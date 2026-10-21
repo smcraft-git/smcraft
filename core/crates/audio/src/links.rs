@@ -534,7 +534,15 @@ impl SoundDb {
         let Some(u) = self.users.get(user) else {
             return false;
         };
-        let Some(&root) = u.keys.get(key) else {
+        // a top-level key, else a container's child of that name (the 2D styles keep the pink
+        // coins' numbered keys under one container whose choice the data doesn't carry; the
+        // game names the child it wants [inf])
+        let Some(root) = u
+            .keys
+            .get(key)
+            .copied()
+            .or_else(|| u.nodes.iter().position(|n| n.key == key))
+        else {
             return false;
         };
         let start = out.len();
@@ -552,7 +560,12 @@ impl SoundDb {
         let Some(u) = self.users.get(user) else {
             return;
         };
-        let Some(&root) = u.keys.get(key) else {
+        let Some(root) = u
+            .keys
+            .get(key)
+            .copied()
+            .or_else(|| u.nodes.iter().position(|n| n.key == key))
+        else {
             return;
         };
         let mut stack = vec![(root, 0)];

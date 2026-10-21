@@ -144,6 +144,11 @@ pub struct Sounds {
     /// Blocks bumping last tick (tile → bump frames).
     bumps: BTreeMap<(i32, i32), u32>,
     note_hits: usize,
+    /// Keys and pink coins held after the last tick, and whether each burner phase (plain,
+    /// alternate) was burning.
+    keys: u32,
+    pink: usize,
+    burning: [bool; 2],
     /// The worn SMM1 costume's sounds (Phase 11).
     costume: CostumeSounds,
     /// What the last tick played (for tests and diagnostics): user, key.
@@ -194,6 +199,9 @@ impl Sounds {
             footstep: 0,
             bumps: BTreeMap::new(),
             note_hits: 0,
+            keys: 0,
+            pink: 0,
+            burning: [false; 2],
             costume: CostumeSounds::default(),
             log: Vec::new(),
         }
@@ -795,6 +803,12 @@ impl Sounds {
         self.footstep = 0;
         self.bumps = bumps(world);
         self.actors = snapshot(world);
+        self.keys = world.keys;
+        self.pink = world.pink.len();
+        self.burning = [
+            world.burner_flame(false) > 0.0,
+            world.burner_flame(true) > 0.0,
+        ];
         self.send(Command::SetMusicLayer {
             gain: 0.0,
             frames: 0,
@@ -856,6 +870,7 @@ impl Sounds {
         let before = self.prev_player;
         self.observe_player(world);
         self.observe_blocks(world);
+        self.observe_objects(world);
 
         let pe = Self::player_emitter(world);
         let events = world.events.clone();
@@ -1294,6 +1309,9 @@ impl Sounds {
                             s.x,
                             s.y,
                         ));
+                    } else if s.kind == Kind::Key {
+                        // a key appeared (a defeated enemy's, the last pink coin's)
+                        todo.push((s.kind, "key_appear", PropList::default(), s.x, s.y));
                     } else if let Some(key) = launch_key(s.kind) {
                         // a projectile appeared: its own launch sound (the shooter's for a
                         // cannonball)
@@ -1375,6 +1393,15 @@ impl Sounds {
                 self.sfx_at(world, &user, "r_shoot", &PropList::default(), e, 0);
                 continue;
             }
+            if key == "key_appear" {
+                let e = Emitter {
+                    x,
+                    y,
+                    water: self.in_water(world, y),
+                };
+                self.object_sfx(world, key, e);
+                continue;
+            }
             if key == "r_shoot_blaster" {
                 // a Bill Blaster fired: the cannon's sound
                 let user = self.user("KillerHoudai");
@@ -1418,6 +1445,55 @@ impl Sounds {
                 water: self.in_water(world, y as f32 * 16.0),
             };
             self.sfx_at(world, &user, "jump", &props, e, 0);
+        }
+    }
+
+    /// Keys, pink coins and Burners. A key picked up: the player's `key_get`; a key appearing
+    /// (out of a defeated enemy, the last pink coin, a block): `key_appear`. A pink coin: its
+    /// count's note `pinkCoin_<n>`, the last one `pinkCoinComplete_<total>` [inf: the key by
+    /// the number collected; the containers' choice isn't in the data]. A Burner on screen
+    /// starting its flame: `fire` at the burner (every Burner of a phase shares the area clock).
+    fn observe_objects(&mut self, world: &World) {
+        if world.keys > self.keys {
+            self.player_sfx(world, "key_get", &[]);
+        }
+        self.keys = world.keys;
+        let pink = world.pink.len();
+        if pink > self.pink && world.pink_total > 0 {
+            let key = if pink >= world.pink_total {
+                format!("pinkCoinComplete_{:02}", world.pink_total.min(10))
+            } else {
+                format!("pinkCoin_{:02}", pink.min(10))
+            };
+            self.object_sfx(world, &key, Self::player_emitter(world));
+        }
+        self.pink = pink;
+        let (cx, cy) = (world.camera_x, world.camera_y);
+        let on_screen = |x: f32, y: f32| {
+            x > cx - 32.0 && x < cx + VIEW_W + 32.0 && y > cy - 32.0 && y < cy + VIEW_H + 32.0
+        };
+        for (i, alt) in [false, true].into_iter().enumerate() {
+            let burning = world.burner_flame(alt) > 0.0;
+            if burning && !self.burning[i] {
+                let user = self.user("Burner");
+                let shown: Vec<(f32, f32)> = world
+                    .level
+                    .burners
+                    .iter()
+                    .filter(|b| b.alt == alt && on_screen(b.x, b.y))
+                    .map(|b| (b.x, b.y))
+                    .collect();
+                // one flame sound per phase: the burners light together [inf]
+                if let Some(&(x, y)) = shown.first() {
+                    let e = Emitter {
+                        x,
+                        y,
+                        water: self.in_water(world, y),
+                    };
+                    self.sfx_at(world, &user, "fire", &PropList::default(), e, 0);
+                }
+            }
+            self.burning[i] = burning;
         }
     }
 
