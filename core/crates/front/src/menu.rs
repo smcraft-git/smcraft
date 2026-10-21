@@ -6,7 +6,7 @@ use crate::{DrawItem, push_layout};
 
 /// Menu buttons (a bit set).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct Buttons(pub u8);
+pub struct Buttons(pub u16);
 
 impl Buttons {
     pub const UP: Buttons = Buttons(1);
@@ -15,7 +15,14 @@ impl Buttons {
     pub const BACK: Buttons = Buttons(8);
     pub const LEFT: Buttons = Buttons(16);
     pub const RIGHT: Buttons = Buttons(32);
+    /// The shoulder buttons: L / R change tabs, ZL / ZR switch Challenge Modes.
+    pub const L: Buttons = Buttons(64);
+    pub const R: Buttons = Buttons(128);
+    pub const ZL: Buttons = Buttons(256);
+    pub const ZR: Buttons = Buttons(512);
     pub const NONE: Buttons = Buttons(0);
+    /// Every bit hosts may send.
+    pub const ALL: u16 = 0x3ff;
 
     pub fn has(self, b: Buttons) -> bool {
         self.0 & b.0 != 0
@@ -52,7 +59,7 @@ impl Buttons {
         }
     }
 
-    /// From a script name (confirm, back, up, down, left, right).
+    /// From a script name (confirm, back, up, down, left, right, l, r, zl, zr).
     pub fn from_name(s: &str) -> Option<Buttons> {
         Some(match s {
             "confirm" => Self::CONFIRM,
@@ -61,6 +68,10 @@ impl Buttons {
             "down" => Self::DOWN,
             "left" => Self::LEFT,
             "right" => Self::RIGHT,
+            "l" => Self::L,
+            "r" => Self::R,
+            "zl" => Self::ZL,
+            "zr" => Self::ZR,
             _ => return None,
         })
     }

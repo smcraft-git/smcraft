@@ -44,6 +44,16 @@ enum SettingsKey {
     static let smm1Layering = "smm1.layering"
     static let smb1Mushroom = "smm1.mushroom"
     static let costume = "smm1.costume"
+    /// Bool (default false): SMM1's Muncher hit box (engine option `muncher_smm1_hitbox`).
+    static let muncherHitbox = "smm1.muncherHitbox"
+    /// The front end's Mods page options it keeps itself (`FrontStore`: "front." + its key),
+    /// String "1" / "0": quick level return (default off), the SMW goal wipe (default on),
+    /// Challenge Modes on Course World's Endless button (default on), the Course Maker's
+    /// overlapping pipes (default off).
+    static let quickRetry = "front.mods.quick_retry"
+    static let smwGoalWipe = "front.mods.smw_goal_wipe"
+    static let challengeModes = "front.mods.challenge_modes"
+    static let overlapPipes = "front.mods.smm1_overlap_pipes"
 
     static func registerDefaults() {
         UserDefaults.standard.register(defaults: [
@@ -424,6 +434,16 @@ private struct GameSettings: View {
     @AppStorage(SettingsKey.smm1Layering) private var layering = false
     @AppStorage(SettingsKey.smb1Mushroom) private var mushroom = 0
     @AppStorage(SettingsKey.costume) private var costume = -1
+    @AppStorage(SettingsKey.muncherHitbox) private var muncher = false
+    @AppStorage(SettingsKey.quickRetry) private var quickRetry = "0"
+    @AppStorage(SettingsKey.smwGoalWipe) private var goalWipe = "1"
+    @AppStorage(SettingsKey.challengeModes) private var challengeModes = "1"
+    @AppStorage(SettingsKey.overlapPipes) private var overlapPipes = "0"
+
+    /// A toggle over a "1" / "0" setting.
+    private func flag(_ s: Binding<String>) -> Binding<Bool> {
+        Binding(get: { s.wrappedValue == "1" }, set: { s.wrappedValue = $0 ? "1" : "0" })
+    }
 
     var body: some View {
         Form {
@@ -460,7 +480,16 @@ private struct GameSettings: View {
                         ForEach(CostumeList.entries, id: \.id) { c in Text(c.name).tag(c.id) }
                     }
                 }
-                Text("Costumes and Lanky Mario need the SMM1 import (mmk import-smm1). Courses cleared with shell physics or a mushroom swap aren't sent as records, and online play uses SMM2 rules.")
+                Toggle("SMM1 Muncher hit box", isOn: $muncher)
+                Toggle("Overlapping pipes (Course Maker)", isOn: flag($overlapPipes))
+                Text("Costumes and Lanky Mario need the SMM1 import (mmk import-smm1). Courses cleared with shell physics, a mushroom swap or the Muncher hit box aren't sent as records, and online play uses SMM2 rules.")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
+            Section("Mods") {
+                Toggle("Quick level return (a miss is over in a moment)", isOn: flag($quickRetry))
+                Toggle("SMW goal wipe", isOn: flag($goalWipe))
+                Toggle("Challenge Modes (Course World's Endless button: ZL / ZR switch 100 Mario / Endless)", isOn: flag($challengeModes))
+                Text("The same options are on the Mods page in the game (the menu button on the title screen).")
                     .font(.footnote).foregroundStyle(.secondary)
             }
         }

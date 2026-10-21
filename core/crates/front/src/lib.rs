@@ -14,15 +14,19 @@
 pub mod account;
 pub mod boot;
 pub mod challenge;
+pub mod challenge_modes;
 pub mod coursebot;
 pub mod coursepage;
 pub mod endless;
+pub mod endless_run;
 pub mod fade;
 pub mod host;
 pub mod layout;
 pub mod leaderboard;
 pub mod maker;
 pub mod menu;
+pub mod mods;
+pub mod mods_page;
 pub mod online;
 pub mod play;
 pub mod screens;
@@ -139,6 +143,9 @@ pub enum Go {
     /// Course World's Super Worlds.
     ShowSuperWorlds,
     SuperWorld(superworld::SuperWorldGo),
+    /// Course World's Challenge Modes (or SMM2's Endless Challenge alone).
+    ShowModes,
+    Modes(challenge_modes::ModesGo),
 }
 
 /// Where the 100 Mario Challenge returns to.
@@ -346,6 +353,8 @@ pub enum Screen {
     World(Box<WorldFlow>),
     Challenge(Box<ChallengeFlow>, Back),
     SuperWorld(Box<superworld::SuperWorldFlow>),
+    /// Course World's Endless button: Challenge Modes (`challenge_modes`).
+    Modes(Box<challenge_modes::ChallengeModes>),
     /// One course with the SMM2 screens (the Swift app's library play / `MMK_COURSE`).
     Course(Box<play::CoursePlay>),
     /// The Course Maker.
@@ -372,10 +381,18 @@ pub struct Front {
     pub tick: i64,
     /// Set when the player left a direct course play (`Screen::Course`).
     pub course_done: bool,
+    /// The Mods page and the title's button to it.
+    pub mods: Option<mods_page::ModsUi>,
 }
 
 impl Front {
-    pub fn new(smm2: Ui, smm1: Option<Ui>, opts: Options, host: &mut dyn Host) -> Self {
+    pub fn new(smm2: Ui, smm1: Option<Ui>, mut opts: Options, host: &mut dyn Host) -> Self {
+        // the Mods page's options: the engine's now, the 100 Mario screens for the runs
+        mods::apply_engine(host);
+        if let Some(p) = mods::hundred_screens(host) {
+            opts.hundred = p;
+        }
+        let mods = Some(mods_page::ModsUi::new(&smm2, smm1.is_some()));
         let mut fade = SceneFade::new(Some(&smm2));
         fade.instant = opts.instant_fades;
         let mut f = Self {
@@ -392,6 +409,7 @@ impl Front {
             opts,
             tick: 0,
             course_done: false,
+            mods,
         };
         let boot = if f.opts.boot {
             boot::BootScene::new(&f.smm2, f.opts.opening.as_deref(), host)
@@ -455,10 +473,14 @@ impl Front {
         let lib = host.library();
         let smm2 = self.smm2.clone();
         let script = self.opts.script.clone();
+        let relabel = mods::challenge_modes(host);
         let (mut cx, screen) = self.cx(host);
         *screen = match WorldFlow::new(&smm2, kind, lib, selection, &mut cx) {
             Some(mut f) => {
                 f.script = Script::parse(&script);
+                if relabel {
+                    f.set_endless_label(challenge_modes::BUTTON_LABEL);
+                }
                 Screen::World(Box::new(f))
             }
             None => Screen::None,
@@ -528,6 +550,30 @@ impl Front {
         let mut f = superworld::SuperWorldFlow::new(&smm2, lib, &mut cx);
         f.script = Script::parse(&script);
         *screen = Screen::SuperWorld(Box::new(f));
+    }
+
+    /// Challenge Modes, or (`switching` false) SMM2's Endless Challenge alone; None: as the
+    /// Mods page says.
+    fn show_modes(&mut self, host: &mut dyn Host, switching: Option<bool>) {
+        host.unload_course();
+        let mut lib = host.library();
+        lib.extend(host.challenge_courses());
+        let switching = switching.unwrap_or_else(|| mods::challenge_modes(host));
+        let (smm2, smm1) = (self.smm2.clone(), self.smm1.clone());
+        let hundred = self.opts.hundred;
+        let script = Script::parse(&self.opts.script);
+        let (mut cx, screen) = self.cx(host);
+        let m = challenge_modes::ChallengeModes::new(
+            &mut cx,
+            &smm2,
+            smm1.as_ref(),
+            lib,
+            hundred,
+            switching,
+        );
+        let mut m = Box::new(m);
+        m.script = script;
+        *screen = Screen::Modes(m);
     }
 
     /// Play one course with the SMM2 screens (already loaded by the host): `intro` the card
@@ -613,8 +659,19 @@ impl Front {
             }
             Go::Challenge(c) => {
                 let (mut cx, screen) = self.cx(host);
-                if let Screen::Challenge(f, _) = screen {
-                    f.go(&mut cx, c);
+                match screen {
+                    Screen::Challenge(f, _) => f.go(&mut cx, c),
+                    Screen::Modes(m) => m.go(&mut cx, c),
+                    _ => {}
+                }
+            }
+            Go::ShowModes => self.show_modes(host, None),
+            Go::Modes(g) => {
+                let (mut cx, screen) = self.cx(host);
+                if let Screen::Modes(m) = screen {
+                    match g {
+                        challenge_modes::ModesGo::Switch => m.switch(&mut cx),
+                    }
                 }
             }
             Go::ShowSuperWorlds => self.show_super_worlds(host),
@@ -664,6 +721,8 @@ impl Front {
             }
         }
         let mut after: Option<(FadeKind, Go)> = None;
+        let mut mods = self.mods.take();
+        let mut hundred = None;
         let (mut cx, screen) = self.cx(host);
         match screen {
             Screen::Boot(b) => {
@@ -678,10 +737,27 @@ impl Front {
                     ));
                 }
             }
-            Screen::Title(t) => match t.step(&ui, cx.host) {
-                Some(TitleEvent::Choice(c)) => after = Some((FadeKind::Black, Go::Enter(c))),
-                None => {}
-            },
+            Screen::Title(t) => {
+                // the Mods page's button and window take what they use first
+                let mut title_ui = ui;
+                if let Some(m) = &mut mods {
+                    let (rest, ev) = m.title_step(&ui, t.scene.state, &mut cx);
+                    title_ui = rest;
+                    if let Some(mods_page::ModsEvent::Closed { hundred: Some(p) }) = ev {
+                        hundred = Some(p);
+                    }
+                }
+                let ev = t.step(&title_ui, cx.host);
+                if mods.as_ref().is_some_and(|m| m.has_focus())
+                    && let Some(c) = &mut t.scene.cursor
+                {
+                    c.set_alpha("N_All_00", 0.0);
+                }
+                match ev {
+                    Some(TitleEvent::Choice(c)) => after = Some((FadeKind::Black, Go::Enter(c))),
+                    None => {}
+                }
+            }
             Screen::World(f) => match f.step(&play, &mut cx) {
                 Some(WorldEvent::Exit) => {
                     // back to the title's Play menu on the button that led here [inf]
@@ -715,15 +791,7 @@ impl Front {
                         }),
                     ))
                 }
-                Some(WorldEvent::Endless) => {
-                    after = Some((
-                        FadeKind::Black,
-                        Go::ShowChallenge {
-                            presentation: Some(Presentation::Smm2),
-                            back: Back::CourseWorld,
-                        },
-                    ))
-                }
+                Some(WorldEvent::Endless) => after = Some((FadeKind::Black, Go::ShowModes)),
                 None => {}
             },
             Screen::Challenge(f, back) => {
@@ -745,6 +813,12 @@ impl Front {
                 if f.step(&play, &mut cx) == Some(superworld::SuperWorldEvent::Exit) {
                     // back to Course World's hub on its Super Worlds button [inf]
                     after = Some((FadeKind::Black, Go::CourseWorld { selection: 5 }));
+                }
+            }
+            Screen::Modes(m) => {
+                if m.step(&play, &mut cx) == Some(ChallengeEvent::Exit) {
+                    // back to Course World, on its Endless button [inf]
+                    after = Some((FadeKind::Black, Go::CourseWorld { selection: 3 }));
                 }
             }
             Screen::Course(p) => {
@@ -790,6 +864,10 @@ impl Front {
             Screen::Coursebot(f) => after = f.step(&play, &mut cx),
             Screen::None => {}
         }
+        self.mods = mods;
+        if let Some(p) = hundred {
+            self.opts.hundred = p;
+        }
         self.run_now(host);
         if let Some((k, g)) = after {
             self.fade_to(host, k, g);
@@ -816,10 +894,16 @@ impl Front {
         let mut items = Vec::new();
         match &mut self.screen {
             Screen::Boot(b) => b.draw(&mut items),
-            Screen::Title(t) => t.draw(&mut items),
+            Screen::Title(t) => {
+                t.draw(&mut items);
+                if let Some(m) = &mut self.mods {
+                    m.draw(&mut items);
+                }
+            }
             Screen::World(f) => f.draw(&mut items),
             Screen::Challenge(f, _) => f.draw(&mut items),
             Screen::SuperWorld(f) => f.draw(&mut items),
+            Screen::Modes(m) => m.draw(&mut items),
             Screen::Course(p) => p.draw(&mut items),
             Screen::Maker(m) => m.draw(&mut items),
             Screen::Coursebot(f) => f.draw(&mut items),
@@ -840,6 +924,7 @@ impl Front {
             Screen::World(w) => w.playing(),
             Screen::Challenge(c, _) => c.playing.as_mut(),
             Screen::SuperWorld(f) => f.playing(),
+            Screen::Modes(m) => m.playing(),
             _ => None,
         };
         p.is_some_and(|p| p.phase == play::Phase::Playing)
@@ -855,7 +940,9 @@ impl Front {
     }
 
     /// Captures: jump to a screen the way the Swift app's `MMK_UI_SCREEN` does: boot, title,
-    /// title-main, title-play, courseworld, courseworld-list, the online screens (account,
+    /// title-main, title-play, mods, mods-2 (the Mods page's pages), challenge-modes
+    /// (-hundred, -endless: Course World's Challenge Modes), endless, endless-map (SMM2's own
+    /// Endless Challenge), courseworld, courseworld-list, the online screens (account,
     /// courseworld-leaderboards, courseworld-course-page / -comments / -post / -maker / -play /
     /// -pause / -clear of the list's first server course), challenge, challenge-map,
     /// challenge-walk, challenge-gameover, challenge-ending (`difficulty`, `cleared` for the
@@ -1028,6 +1115,47 @@ impl Front {
                     m.load_icons(cx.host);
                     self.run_now(host);
                 }
+            }
+            // Course World's Challenge Modes on the mode used last, on one of them, SMM2's
+            // Endless Challenge alone (endless; endless-map: a run's map)
+            "challenge-modes" | "challenge-modes-hundred" | "challenge-modes-endless" => {
+                let mode = match screen {
+                    "challenge-modes-hundred" => Some("hundred"),
+                    "challenge-modes-endless" => Some("endless"),
+                    _ => None,
+                };
+                if let Some(m) = mode {
+                    host.store_value(mods::CHALLENGE_MODE_KEY, m);
+                }
+                self.show_modes(host, Some(true));
+            }
+            "endless" | "endless-map" => {
+                self.show_modes(host, Some(false));
+                let (mut cx, scr) = self.cx(host);
+                let Screen::Modes(m) = scr else {
+                    return false;
+                };
+                let challenge_modes::Flow::Endless(f) = &mut m.flow else {
+                    return false;
+                };
+                f.debug_select(difficulty);
+                if screen == "endless-map" {
+                    f.start(&mut cx, difficulty, false);
+                }
+                self.run_now(host);
+            }
+            // the Mods page over the title (mods-2: its second page)
+            "mods" | "mods-2" => {
+                self.show_title(host, title::State::Main, None);
+                let mut m = self.mods.take();
+                let (mut cx, _) = self.cx(host);
+                if let Some(m) = &mut m {
+                    m.open(&mut cx);
+                    if let (Some(p), true) = (&mut m.page, screen == "mods-2") {
+                        p.turn(1, &mut cx);
+                    }
+                }
+                self.mods = m;
             }
             s if s.starts_with("challenge") => {
                 self.show_challenge(host, None, Back::Title);

@@ -1303,9 +1303,19 @@ pub struct WorldFlow {
     downloads: Vec<(u32, String)>,
     /// Captures: menu presses at global UI ticks.
     pub script: Script,
+    /// The Endless Challenge button's own label instead of the layout's (Challenge Modes).
+    endless_label: Option<String>,
 }
 
 impl WorldFlow {
+    /// Label the hub's Endless Challenge button `label` (Challenge Modes, `challenge_modes`).
+    pub fn set_endless_label(&mut self, label: &str) {
+        self.endless_label = Some(label.to_string());
+        if let Stage::Hub(h) = &mut self.stage {
+            h.layout.text("L_EndlessMode_00/T_Btn_00", label);
+        }
+    }
+
     /// The hub (Course World) or straight the list (Story Mode, Coursebot).
     pub fn new(
         ui: &Ui,
@@ -1331,6 +1341,7 @@ impl WorldFlow {
             thumbs: Thumbs::default(),
             downloads: Vec::new(),
             script: Script::default(),
+            endless_label: None,
         };
         if kind != ListKind::World {
             f.show_list(cx);
@@ -1358,7 +1369,10 @@ impl WorldFlow {
     pub fn show_hub(&mut self, cx: &Cx) {
         self.under.clear();
         let name = cx.online.account.as_ref().map(|a| a.name.clone());
-        if let Some(h) = HubScene::new(&self.ui, self.hub_selection, name.as_deref()) {
+        if let Some(mut h) = HubScene::new(&self.ui, self.hub_selection, name.as_deref()) {
+            if let Some(label) = &self.endless_label {
+                h.layout.text("L_EndlessMode_00/T_Btn_00", label);
+            }
             self.stage = Stage::Hub(Box::new(h));
         }
     }

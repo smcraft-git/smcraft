@@ -417,7 +417,7 @@ impl App {
     fn front_advance(&mut self, dt: f64, pads: u32) -> bool {
         match &mut self.front {
             Some(f) => {
-                f.advance(dt, &self.keys, pads, &mut self.game);
+                f.advance(dt, &self.keys, pads, self.pads.shoulders, &mut self.game);
                 true
             }
             None => false,

@@ -108,6 +108,9 @@ The app is called SMCraft; the name, bundle id and version live only in
 | `online.server` | String | empty | open-source course server Course World also lists (e.g. `http://localhost:8640`) |
 | `online.courseWorld` | String | `tgrcode` | Course World's source: `tgrcode`, `server` (the one above), `library` |
 | `player.character` | Int 0–3 | 0 | Mario / Luigi / Toad / Toadette (also the SMM2 pause menu's Settings) |
+| `smm1.shellKicks`, `smm1.layering`, `smm1.muncherHitbox` | Bool | false | SMM1 extras: shell jumps, draw order, Muncher hit box (also the in-game Mods page) |
+| `smm1.mushroom`, `smm1.costume` | Int | 0, −1 | SMB1 Super Mushrooms: 0 / 1 Mystery / 2 Weird; the Mystery costume (−1 random) |
+| `front.mods.quick_retry`, `front.mods.smw_goal_wipe`, `front.mods.challenge_modes`, `front.mods.smm1_overlap_pipes` | String `1` / `0` | 0, 1, 1, 0 | the front end's mods: quick level return, SMW goal wipe, Challenge Modes, overlapping pipes |
 
 Read them with `UserDefaults.standard.double(forKey: "volume.music")` etc.; defaults are
 registered at launch (`SettingsKey.registerDefaults`).

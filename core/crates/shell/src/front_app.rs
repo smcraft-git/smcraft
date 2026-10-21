@@ -50,7 +50,9 @@ pub struct FrontApp {
 /// Menu buttons, pause and skip from the keyboard and the pads' engine buttons, as in the Swift
 /// app: arrows / WASD move, Return / Z / Space confirm, Esc / P / Backspace go back (a key that
 /// does both confirms); pads: the d-pad, jump confirms, run and Start go back. Skip: − or Tab.
-pub fn menu_input(keys: &Keyboard, pad: u32) -> FrontInput {
+/// L / R: Q / E or the pads' shoulders, ZL / ZR: 1 / 3 or their triggers (`shoulders`:
+/// [`crate::input::SHOULDER_L`] …).
+pub fn menu_input(keys: &Keyboard, pad: u32, shoulders: u32) -> FrontInput {
     use mmk_sim::input as b;
     let k = |codes: &[KeyCode]| codes.iter().any(|&c| keys.held(c));
     let mut m = Buttons::NONE;
@@ -89,6 +91,25 @@ pub fn menu_input(keys: &Keyboard, pad: u32) -> FrontInput {
         k(&[KeyCode::Escape, KeyCode::KeyP, KeyCode::Backspace]) || pad & (b::RUN | b::START) != 0;
     add(confirm, Buttons::CONFIRM);
     add(back && !confirm, Buttons::BACK);
+    {
+        use crate::input::{SHOULDER_L, SHOULDER_R, SHOULDER_ZL, SHOULDER_ZR};
+        add(
+            k(&[KeyCode::KeyQ]) || shoulders & SHOULDER_L != 0,
+            Buttons::L,
+        );
+        add(
+            k(&[KeyCode::KeyE]) || shoulders & SHOULDER_R != 0,
+            Buttons::R,
+        );
+        add(
+            k(&[KeyCode::Digit1]) || shoulders & SHOULDER_ZL != 0,
+            Buttons::ZL,
+        );
+        add(
+            k(&[KeyCode::Digit3]) || shoulders & SHOULDER_ZR != 0,
+            Buttons::ZR,
+        );
+    }
     FrontInput {
         menu: m,
         start: keys.buttons() & b::START != 0 || pad & b::START != 0,
@@ -167,11 +188,12 @@ impl FrontApp {
         }
     }
 
-    /// Host time `dt` with the keyboard and pads: the ticks it is worth.
-    pub fn advance(&mut self, dt: f64, keys: &Keyboard, pad: u32, game: &mut Game) {
+    /// Host time `dt` with the keyboard and pads (`shoulders`: their shoulder buttons): the
+    /// ticks it is worth.
+    pub fn advance(&mut self, dt: f64, keys: &Keyboard, pad: u32, shoulders: u32, game: &mut Game) {
         let n = self.step.advance(dt);
         let game_buttons = crate::input::combine(keys, pad).buttons;
-        let mut input = menu_input(keys, pad);
+        let mut input = menu_input(keys, pad, shoulders);
         input.pointer = self.pointer;
         input.pointer_down = self.pointer_down;
         input.pointer_alt = self.pointer_alt;

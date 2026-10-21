@@ -107,6 +107,7 @@ final class GameSession: ObservableObject, Identifiable {
         mmk_engine_set_option(e, "smm1_layering", d.bool(forKey: SettingsKey.smm1Layering) ? 1 : 0)
         mmk_engine_set_option(e, "smb1_mushroom", Int32(d.integer(forKey: SettingsKey.smb1Mushroom)))
         mmk_engine_set_option(e, "costume", d.object(forKey: SettingsKey.costume) == nil ? -1 : Int32(d.integer(forKey: SettingsKey.costume)))
+        mmk_engine_set_option(e, "muncher_smm1_hitbox", d.bool(forKey: SettingsKey.muncherHitbox) ? 1 : 0)
         // player 1's character (the pause menu's Settings)
         mmk_engine_set_character(e, UInt32(max(0, min(3, d.integer(forKey: SettingsKey.character)))))
         // switching to another app pauses (not during scripted runs)
@@ -515,8 +516,26 @@ final class GameSession: ObservableObject, Identifiable {
 enum FrontStore {
     static let hundredURL = AppPaths.support.appendingPathComponent("hundred.json")
 
+    /// The Mods page's options the app's own Settings also show: (front end key, Settings key,
+    /// kept as a Bool).
+    static let shared: [(String, String, Bool)] = [
+        ("mods.smm1_shell_kicks", SettingsKey.smm1ShellKicks, true),
+        ("mods.smm1_layering", SettingsKey.smm1Layering, true),
+        ("mods.muncher_smm1_hitbox", SettingsKey.muncherHitbox, true),
+        ("mods.smb1_mushroom", SettingsKey.smb1Mushroom, false),
+        ("mods.costume", SettingsKey.costume, false),
+        ("mods.hundred_screens", SettingsKey.hundredPresentation, false),
+        ("course_world", SettingsKey.courseWorld, false),
+    ]
+
     static func load(_ key: String) -> String? {
         let d = UserDefaults.standard
+        if let e = shared.first(where: { $0.0 == key }) {
+            let (k, isBool) = (e.1, e.2)
+            guard let v = d.object(forKey: k) else { return nil }
+            if isBool { return d.bool(forKey: k) ? "1" : "0" }
+            return (v as? String) ?? (v as? NSNumber)?.stringValue
+        }
         switch key {
         case "saves": return try? String(contentsOf: AppPaths.saves, encoding: .utf8)
         case "hundred": return try? String(contentsOf: hundredURL, encoding: .utf8)
@@ -528,6 +547,12 @@ enum FrontStore {
 
     static func store(_ key: String, _ value: String) {
         let d = UserDefaults.standard
+        if let e = shared.first(where: { $0.0 == key }) {
+            let (k, isBool) = (e.1, e.2)
+            let v = value.trimmingCharacters(in: CharacterSet(charactersIn: "\" "))
+            if isBool { d.set(v == "1", forKey: k) } else if let n = Int(v) { d.set(n, forKey: k) } else { d.set(v, forKey: k) }
+            return
+        }
         switch key {
         case "saves", "hundred":
             let url = key == "saves" ? AppPaths.saves : hundredURL

@@ -209,7 +209,7 @@ mod native {
         #[arg(long)]
         data_dir: Option<PathBuf>,
         /// Headless front end capture (with --screenshot, --ticks): boot, title, title-main,
-        /// title-play, courseworld, courseworld-list (-popular, -new: the other tabs; the list
+        /// title-play, mods, mods-2 (the Mods page's two pages), courseworld, courseworld-list (-popular, -new: the other tabs; the list
         /// and its thumbnails are waited for), courseworld-search (the ID search),
         /// courseworld-id:<course or maker ID> (its answer), storymode, with --server (and
         /// MMK_FRONT_REALTIME=1): account, courseworld-leaderboards, courseworld-course-page,
@@ -280,8 +280,9 @@ mod native {
         /// "random", the default).
         #[arg(long, value_name = "ID|random")]
         costume: Option<String>,
-        /// A front-end mod setting as NAME=VALUE, kept in the data folder (repeatable):
-        /// `quick_retry=1` (quick level return).
+        /// A front-end mod setting as NAME=VALUE, kept in the data folder (repeatable): the
+        /// Mods page's options by name (`mmk_front::mods::OPTIONS`, `mods.NAME`), e.g.
+        /// `quick_retry=1` (quick level return), `smm1_shell_kicks=1`.
         #[arg(long = "mod", value_name = "NAME=VALUE")]
         mods: Vec<String>,
         /// Any engine option as NAME=VALUE (repeatable; see `mmk_sim::Options`).
@@ -450,6 +451,13 @@ mod native {
         let source = assets_dir.as_ref().map(|d| DirSource::new(d.clone()));
         let mut game = Game::load(source.as_ref().map(|s| s as &dyn AssetSource), None)?;
         game.no_hud = true;
+        // the engine options of the command line; the Mods page's kept ones go over them
+        let mut options = engine_options(args)?;
+        let costumes = game.cache.costumes();
+        if !costumes.is_empty() {
+            options.set_costume_pool(costumes.iter().map(|(id, _)| *id));
+        }
+        game.session.set_options(options);
         let mut data = HostData::new(assets_dir.as_ref().map(|d| DirSource::new(d.clone())));
         data.ui_dir = Some(ui_dir.clone());
         data.server = args
@@ -490,6 +498,7 @@ mod native {
         let cache = std::env::var_os("MMK_TGRCODE_CACHE")
             .map(PathBuf::from)
             .or_else(|| data.data_dir.as_ref().map(|d| d.join("TGRCode/cache")));
+        data.tgr_cache = cache.clone();
         data.backend = mmk_online::world::Backend::from_setting(
             setting.as_deref(),
             data.server.as_deref(),

@@ -291,6 +291,9 @@ impl MakerFlow {
                 }
             },
         };
+        // the Mods page's SMM1 rule: a pipe may go across a pipe
+        let mut editor = editor;
+        editor.smm1_overlap_pipes = crate::mods::overlap_pipes(cx.host);
         let mut f = Self {
             ui: ui.clone(),
             editor,

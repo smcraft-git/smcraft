@@ -269,15 +269,18 @@ impl EndlessMenuScene {
                 .set_alpha(t, if q.unlocked(k) { 255.0 } else { 110.0 });
         }
         b.both(|l| l.hold("TypeStartBtn", if can_continue { 0.0 } else { 1.0 }));
-        let rule = format!(
-            "{} courses, {}",
-            RUN_LENGTHS[d],
-            if unlocked {
-                "100 lives"
-            } else {
-                locked_message(d)
-            }
-        );
+        let rule = match q.rule_text(d) {
+            Some(r) if unlocked => r,
+            _ => format!(
+                "{} courses, {}",
+                RUN_LENGTHS[d],
+                if unlocked {
+                    "100 lives"
+                } else {
+                    locked_message(d)
+                }
+            ),
+        };
         let bl = b.button_layer();
         bl.text("T_Rule_00", &rule);
         for (i, p) in ["L_StartBtn_00", "L_StartBtn_01"].iter().enumerate() {
@@ -296,9 +299,13 @@ impl EndlessMenuScene {
                 bl.hold(&inv, 0.0);
             }
         }
-        b.set_dots(cont.map_or(0, |c| c.1), RUN_LENGTHS[d], cont.is_some());
-        b.place_mario(cont.map(|c| c.1.saturating_sub(1)));
-        b.set_counters(cont.map_or(100, |c| c.0), cont.map_or(0, |c| c.1));
+        let dot = cont.map_or(0, |c| q.map_dot(c.1));
+        b.set_dots(dot, q.run_length(d), cont.is_some());
+        b.place_mario(cont.map(|_| dot.saturating_sub(1)));
+        b.set_counters(
+            cont.map_or(q.new_game_lives(d), |c| c.0),
+            cont.map_or(0, |c| c.1),
+        );
     }
 
     pub fn step(&mut self, input: &UiInput, q: &dyn RunQuery) -> Option<EndlessEvent> {
@@ -400,6 +407,18 @@ impl EndlessMenuScene {
             return None;
         }
         let can_continue = q.unlocked(self.difficulty) && q.can_continue(self.difficulty);
+        // L / R: the difficulty tabs from anywhere on the menu
+        if p.has(Buttons::L) || p.has(Buttons::R) {
+            let d = if p.has(Buttons::R) {
+                (self.difficulty + 1).min(3)
+            } else {
+                self.difficulty.saturating_sub(1)
+            };
+            if d != self.difficulty {
+                self.choose(d, q);
+            }
+            return None;
+        }
         if p.has(Buttons::LEFT) || p.has(Buttons::RIGHT) {
             let right = p.has(Buttons::RIGHT);
             if self.on_tabs {

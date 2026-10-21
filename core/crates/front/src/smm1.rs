@@ -188,6 +188,22 @@ pub trait RunQuery {
     fn can_continue(&self, d: usize) -> bool;
     /// The Continue record (lives, courses cleared).
     fn continue_info(&self, d: usize) -> Option<(u32, usize)>;
+    /// Courses in a run (the map's dots); 100 Mario's fixed lengths.
+    fn run_length(&self, d: usize) -> usize {
+        RUN_LENGTHS[d.min(3)]
+    }
+    /// Lives a New Game starts with.
+    fn new_game_lives(&self, _d: usize) -> u32 {
+        100
+    }
+    /// The rule line under New Game (None: "N courses, 100 lives").
+    fn rule_text(&self, _d: usize) -> Option<String> {
+        None
+    }
+    /// The map dot of the course after `cleared` clears (an endless run goes round the map).
+    fn map_dot(&self, cleared: usize) -> usize {
+        cleared
+    }
 }
 
 /// What the SMM1 screens ask of the run.
@@ -341,6 +357,13 @@ impl ChallengeMenuScene {
         let mut p = input.pressed;
         if let Some(c) = input.click {
             p = p | self.click(c, q);
+        }
+        // L / R: the difficulty tabs too
+        if p.has(Buttons::L) {
+            p = p | Buttons::LEFT;
+        }
+        if p.has(Buttons::R) {
+            p = p | Buttons::RIGHT;
         }
         if p.has(Buttons::LEFT) || p.has(Buttons::RIGHT) {
             let right = p.has(Buttons::RIGHT);
