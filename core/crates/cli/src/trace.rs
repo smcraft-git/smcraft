@@ -112,6 +112,10 @@ pub fn run(course: &[u8], script: &[Input], start: &Start) -> Result<String, Str
 pub const STYLES: [&str; 5] = ["M1", "M3", "MW", "WU", "3W"];
 pub const KINDS: [&str; 6] = ["flat", "wall", "slope", "water", "items", "form"];
 
+/// Where the items / form courses keep their power-up: the ? block's tile column and its row
+/// above the floor (the capture walks there first; no test script gets that far).
+pub const POWER_BLOCK: (i32, i32) = (140, 4);
+
 /// All test course names: `<style>_<kind>`.
 pub fn course_names() -> Vec<String> {
     let mut v = Vec::new();
@@ -132,7 +136,12 @@ pub fn build_course(name: &str) -> Result<Vec<u8>, String> {
         return Err(format!("unknown test course {name}"));
     }
     let err = |x: mmk_editor::EditError| format!("{x:?}");
-    let len = 120;
+    // the items / form courses are longer: their power-up block is past every test's reach
+    let len = if matches!(kind, "items" | "form") {
+        160
+    } else {
+        120
+    };
     // floor height in tiles: the game rejects a 3D World course with start height 1
     let base: i32 = if style == "3W" { 2 } else { 1 };
     let mut e = Editor::new(style);
@@ -183,16 +192,28 @@ pub fn build_course(name: &str) -> Result<Vec<u8>, String> {
             floor(&mut e, 93, len - 1)?;
         }
         "water" => floor(&mut e, 0, len - 1)?,
-        "items" => {
-            // a Super Mushroom on the floor just ahead of the start (walk into it to grow)
+        "items" | "form" => {
+            // the power-up in a ? block 4 tiles up, far enough right that no test reaches it:
+            // a Super Mushroom (items) or the style's own power-up (form; part 44: leaf,
+            // feather, propeller, bell; a mushroom in SMB1). On the floor the game's items
+            // move off or don't show at the title screen [obs: emulator]; out of a block they
+            // come to the player. Walls 3 tiles either side keep a moving item close.
             floor(&mut e, 0, len - 1)?;
-            e.place(20, 10, base).map_err(err)?;
-        }
-        "form" => {
-            // the style's own power-up (part 44: leaf, feather, propeller, bell; a mushroom in
-            // SMB1) just ahead of the start
-            floor(&mut e, 0, len - 1)?;
-            e.place(44, 10, base).map_err(err)?;
+            let (bx, by) = (POWER_BLOCK.0, up(POWER_BLOCK.1));
+            let item = if kind == "items" { 20 } else { 44 };
+            if item == 44 && matches!(style, "WU" | "3W") {
+                // out of a block the Propeller Mushroom and the Super Bell fly out of the pen;
+                // on the floor they stay in it [obs: emulator]
+                e.place(item, bx, up(1)).map_err(err)?;
+            } else {
+                let i = e.place(5, bx, by).map_err(err)?;
+                e.try_set_child(i, item, mmk_editor::DEFAULT_FLAGS)
+                    .map_err(err)?;
+            }
+            for y in 1..=2 {
+                e.paint_ground(bx - 4, up(y)).map_err(err)?;
+                e.paint_ground(bx + 4, up(y)).map_err(err)?;
+            }
         }
         "wall" => {
             // floor, then a 12-tall wall at x 40 and a second one at x 46 (a 5-wide shaft for
