@@ -2,6 +2,22 @@
 
 Newest first. Each entry: what was decided, why, and what would change it.
 
+## 2026-10-21 — Super Worlds: the game's map data, a flat map for now
+**Decision:** Super Worlds play on the game's own data: the world-map blob (decrypted with a key
+table the importer finds in the player's `main`, never stored in the repo) and the course list,
+from TGRCode or assembled from the library (the test world, offline). The screens are the game's
+layouts (planets, title, HUD, balloons, course card, ending); the map itself is drawn flat in 2D
+from the grid (land / water by the theme, roads, dots for courses, castle, pipes, Toad Houses,
+Mario's HUD icon) instead of the game's 3D map models. Rules SMCraft had to choose (marked [inf]
+in the spec): an uncleared course blocks the way on; a death retries the course with one life
+less; a game over refills the lives and returns to the world's start, clears kept; a Toad House
+gives 3 lives once until a game over (no minigames yet). TGRCode access goes through the TGRCode
+client on main (`super_worlds`, `super_world` calls; `Backend::super_world` decrypts the map).
+**Why:** the data and the layouts give the real worlds and screens now; the 3D map needs the
+MyWorld models imported and drawn through the mesh path, which is its own piece of work.
+**Would change it:** the 3D map being imported (the flat map stays as the fallback), or the
+binary showing other rules for blocking, deaths or game overs.
+
 ## 2026-10-21 — Android: the portable shell in a NativeActivity
 **Decision:** SMCraft on Android is `mmk-shell` (winit, wgpu on Vulkan, cpal on AAudio) and the Rust
 front end, started from `android_main` in a small cdylib crate (`crates/android`, library

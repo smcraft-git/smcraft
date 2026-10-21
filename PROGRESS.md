@@ -91,9 +91,29 @@ sound-perfect as possible, that **never needs the ROM or key files to run**.
   rule ("based on <code> by <maker>")
 - ⬜ Coursebot screens (save slots, upload to the own server)
 
-**G5 — Super Worlds** ⬜
-- ⬜ Research: the `MyWorld` data and screens (v3.0.3), world map rules, save
-- ⬜ Play Super Worlds downloaded from TGRCode (world map, 5–40 courses, lives, progress)
+**G5 — Super Worlds** 🔄
+- ✅ Research (`research/specs/super-worlds.md`, public format `docs/formats/smm2-super-world.md`):
+  the world-map blob (0x500 bytes, encrypted like a course with its own key table; TGRCode's
+  `unk1` and the game's `MyWorld/new_layout_data.ldt`), the 7 × 4 grid with its road pieces and
+  connections, points, pipes, Toad Houses, course order, themes, the progress record and its
+  checks, `myworld.dat`'s slots, the screens' layouts. Checked on the template and 5 TGRCode
+  worlds (39 worlds): byte-exact round trips, every point reachable, every link two-way
+- ✅ Format and rules: `mmk_formats::smm2::world` (crypto, key-table search, map parse / write),
+  `mmk_modes::superworld` (test world from the library, TGRCode worlds, walking and blocking,
+  clears, lives, game over, Toad Houses, world clear and end, saved progress)
+- ✅ Import stage `myworld` (`keys/world_table.bin`, found with the dump's own `.ldt`;
+  `mmk import-myworld` adds it to an existing pack)
+- ✅ Play: Course World's Super Worlds button → planets (`Nwk_MyWTitle_00` over the hub's
+  InMyWTitle backdrop: the library's test world + TGRCode's picked-up worlds) → title
+  (`MyWEdit_WorldPlayTitle_00`, New Game / Continue) → the map (flat 2D drawing under
+  `MyWEdit_PlayScene_00`'s HUD, course-name balloon, Play prompt) → courses with lives (card
+  `AnimMyWorld` with "W1") → `MyW_Ending_00`. Progress saved per world (`superworld.<id>`).
+  TGRCode: `super_worlds` / `super_world` calls (`mmk_online::world::Backend::super_world`
+  decrypts the map); captures `superworld`, `-title`, `-map`, `-walk`, `-play`, `-ending`
+- ⬜ The map in 3D with the game's models (`MyWorld_Model.pack`: fields, roads, points, Mario's
+  walk / swim / climb animations from `WM_*Anime`), the map music and sounds
+- ⬜ Toad House minigames (`MyWEdit_Minigame_00…02`; a fixed 3-life gift for now), enemy-icon
+  courses that start on contact, point icons by model, map ghosts, co-op ("Play Together")
 - ⬜ Super World maker (later)
 
 **G6 — Network Play through Nextendo** 🔄 (offline groundwork done; `docs/nextendo-network-play.md`)
