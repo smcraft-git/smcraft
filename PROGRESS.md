@@ -198,9 +198,29 @@ sound-perfect as possible, that **never needs the ROM or key files to run**.
   8 ticks a frame, about 0.4 s instead of 3.1 s
 - ✅ SMW goal wipe (on by default, `mods.smw_goal_wipe=0` turns it off): the circle and SMW's own
   goal-wipe sound (imported with the UI) before the clear panel in SMW courses
-- ⬜ Challenge Modes: the Endless button switches between 100 Mario and SMM2's Endless (ZL / ZR)
-- ⬜ One Mods settings page (front end) listing every option above plus the SMM1 extras; options
-  saved per player; online / replays keep them off where they change play
+- ✅ Challenge Modes (`front/src/challenge_modes.rs`): Course World's Endless Challenge button reads
+  "Challenge Modes" and opens the mode used last; ZL / ZR (keys 1 / 3, or a tap on the title bar,
+  "ZL < mode > ZR" in the font's own glyphs) switch between the 100 Mario Challenge (on the screens
+  the Mods page chose) and SMM2's own Endless Challenge, new in the front end
+  (`front/src/endless_run.rs`: `mmk_modes::endless::Session` offline over the library and the
+  TGRCode pool, 5 lives, 1-Ups paid at the goal, skips, Continue, saved as `endless`; the map's 32
+  dots go round). L / R (Q / E) change the difficulty tabs on both menus. Off on the Mods page: the
+  button keeps its name and opens SMM2's Endless alone. Endless still open: the goal time bonus,
+  the high score panel, the server's runs and rankings
+- ✅ One Mods page in the front end (`front/src/mods.rs`, `mods_page.rs`; every platform:
+  `mmk-play` desktop / web, Android, the Swift app's front end): SMM2's settings window
+  (`Cmn_OptionWindow_00`) over the title, opened from SMM2's round menu button in the title's
+  top-left corner (up from Make / Play, or a click / tap). Two pages (L / R, or its page row):
+  shell jumps, draw order, SMB1 Super Mushrooms, the Mystery costume, the Muncher hit box,
+  overlapping pipes; quick level return, the SMW goal wipe, the 100 Mario screens, Course World's
+  Endless button, Course World's courses. Each with its description; options that change play
+  are marked * and say they stay off online and send no record / replay (the hosts already
+  enforce it). Kept through the host (`mods.<name>`, `course_world`), engine options handed to
+  the sim at start and when changed (`Host::set_engine_option`), Course World's source switched
+  live (`Host::set_course_world`). Swift app: the same options in its SwiftUI Settings, one store
+  (`FrontStore` maps the page's keys onto its UserDefaults). Captures: `mods`, `mods-2`,
+  `challenge-modes[-hundred|-endless]`, `endless`, `endless-map`. The front end's Course Maker
+  takes overlapping pipes from it when it opens (the shell's old `--edit` maker doesn't)
 - ⬜ Mid-air shell jumps checked against the recomp's test course; SMM1 course card choice
 
 **G8 — Fidelity: pixel, physics, sound** 🔄

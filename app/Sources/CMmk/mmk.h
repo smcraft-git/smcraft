@@ -335,7 +335,8 @@ typedef struct {
 } MmkFrontOptions;                                                     // 72 bytes
 
 typedef struct {
-    uint32_t menu;              // held: 1 up, 2 down, 4 confirm, 8 back, 16 left, 32 right
+    uint32_t menu;              // held: 1 up, 2 down, 4 confirm, 8 back, 16 left, 32 right,
+                                //   64 L, 128 R, 256 ZL, 512 ZR
     uint32_t buttons;           // engine buttons (MMK_BTN_*) for the course
     uint32_t flags;             // bit 0 pause held, bit 1 skip held, bit 2 click this tick,
                                 // bit 3 pointer at click_x/y, bit 4 pointer down, bit 5

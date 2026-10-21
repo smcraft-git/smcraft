@@ -32,6 +32,8 @@ pub struct HostData {
     pub server: Option<String>,
     /// Where Course World's courses come from (`MmkFrontOptions`-like setting, see main).
     pub backend: Backend,
+    /// TGRCode's cache folder (for a backend made again from the Mods page).
+    pub tgr_cache: Option<PathBuf>,
     /// Where save data and settings go (None: nowhere, captures).
     pub data_dir: Option<PathBuf>,
     /// The player's buttons this tick (engine bits).
@@ -103,6 +105,7 @@ impl HostData {
             ui_dir: None,
             server: None,
             backend: Backend::Library,
+            tgr_cache: None,
             data_dir: None,
             input: 0,
             audio: None,
@@ -919,6 +922,28 @@ impl Host for ShellHost<'_> {
         self.game.part_icon(style, part)
     }
 
+    fn set_engine_option(&mut self, name: &str, value: i32) -> bool {
+        let mut o = self.game.session.options;
+        if !o.set(name, value) {
+            return false;
+        }
+        self.game.session.set_options(o);
+        true
+    }
+
+    fn costumes(&mut self) -> Vec<(u16, String)> {
+        self.game.cache.costumes()
+    }
+
+    fn set_course_world(&mut self, source: &str) -> bool {
+        self.data.backend = Backend::from_setting(
+            Some(source),
+            self.data.server.as_deref(),
+            self.data.tgr_cache.clone(),
+        );
+        true
+    }
+
     fn load_value(&mut self, key: &str) -> Option<String> {
         self.data.load_value(key)
     }
@@ -1077,5 +1102,36 @@ mod tests {
         assert_eq!(v, ["C1", "c2", "c10"]);
         assert_eq!(file_name("player.character"), "player.character.json");
         assert_eq!(file_name("a/b"), "a_b.json");
+    }
+
+    #[test]
+    fn the_mods_pages_engine_options_are_the_engines() {
+        use mmk_front::mods::{OPTIONS, Target};
+        let engine: Vec<&str> = OPTIONS
+            .iter()
+            .filter_map(|o| match o.target {
+                Target::Engine(n) => Some(n),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(engine, mmk_sim::Options::NAMES);
+        // and every value they offer is one the engine takes
+        let mut o = mmk_sim::Options::default();
+        for m in OPTIONS
+            .iter()
+            .filter(|m| matches!(m.target, Target::Engine(_)))
+        {
+            let Target::Engine(n) = m.target else {
+                continue;
+            };
+            for (v, _) in m.choices(&[(3, "Costume".into())]) {
+                assert!(o.set(n, v.parse().unwrap()), "{n}={v}");
+            }
+        }
+        // the Course World key is the file the command line reads (course_world.json)
+        assert_eq!(
+            file_name(mmk_front::mods::COURSE_WORLD_KEY),
+            "course_world.json"
+        );
     }
 }

@@ -73,12 +73,21 @@ const STICK: f32 = 0.4;
 /// empty rather than failing.
 pub struct Pads {
     gilrs: Option<gilrs::Gilrs>,
+    /// The shoulder buttons held on any pad at the last poll ([`SHOULDER_L`] …), for the menus.
+    pub shoulders: u32,
 }
+
+/// Shoulder buttons in [`Pads::shoulders`] (not engine buttons: only the menus use them).
+pub const SHOULDER_L: u32 = 1;
+pub const SHOULDER_R: u32 = 2;
+pub const SHOULDER_ZL: u32 = 4;
+pub const SHOULDER_ZR: u32 = 8;
 
 impl Pads {
     pub fn new() -> Self {
         Self {
             gilrs: gilrs::Gilrs::new().ok(),
+            shoulders: 0,
         }
     }
 
@@ -95,6 +104,7 @@ impl Pads {
         };
         while g.next_event().is_some() {}
         let mut out = Vec::new();
+        self.shoulders = 0;
         for (_, pad) in g.gamepads() {
             let mut b = 0;
             let x = pad.value(Axis::LeftStickX);
@@ -121,6 +131,16 @@ impl Pads {
             }
             if held(Button::Start) {
                 b |= input::START;
+            }
+            for (btn, bit) in [
+                (Button::LeftTrigger, SHOULDER_L),
+                (Button::RightTrigger, SHOULDER_R),
+                (Button::LeftTrigger2, SHOULDER_ZL),
+                (Button::RightTrigger2, SHOULDER_ZR),
+            ] {
+                if held(btn) {
+                    self.shoulders |= bit;
+                }
             }
             out.push(b);
         }

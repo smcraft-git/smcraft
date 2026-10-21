@@ -530,6 +530,20 @@ pub trait Host {
     fn part_icon(&mut self, _style: &str, _part: i16, _flags: u32) -> Option<Icon> {
         None
     }
+    /// Set an engine play option by name (`mmk_sim::Options::set`: the SMM1 extras of the Mods
+    /// page) for the courses played from now on. False: no such option, or no engine options.
+    fn set_engine_option(&mut self, _name: &str, _value: i32) -> bool {
+        false
+    }
+    /// The Mystery Mushroom costumes the host has art for: (SMM1 costume id, name).
+    fn costumes(&mut self) -> Vec<(u16, String)> {
+        Vec::new()
+    }
+    /// Course World's source changed on the Mods page (`tgrcode`, `server`, `library`): use
+    /// it from now on. False: the host can't switch (it applies at the next start).
+    fn set_course_world(&mut self, _source: &str) -> bool {
+        false
+    }
     /// Small persistent values (save data, settings) by key.
     fn load_value(&mut self, key: &str) -> Option<String>;
     fn store_value(&mut self, key: &str, value: &str);

@@ -74,6 +74,8 @@ pub struct ChallengeFlow {
     endless_handoff: Option<EndlessBoard>,
     /// Captures: start the course without the card (`MMK_UI_INTRO=0`).
     pub intro: bool,
+    /// The SMM2 menu's header instead of "100 Mario Challenge" (Challenge Modes' ZL / ZR hint).
+    pub header: Option<String>,
 }
 
 /// What a step tells the owner.
@@ -268,9 +270,25 @@ impl ChallengeFlow {
             handoff: None,
             endless_handoff: None,
             intro: true,
+            header: None,
         };
         f.make_menu();
         f
+    }
+
+    /// Show `header` over the SMM2 menu (Challenge Modes).
+    pub fn set_header(&mut self, header: &str) {
+        self.header = Some(header.to_string());
+        if let Scene::Menu(s) = &mut self.scene
+            && let Some(b) = &mut s.board
+        {
+            b.layout.text("T_Title_00", header);
+        }
+    }
+
+    /// The difficulty select is up (Challenge Modes may switch away from it).
+    pub fn at_menu(&self) -> bool {
+        self.playing.is_none() && matches!(self.scene, Scene::Menu(_) | Scene::Smm1Menu(_))
     }
 
     fn smm2(&self) -> bool {
@@ -282,7 +300,13 @@ impl ChallengeFlow {
         self.endless_handoff = None;
         let d = self.run.difficulty;
         self.scene = if self.smm2() {
-            EndlessMenuScene::new(&self.ui, d, &self.run).map_or(Scene::None, Scene::Menu)
+            let mut m = EndlessMenuScene::new(&self.ui, d, &self.run);
+            if let (Some(m), Some(h)) = (&mut m, &self.header)
+                && let Some(b) = &mut m.board
+            {
+                b.layout.text("T_Title_00", h);
+            }
+            m.map_or(Scene::None, Scene::Menu)
         } else {
             ChallengeMenuScene::new(&self.ui, d, &self.run).map_or(Scene::None, Scene::Smm1Menu)
         };
@@ -506,7 +530,11 @@ impl ChallengeFlow {
                 }
                 EndlessEvent::Locked(d) => cx.toast(endless::locked_message(d)),
                 EndlessEvent::Start { difficulty, resume } => {
-                    self.endless_handoff = s.board.take();
+                    self.endless_handoff = s.board.take().map(|mut b| {
+                        // the run's map: the mode's own name again
+                        b.layout.text("T_Title_00", "100 Mario Challenge");
+                        b
+                    });
                     self.start(cx, difficulty, resume);
                 }
                 _ => {}

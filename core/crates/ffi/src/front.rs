@@ -90,7 +90,8 @@ pub const MMK_FRONT_HUNDRED_SMM1: u32 = 4;
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
 pub struct MmkFrontInput {
-    /// Menu buttons held: 1 up, 2 down, 4 confirm, 8 back, 16 left, 32 right.
+    /// Menu buttons held: 1 up, 2 down, 4 confirm, 8 back, 16 left, 32 right, 64 L, 128 R,
+    /// 256 ZL, 512 ZR.
     pub menu: u32,
     /// Engine buttons (MMK_BTN_*) for the course; START is masked (pausing is `flags` bit 0).
     pub buttons: u32,
@@ -888,6 +889,29 @@ impl Host for FfiHost {
         })
     }
 
+    fn set_engine_option(&mut self, name: &str, value: i32) -> bool {
+        let e = self.engine();
+        if !e.options.set(name, value) {
+            return false;
+        }
+        e.world.set_options(e.options);
+        true
+    }
+
+    fn costumes(&mut self) -> Vec<(u16, String)> {
+        self.assets()
+            .costumes
+            .iter()
+            .map(|(id, n)| (*id, n.to_string_lossy().into_owned()))
+            .collect()
+    }
+
+    fn set_course_world(&mut self, source: &str) -> bool {
+        self.course_world = Some(source.to_string());
+        self.rebuild_backend();
+        true
+    }
+
     fn load_value(&mut self, key: &str) -> Option<String> {
         let f = self.cb.load_value?;
         let key = CString::new(key).ok()?;
@@ -1174,7 +1198,7 @@ pub unsafe extern "C" fn mmk_front_set_course_world(
 
 fn front_input(i: &MmkFrontInput) -> FrontInput {
     FrontInput {
-        menu: Buttons((i.menu & 0x3f) as u8),
+        menu: Buttons((i.menu & Buttons::ALL as u32) as u16),
         start: i.flags & 1 != 0,
         skip: i.flags & 2 != 0,
         click: (i.flags & 4 != 0).then_some([i.click_x, i.click_y]),

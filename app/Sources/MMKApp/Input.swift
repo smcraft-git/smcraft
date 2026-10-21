@@ -6,13 +6,18 @@ import GameController
 
 /// Menu navigation buttons (pause menu, overlays).
 struct MenuInput: OptionSet {
-    let rawValue: UInt8
+    let rawValue: UInt16
     static let up = MenuInput(rawValue: 1)
     static let down = MenuInput(rawValue: 2)
     static let confirm = MenuInput(rawValue: 4)
     static let back = MenuInput(rawValue: 8)
     static let left = MenuInput(rawValue: 16)
     static let right = MenuInput(rawValue: 32)
+    /// Shoulder buttons: L / R change tabs (and the Mods page's page), ZL / ZR switch Challenge Modes.
+    static let l = MenuInput(rawValue: 64)
+    static let r = MenuInput(rawValue: 128)
+    static let zl = MenuInput(rawValue: 256)
+    static let zr = MenuInput(rawValue: 512)
 }
 
 /// Keyboard and game controllers (Switch Pro, Joy-Con, DualSense, Xbox via GameController) →
@@ -32,6 +37,8 @@ final class InputState {
 
     /// Return / keypad Enter always confirm in menus.
     private static let confirmKeys: Set<UInt16> = [36, 76]
+    /// Menu-only keys (macOS key codes): Q / E are L / R, 1 / 3 are ZL / ZR.
+    private static let shoulderKeys: [(UInt16, MenuInput)] = [(12, .l), (14, .r), (18, .zl), (20, .zr)]
 
     #if os(macOS)
     private var keysDown = Set<UInt16>()
@@ -74,7 +81,8 @@ final class InputState {
             default: break
             }
             // swallow game keys so the window doesn't beep
-            return self.isGameKey(event.keyCode) ? nil : event
+            let menuKey = Self.shoulderKeys.contains { $0.0 == event.keyCode }
+            return self.isGameKey(event.keyCode) || menuKey ? nil : event
         }
         monitor = m
         observeBindings()
@@ -174,6 +182,7 @@ final class InputState {
         if held(.right) { m.insert(.right) }
         if anyDown(Self.confirmKeys) || held(.jump) { m.insert(.confirm) }
         if held(.pause) { m.insert(.back) }
+        for (code, b) in Self.shoulderKeys where anyDown([code]) { m.insert(b) }
         for c in GCController.controllers() {
             guard let g = c.extendedGamepad else { continue }
             let x = g.leftThumbstick.xAxis.value, y = g.leftThumbstick.yAxis.value
@@ -183,6 +192,10 @@ final class InputState {
             if g.dpad.right.isPressed || x > 0.5 { m.insert(.right) }
             if g.buttonA.isPressed { m.insert(.confirm) }
             if g.buttonB.isPressed || padHeld(.pause, g) { m.insert(.back) }
+            if g.leftShoulder.isPressed { m.insert(.l) }
+            if g.rightShoulder.isPressed { m.insert(.r) }
+            if g.leftTrigger.isPressed { m.insert(.zl) }
+            if g.rightTrigger.isPressed { m.insert(.zr) }
         }
         #if os(iOS)
         // on-screen controls: the d-pad moves, Jump confirms, Run and + go back

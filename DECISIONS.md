@@ -2,6 +2,47 @@
 
 Newest first. Each entry: what was decided, why, and what would change it.
 
+## 2026-10-22 — The Mods page: SMM2's settings window, from a menu button on the title
+**Decision:** the mod options are one page of the front end (`mmk_front::mods_page`), so every
+platform has it, including the ones with no settings UI of their own (desktop `mmk-play`, the web,
+Android). It is SMM2's settings window `Cmn_OptionWindow_00` (Type 0, its eight setting rows):
+the rows' labels name the options, their setting buttons show the values (confirm or a click
+moves a value on), the Player Controls label is the selected option's description, the top-left
+row and L / R turn between two pages, OK / B close. It opens over the title from SMM2's own round
+menu button (`Cmn_MenuOpenBtn_00`) in the top-left corner, shown while Make / Play or the Play menu
+is up: up from Make / Play selects it, a click or tap opens it. Values are kept through the host
+(`mods.<name>`, Course World's source as the hosts' `course_world`) and applied at once: engine
+options through `Host::set_engine_option`, Course World's source through `Host::set_course_world`.
+Options that change play are marked and described as staying off online / out of replays (the
+hosts' existing `affects_play` rules do it). The Swift app keeps its SwiftUI Settings with the same
+options over the same store.
+**Why:** the title is where every mode starts and where the options matter before a course is
+picked; SMM2 opens its main menu (Settings among it) from that round button, so the button reads
+as SMM2's way in. The pause menu's Settings would reach only in-course options and changes there
+would land mid-course (and mid-replay). A fifth Play-menu button doesn't fit (four are already at
+80%). SMM2's settings window is the layout made for exactly this: labelled setting buttons.
+**Would change it:** a main menu of our own (Course Maker, Settings, Controllers) — the page then
+moves under its Settings; more options than two pages hold (a scrolling list).
+
+## 2026-10-22 — Challenge Modes: SMM2's own Endless Challenge in the front end, switched with ZL / ZR
+**Decision:** Course World's Endless Challenge button is "Challenge Modes" (the recomp's relabel
+mod) and opens the mode used last (`mods.challenge_mode`). On either mode's difficulty select ZL /
+ZR (keys 1 / 3) or a tap on the title bar switch to the other behind the black fade; the title bar
+reads "ZL < 100 Mario Challenge > ZR" / "ZL < Endless Challenge > ZR" with the message font's own
+ZL / ZR glyphs; L / R (Q / E) move the difficulty tabs. The 100 Mario Challenge is the existing
+flow on the screens the Mods page chose. SMM2's own Endless Challenge is new in the front end
+(`endless_run`): the rules of `mmk_modes::endless` played offline through its `Session` (the same
+record updates as our server's) over the library and the TGRCode pool, on the Endless menu and map
+the 100 Mario Challenge's SMM2 look already uses, saved as its own `endless` value. Its map goes
+round its 32 dots. Turning Challenge Modes off on the Mods page leaves the button's name and opens
+the Endless Challenge alone. The menu buttons grew L / R / ZL / ZR (`Buttons` is 16 bits; FFI
+`MmkFrontInput.menu` bits 64–512).
+**Why:** the owner asked for the recomp's Challenge Modes; before this, Course World's button
+opened 100 Mario rules on the Endless screens, so SMM2's own Endless Challenge wasn't playable at
+all. A switch through the fade rather than over the menu keeps the two flows independent.
+**Would change it:** Endless runs on our server (its leaderboards), or the SMM1 look's select
+getting a title bar of its own for the hint (it shows a message once now).
+
 ## 2026-10-21 — Super Worlds: the game's map data, a flat map for now
 **Decision:** Super Worlds play on the game's own data: the world-map blob (decrypted with a key
 table the importer finds in the player's `main`, never stored in the repo) and the course list,
