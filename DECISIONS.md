@@ -2,6 +2,32 @@
 
 Newest first. Each entry: what was decided, why, and what would change it.
 
+## 2026-10-22 — Network Play's screens: SMM2's flow, the course drawn from a shared pool
+**Decision:** the front end's Network Play follows SMM2 v3.0.3's own flow (research
+`specs/network-play.md`): hub button → mode select → search with Quit → lobby → "Getting course
+data…" → the course after a 3-2-1-GO countdown → clear → result with Exit / Continue playing. The
+front end talks to the network only through a small `Network` trait the host implements
+(`Host::network`); the portable shell runs `mmk-nex` on a thread for it.
+- **The course:** no vote and no download yet. Every player draws the same course from the pool
+  all SMCraft players have, the Story Mode courses of their own import, sorted by content key,
+  picked by the session's gathering ID; the pool's fingerprint is the session's course attribute,
+  so players with different pools never meet. Nothing about the course goes over the wire.
+- **Characters by position** (player 1 Mario, 2 Luigi, …, as the game's DecidePosition): the
+  world's character slots follow the match order on every peer, so the one at the goal is the
+  versus winner.
+- **The pause doesn't stop the course** (the multiplayer menu: Give Up only): the peers can't
+  wait. Giving up leaves the match.
+- **Leaving:** a goodbye datagram on the game socket, or 5 s without a packet (15 s before the
+  first), ends the match for the others with a message (as EndBattleDisconnected); a match doesn't
+  go on without a player yet.
+- **Sign-in in Standings's place** on the mode select (SMCraft has no console account). Only the
+  local test server is wired up: `--nextendo-local` gives a test account; live waits for Nextendo.
+**Why:** the shared pool gives every player the same course with no protocol of our own on top of
+Nextendo's matchmaking, and works offline of TGRCode; the trait keeps the front end free of
+sockets and threads, and the hooks into the shared files small.
+**Would change it:** the difficulty vote with TGRCode courses (the owner then sends the course
+code), Nextendo going live, 3–4 player matches across NATs.
+
 ## 2026-10-21 — Super Worlds: the game's map data, a flat map for now
 **Decision:** Super Worlds play on the game's own data: the world-map blob (decrypted with a key
 table the importer finds in the player's `main`, never stored in the repo) and the course list,

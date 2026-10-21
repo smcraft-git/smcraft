@@ -23,6 +23,7 @@ pub mod layout;
 pub mod leaderboard;
 pub mod maker;
 pub mod menu;
+pub mod netplay;
 pub mod online;
 pub mod play;
 pub mod screens;
@@ -139,6 +140,9 @@ pub enum Go {
     /// Course World's Super Worlds.
     ShowSuperWorlds,
     SuperWorld(superworld::SuperWorldGo),
+    /// Network Play's screens (from the Course World hub).
+    ShowNetplay,
+    Netplay(netplay::NetGo),
 }
 
 /// Where the 100 Mario Challenge returns to.
@@ -352,6 +356,8 @@ pub enum Screen {
     Maker(Box<MakerFlow>),
     /// The Coursebot (and a course played from it, the maker waiting on it).
     Coursebot(Box<CoursebotFlow>),
+    /// Network Play: the mode select, matchmaking, the lobby, the match, the result.
+    Netplay(Box<netplay::NetplayFlow>),
     None,
 }
 
@@ -519,6 +525,18 @@ impl Front {
         *screen = Screen::Challenge(Box::new(flow), back);
     }
 
+    fn show_netplay(&mut self, host: &mut dyn Host) {
+        host.unload_course();
+        let lib = host.library();
+        let smm2 = self.smm2.clone();
+        let script = self.opts.script.clone();
+        let (mut cx, screen) = self.cx(host);
+        if let Some(mut f) = netplay::NetplayFlow::new(&smm2, &lib, &mut cx) {
+            f.script = Script::parse(&script);
+            *screen = Screen::Netplay(Box::new(f));
+        }
+    }
+
     fn show_super_worlds(&mut self, host: &mut dyn Host) {
         host.unload_course();
         let lib = host.library();
@@ -624,6 +642,13 @@ impl Front {
                     f.go(&mut cx, g);
                 }
             }
+            Go::ShowNetplay => self.show_netplay(host),
+            Go::Netplay(n) => {
+                let (mut cx, screen) = self.cx(host);
+                if let Screen::Netplay(f) = screen {
+                    f.go(&mut cx, n);
+                }
+            }
         }
     }
 
@@ -698,6 +723,7 @@ impl Front {
                         },
                     ));
                 }
+                Some(WorldEvent::NetworkPlay) => after = Some((FadeKind::Black, Go::ShowNetplay)),
                 Some(WorldEvent::SuperWorlds) => {
                     after = Some((FadeKind::Black, Go::ShowSuperWorlds));
                 }
@@ -788,6 +814,12 @@ impl Front {
                 });
             }
             Screen::Coursebot(f) => after = f.step(&play, &mut cx),
+            Screen::Netplay(f) => {
+                if f.step(&play, &mut cx) == Some(netplay::NetplayEvent::Exit) {
+                    // back to the hub, on the Network Play button
+                    after = Some((FadeKind::Black, Go::CourseWorld { selection: 2 }));
+                }
+            }
             Screen::None => {}
         }
         self.run_now(host);
@@ -823,6 +855,7 @@ impl Front {
             Screen::Course(p) => p.draw(&mut items),
             Screen::Maker(m) => m.draw(&mut items),
             Screen::Coursebot(f) => f.draw(&mut items),
+            Screen::Netplay(f) => f.draw(&mut items),
             Screen::None => {}
         }
         self.fade.draw(&mut items);
@@ -835,6 +868,9 @@ impl Front {
     /// The player is controlling a course right now (not a menu, card, pause or result):
     /// touch screens show their on-screen controls then.
     pub fn in_play(&mut self) -> bool {
+        if let Screen::Netplay(f) = &self.screen {
+            return f.in_play();
+        }
         let p = match &mut self.screen {
             Screen::Course(p) => Some(&mut **p),
             Screen::World(w) => w.playing(),
@@ -971,6 +1007,24 @@ impl Front {
                 self.run_now(host);
             }
             "storymode" => self.show_world(host, ListKind::Story, 0),
+            // Network Play: the mode select; netplay-wait / -lobby / -loading / -play / -menu /
+            // -clear / -result with a made-up match (versus with a `-versus` suffix)
+            s if s.starts_with("netplay") => {
+                self.show_netplay(host);
+                let what = s.trim_start_matches("netplay").trim_start_matches('-');
+                let versus = what.ends_with("versus");
+                let what = what.trim_end_matches("versus").trim_end_matches('-');
+                if !what.is_empty() {
+                    let (mut cx, scr) = self.cx(host);
+                    let Screen::Netplay(f) = scr else {
+                        return false;
+                    };
+                    if !f.debug(&mut cx, what, versus) {
+                        return false;
+                    }
+                }
+                self.run_now(host);
+            }
             // Super Worlds over the library's test world: the planets, its title, the map
             // (`cleared` courses of world 1 cleared, Mario on the next), its first course, the end
             s if s.starts_with("superworld") => {

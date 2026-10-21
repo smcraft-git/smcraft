@@ -56,6 +56,7 @@ pub enum HubChoice {
     SuperWorlds,
     Account,
     IdSearch,
+    NetworkPlay,
     Unavailable,
 }
 
@@ -63,7 +64,7 @@ pub enum HubChoice {
 pub const HUB_BUTTONS: [(&str, HubChoice); 8] = [
     ("L_Course_00", HubChoice::Courses),
     ("L_Maker_00", HubChoice::Leaderboards),
-    ("L_MultiPlay_00", HubChoice::Unavailable),
+    ("L_MultiPlay_00", HubChoice::NetworkPlay),
     ("L_EndlessMode_00", HubChoice::Endless),
     ("L_EventCourseBtn_00", HubChoice::Unavailable),
     ("L_MyWBtn_00", HubChoice::SuperWorlds),
@@ -1181,6 +1182,8 @@ pub enum WorldEvent {
     Endless,
     /// Super Worlds (the owner shows them and comes back here).
     SuperWorlds,
+    /// Network Play (the owner shows its screens and comes back here).
+    NetworkPlay,
     /// Open a course in the Course Maker: where it comes from, the Coursebot entry it saves to
     /// (the player's own), the credit line of someone else's.
     Edit {
@@ -1590,6 +1593,7 @@ impl WorldFlow {
                         }
                         HubChoice::Endless => return Some(WorldEvent::Endless),
                         HubChoice::SuperWorlds => return Some(WorldEvent::SuperWorlds),
+                        HubChoice::NetworkPlay => return Some(WorldEvent::NetworkPlay),
                         HubChoice::Account => {
                             h.player_info(true);
                             if let Some(a) = AccountScene::new(&self.ui, cx) {

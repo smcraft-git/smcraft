@@ -183,11 +183,28 @@ pin). `cargo test -p mmk-nex` runs the integration tests against it when it is b
 otherwise, as in CI): login, refused tokens and access keys, sessions kept apart from console
 ones, TLS with the pin, and two players matched, punched and playing `mmk-netplay` on loopback.
 
+## In the front end
+
+Course World's Network Play button opens SMM2's own Network Play screens (`mmk-front`'s
+`netplay`): Co-op or Versus, the search (Quit cancels it and leaves the session), the lobby, the
+course, the clear and the result (Exit, or Continue playing for a new search). The host provides
+them as a `Network` (`mmk-shell`'s `network`: the search on a thread, the match's UDP link that
+also notices a peer leaving). Every player draws the same course from the Story Mode courses of
+their import by the gathering ID; the pool's fingerprint is the session's course attribute.
+
+```sh
+mmk-play --nextendo-local 127.0.0.1:<port> --nex-access-key 0f1e2d3c --nex-token-secret localsecret --maker Ada
+# headless, two of these at once: press Co-op, play the scripted run, capture the end
+MMK_FRONT_REALTIME=1 mmk-play --nextendo-local 127.0.0.1:<port> --nex-access-key 0f1e2d3c \
+  --nex-token-secret localsecret --front-screen netplay --front-script 10:confirm --scripted \
+  --ticks 1400 --screenshot out.png
+```
+
 ## Not done yet
 
 - Live use: the game server address and SNI, the access key (the game's own, from the player's
   import, or one Nextendo gives SMCraft), the client registration's redirect rules, and
   Nextendo's agreement. Nothing connects to `nextendo.network`'s game servers until then.
-- A menu entry (the front end's Network Play screen), versus, friend rooms, 3–4 players
-  across NATs (the joiners punch to each other with the host's START list; only tested with
+- In the front end: the difficulty vote and TGRCode courses, the other players' names, versus
+  rating, friend rooms, 3–4 players across NATs (the joiners punch to each other with the host's START list; only tested with
   two on loopback), a relay for symmetric NATs.

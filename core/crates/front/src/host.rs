@@ -533,6 +533,10 @@ pub trait Host {
     fn store_value(&mut self, key: &str, value: &str);
     /// A random number (opening choice, title course, 100 Mario seed).
     fn random(&mut self) -> u64;
+    /// Network Play (Nextendo matchmaking, rollback play): None when the host has none.
+    fn network(&mut self) -> Option<&mut dyn crate::netplay::Network> {
+        None
+    }
 }
 
 /// Engine buttons (`mmk_sim::input`) for scripted demo input.

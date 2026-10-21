@@ -168,13 +168,15 @@ sound-perfect as possible, that **never needs the ROM or key files to run**.
   courses that start on contact, point icons by model, map ghosts, co-op ("Play Together")
 - ⬜ Super World maker (later)
 
-**G6 — Network Play through Nextendo** 🔄 (offline groundwork done; `docs/nextendo-network-play.md`)
+**G6 — Network Play through Nextendo** 🔄 (works end to end on a local server; live waits for
+Nextendo; `docs/nextendo-network-play.md`, spec `research/specs/network-play.md`)
 - ✅ NEX client in Rust (`core/crates/nex`, `mmk-nex`): WebSocket + TLS with the server's key
   pinned, PRUDP Lite (handshake, reliable order, fragments, acks, pings; V1 codec), RMC and NEX's
   types, the ticket, ValidateAndRequestTicketWithParam, the secure connection, Register.
   Signatures and layouts byte-checked against `nextendo-nex`'s own code
 - ✅ Local test server: `scripts/nex-local.sh` builds Nextendo's public server core (fetched,
-  never committed) with our `tools/nex-local/main.go`; 5 integration tests (skip without it)
+  never committed) with our `tools/nex-local/main.go`; 6 integration tests (skip without it),
+  one of them a cancelled search leaving its session
 - ✅ Matchmaking for SMCraft-only sessions (own game mode, attributes, course hash; never meets a
   console's), participants, notifications; NAT check; probe requests and our UDP hole punch →
   peer addresses for `mmk-netplay` (`play::find_match`)
@@ -182,11 +184,35 @@ sound-perfect as possible, that **never needs the ROM or key files to run**.
   rotation, `/api/nex-token`; tokens only in the host's store (`mmk-play --nextendo-sign-in`)
 - ✅ `mmk-play --nextendo-local <addr>`: local server → match → co-op over rollback (with the
   headless `peer` example: 1500 frames, 24 state checks, no desync)
-- ⬜ Front-end Network Play screen; versus; friend rooms; 3–4 players across NATs; a relay for
-  symmetric NATs
+- ✅ Research from the binary (v3.0.3): NetworkMatchingSeq's states, the internet matching
+  sub-sequence (44 states: search, fixing, lobby beat, difficulty vote, course download, battle
+  start, disconnects), the in-course multiplayer sequences and the end-of-course states, the
+  layouts and texts (`research/specs/network-play.md`, private)
+- ✅ Network Play in the front end (`mmk-front` `netplay`, the host's `Network` trait;
+  `mmk-shell` `network`: `mmk-nex` on a thread): the hub's Network Play button → the mode select
+  (`Nwk_MatchingModeSelect_00` over `Nwk_MatchingBG_00`), Co-op and Versus; the wait screen
+  ("Finding players…", n/m found, Quit cancels and leaves the session); the lobby (`Nwk_Matching_00`,
+  "Meet your team…" / "Meet the competition…", a card per player, characters by position); "Getting
+  course data…"; the course with the HUD and the 3-2-1-GO countdown; the multiplayer menu (Give Up,
+  the course goes on); the clear (co-op's network banner with the course and time, versus's YOU
+  WIN! / YOU LOSE); the result (`Play_BattleResult_00`: Exit / Continue playing = a new search); a
+  peer leaving (goodbye datagram, or 5 s of silence) ends the match with a message. The sign-in
+  state on the mode select (Standings's place): sign in / out (a test account on the local
+  server). The course: every player draws the same one from the Story Mode courses of their
+  import by the gathering ID, the pool's fingerprint in the session attributes. Checked: headless
+  captures of every screen (`--front-screen netplay…`), a flow test on a mock network, and real
+  local matches between two `mmk-play --nextendo-local` front ends (co-op and versus: 600 frames,
+  9 state checks, the same player positions on both, no desync; a peer quitting → the other back
+  to the mode select; a cancelled search)
+- ⬜ Difficulty vote and TGRCode courses by difficulty (the owner sends the code); Miis / names
+  of the other players (peers' names aren't exchanged: "Player n"); versus rating; watching mode
+  after one's run ends; preset messages; Play with Friends (rooms); 3–4 players across NATs (the
+  front end asks for 2); a match going on without a player who left; a relay for symmetric NATs
 - ⏳ Live: Nextendo's OK and an SMCraft app registration (or the SMM2Recomp one with loopback
   redirects), the game server's address / key pin, the access key (from the import, or one of
-  SMCraft's own from Nextendo)
+  SMCraft's own from Nextendo); then the shell's `NetworkHost` gets a live server kind (the OAuth
+  sign-in of `mmk-online::nextendo` behind the mode select's account button). Until then Network
+  Play exists only with `--nextendo-local`; without it the screens say it isn't set up
 - ⬜ Live test with the owner (needs their go-ahead and a second player)
 
 **G7 — The smm2recomp mod options** 🔄
