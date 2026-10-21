@@ -1547,6 +1547,27 @@ mod tests {
     }
 
     #[test]
+    fn the_hub_button_opens_them_and_back_returns_to_it() {
+        let mut host = MockHost {
+            library: library(3),
+            ..Default::default()
+        };
+        let Some(mut f) = front(&mut host) else {
+            return;
+        };
+        f.apply(&mut host, Go::CourseWorld { selection: 5 });
+        press(&mut f, &mut host, Buttons::CONFIRM);
+        idle(&mut f, &mut host, 60);
+        assert_eq!(flow(&mut f).stage_name(), "planets");
+        press(&mut f, &mut host, Buttons::BACK);
+        idle(&mut f, &mut host, 10);
+        match &f.screen {
+            Screen::World(w) => assert_eq!(w.hub_selection(), 5),
+            _ => panic!("not back on Course World"),
+        }
+    }
+
+    #[test]
     fn deaths_cost_lives_and_a_game_over_refills_them() {
         let mut host = MockHost {
             library: library(5),
