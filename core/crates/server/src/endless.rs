@@ -23,7 +23,7 @@ use std::path::Path;
 
 use mmk_modes::endless::{
     Applied, BATCH, Candidate, Difficulty, EndlessSave, Finished, HistoryEntry, Outcome, Report,
-    Ruleset, RunError, RunStatus, pick, pick_hundred,
+    Ruleset, RunError, RunStatus, pick, pick_fresh, pick_hundred,
 };
 use serde_json::{Map, Value, json};
 
@@ -41,6 +41,21 @@ pub(crate) fn load(dir: &Path) -> HashMap<String, EndlessSave> {
                 .collect()
         })
         .unwrap_or_default()
+}
+
+/// The courses a player passed in their challenge runs, newest first (a played list for a store
+/// kept before played lists were: seeded from the runs it holds).
+pub(crate) fn played_in_runs(save: &EndlessSave) -> Vec<String> {
+    let mut runs: Vec<&mmk_modes::endless::RunRecord> =
+        save.runs.iter().chain(&save.hundred).flatten().collect();
+    runs.sort_by_key(|r| r.status.updated_at);
+    let mut out: Vec<String> = Vec::new();
+    for code in runs.iter().rev().flat_map(|r| r.played.iter().rev()) {
+        if !out.contains(code) && out.len() < crate::PLAYED_KEPT {
+            out.push(code.clone());
+        }
+    }
+    out
 }
 
 fn run_err(e: RunError) -> StoreError {
@@ -145,6 +160,8 @@ impl Store {
         rec.status.best_before = best;
         let out = rec.status;
         self.save_endless(&g)?;
+        drop(g);
+        self.short_of(d); // (an upstream source tops the difficulty up while the run starts)
         Ok(out)
     }
 
@@ -153,18 +170,24 @@ impl Store {
     pub fn endless_status(&self, who: &str) -> Value {
         let g = self.inner.lock().unwrap();
         let save = g.endless_runs.get(who).cloned().unwrap_or_default();
-        let runs: Map<String, Value> = Difficulty::ALL
-            .iter()
-            .map(|&d| {
-                let v = save.run(d).map_or(Value::Null, |r| r.status.to_json());
-                (d.name().to_string(), v)
-            })
-            .collect();
+        let slots = |ruleset: Ruleset| -> Map<String, Value> {
+            Difficulty::ALL
+                .iter()
+                .map(|&d| {
+                    let v = save
+                        .run_of(ruleset, d)
+                        .map_or(Value::Null, |r| r.status.to_json());
+                    (d.name().to_string(), v)
+                })
+                .collect()
+        };
+        let runs = slots(Ruleset::Smm2);
+        let hundred_runs = slots(Ruleset::Hundred);
         let best: Map<String, Value> = Difficulty::ALL
             .iter()
             .map(|&d| (d.name().to_string(), json!(g.best(d, who))))
             .collect();
-        json!({ "runs": runs, "best": best, "skips": save.skips,
+        json!({ "runs": runs, "hundred_runs": hundred_runs, "best": best, "skips": save.skips,
                 "last": save.last.map(Difficulty::name) })
     }
 
@@ -174,6 +197,7 @@ impl Store {
         &self,
         who: &str,
         d: Difficulty,
+        want: Option<Ruleset>,
         count: usize,
     ) -> Result<Batch, StoreError> {
         let mut g = self.inner.lock().unwrap();
@@ -187,12 +211,15 @@ impl Store {
         } = &mut *g;
         let save = endless_runs.get_mut(who).ok_or(StoreError::NotFound)?;
         save.last = Some(d);
-        let rec = save.run_mut(d).ok_or(StoreError::NotFound)?;
+        let recent = save.recent.clone();
+        let slot = save.slot(d, want);
+        let rec = save.run_of_mut(slot, d).ok_or(StoreError::NotFound)?;
         if !rec.status.can_continue() {
             return Err(run_err(RunError::NotActive));
         }
         rec.queue.retain(|c| by_code.contains_key(c));
         let mut widened = false;
+        let mut dealt: Vec<String> = Vec::new();
         if rec.queue.is_empty() {
             let banned: HashSet<u32> = accounts
                 .list
@@ -215,20 +242,24 @@ impl Store {
                     broken: m.owner != 0 && banned.contains(&m.owner),
                 })
                 .collect();
-            let pick = match rec.status.ruleset {
+            let rule: mmk_modes::endless::PickRule = match rec.status.ruleset {
                 Ruleset::Smm2 => pick,
                 Ruleset::Hundred => pick_hundred,
             };
-            let p = pick(
+            // (courses the player was dealt in earlier runs come back only when no fresh one is left)
+            let p = pick_fresh(
+                rule,
                 &cands,
                 d,
                 &rec.excluded(),
+                &recent,
                 who,
                 BATCH,
                 &mut mmk_modes::Rng::new(seed),
             );
             widened = p.widened;
-            rec.enqueue(p.indices.iter().map(|&i| cands[i].id.clone()), p.widened);
+            dealt = p.indices.iter().map(|&i| cands[i].id.clone()).collect();
+            rec.enqueue(dealt.iter().cloned(), p.widened);
         }
         let list: Vec<Meta> = rec
             .queue
@@ -237,7 +268,12 @@ impl Store {
             .filter_map(|c| by_code.get(c).map(|&i| courses[i].clone()))
             .collect();
         let run = rec.status;
+        save.note_recent(dealt.iter().map(String::as_str));
         self.save_endless(&g)?;
+        drop(g);
+        if widened {
+            self.short_of(d); // (the bands ran dry: an upstream source fetches more)
+        }
         Ok(Batch {
             courses: list,
             widened,
@@ -251,6 +287,7 @@ impl Store {
         &self,
         who: &str,
         d: Difficulty,
+        want: Option<Ruleset>,
         r: &Report,
     ) -> Result<Answer, StoreError> {
         let outcome = r.outcome.ok_or_else(|| {
@@ -262,7 +299,8 @@ impl Store {
             (g.courses[i].style.clone(), g.courses[i].theme)
         });
         let save = g.endless_runs.get_mut(who).ok_or(StoreError::NotFound)?;
-        let rec = save.run_mut(d).ok_or(StoreError::NotFound)?;
+        let slot = save.slot(d, want);
+        let rec = save.run_of_mut(slot, d).ok_or(StoreError::NotFound)?;
         let first = rec.current() != Some(r.code.as_str()) || rec.course_reports == 0;
         let ruleset = rec.status.ruleset;
         let applied = rec.report(r, &style, theme, now()).map_err(run_err)?;
@@ -277,6 +315,10 @@ impl Store {
             Ruleset::Hundred if applied.complete => g.add_completion(d, who),
             Ruleset::Hundred => g.board_score(&board(ruleset, d), who),
         };
+        let played = first && outcome != Outcome::Broken && ix.is_some();
+        if played {
+            g.note_played(who, &r.code);
+        }
         if let Some(i) = ix {
             let m = &mut g.courses[i];
             if first && outcome != Outcome::Broken {
@@ -300,7 +342,7 @@ impl Store {
             }
             self.save_index(&g)?;
         }
-        if outcome == Outcome::Clear || applied.game_over || applied.complete {
+        if played || outcome == Outcome::Clear || applied.game_over || applied.complete {
             self.save_social(&g)?;
         }
         self.save_endless(&g)?;
@@ -308,12 +350,17 @@ impl Store {
     }
 
     /// Quit to the menu: the run is kept for Continue (the lives already lost stay lost).
-    pub fn endless_suspend(&self, who: &str, d: Difficulty) -> Result<RunStatus, StoreError> {
+    pub fn endless_suspend(
+        &self,
+        who: &str,
+        d: Difficulty,
+        want: Option<Ruleset>,
+    ) -> Result<RunStatus, StoreError> {
         let mut g = self.inner.lock().unwrap();
         let rec = g
             .endless_runs
             .get_mut(who)
-            .and_then(|s| s.run_mut(d))
+            .and_then(|s| s.run_of_mut(s.slot(d, want), d))
             .ok_or(StoreError::NotFound)?;
         rec.status.updated_at = now();
         let out = rec.status;
@@ -322,11 +369,16 @@ impl Store {
     }
 
     /// Finish the run (after the game over): the best is updated and the run cleared.
-    pub fn endless_finish(&self, who: &str, d: Difficulty) -> Result<Finished, StoreError> {
+    pub fn endless_finish(
+        &self,
+        who: &str,
+        d: Difficulty,
+        want: Option<Ruleset>,
+    ) -> Result<Finished, StoreError> {
         let mut g = self.inner.lock().unwrap();
         let save = g.endless_runs.get_mut(who).ok_or(StoreError::NotFound)?;
-        let ruleset = save.run(d).map(|r| r.status.ruleset).unwrap_or_default();
-        let f = save.finish(d).ok_or(StoreError::NotFound)?;
+        let ruleset = save.slot(d, want);
+        let f = save.finish_of(ruleset, d).ok_or(StoreError::NotFound)?;
         let best = match ruleset {
             Ruleset::Smm2 => g.raise_best(d, who, f.clears as u64),
             Ruleset::Hundred => g.board_score(&board(ruleset, d), who),
@@ -344,12 +396,13 @@ impl Store {
         &self,
         who: &str,
         d: Difficulty,
+        want: Option<Ruleset>,
     ) -> Result<Vec<HistoryEntry>, StoreError> {
         let g = self.inner.lock().unwrap();
         let rec = g
             .endless_runs
             .get(who)
-            .and_then(|s| s.run(d))
+            .and_then(|s| s.run_of(s.slot(d, want), d))
             .ok_or(StoreError::NotFound)?;
         Ok(rec.history.iter().cloned().collect())
     }
@@ -406,6 +459,17 @@ pub(crate) fn route(
         return Some(json_resp(404, json!({ "error": "no such difficulty" })));
     };
     let name = d.name();
+    // the run slot: ?ruleset= (smm2 or hundred), else the one with a run that can go on
+    let want = match q.get("ruleset").map(|n| Ruleset::from_name(n)) {
+        None => None,
+        Some(Some(r)) => Some(r),
+        Some(None) => {
+            return Some(json_resp(
+                400,
+                json!({ "error": "ruleset: smm2 or hundred" }),
+            ));
+        }
+    };
     let out = match action {
         "start" => {
             let v = serde_json::from_slice::<Value>(body).unwrap_or(Value::Null);
@@ -427,7 +491,7 @@ pub(crate) fn route(
         }
         "next" => {
             let count = q.get("count").and_then(|c| c.parse().ok()).unwrap_or(BATCH);
-            store.endless_next(who, d, count).map(|b| {
+            store.endless_next(who, d, want, count).map(|b| {
                 json_resp(
                     200,
                     json!({
@@ -441,7 +505,7 @@ pub(crate) fn route(
         }
         "result" => {
             let v = serde_json::from_slice::<Value>(body).unwrap_or(Value::Null);
-            store.endless_report(who, d, &Report::from_json(&v)).map(|a| {
+            store.endless_report(who, d, want, &Report::from_json(&v)).map(|a| {
                 json_resp(
                     200,
                     json!({
@@ -453,19 +517,27 @@ pub(crate) fn route(
             })
         }
         "suspend" => store
-            .endless_suspend(who, d)
+            .endless_suspend(who, d, want)
             .map(|s| json_resp(200, json!({ "difficulty": name, "run": s.to_json() }))),
-        "finish" => store.endless_finish(who, d).map(|f| {
+        "finish" => store.endless_finish(who, d, want).map(|f| {
             let mut v = f.to_json();
             v["difficulty"] = json!(name);
             json_resp(200, v)
         }),
-        _ => store.endless_history(who, d).map(|h| {
-            json_resp(
-                200,
-                json!({ "difficulty": name,
-                        "history": h.iter().map(HistoryEntry::to_json).collect::<Vec<_>>() }),
-            )
+        _ => store.endless_history(who, d, want).map(|h| {
+            // each course's name and maker too, where the server holds it (a continued 100 Mario run's credits)
+            let history: Vec<Value> = h
+                .iter()
+                .map(|e| {
+                    let mut v = e.to_json();
+                    if let Some(m) = store.get(&e.code) {
+                        v["name"] = json!(m.name);
+                        v["maker"] = json!(m.maker);
+                    }
+                    v
+                })
+                .collect();
+            json_resp(200, json!({ "difficulty": name, "history": history }))
         }),
     };
     Some(out.unwrap_or_else(store_err))
@@ -476,6 +548,23 @@ mod tests {
     use super::*;
     use crate::handle;
     use mmk_formats::smm2::Course;
+
+    #[test]
+    fn a_played_list_seeded_from_the_runs_is_newest_first() {
+        let run = |at: u64, codes: &[&str]| {
+            let mut r = mmk_modes::endless::RunRecord::default();
+            r.status.updated_at = at;
+            r.played = codes.iter().map(|c| c.to_string()).collect();
+            Some(r)
+        };
+        let mut save = EndlessSave::default();
+        save.runs[0] = run(10, &["AAA-AAA-AAA", "BBB-BBB-BBB"]);
+        save.hundred[1] = run(20, &["CCC-CCC-CCC", "AAA-AAA-AAA"]);
+        assert_eq!(
+            played_in_runs(&save),
+            ["AAA-AAA-AAA", "CCC-CCC-CCC", "BBB-BBB-BBB"]
+        );
+    }
 
     fn tmp(name: &str) -> std::path::PathBuf {
         let d = std::env::temp_dir().join(format!(
@@ -539,6 +628,127 @@ mod tests {
 
     fn report(code: &str, result: &str, extra: &str) -> String {
         format!(r#"{{"code":"{code}","result":"{result}"{extra}}}"#)
+    }
+
+    #[test]
+    fn both_modes_keep_their_own_run() {
+        let dir = tmp("slots");
+        let store = Store::open(&dir).unwrap();
+        let (me, _) = account(&store, "Pia");
+        let (maker, _) = account(&store, "Mo");
+        for _ in 0..12 {
+            course(&store, &maker, 80, 100);
+        }
+        let me = Some(me.as_str());
+        let start = |body: &str| call(&store, "POST", "/api/endless/easy/start", me, body);
+        assert_eq!(start(r#"{"ruleset":"smm2"}"#).0, 201);
+        assert_eq!(
+            start(r#"{"ruleset":"hundred"}"#).0,
+            201,
+            "doesn't end the SMM2 run"
+        );
+        let (_, s) = call(&store, "GET", "/api/endless", me, "");
+        assert_eq!(s["runs"]["easy"]["lives"].as_u64(), Some(5));
+        assert_eq!(s["hundred_runs"]["easy"]["lives"].as_u64(), Some(100));
+        // each slot plays its own queue, by ?ruleset=
+        let (st, b) = call(&store, "GET", "/api/endless/easy/next?ruleset=smm2", me, "");
+        assert_eq!((st, b["run"]["ruleset"].as_str()), (200, Some("smm2")));
+        let first = codes(&b)[0].clone();
+        let (_, a) = call(
+            &store,
+            "POST",
+            "/api/endless/easy/result?ruleset=smm2",
+            me,
+            &report(&first, "death", ""),
+        );
+        assert_eq!(a["lives"].as_u64(), Some(4));
+        let (_, b) = call(
+            &store,
+            "GET",
+            "/api/endless/easy/next?ruleset=hundred",
+            me,
+            "",
+        );
+        assert_eq!(
+            b["run"]["lives"].as_u64(),
+            Some(100),
+            "the 100 Mario run kept its lives"
+        );
+        assert_eq!(
+            call(&store, "GET", "/api/endless/easy/next?ruleset=odd", me, "").0,
+            400
+        );
+        // finishing the 100 Mario run leaves the SMM2 one, and the file keeps both (reopened)
+        call(
+            &store,
+            "POST",
+            "/api/endless/easy/finish?ruleset=hundred",
+            me,
+            "",
+        );
+        drop(store);
+        let store = Store::open(&dir).unwrap();
+        let (_, s) = call(&store, "GET", "/api/endless", me, "");
+        assert_eq!(s["runs"]["easy"]["lives"].as_u64(), Some(4));
+        assert!(s["hundred_runs"]["easy"].is_null());
+        // without ?ruleset= the slot with a run that can go on
+        let (st, b) = call(&store, "GET", "/api/endless/easy/next", me, "");
+        assert_eq!((st, b["run"]["ruleset"].as_str()), (200, Some("smm2")));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn two_runs_on_a_30_course_pool_share_no_courses() {
+        let dir = tmp("fresh");
+        let store = Store::open(&dir).unwrap();
+        let (me, _) = account(&store, "Pia");
+        let (maker, _) = account(&store, "Mo");
+        for _ in 0..30 {
+            course(&store, &maker, 80, 100);
+        }
+        let me = Some(me.as_str());
+        let mut dealt: Vec<Vec<String>> = Vec::new();
+        for _ in 0..2 {
+            let (st, _) = call(
+                &store,
+                "POST",
+                "/api/endless/easy/start",
+                me,
+                r#"{"ruleset":"hundred"}"#,
+            );
+            assert_eq!(st, 201);
+            let mut run = Vec::new();
+            while run.len() < 8 {
+                let (_, b) = call(&store, "GET", "/api/endless/easy/next?count=10", me, "");
+                let batch = codes(&b);
+                run.extend(
+                    batch
+                        .iter()
+                        .filter(|c| !run.contains(*c))
+                        .cloned()
+                        .collect::<Vec<_>>(),
+                );
+                let (st, _) = call(
+                    &store,
+                    "POST",
+                    "/api/endless/easy/result",
+                    me,
+                    &report(&batch[0], "clear", ""),
+                );
+                assert_eq!(st, 200);
+            }
+            call(&store, "POST", "/api/endless/easy/finish", me, "");
+            dealt.push(run);
+        }
+        assert!(dealt[1].iter().all(|c| !dealt[0].contains(c)), "{dealt:?}");
+        // the recent list is the player's, kept in endless.json
+        drop(store);
+        let store = Store::open(&dir).unwrap();
+        let g = store.inner.lock().unwrap();
+        let recent = &g.endless_runs.values().next().unwrap().recent;
+        assert!(dealt[0].iter().chain(&dealt[1]).all(|c| recent.contains(c)));
+        drop(g);
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -673,6 +883,12 @@ mod tests {
         assert_eq!(
             (h[1]["result"].as_str(), h[1]["code"].as_str()),
             (Some("skip"), Some(batch[1].as_str()))
+        );
+        // with each course's name and maker (a continued run's credits)
+        let m = store.get(&batch[1]).unwrap();
+        assert_eq!(
+            (h[1]["name"].as_str(), h[1]["maker"].as_str()),
+            (Some(m.name.as_str()), Some(m.maker.as_str()))
         );
         // suspend and status
         let (st, v) = call(&store, "POST", "/api/endless/easy/suspend", me, "");
@@ -830,7 +1046,7 @@ mod tests {
             assert_eq!(a["run_complete"].as_bool(), Some(k == 7));
         }
         let (_, a) = call(&store, "GET", "/api/endless", me, "");
-        assert_eq!(a["runs"]["easy"]["complete"], true);
+        assert_eq!(a["hundred_runs"]["easy"]["complete"], true);
         assert_eq!(a["best"]["easy"].as_u64(), Some(0), "not an Endless score");
         assert_eq!(call(&store, "GET", "/api/endless/easy/next", me, "").0, 400);
         let (_, r) = call(&store, "GET", "/api/rankings/hundred_easy", me, "");

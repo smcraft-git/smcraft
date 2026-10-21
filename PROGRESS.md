@@ -22,8 +22,11 @@ sound-perfect as possible, that **never needs the ROM or key files to run**.
 - ✅ Clone of github.com/smcraft-git/smcraft (snapshot `8bdb0ff` = tag `smcraft-final` without
   `recomp/`); builds, 763 tests pass
 - 🔄 Goal and plan written down (this section, DECISIONS.md 2026-10-21); README no longer "archived"
-- ⬜ Bring over the course-server work done on smm2recomp since the split (TGRCode upstream
-  fetcher, the embedded server crate, Endless rulesets)
+- ✅ Brought over the course-server work done on smm2recomp since the split (`smcraft-final..main`):
+  the TGRCode upstream fetcher (`server/src/upstream.rs`, `mmk server --upstream tgrcode`),
+  thumbnails and whole-course maps on the server, Played / Liked lists, `based_on` uploads, the
+  listener that recovers from a failed accept, the `mmk-embed` crate, Endless's run slot per
+  ruleset and no-repeat pool, the relay's 1450-byte messages; licence GPL-3.0-or-later
 - ⬜ CI on the public repo (Linux on push; macOS / Windows / wasm / Android by hand)
 
 **G1 — Import once, then ROM-free** ⬜
