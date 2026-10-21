@@ -25,6 +25,7 @@ const SETUP: &[&str] = &[
     "core/crates/shell/web/mmk-web.js",
     "core/crates/shell/web/mmk-import-worker.js",
     "app/Sources/MMKApp/ImportView.swift",
+    "app/Sources/MMKApp/CacheSetup.swift",
     "app/Sources/MMKApp/Bridge.swift",
 ];
 

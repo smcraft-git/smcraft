@@ -43,8 +43,9 @@ sound-perfect as possible, that **never needs the ROM or key files to run**.
   with no dump anywhere (an app-level run) ✅ (the second launch above)
 - 🔄 Setup screen on every platform (pick the NSP, the update NSP, `prod.keys`; progress; done):
   macOS app ✅ (NSP files or extracted folders, `mmk_import_nsp`); web (`mmk-play` in a browser: a
-  folder with the NSPs and `prod.keys`) ✅ builds, not yet tried in a browser; iOS / iPadOS ⬜
-  (still copies a cache made on the Mac); native `mmk-play` (Windows / Linux / macOS) and Android
+  folder with the NSPs and `prod.keys`) ✅ builds, not yet tried in a browser; iOS / iPadOS 🔄
+  (the NSPs and prod.keys picked in Files or dropped into the app's `import` folder, `mmk_import_nsp`;
+  builds for the Simulator, not yet run end to end on a device; a cache made on a Mac still works); native `mmk-play` (Windows / Linux / macOS) and Android
   ✅ through a drop folder: the NSPs and `prod.keys` copied into `<data folder>/import/` are
   imported at the first launch on a thread, with the progress over the demo strip, then the front
   end starts (`shell/src/setup.rs`, `launch.rs`; checked on macOS from an empty data folder:
