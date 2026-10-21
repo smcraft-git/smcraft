@@ -1,0 +1,17 @@
+[package]
+name = "smcraft-android"
+description = "SMCraft on Android: the portable shell's front end in a NativeActivity (scripts/build-android.sh makes the APK)"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+name = "smcraft"
+crate-type = ["cdylib"]
+
+[target.'cfg(target_os = "android")'.dependencies]
+mmk-front = { path = "../front" }
+mmk-host = { path = "../host" }
+mmk-shell = { path = "../shell" }
+winit = { version = "0.30.13", features = ["android-native-activity"] }

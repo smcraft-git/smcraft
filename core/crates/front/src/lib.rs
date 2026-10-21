@@ -548,6 +548,18 @@ impl Front {
         }
     }
 
+    /// The player is controlling a course right now (not a menu, card, pause or result):
+    /// touch screens show their on-screen controls then.
+    pub fn in_play(&mut self) -> bool {
+        let p = match &mut self.screen {
+            Screen::Course(p) => Some(&mut **p),
+            Screen::World(w) => w.playing(),
+            Screen::Challenge(c, _) => c.playing.as_mut(),
+            _ => None,
+        };
+        p.is_some_and(|p| p.phase == play::Phase::Playing)
+    }
+
     /// The UI sounds started since the last call (take them every tick).
     pub fn take_sounds(&mut self) -> Vec<SoundCue> {
         let mut sounds = self.smm2.take_cues();

@@ -39,6 +39,8 @@ pub struct FrontApp {
     typed: VecDeque<char>,
     /// Keeps the sound playing.
     pub audio_stream: Option<crate::ui_sound::FrontAudio>,
+    /// On-screen controls to draw this frame (`TouchPad::shapes`; empty: none).
+    pub touch_shapes: Vec<([f32; 2], f32, bool)>,
 }
 
 /// Menu buttons, pause and skip from the keyboard and the pads' engine buttons, as in the Swift
@@ -101,6 +103,7 @@ impl FrontApp {
             toasts: 0,
             typed: VecDeque::new(),
             audio_stream: None,
+            touch_shapes: Vec::new(),
         }
     }
 
@@ -278,6 +281,15 @@ impl FrontApp {
                 }
             }
         }
+        if !self.touch_shapes.is_empty() {
+            // on-screen controls over the whole window (window px, origin centre, y up)
+            let (w, h) = (size.0 as f32, size.1 as f32);
+            let quads = touch_quads(&self.touch_shapes, w, h);
+            let i = self.layer(gpu, format, UiKind::Smm2);
+            self.layers[i]
+                .1
+                .encode(gpu, enc, target, (0.0, 0.0, w, h), &quads, [w, h]);
+        }
         if !toast.is_empty() {
             let i = self.layer(gpu, format, UiKind::Smm2);
             self.layers[i].1.sync(gpu, &self.front.smm2.cache());
@@ -286,6 +298,52 @@ impl FrontApp {
                 .encode(gpu, enc, target, (vx, vy, vw, vh), &toast, [1280.0, 720.0]);
         }
     }
+}
+
+/// The on-screen controls as rings (a translucent disc with a brighter edge; brighter while
+/// held), in window px around the window's centre, y up.
+fn touch_quads(shapes: &[([f32; 2], f32, bool)], w: f32, h: f32) -> Vec<Quad> {
+    const SEGMENTS: usize = 32;
+    let flags = (COMBINE_NONE << SHIFT_COMBINE_COLOR)
+        | (COMBINE_NONE << SHIFT_COMBINE_ALPHA)
+        | BLEND_NORMAL;
+    let mut out = Vec::new();
+    // a quad from four points (TL, TR, BL, BR order; the two triangles are TL-BL-TR, TR-BL-BR)
+    let mut quad = |pos: [[f32; 2]; 4], color: [u8; 4]| {
+        out.push(Quad {
+            pos,
+            uv0: [[0.0; 2]; 4],
+            uv1: [[0.0; 2]; 4],
+            color: [color; 4],
+            black: [0, 0, 0, 0],
+            white: [255; 4],
+            tex0: TEXTURE_NONE,
+            tex1: TEXTURE_NONE,
+            flags,
+        })
+    };
+    for &([cx, cy], r, held) in shapes {
+        let c = [cx - w / 2.0, h / 2.0 - cy];
+        let at = |k: usize, rr: f32| {
+            let a = k as f32 / SEGMENTS as f32 * std::f32::consts::TAU;
+            [c[0] + rr * a.cos(), c[1] + rr * a.sin()]
+        };
+        let (fill, edge) = if held {
+            ([255, 255, 255, 110], [255, 255, 255, 230])
+        } else {
+            ([0, 0, 0, 70], [255, 255, 255, 140])
+        };
+        for k in 0..SEGMENTS {
+            // the disc: a fan of triangles (the quad's first triangle is degenerate)
+            quad([c, at(k, r), c, at(k + 1, r)], fill);
+            // the edge: a band from 0.9 r to r
+            quad(
+                [at(k, r * 0.9), at(k + 1, r * 0.9), at(k, r), at(k + 1, r)],
+                edge,
+            );
+        }
+    }
+    out
 }
 
 fn clear(enc: &mut wgpu::CommandEncoder, target: &wgpu::TextureView) {

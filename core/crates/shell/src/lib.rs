@@ -22,6 +22,7 @@ pub mod render;
 pub mod session;
 pub mod source;
 pub mod texture;
+pub mod touch;
 pub mod ui_layer;
 
 pub mod front_app;

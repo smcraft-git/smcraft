@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
-use winit::event::{ElementState, MouseButton, StartCause, WindowEvent};
+use winit::event::{ElementState, MouseButton, StartCause, TouchPhase, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoopProxy};
 use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::{Window, WindowId};
@@ -213,6 +213,8 @@ pub struct App {
     sound: Option<Arc<AudioOut>>,
     /// The SMM2 front end (menus, Course World, 100 Mario, in-course screens), when it runs.
     pub front: Option<Box<crate::front_app::FrontApp>>,
+    /// On-screen controls (touch screens).
+    pub touch: crate::touch::TouchPad,
 }
 
 pub fn log(msg: &str) {
@@ -245,6 +247,7 @@ impl App {
             audio: None,
             sound: None,
             front: None,
+            touch: crate::touch::TouchPad::default(),
         }
     }
 
@@ -301,6 +304,12 @@ impl App {
         } else {
             each.first().copied().unwrap_or(0)
         };
+        if pads != 0 {
+            self.touch.hide();
+        }
+        // the on-screen controls only count in play (in menus a touch is a tap)
+        let in_play = self.front.as_mut().is_none_or(|f| f.front.in_play());
+        let pads = pads | if in_play { self.touch.buttons() } else { 0 };
         self.game.session.extra_inputs = each
             .iter()
             .skip(1)
@@ -337,6 +346,13 @@ impl App {
             {
                 f(r);
             }
+        }
+        if let Some(f) = &mut self.front {
+            f.touch_shapes = if self.touch.visible && f.front.in_play() {
+                self.touch.shapes()
+            } else {
+                Vec::new()
+            };
         }
         if let Some(gfx) = &mut self.gfx {
             let drawn = match &mut self.front {
@@ -553,6 +569,17 @@ impl ApplicationHandler<UserEvent> for App {
         }
     }
 
+    /// Android takes the window's surface away while the app is in the background: drop the
+    /// graphics and make them again when it comes back.
+    fn suspended(&mut self, _: &ActiveEventLoop) {
+        #[cfg(target_os = "android")]
+        {
+            self.gfx = None;
+            self.starting = false;
+            self.touch.hide();
+        }
+    }
+
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: UserEvent) {
         match event {
             UserEvent::Gfx(g) => self.installed(g, event_loop),
@@ -578,6 +605,7 @@ impl ApplicationHandler<UserEvent> for App {
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::Resized(size) => {
+                self.touch.resize(size.width, size.height);
                 if let Some(g) = &mut self.gfx {
                     g.resize(size.width, size.height);
                     g.window.request_redraw();
@@ -633,6 +661,23 @@ impl ApplicationHandler<UserEvent> for App {
                     }
                 }
             }
+            WindowEvent::Touch(t) => match t.phase {
+                TouchPhase::Started => {
+                    let in_play = self.front.as_mut().is_none_or(|f| f.front.in_play());
+                    let on_control = in_play && self.touch.down(t.id, t.location.x, t.location.y);
+                    if !in_play {
+                        self.touch.visible = true;
+                    }
+                    if !on_control && let (Some(f), Some(g)) = (&mut self.front, &self.gfx) {
+                        f.click(
+                            (t.location.x, t.location.y),
+                            (g.config.width, g.config.height),
+                        );
+                    }
+                }
+                TouchPhase::Moved => self.touch.moved(t.id, t.location.x, t.location.y),
+                TouchPhase::Ended | TouchPhase::Cancelled => self.touch.up(t.id),
+            },
             WindowEvent::RedrawRequested => self.frame(event_loop),
             _ => {}
         }

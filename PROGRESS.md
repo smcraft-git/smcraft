@@ -91,7 +91,15 @@ sound-perfect as possible, that **never needs the ROM or key files to run**.
 
 **G9 — Every platform** 🔄
 - 🔄 macOS (Swift app) · 🔄 iOS / iPadOS (built for the Simulator; the owner's iPad) · 🔄 Windows ·
-  🔄 Linux · 🔄 web · ⬜ Android (`mmk-play` on winit + wgpu / Vulkan, an APK)
+  🔄 Linux · 🔄 web · 🔄 Android
+- 🔄 Android (`crates/android`, `scripts/build-android.sh`): the portable shell and the SMM2 front end in
+  a NativeActivity (no Java code, no Gradle), arm64, API 28+, Vulkan. On-screen controls (d-pad,
+  Jump / Run / Spin, +; several fingers, drawn while playing; a touch elsewhere is a tap for the
+  menus), the surface dropped and remade across background / foreground. Checked in the Android
+  Emulator (API 35, arm64) with an asset pack pushed by `build-android.sh --push`: opening, title,
+  Play menu, Course World, the library list, a course page and play by touch. Open: the import on
+  the device (G1's NSP importer + a file picker), a real phone, Bluetooth controllers (winit key
+  events), the 3D World sky drawn in stripes in the emulator, sound not checked (emulator audio off)
 - ⬜ Release packages for every platform (the game only; the player imports their own dump)
 
 ---

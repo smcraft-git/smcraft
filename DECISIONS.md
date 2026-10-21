@@ -2,6 +2,21 @@
 
 Newest first. Each entry: what was decided, why, and what would change it.
 
+## 2026-10-21 — Android: the portable shell in a NativeActivity
+**Decision:** SMCraft on Android is `mmk-shell` (winit, wgpu on Vulkan, cpal on AAudio) and the Rust
+front end, started from `android_main` in a small cdylib crate (`crates/android`, library
+`libsmcraft.so`) inside Android's own `NativeActivity`. The APK is put together by
+`scripts/build-android.sh` with the SDK's aapt2 / zipalign / apksigner: no Java code, no Gradle, a
+local debug key. The player's data lives in the app's external files folder (`MMK_HOME`), with the
+same `assets/` / `courses/` / `play/` layout as the desktop. Touch: the shell's own on-screen
+controls (`touch.rs`, laid out like the iOS app's) while a course is played; every other touch is a
+tap for the layout menus.
+**Why:** it reuses the code every other non-Apple platform runs, with nothing Android-specific
+beyond the entry point, the lifecycle (surface lost in the background) and touch. SDL's Java
+activity (the recomp's route) isn't needed because winit drives the NativeActivity directly.
+**Would change it:** needing Android APIs NativeActivity can't reach (a document picker for the
+import, IME text entry); then a small Java activity of our own takes over.
+
 ## 2026-10-21 — SMCraft revived: import once, then no ROM or keys; the mode list
 **Decision (owner):** SMCraft is developed again, alongside smm2recomp. The goal is SMM2 rebuilt from
 scratch, every style as pixel-, physics- and sound-exact as we can make it, that does not need the
