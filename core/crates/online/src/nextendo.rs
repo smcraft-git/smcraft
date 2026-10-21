@@ -2,7 +2,8 @@
 //!
 //! OAuth 2.0 authorization code with PKCE (S256), as Nextendo's developer docs describe it for
 //! third-party apps: the player signs in in their own browser, which comes back to a listener
-//! on 127.0.0.1 (any free port, `/callback`); the code is exchanged for an access token
+//! on 127.0.0.1 (port [`CALLBACK_PORT`], `/callback`: the redirect registered with the app,
+//! matched exactly by Nextendo); the code is exchanged for an access token
 //! (`POST /oauth/token`, then `/api/oauth/token` if that is not there), and the access token
 //! for the game token (`GET /api/nex-token`: `nex_token`, `pid`, `username`, `friend_code`;
 //! 24 h). The game token goes into the NEX login (`mmk-nex`).
@@ -29,6 +30,8 @@ pub const DEFAULT_API: &str = "https://nextendo.network";
 /// The "SMM2Recomp" application (a public client: PKCE, no secret).
 pub const DEFAULT_CLIENT_ID: &str = "nxc_R-JWtJ6JrrgY";
 pub const SCOPES: &str = "identity game.matchmaking";
+/// The loopback port of the registered redirect `http://127.0.0.1:47614/callback`.
+pub const CALLBACK_PORT: u16 = 47614;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Config {
@@ -36,6 +39,8 @@ pub struct Config {
     pub api: String,
     pub client_id: String,
     pub timeout: Duration,
+    /// The sign-in listener's port ([`CALLBACK_PORT`]; 0: any free port, for tests).
+    pub callback_port: u16,
 }
 
 impl Default for Config {
@@ -44,6 +49,7 @@ impl Default for Config {
             api: DEFAULT_API.into(),
             client_id: DEFAULT_CLIENT_ID.into(),
             timeout: Duration::from_secs(10),
+            callback_port: CALLBACK_PORT,
         }
     }
 }
@@ -304,7 +310,13 @@ pub struct SignIn {
 impl SignIn {
     /// Opens the loopback listener (127.0.0.1 only) and builds the authorize URL.
     pub fn begin(cfg: &Config) -> Result<Self> {
-        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).map_err(|e| e.to_string())?;
+        let listener =
+            TcpListener::bind((Ipv4Addr::LOCALHOST, cfg.callback_port)).map_err(|e| {
+                format!(
+                    "the sign-in needs port {} on this computer for Nextendo's reply: {e}",
+                    cfg.callback_port
+                )
+            })?;
         let port = listener.local_addr().map_err(|e| e.to_string())?.port();
         let redirect_uri = format!("http://127.0.0.1:{port}/callback");
         let state = b64url(&random_bytes(16));
@@ -714,6 +726,7 @@ mod tests {
             api: m.base.clone(),
             client_id: "nxc_test".into(),
             timeout: Duration::from_secs(5),
+            callback_port: 0,
         };
         let store = Memory::default();
         let acct = Account {
@@ -743,6 +756,7 @@ mod tests {
     fn forged_or_cancelled_callbacks_are_refused() {
         let cfg = Config {
             api: "http://127.0.0.1:9".into(),
+            callback_port: 0,
             ..Default::default()
         };
         for (query, want) in [
