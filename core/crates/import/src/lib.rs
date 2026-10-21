@@ -28,6 +28,7 @@ use serde_json::{Value, json};
 pub mod env;
 pub mod meshes;
 pub mod modes;
+pub mod myworld;
 pub mod nsp;
 pub mod overlay;
 pub mod sprites;
@@ -373,6 +374,8 @@ pub fn run(cfg: &ImportConfig, progress: Progress) -> Result<ImportReport> {
     }
     let table_bytes: Vec<u8> = table.iter().flat_map(|w| w.to_le_bytes()).collect();
     write(&out.join("keys/course_table.bin"), &table_bytes)?;
+    // the Super World maps' key table (3.0.0+)
+    let world_keys = myworld::import_world_keys(&cfg.romfs, &nso, &out)?;
 
     // 3. tables: every Mush/*.byml in Static.pack → tables/<name>.json
     let static_path = cfg.romfs.join("Pack/Static.pack");
@@ -428,7 +431,7 @@ pub fn run(cfg: &ImportConfig, progress: Progress) -> Result<ImportReport> {
         "game": "SMM2",
         "build": build,
         "module_id": nso.module_id_hex(),
-        "stages": ["identify", "keys", "tables", "textures", "audio", "sprites", "meshes", "env", "effects", "modes"],
+        "stages": ["identify", "keys", "myworld", "tables", "textures", "audio", "sprites", "meshes", "env", "effects", "modes"],
         "effect_users": fx.users,
         "effect_sets": fx.sets,
         "texture_styles": STYLES,
@@ -445,6 +448,7 @@ pub fn run(cfg: &ImportConfig, progress: Progress) -> Result<ImportReport> {
         "env": env_count,
         "tables": tables,
         "builtin_courses": courses.len(),
+        "world_keys": world_keys,
         "story_flows": modes_report.story_flows,
         "lesson_flows": modes_report.lesson_flows,
         "lessons": modes_report.lessons,

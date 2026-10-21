@@ -12,7 +12,8 @@
 //!   (`Nwk_PlayerInfo_00`, over the hub); "More info" → the course page and "View comments" →
 //!   the comments (`coursepage`); a maker's profile is `Nwk_CourseListWindow_00` (Type 0) with
 //!   their uploaded courses as course rows;
-//! - Endless Challenge → the Endless menu (100 Mario rules, see `endless`).
+//! - Endless Challenge → the Endless menu (100 Mario rules, see `endless`);
+//! - Super Worlds → the planets, the world maps and their courses (see `superworld`).
 //!
 //! Scene changes use the black fade [obs]; the windows (course page, profile, comments, the
 //! comment form) open over the screen under them with their own In [inf: as the game's
@@ -52,6 +53,7 @@ pub enum HubChoice {
     Courses,
     Leaderboards,
     Endless,
+    SuperWorlds,
     Account,
     IdSearch,
     Unavailable,
@@ -64,7 +66,7 @@ pub const HUB_BUTTONS: [(&str, HubChoice); 8] = [
     ("L_MultiPlay_00", HubChoice::Unavailable),
     ("L_EndlessMode_00", HubChoice::Endless),
     ("L_EventCourseBtn_00", HubChoice::Unavailable),
-    ("L_MyWBtn_00", HubChoice::Unavailable),
+    ("L_MyWBtn_00", HubChoice::SuperWorlds),
     ("L_PlayerBody_00", HubChoice::Account),
     ("L_IDSearchBtn_00", HubChoice::IdSearch),
 ];
@@ -1154,6 +1156,8 @@ pub enum WorldEvent {
     Exit,
     /// Endless Challenge (the owner shows the Endless menu and comes back here).
     Endless,
+    /// Super Worlds (the owner shows them and comes back here).
+    SuperWorlds,
 }
 
 /// A clear being sent: the `submit_replay` call, the course code and the time (a plain
@@ -1555,6 +1559,7 @@ impl WorldFlow {
                             cx.fade_to(FadeKind::Black, Go::World(WorldGo::Leaderboards))
                         }
                         HubChoice::Endless => return Some(WorldEvent::Endless),
+                        HubChoice::SuperWorlds => return Some(WorldEvent::SuperWorlds),
                         HubChoice::Account => {
                             h.player_info(true);
                             if let Some(a) = AccountScene::new(&self.ui, cx) {

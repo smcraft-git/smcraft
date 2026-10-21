@@ -299,6 +299,17 @@ impl FfiHost {
             .map_err(|e| mmk_host::course::no_key_table(format!("{}: {e}", path.display())))
     }
 
+    /// The Super World maps' key table (TGRCode's world maps decrypt with it).
+    fn world_table(&self) -> Result<Vec<u8>, String> {
+        let path = self.assets().cache.root.join(mmk_host::course::WORLD_TABLE);
+        std::fs::read(&path).map_err(|e| {
+            format!(
+                "the asset pack has no world-map key table ({}: {e})",
+                path.display()
+            )
+        })
+    }
+
     /// The library entry of a course file (None: not a course the engine reads).
     fn entry_of(&self, path: &Path, meta: CourseMeta) -> Option<CourseEntry> {
         let bytes = std::fs::read(path).ok()?;
@@ -645,6 +656,13 @@ impl Host for FfiHost {
                 std::fs::write(&file, body).map_err(|e| e.to_string())?;
                 Ok(json!({ "file": file.to_string_lossy() }))
             });
+            return true;
+        }
+        if action == "super_world" {
+            // its map decrypted with the pack's world-map table (TGRCode only)
+            let table = self.world_table();
+            let world = args["id"].as_str().unwrap_or_default().to_string();
+            self.spawn_online(id, move || backend.super_world(&world, || table));
             return true;
         }
         let Some(server) = backend.server().map(str::to_string) else {

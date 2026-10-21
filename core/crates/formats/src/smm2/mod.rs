@@ -4,6 +4,7 @@ pub mod clear;
 pub mod course;
 pub mod crypto;
 pub mod keyfind;
+pub mod world;
 
 pub use course::{Area, AreaHeader, COURSE_SIZE, Course, CourseHeader, CourseObject};
 pub use crypto::{BCD_SIZE, BcdFile, KeyTable};

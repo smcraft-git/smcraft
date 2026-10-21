@@ -42,6 +42,8 @@ pub fn decode(
 
 /// Path of the key table inside an asset cache.
 pub const KEY_TABLE: &str = "keys/course_table.bin";
+/// The Super World maps' key table, in the asset pack (import stage `myworld`).
+pub const WORLD_TABLE: &str = "keys/world_table.bin";
 
 /// The message used when a `.bcd` arrives without imported game data.
 pub fn no_key_table(detail: impl std::fmt::Display) -> String {

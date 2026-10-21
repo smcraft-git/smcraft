@@ -219,6 +219,10 @@ impl HostData {
         source::key_table(self.src())
     }
 
+    fn world_table(&self) -> Result<Vec<u8>, String> {
+        source::world_table(self.src())
+    }
+
     /// Where downloads go: the first library folder's `Downloaded/` (else the data folder's).
     fn download_dir(&self) -> Option<PathBuf> {
         self.library_dirs
@@ -629,6 +633,17 @@ impl Host for ShellHost<'_> {
                     Ok(file)
                 })();
                 let _ = tx.send((id, Answer::Download(r)));
+            });
+            return true;
+        }
+        if action == "super_world" {
+            let call = id;
+            // its map decrypted with the pack's world-map table (TGRCode only)
+            let table = self.data.world_table();
+            let id = args["id"].as_str().unwrap_or_default().to_string();
+            std::thread::spawn(move || {
+                let a = backend.super_world(&id, || table);
+                let _ = tx.send((call, Answer::Json(a)));
             });
             return true;
         }

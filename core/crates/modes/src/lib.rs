@@ -14,6 +14,9 @@
 //! - [`coursebot`]: the Coursebot's 120 My Courses + 60 Downloaded slots (slot table, metadata,
 //!   Downloaded stats), the course-number space and the scene-change reasons of its screens;
 //!   [`coursebot::CoursebotStore`] keeps the files over a pluggable blob store.
+//! - [`superworld`]: Super Worlds (`research/specs/super-worlds.md`): the world and its courses
+//!   (a test world from the library, or a downloaded one), the walk on the 7 × 4 maps, the rules
+//!   (clears, lives, game over, Toad Houses, world clear) and the saved progress.
 //! - [`dojo`]: Yamamura's Dojo lesson list (from the owner's imported `lessons/index.json`),
 //!   lesson starts and the saved completion marks / Maker Basics / Nina flags.
 //!
@@ -27,6 +30,7 @@ pub mod hundred;
 pub mod pool;
 pub mod replay;
 pub mod save;
+pub mod superworld;
 
 /// Small deterministic generator (xorshift64*), seeded by the caller.
 #[derive(Clone, Debug)]

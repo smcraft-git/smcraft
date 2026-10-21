@@ -17,7 +17,8 @@
 //! | `search_popular?count=1..100&difficulty=e\|n\|ex\|sex` | `{"courses": [record]}` by course points |
 //! | `search_new?count=1..20` | the newest uploads |
 //! | `search_endless_mode?count=1..300&difficulty=…` | a draw from the Endless Challenge pool |
-//! | `super_world/<id>` | a Super World: `{worlds, levels, planet_type, courses: [record], uploader}` |
+//! | `super_world/<id>` | a Super World: `{worlds, levels, planet_type, unk1, courses: [record], uploader}`; `unk1` is the encrypted world map (0x500 bytes, base64) |
+//! | `get_super_worlds` | `{"super_worlds": [{id, worlds, levels, planet_type, uploader}]}`: 50 picked up |
 //!
 //! A course record: `course_id` (9 characters, no dashes), `data_id`, `name`, `description`,
 //! `uploaded` (seconds since 1970), `game_style` (0 SMB1, 1 SMB3, 2 SMW, 3 NSMBU, 4 SM3DW),
@@ -363,6 +364,12 @@ impl TgrCode {
         }
         self.json(&format!("/super_world/{id}"))
     }
+
+    /// Super Worlds picked up by the service (no maps or courses: fetch each by its id).
+    pub fn super_worlds(&self) -> TgrResult<Vec<Value>> {
+        let v = self.json("/get_super_worlds")?;
+        Ok(v["super_worlds"].as_array().cloned().unwrap_or_default())
+    }
 }
 
 /// Endless / Popular difficulty.
@@ -601,7 +608,8 @@ fn courses_json(list: &[Value]) -> Value {
 /// | `comments` | `{code}` | `[{maker_id, name, text, posted}]` |
 /// | `maker` | `{maker_id}` | `{maker, courses}` (the uploaded courses) |
 /// | `maker_courses` | `{maker_id, kind: posted \| liked \| played \| first_clears \| records}` | `[listing]` |
-/// | `super_world` | `{id}` | `{id, worlds, levels, courses: [listing], maker}` |
+/// | `super_world` | `{id}` | `{id, worlds, levels, planet_type, created, map, courses: [listing], maker}` (`map`: the encrypted world map, base64) |
+/// | `super_worlds` | — | `[{id, worlds, levels, planet_type, maker}]` |
 ///
 /// Hot is a fresh draw from the Endless Challenge pool (TGRCode has no "hot" list); Popular
 /// is TGRCode's course-point ranking at `difficulty` (default normal). The rest (likes,
@@ -642,11 +650,23 @@ pub fn call(t: &TgrCode, action: &str, args: &Value) -> crate::Result<Value> {
             let w = t.super_world(s("id")).map_err(e)?;
             json!({
                 "id": w["id"], "worlds": w["worlds"], "levels": w["levels"],
-                "planet_type": w["planet_type"], "created": w["created"],
+                "planet_type": w["planet_type"], "created": w["created"], "map": w["unk1"],
                 "courses": courses_json(w["courses"].as_array().map(Vec::as_slice).unwrap_or(&[])),
                 "maker": maker_json(&w["uploader"]),
             })
         }
+        "super_worlds" => Value::Array(
+            t.super_worlds()
+                .map_err(e)?
+                .iter()
+                .map(|w| {
+                    json!({
+                        "id": w["id"], "worlds": w["worlds"], "levels": w["levels"],
+                        "planet_type": w["planet_type"], "maker": maker_json(&w["uploader"]),
+                    })
+                })
+                .collect(),
+        ),
         _ => {
             return Err(format!(
                 "Course World on TGRCode is read-only ({action} needs our own course server)"
