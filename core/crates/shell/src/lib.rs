@@ -20,6 +20,7 @@ pub mod maker;
 pub mod mesh;
 pub mod render;
 pub mod session;
+pub mod shadow;
 pub mod source;
 pub mod texture;
 pub mod touch;

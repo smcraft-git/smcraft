@@ -10,8 +10,7 @@
 use std::path::Path;
 
 use mmk_editor::Editor;
-use mmk_formats::archive::sarc;
-use mmk_formats::smm2::crypto::{self, KeyTable};
+use mmk_formats::smm2::crypto::KeyTable;
 
 pub const THEMES: [&str; 10] = [
     "ground",
@@ -29,11 +28,11 @@ pub const THEMES: [&str; 10] = [
 /// (name, style, theme, night) of every test course.
 pub fn list() -> Vec<(String, &'static str, u8, bool)> {
     let mut out = Vec::new();
-    for style in ["WU", "3W", "M1"] {
+    for style in ["M1", "M3", "MW", "WU", "3W"] {
         for (t, name) in THEMES.iter().enumerate() {
             out.push((format!("{style}_{name}"), style, t as u8, false));
             // 3D World has no night versions
-            if style == "WU" {
+            if style != "3W" {
                 out.push((format!("{style}_{name}_night"), style, t as u8, true));
             }
         }
@@ -89,8 +88,7 @@ pub fn build(style: &str, theme: u8, night: bool) -> Result<Vec<u8>, String> {
     e.place(6, 9, 5).map_err(err)?;
     e.place(6, 12, 5).map_err(err)?;
     e.place(0, 10, 5).map_err(err)?;
-    e.place_sized(1, 11, 5, 1, 2, mmk_editor::DEFAULT_FLAGS)
-        .map_err(err)?;
+    e.place(1, 11, 5).map_err(err)?;
     // object fields as the game writes them: child flags default like the flags, pipes get a
     // link id and flag 0x80 [obs: every pipe of the owner's sample]
     let mut links = 0i16;
@@ -181,28 +179,11 @@ fn normalise(mut m: usize) -> usize {
     m
 }
 
-/// Encrypt a course and wrap it like the game's built-in courses (Yaz0 → SARC → `<stem>.bcd`).
+/// Encrypt a course and wrap it like the game's built-in courses (the trace courses' wrapper,
+/// which keeps the SARC data at 0x100 as the game's own archives do: with the data anywhere else
+/// the game falls back to a blank course).
 pub fn szs(course: &[u8], table: &KeyTable, stem: &str) -> Result<Vec<u8>, String> {
-    let iv = [0x5Au8; 16];
-    let state = [0x1234_5678, 0x9ABC_DEF0, 0x0F1E_2D3C, 0x4B5A_6978];
-    let bcd = crypto::encrypt_bcd(course, table, crypto::default_header(), iv, state)
-        .map_err(|e| e.to_string())?;
-    let name = format!("{stem}.bcd");
-    let arc = sarc::build(&[(name.as_str(), &bcd)]);
-    Ok(yaz0_store(&arc))
-}
-
-/// Yaz0 without back-references (every group is 8 literal bytes): valid for any reader.
-fn yaz0_store(data: &[u8]) -> Vec<u8> {
-    let mut out = Vec::with_capacity(16 + data.len() * 9 / 8 + 1);
-    out.extend_from_slice(b"Yaz0");
-    out.extend_from_slice(&(data.len() as u32).to_be_bytes());
-    out.extend_from_slice(&[0u8; 8]);
-    for chunk in data.chunks(8) {
-        out.push(0xFF);
-        out.extend_from_slice(chunk);
-    }
-    out
+    crate::trace::szs(course, table, stem)
 }
 
 /// Write the selected courses to `out`; with `romfs` (needs the key table), also the replacement
@@ -257,12 +238,5 @@ mod tests {
             let e = Editor::open(&c).unwrap();
             assert_eq!(e.theme(), (theme, night), "{name}");
         }
-    }
-
-    #[test]
-    fn yaz0_store_round_trips() {
-        let data: Vec<u8> = (0..1000u32).map(|i| (i * 7) as u8).collect();
-        let z = yaz0_store(&data);
-        assert_eq!(mmk_formats::archive::yaz0::decompress(&z).unwrap(), data);
     }
 }

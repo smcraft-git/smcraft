@@ -1145,6 +1145,7 @@ impl MeshPlanner {
         let mut list = world.sprites();
         list.sort_by_key(|s| s.layer);
         let style = world.level.style.as_str();
+        resolver.begin_frame(world, cache);
         sprites.clear();
         meshes.clear();
         self.background.clear();

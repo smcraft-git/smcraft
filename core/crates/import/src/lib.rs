@@ -38,7 +38,9 @@ pub mod sprites;
 /// 7: effects stage (effects/: particle effects and their links; effect textures).
 /// 8: env stage (3D styles' backgrounds, lights, fogs, richer materials).
 /// 9: gameplay sound database (`audio/sound.json`, `audio/se/`, music by the game's names).
-pub const IMPORTER_VERSION: u32 = 9;
+/// 10: the field animation models (`Pack/<style>_FieldAnime_<set>.pack`: ? blocks, bricks, coins,
+///     note blocks, conveyors… with their frames, one set per theme's SceneDB `FieldAnime`).
+pub const IMPORTER_VERSION: u32 = 10;
 pub mod smm1;
 pub mod smm1_costumes;
 pub use smm1::{Smm1Config, Smm1Report, run_smm1};
@@ -224,7 +226,8 @@ fn model_name(path: &str) -> String {
 }
 
 /// Every model of the imported styles: `Model/<style>_*.zs`, members of `Pack/<style>_Model.pack`
-/// and the 3D styles' members of `Pack/StaticModel.pack` (3D World blocks, coins, pipes, ...).
+/// and `Pack/<style>_FieldAnime_*.pack` (the play field's animated blocks and coins), and the 3D
+/// styles' members of `Pack/StaticModel.pack` (3D World blocks, coins, pipes, ...).
 fn collect_models(romfs: &Path) -> Result<Vec<(String, Vec<u8>)>> {
     let mut models = Vec::new();
     let dir = romfs.join("Model");
@@ -234,8 +237,24 @@ fn collect_models(romfs: &Path) -> Result<Vec<(String, Vec<u8>)>> {
             models.push((model_name(&name), read(&p)?));
         }
     }
-    for style in STYLES {
-        let pack_path = romfs.join(format!("Pack/{style}_Model.pack"));
+    let mut packs: Vec<PathBuf> = STYLES
+        .iter()
+        .map(|style| romfs.join(format!("Pack/{style}_Model.pack")))
+        .collect();
+    // (read_dir sorts; a RomFS without a Pack folder has none)
+    if let Ok(entries) = read_dir(&romfs.join("Pack")) {
+        let anime = entries
+            .into_iter()
+            .filter(|p| {
+                let n = p.file_name().unwrap_or_default().to_string_lossy();
+                STYLES
+                    .iter()
+                    .any(|s| n.starts_with(&format!("{s}_FieldAnime_")) && n.ends_with(".pack"))
+            })
+            .collect::<Vec<_>>();
+        packs.extend(anime);
+    }
+    for pack_path in packs {
         if is_file(&pack_path) {
             for (name, data) in open_sarc(&pack_path)?.files() {
                 if name.ends_with(".zs") {
