@@ -1,0 +1,19 @@
+[package]
+name = "mmk-nex"
+description = "Client for NEX (PRUDP, RMC, Kerberos-style login, matchmaking, NAT check) as Nextendo Network's game servers speak it"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+getrandom = "0.3"
+hmac = "0.12"
+md-5 = "0.10"
+serde_json.workspace = true
+sha1 = "0.10"
+sha2 = "0.10"
+
+[dev-dependencies]
+mmk-netplay = { path = "../netplay" }
+mmk-sim = { path = "../sim" }
