@@ -490,23 +490,6 @@ impl Host for ShellHost<'_> {
                     }
                 }
             }
-            // the maker's upload: raw course data as zero-run hex (`mmk_front::maker::hex_rle`)
-            "upload" => {
-                let data = args["course"]
-                    .as_str()
-                    .and_then(mmk_front::maker::un_hex_rle);
-                let maker = args["maker"].as_str().unwrap_or("anonymous").to_string();
-                std::thread::spawn(move || {
-                    let a = match data {
-                        Some(d) => mmk_online::Client::new(server)
-                            .with_token(token)
-                            .upload(&d, &maker)
-                            .map(|l| mmk_online::listing_json(&l)),
-                        None => Err("no course data".into()),
-                    };
-                    let _ = tx.send((id, Answer::Json(a)));
-                });
-            }
             "ghost" => {
                 std::thread::spawn(move || {
                     let bytes = mmk_online::Client::new(server).record_replay(&code);

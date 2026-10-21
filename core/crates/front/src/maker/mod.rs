@@ -2386,44 +2386,7 @@ fn load_draft(host: &mut dyn Host) -> Option<(Editor, Option<String>, Option<Str
     Some((e, entry, based_on))
 }
 
-/// Course data as text: hex with runs of zero bytes as `z<count>;` (course data is mostly
-/// zeros: a few KB instead of 750).
-pub fn hex_rle(b: &[u8]) -> String {
-    let mut out = String::new();
-    let mut i = 0;
-    while i < b.len() {
-        if b[i] == 0 {
-            let mut n = 0;
-            while i < b.len() && b[i] == 0 {
-                n += 1;
-                i += 1;
-            }
-            out.push_str(&format!("z{n};"));
-        } else {
-            out.push_str(&format!("{:02x}", b[i]));
-            i += 1;
-        }
-    }
-    out
-}
-
-pub fn un_hex_rle(s: &str) -> Option<Vec<u8>> {
-    let mut out = Vec::new();
-    let b = s.as_bytes();
-    let mut i = 0;
-    while i < b.len() {
-        if b[i] == b'z' {
-            let end = s[i..].find(';')? + i;
-            let n: usize = s[i + 1..end].parse().ok()?;
-            out.extend(std::iter::repeat_n(0u8, n));
-            i = end + 1;
-        } else {
-            out.push(u8::from_str_radix(s.get(i..i + 2)?, 16).ok()?);
-            i += 2;
-        }
-    }
-    Some(out)
-}
+pub use mmk_formats::hex_rle::{hex_rle, un_hex_rle};
 
 /// A part picture padded to the icon panes' shape (66 × 82: `P_Icon_00`, `P_Dummy_00`
 /// [obs data]), the part in the middle at most 80 % of the width, a little below the centre.

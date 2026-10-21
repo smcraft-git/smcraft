@@ -533,6 +533,13 @@ pub fn call(server: &str, token: Option<&str>, action: &str, args: &Value) -> Re
     let s = |k: &str| args[k].as_str().unwrap_or_default();
     let n = |k: &str| args[k].as_u64().unwrap_or(0);
     Ok(match action {
+        // a course made in the Course Maker: raw data as `mmk_formats::hex_rle` text, the
+        // maker's name for anonymous uploads
+        "upload" => {
+            let data = mmk_formats::hex_rle::un_hex_rle(s("course")).ok_or("no course data")?;
+            let maker = args["maker"].as_str().unwrap_or("anonymous");
+            listing_json(&c.upload(&data, maker)?)
+        }
         "register" => {
             let (a, t) = c.register(s("name"))?;
             json!({ "account": account_json(&a), "token": t })

@@ -10,5 +10,6 @@ publish.workspace = true
 mmk-ui = { path = "../ui" }
 mmk-modes = { path = "../modes" }
 mmk-editor = { path = "../editor" }
+mmk-formats = { path = "../formats" }
 mmk-assets = { path = "../assets" }
 serde_json.workspace = true

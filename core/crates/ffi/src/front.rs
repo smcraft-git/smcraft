@@ -311,9 +311,57 @@ fn natural(a: &str, b: &str) -> std::cmp::Ordering {
     key(a).cmp(&key(b))
 }
 
+impl FfiHost {
+    /// Where the maker saves the Coursebot's courses: `Coursebot/` next to the downloads
+    /// folder (the app's data folder), else in the temp folder.
+    fn coursebot_dir(&self) -> PathBuf {
+        self.downloads
+            .as_ref()
+            .and_then(|d| d.parent())
+            .map(Path::to_path_buf)
+            .unwrap_or_else(std::env::temp_dir)
+            .join("Coursebot")
+    }
+
+    /// The Coursebot's courses as library entries (the app's own library scan doesn't look
+    /// there).
+    fn coursebot(&self) -> Vec<CourseEntry> {
+        let Ok(rd) = std::fs::read_dir(self.coursebot_dir()) else {
+            return Vec::new();
+        };
+        let mut out: Vec<CourseEntry> = rd
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.extension().is_some_and(|x| x == "bin"))
+            .filter_map(|p| {
+                let data = std::fs::read(&p).ok()?;
+                let c = mmk_formats::smm2::Course::parse(&data).ok()?;
+                Some(CourseEntry {
+                    id: p.to_string_lossy().into_owned(),
+                    name: c.header.name.to_string_lossy(),
+                    description: c.header.description.to_string_lossy(),
+                    style: c.header.game_style.as_str_lossy(),
+                    theme: c.main.header.theme,
+                    playable: playable(&c),
+                    key: format!("{:016x}", crate::course_info::fnv1a64(&data)),
+                    ..Default::default()
+                })
+            })
+            .collect();
+        out.sort_by(|a, b| natural(&a.id, &b.id));
+        out
+    }
+}
+
 impl Host for FfiHost {
     fn library(&mut self) -> Vec<CourseEntry> {
-        self.library.clone()
+        let mut l = self.library.clone();
+        for e in self.coursebot() {
+            if !l.iter().any(|x| x.id == e.id) {
+                l.push(e);
+            }
+        }
+        l
     }
 
     fn request_server_courses(&mut self) -> bool {
@@ -536,6 +584,92 @@ impl Host for FfiHost {
 
     fn play_options_affect_play(&self) -> bool {
         self.engine_ref().options.affects_play()
+    }
+
+    fn edit_show(&mut self, course: &[u8], area: usize) -> bool {
+        let Ok(c) = mmk_formats::smm2::Course::parse(course) else {
+            return false;
+        };
+        let e = self.engine();
+        e.world = World::from_course(&c);
+        e.world.set_options(e.options);
+        e.world.show_area(area);
+        e.world.player.hidden = area != 0;
+        e.course = Some(c);
+        e.resolver.reset();
+        e.planner.reset();
+        // a still view: no course music
+        e.director = None;
+        true
+    }
+
+    fn edit_camera(&mut self, x: f32, y: f32) {
+        self.engine().world.look_at(x, y);
+    }
+
+    fn test_play(
+        &mut self,
+        course: &[u8],
+        area: usize,
+        start: Option<[f32; 2]>,
+    ) -> Result<LoadedCourse, String> {
+        self.recording = false;
+        let loaded = self.load_bytes(course)?;
+        let w = &mut self.engine().world;
+        if area != 0 {
+            w.show_area(area);
+        }
+        if let Some([x, y]) = start {
+            w.player.x = x;
+            w.player.y = y;
+            w.player.vy = 0.0;
+            w.reset_camera();
+        }
+        Ok(loaded)
+    }
+
+    fn player_position(&self) -> Option<(usize, [f32; 2])> {
+        let w = &self.engine_ref().world;
+        w.player
+            .alive()
+            .then_some((w.area, [w.player.x, w.player.y]))
+    }
+
+    fn save_course(&mut self, id: Option<&str>, course: &[u8]) -> Result<String, String> {
+        let dir = self.coursebot_dir();
+        let path = match id {
+            Some(p) => PathBuf::from(p),
+            None => {
+                std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+                (1..)
+                    .map(|n| dir.join(format!("course_{n:03}.bin")))
+                    .find(|p| !p.exists())
+                    .expect("a free name")
+            }
+        };
+        std::fs::write(&path, course).map_err(|e| format!("{}: {e}", path.display()))?;
+        Ok(path.to_string_lossy().into_owned())
+    }
+
+    fn course_data(&mut self, source: &Source) -> Result<Vec<u8>, String> {
+        let bytes = match source {
+            Source::Library(path) => std::fs::read(path).map_err(|e| format!("{path}: {e}"))?,
+            Source::Server(code) => {
+                let server = self.server.clone().ok_or("no course server")?;
+                mmk_online::Client::new(server)
+                    .download(code)
+                    .map_err(|e| e.to_string())?
+            }
+        };
+        crate::decode_course_data(&bytes, Some(self.assets())).map(|(d, _)| d)
+    }
+
+    fn part_icon(&mut self, style: &str, part: i16, _flags: u32) -> Option<mmk_front::Icon> {
+        mmk_host::icon::part_icon(&self.assets().cache, style, part).map(|i| mmk_front::Icon {
+            width: i.width,
+            height: i.height,
+            rgba: i.rgba,
+        })
     }
 
     fn load_value(&mut self, key: &str) -> Option<String> {

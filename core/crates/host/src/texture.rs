@@ -35,6 +35,27 @@ pub fn decode_rgba(format: MtexFormat, data: &[u8], width: u32, height: u32) -> 
     Some(rgba)
 }
 
+/// Decode an engine texture to RGBA8 with its channel select applied (0 zero, 1 one, 2 R, 3 G,
+/// 4 B, 5 A); None for formats not decodable here (BC6H).
+pub fn decode_mtex(t: &mmk_assets::Mtex) -> Option<Vec<u8>> {
+    let mut rgba = decode_rgba(t.format, &t.data, t.width, t.height)?;
+    let sel = t.channel_select;
+    if sel != [2, 3, 4, 5] {
+        for px in rgba.as_chunks_mut::<4>().0 {
+            let src = *px;
+            for (o, &s) in px.iter_mut().zip(&sel) {
+                *o = match s {
+                    0 => 0,
+                    1 => 255,
+                    2..=5 => src[(s - 2) as usize],
+                    _ => src[3],
+                };
+            }
+        }
+    }
+    Some(rgba)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

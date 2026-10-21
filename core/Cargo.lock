@@ -1299,6 +1299,7 @@ version = "0.1.0"
 dependencies = [
  "mmk-assets",
  "mmk-editor",
+ "mmk-formats",
  "mmk-modes",
  "mmk-ui",
  "serde_json",
@@ -1311,6 +1312,7 @@ dependencies = [
  "flate2",
  "mmk-assets",
  "mmk-audio",
+ "mmk-editor",
  "mmk-formats",
  "mmk-sim",
  "serde_json",
