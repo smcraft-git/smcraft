@@ -552,3 +552,60 @@ fn the_start_and_goal_drag_their_heights_and_the_course_length() {
     assert_eq!(m.editor.size().0, 240);
     assert_eq!(m.editor.course.header.start_y, 5);
 }
+
+#[test]
+fn save_as_picks_a_coursebot_slot_and_comes_back_and_load_opens_a_course() {
+    let Some(ui) = crate::testing::smm2() else {
+        return;
+    };
+    let mut host = MockHost::default();
+    let opts = crate::Options {
+        boot: false,
+        instant_fades: true,
+        ..Default::default()
+    };
+    let mut f = crate::Front::new(ui, None, opts, &mut host);
+    assert!(f.capture(&mut host, "maker", 0, 0));
+    let tick = |f: &mut crate::Front, host: &mut MockHost, b: Buttons| {
+        let i = crate::FrontInput {
+            menu: b,
+            ..Default::default()
+        };
+        f.tick(&i, host);
+        f.tick(&crate::FrontInput::default(), host);
+    };
+    if let crate::Screen::Maker(m) = &mut f.screen {
+        m.editor.set_name("Slot test");
+        m.open_save();
+    }
+    // Save As (the only save button of a new course, first) → the Coursebot on slot 0
+    tick(&mut f, &mut host, Buttons::CONFIRM);
+    let crate::Screen::Coursebot(b) = &f.screen else {
+        panic!("the Coursebot");
+    };
+    assert_eq!(b.scene.mode, crate::coursebot::BotMode::Save);
+    tick(&mut f, &mut host, Buttons::CONFIRM);
+    let crate::Screen::Maker(m) = &f.screen else {
+        panic!("back in the maker");
+    };
+    assert_eq!(m.entry.as_deref(), Some("slot:0"));
+    assert!(host.courses.contains_key("slot:0"));
+    // Load: the Coursebot on "Select a Course to Load", the course, Load → the maker with it
+    if let crate::Screen::Maker(m) = &mut f.screen {
+        m.editor.set_name("Changed");
+        m.open_save();
+        m.save_sel = m.save_buttons().len() - 1;
+    }
+    tick(&mut f, &mut host, Buttons::CONFIRM);
+    let crate::Screen::Coursebot(b) = &f.screen else {
+        panic!("the Coursebot to load from");
+    };
+    assert_eq!(b.scene.mode, crate::coursebot::BotMode::Load);
+    tick(&mut f, &mut host, Buttons::CONFIRM);
+    tick(&mut f, &mut host, Buttons::CONFIRM);
+    let crate::Screen::Maker(m) = &f.screen else {
+        panic!("the maker with the loaded course");
+    };
+    assert_eq!(m.editor.course.header.name.to_string_lossy(), "Slot test");
+    assert_eq!(m.entry.as_deref(), Some("slot:0"));
+}
