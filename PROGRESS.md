@@ -1,5 +1,94 @@
 # Progress
 
+## Goal (owner, 2026-10-21) — SMCraft revived
+SMCraft is back in development (it was archived on 2026-10-19 in favour of the recomp; both now go on).
+The goal: **Super Mario Maker 2 rebuilt from scratch**, every style as close to pixel-, physics- and
+sound-perfect as possible, that **never needs the ROM or key files to run**.
+- **Assets:** a one-time import reads the player's own dump (NSP + `prod.keys`, plus the 3.0.3 update)
+  and writes a local asset pack (art, sound, layouts, fonts, text, course key table). After that the
+  game runs from the pack alone; the dump and keys can be deleted. No Nintendo files in this repo.
+- **Code:** clean-room. Behaviour is worked out from the binary (Ghidra / REA), written up as prose
+  specs, implemented as original code and checked frame by frame against the real game in Ryujinx.
+- **Modes:** Network Play through Nextendo; Course World search and play through TGRCode; the
+  Course Maker for any course (edit someone else's course, SMM1 style); 100 Mario Challenge;
+  Endless Challenge; local co-op (courses and the challenge modes); the smm2recomp mod options;
+  Super Worlds. **Not** Story Mode (its core stays in the tree, its screens aren't built).
+- **Platforms:** the same as smm2recomp: macOS, iOS / iPadOS, Windows, Linux, Android, plus the web.
+
+### Plan
+✅ done · 🔄 in progress · ⬜ not started · ⏳ waiting on owner
+
+**G0 — Revive** 🔄
+- ✅ Clone of github.com/smcraft-git/smcraft (snapshot `8bdb0ff` = tag `smcraft-final` without
+  `recomp/`); builds, 763 tests pass
+- 🔄 Goal and plan written down (this section, DECISIONS.md 2026-10-21); README no longer "archived"
+- ⬜ Bring over the course-server work done on smm2recomp since the split (TGRCode upstream
+  fetcher, the embedded server crate, Endless rulesets)
+- ⬜ CI on the public repo (Linux on push; macOS / Windows / wasm / Android by hand)
+
+**G1 — Import once, then ROM-free** ⬜
+- ⬜ The importer reads the dump itself: NSP (PFS0) → NCA (header AES-XTS, sections AES-CTR,
+  title key from the ticket) → RomFS / ExeFS, the update's BKTR patch over the base, `prod.keys`
+  read once and never stored; one command / one setup screen, no hactool
+- ⬜ One asset pack for everything (gameplay, sound, SMM2 UI, modes data, effects); versioned, with
+  a manifest the runtime checks; incremental re-import
+- ⬜ A guard test: the game runs (menus, courses, sound) with no dump or keys anywhere, and no code
+  outside the importer opens NSP / keys
+- ⬜ Setup screen on every platform (pick the NSP, the update NSP, `prod.keys`; progress; done)
+
+**G2 — Course World on TGRCode** ⬜
+- ⬜ TGRCode client: search by course ID / maker ID, Popular / New / Hot lists, course details,
+  download (decrypted with the pack's key table), thumbnails
+- ⬜ Course World screens over TGRCode (course list, course page, maker page, play, Download to
+  Coursebot); the own server stays as a setting
+- ⬜ Leaderboards / Ninji where TGRCode has data
+
+**G3 — Challenges** 🔄
+- ✅ 100 Mario Challenge (SMM2 and SMM1 presentation, rules from SMM1)
+- 🔄 Endless Challenge: rules ✅; SMM2 screens on SMM2's own rules ⬜; courses from TGRCode ⬜
+- ⬜ Local co-op for courses, 100 Mario and Endless (SMM2 local rules: bubbles, shared lives)
+
+**G4 — Course Maker for any course** 🔄
+- ✅ Editor core (`mmk-editor`): parts, areas, links, tracks, selection, settings, the game's limits
+- ⬜ SMM2's maker screens (`Edt_*` layouts): palette, tool wheel, area / settings menus, test play,
+  undo dog, eraser, sub-area, Coursebot save
+- ⬜ Edit any course (Course World, library, TGRCode): Edit button in SMM2's style; the re-upload
+  rule ("based on <code> by <maker>")
+- ⬜ Coursebot screens (save slots, upload to the own server)
+
+**G5 — Super Worlds** ⬜
+- ⬜ Research: the `MyWorld` data and screens (v3.0.3), world map rules, save
+- ⬜ Play Super Worlds downloaded from TGRCode (world map, 5–40 courses, lives, progress)
+- ⬜ Super World maker (later)
+
+**G6 — Network Play through Nextendo** ⬜
+- ⬜ Nextendo sign-in (OAuth PKCE, `game.matchmaking`) → nex-token → NEX (PRUDP, Kerberos, secure
+  connection) in Rust, tested against a local `nextendo-nex`
+- ⬜ Matchmaking (MatchmakeExtension) for SMCraft-only sessions; then SMCraft's rollback netcode
+  (`mmk-netplay`) peer to peer, with Nextendo's NAT traversal; co-op and versus
+- ⬜ Live test with the owner (needs their go-ahead and a second player)
+
+**G7 — The smm2recomp mod options** 🔄
+- ✅ SMM1 extras (shell kicks, layering, Lanky Mario, costumes) as engine options
+- ⬜ The rest of the recomp's mods (survey `recomp/games/smm2/mods/`: quick retry, Muncher hitbox,
+  SMW goal, relabels, …) as SMCraft options; one Mods settings page
+
+**G8 — Fidelity: pixel, physics, sound** 🔄
+- 🔄 Physics: 428 / 454 player traces frame-exact → all; enemy and object traces; whole courses
+  start to goal
+- 🔄 Pixels: per style × theme frames against Ryujinx (2D styles exact; NSMBU / 3D World lighting,
+  terrain variants, effects)
+- 🔄 Sound: every object's sounds, mixer behaviour checked against the game's output
+
+**G9 — Every platform** 🔄
+- 🔄 macOS (Swift app) · 🔄 iOS / iPadOS (built for the Simulator; the owner's iPad) · 🔄 Windows ·
+  🔄 Linux · 🔄 web · ⬜ Android (`mmk-play` on winit + wgpu / Vulkan, an APK)
+- ⬜ Release packages for every platform (the game only; the player imports their own dump)
+
+---
+
+# History (Phases 1–11, 2026-10-17 → 2026-10-19)
+
 ## Roadmap
 ✅ done · 🔄 in progress · ⬜ not started · ⏳ waiting on owner
 

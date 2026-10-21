@@ -2,6 +2,29 @@
 
 Newest first. Each entry: what was decided, why, and what would change it.
 
+## 2026-10-21 — SMCraft revived: import once, then no ROM or keys; the mode list
+**Decision (owner):** SMCraft is developed again, alongside smm2recomp. The goal is SMM2 rebuilt from
+scratch, every style as pixel-, physics- and sound-exact as we can make it, that does not need the
+ROM or keys to run.
+- **Assets: import once.** The importer reads the player's own NSP(s) and `prod.keys` one time and
+  writes a local asset pack; from then on nothing reads the dump or the keys. Chosen over shipping
+  original look-alike art (not exact) and over a hybrid. No Nintendo files, and no traced copies of
+  them, go into this repo.
+- **Code: clean-room from the binary** (as before): behaviour from Ghidra / REA, prose specs in the
+  private `research/`, original code, checked against Ryujinx. A matching decompilation was turned
+  down: it is Nintendo's code (can't be public) and years of work.
+- **Modes:** Network Play through Nextendo, Course World through TGRCode, the Course Maker for any
+  course, 100 Mario, Endless, local co-op incl. the challenges, the recomp's mod options, Super
+  Worlds. No Story Mode screens.
+- **Platforms:** smm2recomp's (macOS, iOS / iPadOS, Windows, Linux, Android) plus the web.
+- **Nextendo, my call:** Nextendo provides sign-in, matchmaking and NAT traversal; the game itself
+  runs SMCraft's own rollback netcode between SMCraft players. Playing against real Switch consoles
+  would need the original's network protocol and a bit-exact simulation of it, so it isn't a goal.
+  SMCraft's sessions are kept apart from console ones (their own matchmaking attributes).
+- **TGRCode, my call:** the client talks to TGRCode directly for Course World (search, lists,
+  downloads, Super Worlds); our own server stays as a setting.
+**Would change it:** the owner choosing otherwise, or Nextendo / TGRCode asking for something else.
+
 ## 2026-10-18 — The Swift app runs the Rust front end (`mmk_front_*`); its screen classes are gone
 **Decision:** with the SMM2 UI import, the Apple app's screens are `mmk-front`'s, through a C API
 (`core/crates/ffi/src/front.rs`, section "front end" of `mmk.h`):

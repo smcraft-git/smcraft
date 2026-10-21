@@ -16,6 +16,7 @@ MeloCafe-*.zip
 
 # Private reverse-engineering notes
 /research/
+/research
 
 # macOS
 .DS_Store
