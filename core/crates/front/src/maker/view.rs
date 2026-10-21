@@ -54,6 +54,7 @@ pub fn overlay(f: &MakerFlow) -> DrawItem {
     if f.glove_shown() || f.carrying() {
         grid(f, &mut q);
         frame(f, &mut q);
+        selection(f, &mut q);
     }
     if f.ring_open() {
         q.push(quad(
@@ -114,6 +115,30 @@ fn grid(f: &MakerFlow, q: &mut Vec<Quad>) {
             color,
         ));
         k += 1;
+    }
+}
+
+/// The multigrab rectangle: a tinted area with an edge [inf: the game's rectangle cursor model].
+fn selection(f: &MakerFlow, q: &mut Vec<Quad>) {
+    let Some(r) = f.selection_shown() else {
+        return;
+    };
+    let [x0, y0] = f.to_layout(r.x as f32 * 16.0, r.y as f32 * 16.0);
+    let [x1, y1] = f.to_layout((r.x + r.w) as f32 * 16.0, (r.y + r.h) as f32 * 16.0);
+    q.push(quad(
+        [x0, y0, x1, y1],
+        TEXTURE_NONE,
+        FULL,
+        [80, 170, 255, 70],
+    ));
+    let l = 3.0;
+    for e in [
+        [x0, y0, x1, y0 + l],
+        [x0, y1 - l, x1, y1],
+        [x0, y0, x0 + l, y1],
+        [x1 - l, y0, x1, y1],
+    ] {
+        q.push(quad(e, TEXTURE_NONE, FULL, [80, 170, 255, 230]));
     }
 }
 

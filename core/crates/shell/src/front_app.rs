@@ -101,7 +101,8 @@ pub fn menu_input(keys: &Keyboard, pad: u32) -> FrontInput {
 }
 
 /// The Course Maker's keys: U / Ctrl+Z undo, Y / Ctrl+Shift+Z redo, Q the part window, [ ]
-/// the palette slots, T test play from the cursor, E the eraser, G the other area.
+/// the palette slots, T test play from the cursor, E the eraser, G the other area, M held
+/// multigrab, C copy the selection.
 pub fn maker_keys(keys: &Keyboard, ctrl: bool) -> u16 {
     use mmk_front::maker::keys as m;
     let shift = keys.held(KeyCode::ShiftLeft) || keys.held(KeyCode::ShiftRight);
@@ -115,6 +116,8 @@ pub fn maker_keys(keys: &Keyboard, ctrl: bool) -> u16 {
         (keys.held(KeyCode::KeyT), m::PLAY_HERE),
         (keys.held(KeyCode::KeyE), m::ERASER),
         (keys.held(KeyCode::KeyG), m::AREA),
+        (keys.held(KeyCode::KeyM), m::MULTI),
+        (keys.held(KeyCode::KeyC) && !ctrl, m::COPY),
     ]
     .iter()
     .filter(|(on, _)| *on)

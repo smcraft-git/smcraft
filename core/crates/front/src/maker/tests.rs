@@ -679,3 +679,51 @@ fn semisolids_and_pipes_stretch_by_their_edges() {
     run(&mut m, &mut host, &mut saves, idle());
     assert_eq!(m.editor.object(p).unwrap().height, 2);
 }
+
+#[test]
+fn multigrab_selects_moves_copies_and_erases() {
+    let (mut host, mut saves) = (MockHost::default(), Saves::default());
+    let mut m = maker(&mut host, &mut saves, MakerStart::New("M1".into()));
+    for x in 20..23 {
+        m.editor.place(4, x, 4).unwrap();
+    }
+    let multi = |b: Buttons, pressed: bool| MakerInput {
+        ui: UiInput {
+            pressed: if pressed { b } else { Buttons::NONE },
+            held: b,
+            ..Default::default()
+        },
+        keys: keys::MULTI,
+        ..Default::default()
+    };
+    m.cur = (20, 4);
+    run(&mut m, &mut host, &mut saves, multi(Buttons::CONFIRM, true));
+    m.cur = (22, 4);
+    run(
+        &mut m,
+        &mut host,
+        &mut saves,
+        multi(Buttons::CONFIRM, false),
+    );
+    run(&mut m, &mut host, &mut saves, idle());
+    assert_eq!(m.selection, Some(Rect::new(20, 4, 3, 1)));
+    // carried up two rows
+    m.cur = (21, 4);
+    run(&mut m, &mut host, &mut saves, press(Buttons::CONFIRM));
+    m.cur = (21, 6);
+    run(&mut m, &mut host, &mut saves, held(Buttons::CONFIRM));
+    run(&mut m, &mut host, &mut saves, idle());
+    assert!(m.editor.object_at(20, 6).is_some() && m.editor.object_at(20, 4).is_none());
+    assert_eq!(m.selection, Some(Rect::new(20, 6, 3, 1)));
+    // a copy at the cursor
+    m.cur = (30, 4);
+    run(&mut m, &mut host, &mut saves, keys(keys::COPY));
+    run(&mut m, &mut host, &mut saves, idle());
+    assert!((30..33).all(|x| m.editor.object_at(x, 4).is_some()));
+    // erase on the selection empties it
+    m.cur = (31, 4);
+    run(&mut m, &mut host, &mut saves, press(Buttons::BACK));
+    run(&mut m, &mut host, &mut saves, idle());
+    assert!((30..33).all(|x| m.editor.object_at(x, 4).is_none()));
+    assert!(m.editor.object_at(21, 6).is_some(), "the first group stays");
+}

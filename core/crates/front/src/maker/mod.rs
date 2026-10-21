@@ -60,6 +60,10 @@ pub mod keys {
     pub const ERASER: u16 = 64;
     /// Toggle the main / sub area.
     pub const AREA: u16 = 128;
+    /// Held: presses drag a multigrab rectangle (the game's ZL / ZR).
+    pub const MULTI: u16 = 256;
+    /// Copy the multigrab selection to the cursor.
+    pub const COPY: u16 = 512;
 }
 
 const PAGE: &str = "Edit_MainPage_00";
@@ -166,6 +170,14 @@ enum Drag {
         grab: i32,
         changed: bool,
     },
+    /// Drawing a multigrab rectangle from `from`.
+    Select {
+        from: (i32, i32),
+    },
+    /// Carrying the multigrab selection, grabbed at `grab`.
+    MoveSelection {
+        grab: (i32, i32),
+    },
     /// Stretching a part by its edge: its width (right column) and / or height (top row).
     Resize {
         index: usize,
@@ -234,6 +246,8 @@ pub struct MakerFlow {
     script: Vec<(i32, String)>,
     /// The last tick a pointer was seen.
     pointer_tick: i32,
+    /// The multigrab selection.
+    pub selection: Option<Rect>,
     /// The clear-condition window while open.
     mission: Option<mission::MissionWindow>,
     /// The animation that opened the left window.
@@ -312,6 +326,7 @@ impl MakerFlow {
             upload_call: None,
             script: Vec::new(),
             pointer_tick: -1000,
+            selection: None,
             mission: None,
             window_tab: "ChangeTab00",
             dirty: true,
@@ -660,6 +675,23 @@ impl MakerFlow {
         if keys & keys::AREA != 0 {
             self.switch_area();
         }
+        if keys & keys::COPY != 0
+            && let Some(r) = self.selection
+        {
+            // a copy of the selection with its bottom-left at the cursor
+            self.editor.checkpoint();
+            self.editor.copy(r);
+            match self.editor.paste_clipboard(self.cur.0, self.cur.1) {
+                Ok(()) => {
+                    self.selection = Some(Rect::new(self.cur.0, self.cur.1, r.w, r.h));
+                    self.changed();
+                }
+                Err(e) => {
+                    self.editor.discard_checkpoint();
+                    refuse(cx, &self.ui, &e);
+                }
+            }
+        }
         if keys & keys::PLAY_HERE != 0 {
             let (tx, ty) = self.cur;
             let at = [(tx as f32 + 0.5) * TILE, ty as f32 * TILE];
@@ -752,8 +784,34 @@ impl MakerFlow {
         let place_pressed = pressed.has(Buttons::CONFIRM) || pointer_pressed;
         let erase_pressed =
             (pressed.has(Buttons::BACK) && !input.start) || (input.alt && !self.alt_was);
+        let multi = input.keys & keys::MULTI != 0;
         match self.drag {
+            None if place_pressed && multi => {
+                self.selection = None;
+                self.drag = Some(Drag::Select { from: self.cur });
+            }
+            None if self
+                .selection
+                .is_some_and(|r| r.contains(self.cur.0, self.cur.1))
+                && (place_pressed || erase_pressed) =>
+            {
+                let r = self.selection.expect("selection");
+                if erase_pressed || self.eraser {
+                    self.editor.checkpoint();
+                    if self.editor.delete_rect(r) > 0 {
+                        self.changed();
+                    } else {
+                        self.editor.discard_checkpoint();
+                    }
+                    self.selection = None;
+                } else {
+                    self.drag = Some(Drag::MoveSelection { grab: self.cur });
+                }
+            }
             None => {
+                if place_pressed || erase_pressed {
+                    self.selection = None;
+                }
                 if erase_pressed || (place_pressed && self.eraser) {
                     self.editor.checkpoint();
                     self.drag = Some(Drag::Erase { changed: false });
@@ -796,6 +854,37 @@ impl MakerFlow {
                     self.drag_resize();
                 } else {
                     self.end_drag();
+                }
+            }
+            Some(Drag::Select { from }) => {
+                if !place_held {
+                    self.drag = None;
+                    let r = Rect::spanning(from, self.cur);
+                    // (a press without a drag selects nothing)
+                    self.selection =
+                        (r.w > 1 || r.h > 1 || self.editor.object_at(from.0, from.1).is_some())
+                            .then_some(r);
+                }
+            }
+            Some(Drag::MoveSelection { grab }) => {
+                if !place_held {
+                    self.drag = None;
+                    let (dx, dy) = (self.cur.0 - grab.0, self.cur.1 - grab.1);
+                    if let Some(r) = self.selection
+                        && (dx, dy) != (0, 0)
+                    {
+                        self.editor.checkpoint();
+                        match self.editor.move_rect(r, dx, dy) {
+                            Ok(()) => {
+                                self.selection = Some(Rect::new(r.x + dx, r.y + dy, r.w, r.h));
+                                self.changed();
+                            }
+                            Err(e) => {
+                                self.editor.discard_checkpoint();
+                                refuse(cx, &self.ui, &e);
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -1114,6 +1203,23 @@ impl MakerFlow {
             return self.editor.toggle_big(i).is_ok();
         }
         false
+    }
+
+    /// The rectangle the multigrab shows: the one being drawn, else the selection (moved with
+    /// the cursor while carried).
+    pub fn selection_shown(&self) -> Option<Rect> {
+        match self.drag {
+            Some(Drag::Select { from }) => Some(Rect::spanning(from, self.cur)),
+            Some(Drag::MoveSelection { grab }) => self.selection.map(|r| {
+                Rect::new(
+                    r.x + self.cur.0 - grab.0,
+                    r.y + self.cur.1 - grab.1,
+                    r.w,
+                    r.h,
+                )
+            }),
+            _ => self.selection,
+        }
     }
 
     /// What is being carried (its part id), for the glove's picture.
