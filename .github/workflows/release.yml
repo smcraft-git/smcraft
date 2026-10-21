@@ -112,7 +112,7 @@ jobs:
           v=$(grep -A1 '^name = "wasm-bindgen"$' core/Cargo.lock | sed -n 's/^version = "\(.*\)"/\1/p')
           cargo install wasm-bindgen-cli --version "$v" --locked
       - run: |
-          scripts/build-web.sh dist/SMCraft-web
+          scripts/build-web.sh "$PWD/dist/SMCraft-web"
           (cd dist && zip -qr SMCraft-web.zip SMCraft-web)
       - uses: actions/upload-artifact@v4
         with:
