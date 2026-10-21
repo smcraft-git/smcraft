@@ -38,7 +38,7 @@ pub mod sprites;
 /// 7: effects stage (effects/: particle effects and their links; effect textures).
 /// 8: env stage (3D styles' backgrounds, lights, fogs, richer materials).
 /// 9: gameplay sound database (`audio/sound.json`, `audio/se/`, music by the game's names).
-pub const IMPORTER_VERSION: u32 = 9;
+pub const IMPORTER_VERSION: u32 = 10;
 pub mod smm1;
 pub mod smm1_costumes;
 pub use smm1::{Smm1Config, Smm1Report, run_smm1};

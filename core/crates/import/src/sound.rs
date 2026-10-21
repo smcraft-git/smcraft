@@ -78,17 +78,19 @@ const COMMON_USERS: &[&str] = &[
     "Scene",
 ];
 
-/// Music keys of the course music users that are not played in a course (editor, title,
-/// online and mode screens).
+/// Music keys of the course music users that are not played in a course or the Course Maker
+/// (the Dojo lessons, title, online and mode screens).
 fn menu_music_key(key: &str) -> bool {
-    key.contains("_Edit")
+    // (the Course Maker's own tracks `BGM_<Theme>_Edit` are kept; its Dojo lessons' aren't)
+    key.contains("_Edit_")
         || key.starts_with("BGM_Title")
         || key.starts_with("Battle_")
         || key.ends_with("_Clear") && !key.starts_with("Fanfare")
 }
 
-/// A user of the gameplay database: per-style course objects (not the editor's) and the
-/// common course users.
+/// A user of the gameplay database: per-style course objects, the Course Maker's per-style
+/// part users (`<S>_Edit<Part>`: their sounds when put down, picked up, shaken) and the common
+/// course users.
 fn gameplay_user(name: &str) -> bool {
     if COMMON_USERS.contains(&name) {
         return true;
@@ -96,10 +98,10 @@ fn gameplay_user(name: &str) -> bool {
     if let Some(s) = name.strip_prefix("CourseSceneBGM_") {
         return STYLES.contains(&s);
     }
-    let Some((prefix, base)) = name.split_once('_') else {
+    let Some((prefix, _)) = name.split_once('_') else {
         return false;
     };
-    (STYLES.contains(&prefix) || prefix == "MU") && !base.starts_with("Edit")
+    STYLES.contains(&prefix) || prefix == "MU"
 }
 
 /// Names of every resource list (each a sound user's name).
@@ -689,10 +691,11 @@ mod tests {
         assert!(gameplay_user("3W_Player"));
         assert!(gameplay_user("CourseSceneBGM_WU"));
         assert!(gameplay_user("ObjectCommon"));
-        assert!(!gameplay_user("M1_EditKuribo"));
         assert!(!gameplay_user("UITitle"));
         assert!(!gameplay_user("Quest_Block"));
-        assert!(menu_music_key("BGM_Plain_Edit"));
+        assert!(!menu_music_key("BGM_Plain_Edit"));
+        assert!(menu_music_key("BGM_Plain_Edit_Lesson"));
+        assert!(gameplay_user("M1_EditKuribo"));
         assert!(menu_music_key("BGM_Title_Day"));
         assert!(menu_music_key("Network_Clear"));
         assert!(!menu_music_key("BGM_Plain_Day_Hurry"));
