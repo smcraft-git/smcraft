@@ -149,8 +149,10 @@ mod native {
         net_player: usize,
         /// Network Play through a local NEX test server (scripts/nex-local.sh), named by its
         /// authentication address, e.g. 127.0.0.1:52601: sign-in, matchmaking (SMCraft-only
-        /// sessions) and NAT traversal there, then co-op over the rollback netcode. Every player
-        /// gives the same course (--net-players: how many, default 2).
+        /// sessions) and NAT traversal there, then co-op over the rollback netcode. With the
+        /// menus: Course World's Network Play button (signed in as a test account named
+        /// --maker); with --no-menus: straight into play, every player giving the same course
+        /// (--net-players: how many, default 2).
         #[arg(long, value_name = "ADDR")]
         nextendo_local: Option<String>,
         /// Network Play: the game server's PRUDP access key (default $SMCRAFT_NEX_ACCESS_KEY).
@@ -225,7 +227,10 @@ mod native {
         /// instead; with
         /// --front-course: course-intro,
         /// course-pause, course-clear, course-gameover, course-timeup, course-retire,
-        /// course-settings, course-death, course-play (--ticks of play with the HUD).
+        /// course-settings, course-death, course-play (--ticks of play with the HUD); Network
+        /// Play: netplay (the mode select; with --nextendo-local and --front-script presses, a
+        /// real search and match), netplay-wait, -lobby, -loading, -play, -menu, -clear,
+        /// -result (a made-up match; add -versus for versus).
         #[arg(long, value_name = "NAME")]
         front_screen: Option<String>,
         /// Capture size.
@@ -322,6 +327,27 @@ mod native {
         Ok(o)
     }
 
+    /// The local NEX test server of --nextendo-local (its access key and token secret from the
+    /// flags or the environment).
+    fn local_server(args: &Args, addr: &str) -> Result<mmk_shell::network::LocalServer, String> {
+        let env = |k: &str| std::env::var(k).ok().filter(|v| !v.is_empty());
+        let access_key = args
+            .nex_access_key
+            .clone()
+            .or_else(|| env("SMCRAFT_NEX_ACCESS_KEY"))
+            .ok_or("--nextendo-local needs --nex-access-key (or $SMCRAFT_NEX_ACCESS_KEY)")?;
+        let token_secret = args
+            .nex_token_secret
+            .clone()
+            .or_else(|| env("SMCRAFT_NEX_TOKEN_SECRET"))
+            .ok_or("--nextendo-local needs --nex-token-secret (or $SMCRAFT_NEX_TOKEN_SECRET)")?;
+        Ok(mmk_shell::network::LocalServer {
+            addr: addr.to_string(),
+            access_key,
+            token_secret,
+        })
+    }
+
     /// Network Play against a local NEX server: a test account (a game token made with the
     /// server's secret, as Nextendo's account server would make it), then matchmaking and the
     /// hole punch (`mmk_nex::play`).
@@ -330,46 +356,23 @@ mod native {
         addr: &str,
         course: Option<&[u8]>,
     ) -> Result<mmk_nex::play::Match, String> {
-        use mmk_nex::{crypto, play, token};
-        let env = |k: &str| std::env::var(k).ok().filter(|v| !v.is_empty());
-        let key = args
-            .nex_access_key
-            .clone()
-            .or_else(|| env("SMCRAFT_NEX_ACCESS_KEY"))
-            .ok_or("--nextendo-local needs --nex-access-key (or $SMCRAFT_NEX_ACCESS_KEY)")?;
-        let secret = args
-            .nex_token_secret
-            .clone()
-            .or_else(|| env("SMCRAFT_NEX_TOKEN_SECRET"))
-            .ok_or("--nextendo-local needs --nex-token-secret (or $SMCRAFT_NEX_TOKEN_SECRET)")?;
-        let pid = args.nex_pid.unwrap_or_else(|| {
-            1_000_000
-                + u64::from(u32::from_le_bytes(
-                    crypto::random_bytes(4).try_into().unwrap(),
-                )) % 1_000_000_000
-        });
-        let nx2 = token::nx2_token_for_a_day(secret.as_bytes(), pid, "player");
-        let id_token = token::id_token(pid, &nx2, &crypto::random_bytes(32));
+        use mmk_nex::crypto;
+        let server = local_server(args, addr)?;
         let course_hash = course.map_or(0, |c| {
             u64::from_le_bytes(crypto::sha256(c)[..8].try_into().unwrap())
         });
         let bind = args.net_bind.clone().unwrap_or_else(|| "0.0.0.0:0".into());
         log("Network Play: signing in to the local NEX server");
-        play::find_match(play::PlayConfig {
-            server: mmk_nex::GameServer::smm2(&format!("ws://{addr}/"), &key),
-            pid,
-            id_token,
-            kind: mmk_nex::matchmaking::smcraft::KIND_COOP,
-            players: args.net_players.unwrap_or(2) as u16,
-            course: course_hash,
-            bind: bind
-                .parse()
+        mmk_nex::play::find_match(mmk_shell::network::local_config(
+            &server,
+            mmk_shell::network::test_pid(args.nex_pid),
+            mmk_nex::matchmaking::smcraft::KIND_COOP,
+            args.net_players.unwrap_or(2) as u16,
+            course_hash,
+            bind.parse()
                 .map_err(|e| format!("--net-bind {bind}: {e}"))?,
-            advertise: None,
-            nat_check: None,
-            wait: std::time::Duration::from_secs(300),
-            log: Arc::new(|m: &str| log(m)),
-        })
+            Arc::new(|m: &str| log(m)),
+        ))
         .map_err(|e| format!("Network Play: {}", mmk_nex::client::describe(&e)))
     }
 
@@ -473,6 +476,19 @@ mod native {
         };
         // the library is read on a thread while the opening plays
         data.start_scan();
+        // Network Play over a local NEX test server (Nextendo's live servers wait for Nextendo)
+        if let Some(addr) = &args.nextendo_local {
+            let name = if args.maker == "anonymous" {
+                "Test Player"
+            } else {
+                args.maker.as_str()
+            };
+            data.network = Some(mmk_shell::network::NetworkHost::local(
+                local_server(args, addr)?,
+                args.nex_pid,
+                name,
+            ));
+        }
         // captures keep their settings in memory (nothing read or written)
         data.data_dir = if capture.is_some() && args.data_dir.is_none() {
             None
@@ -681,7 +697,7 @@ mod native {
             && args.code.is_none()
             && args.net_bind.is_none()
             && args.net_relay.is_none()
-            && args.nextendo_local.is_none()
+            && (args.nextendo_local.is_none() || !args.no_menus)
             && args.map.is_none()
             && !args.check_textures
             && !args.no_menus

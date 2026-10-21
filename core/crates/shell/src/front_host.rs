@@ -10,6 +10,7 @@ use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender};
 
 use mmk_front::host::{CourseMeta, LoadedCourse};
+use mmk_front::netplay::{LinkState, MatchRequest, MatchState, NetAccount, Network};
 use mmk_front::{CourseEntry, CourseStatus, Host, Source, WorldCourse};
 use mmk_host::audio::AudioOut;
 use mmk_online::world::Backend;
@@ -56,6 +57,8 @@ pub struct HostData {
     pool_entries: HashMap<PathBuf, Option<CourseEntry>>,
     /// Coursebot courses saved without a data folder (captures): ("memory:<n>", raw data).
     made: Vec<(String, Vec<u8>)>,
+    /// Network Play (None: not set up; `mmk-play --nextendo-local`).
+    pub network: Option<crate::network::NetworkHost>,
 }
 
 /// A thumbnail from its thread: (code, entire, JPEG; empty: none).
@@ -120,6 +123,7 @@ impl HostData {
             thumbs: None,
             pool_entries: HashMap::new(),
             made: Vec::new(),
+            network: None,
         }
     }
 
@@ -959,6 +963,93 @@ impl Host for ShellHost<'_> {
         x ^= x << 17;
         self.data.rng = x;
         x
+    }
+
+    fn network(&mut self) -> Option<&mut dyn Network> {
+        self.data.network.as_ref()?;
+        Some(self)
+    }
+}
+
+/// Network Play: the shell's [`crate::network::NetworkHost`], with the engine for the match.
+impl Network for ShellHost<'_> {
+    fn account(&mut self) -> NetAccount {
+        self.data
+            .network
+            .as_ref()
+            .map_or(NetAccount::SignedOut, |n| n.account())
+    }
+
+    fn sign_in(&mut self) {
+        if let Some(n) = &mut self.data.network {
+            n.sign_in();
+        }
+    }
+
+    fn sign_out(&mut self) {
+        if let Some(n) = &mut self.data.network {
+            n.sign_out();
+        }
+        self.game.session.net = None;
+    }
+
+    fn find_match(&mut self, request: &MatchRequest) {
+        self.game.session.net = None;
+        if let Some(n) = &mut self.data.network {
+            n.find_match(request);
+        }
+    }
+
+    fn cancel_match(&mut self) {
+        if let Some(n) = &mut self.data.network {
+            n.cancel_match();
+        }
+    }
+
+    fn poll_match(&mut self) -> MatchState {
+        self.data
+            .network
+            .as_mut()
+            .map_or(MatchState::Idle, |n| n.poll_match())
+    }
+
+    fn play_match(&mut self, course: &Source) -> Result<LoadedCourse, String> {
+        let loaded = self.load_course(course)?;
+        let (link, players, me) = self
+            .data
+            .network
+            .as_mut()
+            .ok_or("Network Play isn't set up")?
+            .start_link()?;
+        // the characters go by position (player 1 Mario, 2 Luigi, …) on every peer
+        self.game.session.world.main_char = 0;
+        self.game.session.go_online(Box::new(link), players, me);
+        let name = match course {
+            Source::Library(p) => Path::new(p)
+                .file_stem()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_default(),
+            Source::Server(code) => code.clone(),
+        };
+        crate::app::log(&format!(
+            "Network Play: playing {name} as player {} of {players}",
+            me + 1
+        ));
+        Ok(loaded)
+    }
+
+    fn link(&mut self) -> LinkState {
+        self.data
+            .network
+            .as_mut()
+            .map_or(LinkState::Lost, |n| n.link())
+    }
+
+    fn leave_match(&mut self) {
+        if let Some(n) = &mut self.data.network {
+            n.leave_match();
+        }
+        self.game.session.net = None;
     }
 }
 

@@ -53,6 +53,18 @@ pub struct PlayConfig {
     /// How long to wait for the other players.
     pub wait: Duration,
     pub log: Log,
+    /// Set from another thread to give up the search: [`find_match`] leaves the session and
+    /// returns [`Error::Cancelled`].
+    pub cancel: Option<Arc<AtomicBool>>,
+    /// The search's progress for a waiting screen: (players so far, us included; players
+    /// wanted).
+    pub progress: Option<Progress>,
+}
+
+pub type Progress = Arc<dyn Fn(usize, usize) + Send + Sync>;
+
+fn cancelled(c: &Option<Arc<AtomicBool>>) -> bool {
+    c.as_ref().is_some_and(|c| c.load(Ordering::Relaxed))
 }
 
 /// A match ready to play.
@@ -170,6 +182,10 @@ pub fn find_match(cfg: PlayConfig) -> Result<Match, Error> {
     me_url.set("PID", cfg.pid).set("RVCID", secure.rvcid);
 
     let players = cfg.players.clamp(2, 4);
+    if cancelled(&cfg.cancel) {
+        secure.disconnect();
+        return Err(Error::Cancelled);
+    }
     let session = secure.auto_matchmake(&AutoMatchmakeParam {
         session: MatchmakeSession::smcraft(cfg.kind, players, cfg.course),
         criteria: vec![SearchCriteria::smcraft(cfg.kind, cfg.course)],
@@ -190,11 +206,17 @@ pub fn find_match(cfg: PlayConfig) -> Result<Match, Error> {
     socket.set_read_timeout(Some(Duration::from_millis(20)))?;
     let deadline = Instant::now() + cfg.wait;
 
-    let (me, peers) = if host {
+    let report = |found: usize| {
+        if let Some(p) = &cfg.progress {
+            p(found, players as usize);
+        }
+    };
+    let waited = if host {
         log(&format!(
             "Network Play: opened a session, waiting for {} more player(s)",
             players - 1
         ));
+        report(1);
         host_wait(
             &mut secure,
             &socket,
@@ -202,30 +224,26 @@ pub fn find_match(cfg: PlayConfig) -> Result<Match, Error> {
             gid,
             players as usize,
             deadline,
-        )?
+            &cfg.cancel,
+            &report,
+        )
     } else {
         log("Network Play: joined a session, connecting to the host");
-        let host_urls = secure.session_urls(gid)?;
-        // one probe request per connection id (the host's LAN and public URLs share it)
-        let mut targets: Vec<StationUrl> = Vec::new();
-        for u in &host_urls {
-            if u.get("RVCID").is_some() && !targets.iter().any(|t| t.get("RVCID") == u.get("RVCID"))
-            {
-                targets.push(u.clone());
+        report(2);
+        joiner_connect(&mut secure, &socket, &cfg, &session, &me_url, deadline)
+    };
+    let (me, peers) = match waited {
+        Ok(v) => v,
+        Err(e) => {
+            // leave the session, so nobody joins one that is gone
+            if host {
+                let _ = secure.unregister_gathering(gid);
+            } else {
+                let _ = secure.end_participation(gid, "");
             }
+            secure.disconnect();
+            return Err(e);
         }
-        secure.request_probe_initiation(&targets, &me_url)?;
-        let candidates: Vec<SocketAddr> =
-            host_urls.iter().filter_map(|u| u.socket_addr()).collect();
-        joiner_wait(
-            &mut secure,
-            &socket,
-            cfg.pid,
-            session.owner,
-            gid,
-            &candidates,
-            deadline,
-        )?
     };
     log(&format!(
         "Network Play: {} players connected, we are player {}",
@@ -277,7 +295,39 @@ fn recv(socket: &UdpSocket) -> Option<(Message, SocketAddr)> {
     }
 }
 
+/// A joiner: asks for the host's addresses and its probe, then punches until START.
+fn joiner_connect(
+    secure: &mut Secure,
+    socket: &UdpSocket,
+    cfg: &PlayConfig,
+    session: &MatchmakeSession,
+    me_url: &StationUrl,
+    deadline: Instant,
+) -> Result<(usize, Vec<SocketAddr>), Error> {
+    let host_urls = secure.session_urls(session.id)?;
+    // one probe request per connection id (the host's LAN and public URLs share it)
+    let mut targets: Vec<StationUrl> = Vec::new();
+    for u in &host_urls {
+        if u.get("RVCID").is_some() && !targets.iter().any(|t| t.get("RVCID") == u.get("RVCID")) {
+            targets.push(u.clone());
+        }
+    }
+    secure.request_probe_initiation(&targets, me_url)?;
+    let candidates: Vec<SocketAddr> = host_urls.iter().filter_map(|u| u.socket_addr()).collect();
+    joiner_wait(
+        secure,
+        socket,
+        cfg.pid,
+        session.owner,
+        session.id,
+        &candidates,
+        deadline,
+        &cfg.cancel,
+    )
+}
+
 /// The host: learns each joiner (Participate, InitiateProbe), punches, then sends START.
+#[allow(clippy::too_many_arguments)]
 fn host_wait(
     secure: &mut Secure,
     socket: &UdpSocket,
@@ -285,6 +335,8 @@ fn host_wait(
     gid: u32,
     players: usize,
     deadline: Instant,
+    cancel: &Option<Arc<AtomicBool>>,
+    report: &dyn Fn(usize),
 ) -> Result<(usize, Vec<SocketAddr>), Error> {
     // joiner PID → (candidate addresses, confirmed address), in the order they came
     let mut order: Vec<u64> = Vec::new();
@@ -292,9 +344,17 @@ fn host_wait(
     let mut confirmed: HashMap<u64, SocketAddr> = HashMap::new();
     let mut next_probe = Instant::now();
     let probe_nonce = nonce();
+    let mut reported = 0;
     loop {
         if Instant::now() >= deadline {
             return Err(Error::Timeout("waiting for the other players"));
+        }
+        if cancelled(cancel) {
+            return Err(Error::Cancelled);
+        }
+        if order.len() != reported {
+            reported = order.len();
+            report((1 + reported).min(players));
         }
         for e in secure.poll(Duration::from_millis(30))? {
             match e {
@@ -369,7 +429,7 @@ fn host_wait(
             .take(players - 1)
             .collect();
         if ready.len() == players - 1 {
-            return start(socket, me, gid, &ready, &confirmed, deadline);
+            return start(socket, me, gid, &ready, &confirmed, deadline, cancel);
         }
     }
 }
@@ -382,6 +442,7 @@ fn start(
     joiners: &[u64],
     addrs: &HashMap<u64, SocketAddr>,
     deadline: Instant,
+    cancel: &Option<Arc<AtomicBool>>,
 ) -> Result<(usize, Vec<SocketAddr>), Error> {
     let v4 = |a: &SocketAddr| match a {
         SocketAddr::V4(v) => *v,
@@ -397,6 +458,9 @@ fn start(
     let mut next = Instant::now();
     let give_up = (Instant::now() + Duration::from_secs(5)).min(deadline + Duration::from_secs(5));
     while ready.len() < joiners.len() && Instant::now() < give_up {
+        if cancelled(cancel) {
+            return Err(Error::Cancelled);
+        }
         if Instant::now() >= next {
             for p in joiners.iter().filter(|p| !ready.contains(p)) {
                 let _ = socket.send_to(&bytes, addrs[p]);
@@ -422,6 +486,7 @@ fn start(
 }
 
 /// A joiner: punches to the host's candidates until START.
+#[allow(clippy::too_many_arguments)]
 fn joiner_wait(
     secure: &mut Secure,
     socket: &UdpSocket,
@@ -430,6 +495,7 @@ fn joiner_wait(
     gid: u32,
     candidates: &[SocketAddr],
     deadline: Instant,
+    cancel: &Option<Arc<AtomicBool>>,
 ) -> Result<(usize, Vec<SocketAddr>), Error> {
     let probe_nonce = nonce();
     let mut next_probe = Instant::now();
@@ -437,6 +503,9 @@ fn joiner_wait(
     loop {
         if Instant::now() >= deadline {
             return Err(Error::Timeout("the host's START"));
+        }
+        if cancelled(cancel) {
+            return Err(Error::Cancelled);
         }
         secure.poll(Duration::from_millis(10))?;
         if Instant::now() >= next_probe {

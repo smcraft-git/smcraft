@@ -257,6 +257,8 @@ fn config(s: &LocalServer, pid: u64) -> PlayConfig {
         nat_check: None,
         wait: Duration::from_secs(15),
         log: Arc::new(|_| {}),
+        cancel: None,
+        progress: None,
     }
 }
 
@@ -355,4 +357,42 @@ fn over_tls_with_the_key_pinned() {
         .filter(|l| l.contains("login accepted"))
         .count();
     assert_eq!(logins, 1, "the second login never reached the server");
+}
+
+#[test]
+fn a_cancelled_search_leaves_its_session() {
+    let Some(s) = LocalServer::start() else {
+        return;
+    };
+    let s = Arc::new(s);
+    // the first player opens a session, reports itself, then gives up
+    let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let mut c = config(&s, 3_100_001);
+    c.course = 0xCA5CE1;
+    c.cancel = Some(cancel.clone());
+    let progress = seen.clone();
+    c.progress = Some(Arc::new(move |found, wanted| {
+        progress.lock().unwrap().push((found, wanted))
+    }));
+    let first = std::thread::spawn(move || play::find_match(c));
+    std::thread::sleep(Duration::from_millis(700));
+    cancel.store(true, std::sync::atomic::Ordering::Relaxed);
+    let r = first.join().unwrap();
+    assert!(matches!(r, Err(Error::Cancelled)), "{:?}", r.err());
+    assert_eq!(seen.lock().unwrap().first(), Some(&(1, 2)));
+    // the next two players meet each other, not the session that was given up
+    let s2 = s.clone();
+    let host = std::thread::spawn(move || {
+        let mut c = config(&s2, 3_100_002);
+        c.course = 0xCA5CE1;
+        play::find_match(c)
+    });
+    std::thread::sleep(Duration::from_millis(700));
+    let mut c = config(&s, 3_100_003);
+    c.course = 0xCA5CE1;
+    let joiner = play::find_match(c).expect("joiner");
+    let host = host.join().unwrap().expect("host");
+    assert!(host.host && !joiner.host);
+    assert_eq!(host.gid, joiner.gid);
 }
