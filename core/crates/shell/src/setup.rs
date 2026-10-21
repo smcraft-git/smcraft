@@ -29,7 +29,11 @@ pub fn missing_message(drop: &Path) -> (String, (String, String)) {
             drop.display()
         ),
         (
-            "COPY YOUR SMM2 NSP AND PROD.KEYS TO".into(),
+            if mmk_host::paths::outdated_import() {
+                "YOUR IMPORT IS FROM AN OLDER SMCRAFT: COPY YOUR NSP AND PROD.KEYS TO".into()
+            } else {
+                "COPY YOUR SMM2 NSP AND PROD.KEYS TO".into()
+            },
             drop.display().to_string().to_ascii_uppercase(),
         ),
     )

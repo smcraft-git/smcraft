@@ -14,3 +14,6 @@ ab_glyph.workspace = true
 thiserror.workspace = true
 crc32fast.workspace = true
 aes.workspace = true
+
+[dev-dependencies]
+mmk-host = { path = "../host" }

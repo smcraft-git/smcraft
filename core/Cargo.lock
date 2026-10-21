@@ -1391,6 +1391,7 @@ dependencies = [
  "crc32fast",
  "mmk-assets",
  "mmk-formats",
+ "mmk-host",
  "serde_json",
  "thiserror 2.0.21",
 ]

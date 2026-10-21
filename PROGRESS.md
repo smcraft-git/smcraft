@@ -34,8 +34,10 @@ sound-perfect as possible, that **never needs the ROM or key files to run**.
   extractions, and the import matches the folder import's caches byte for byte (DECISIONS.md
   2026-10-21)
 - 🔄 One asset pack for everything: one run writes the game cache and the SMM2 UI (gameplay,
-  sound, modes data, effects, UI) into one asset root ✅; one versioned pack with a manifest the
-  runtime checks ⬜; incremental re-import ⬜
+  sound, modes data, effects, UI) into one asset root ✅; the runtime checks each pack's importer
+  version (`mmk_host::paths::GAME_PACK_VERSION` / `UI_PACK_VERSION`, kept equal to the importer's by
+  a test): an older import counts as missing and the setup asks for the dump again ✅; incremental
+  re-import ⬜
 - 🔄 A guard test (`core/crates/host/tests/rom_free.rs`): no code outside the importer and the setup
   screens opens NSP / keys ✅, a built-in course plays from the pack alone ✅; menus and sound run
   with no dump anywhere (an app-level run) ✅ (the second launch above)

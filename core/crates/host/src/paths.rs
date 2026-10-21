@@ -11,7 +11,7 @@
 //! settings of the portable players). Older developer layouts (`~/smm-work/cache/…`) are still
 //! found as a fallback.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// The user's home folder.
 pub fn home() -> Option<PathBuf> {
@@ -77,14 +77,43 @@ pub fn find_import(prefix: &str, exclude: Option<&str>, legacy: &str) -> Option<
         .filter(|p| p.join("manifest.json").is_file())
 }
 
-/// The game asset cache (`smm2-<build>`).
-pub fn game_cache() -> Option<PathBuf> {
-    find_import("smm2-", Some("smm2-ui-"), "smm2-3.0.3")
+/// The oldest importer each pack may come from: an import made by an older importer lacks what
+/// this version of the game reads, so it counts as missing and the player imports again. Raised
+/// with the importer's own versions (`mmk_import::IMPORTER_VERSION`,
+/// `SMM2_UI_IMPORTER_VERSION`; the importer's tests check the two agree).
+pub const GAME_PACK_VERSION: u32 = 9;
+pub const UI_PACK_VERSION: u32 = 4;
+
+/// An import's `importer_version` from its manifest (0 when unreadable).
+pub fn pack_version(dir: &Path) -> u32 {
+    std::fs::read_to_string(dir.join("manifest.json"))
+        .ok()
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+        .and_then(|m| m["importer_version"].as_u64())
+        .unwrap_or(0) as u32
 }
 
-/// The SMM2 UI import (`smm2-ui-<build>`).
+/// The game asset cache (`smm2-<build>`), if it is new enough ([`GAME_PACK_VERSION`]).
+pub fn game_cache() -> Option<PathBuf> {
+    find_import("smm2-", Some("smm2-ui-"), "smm2-3.0.3")
+        .filter(|p| pack_version(p) >= GAME_PACK_VERSION)
+}
+
+/// The SMM2 UI import (`smm2-ui-<build>`), if it is new enough ([`UI_PACK_VERSION`]).
 pub fn smm2_ui() -> Option<PathBuf> {
-    find_import("smm2-ui-", None, "smm2-ui-3.0.3")
+    find_import("smm2-ui-", None, "smm2-ui-3.0.3").filter(|p| pack_version(p) >= UI_PACK_VERSION)
+}
+
+/// There is an SMM2 import, but an older importer made it (import again).
+pub fn outdated_import() -> bool {
+    let old = |p: Option<PathBuf>, need: u32| p.is_some_and(|p| pack_version(&p) < need);
+    old(
+        find_import("smm2-", Some("smm2-ui-"), "smm2-3.0.3"),
+        GAME_PACK_VERSION,
+    ) || old(
+        find_import("smm2-ui-", None, "smm2-ui-3.0.3"),
+        UI_PACK_VERSION,
+    )
 }
 
 /// The SMM1 UI import (`smm1-<build>`).
@@ -119,7 +148,11 @@ mod tests {
         let assets = dir.join("assets");
         for n in ["smm2-3.0.3", "smm2-ui-3.0.3", "smm1-v208", "smm2-1.0.0"] {
             std::fs::create_dir_all(assets.join(n)).unwrap();
-            std::fs::write(assets.join(n).join("manifest.json"), "{}").unwrap();
+            std::fs::write(
+                assets.join(n).join("manifest.json"),
+                r#"{"importer_version": 99}"#,
+            )
+            .unwrap();
         }
         // SAFETY: tests in this crate don't read MMK_HOME concurrently
         unsafe { std::env::set_var("MMK_HOME", &dir) };
@@ -131,6 +164,15 @@ mod tests {
         );
         assert_eq!(smm2_ui(), Some(assets.join("smm2-ui-3.0.3")));
         assert_eq!(smm1_ui(), Some(assets.join("smm1-v208")));
+        assert!(!outdated_import());
+        // an import from an older importer counts as missing: import again
+        std::fs::write(
+            assets.join("smm2-3.0.3").join("manifest.json"),
+            r#"{"importer_version": 1}"#,
+        )
+        .unwrap();
+        assert_eq!(game_cache(), None);
+        assert!(outdated_import());
         unsafe { std::env::remove_var("MMK_HOME") };
         let _ = std::fs::remove_dir_all(&dir);
     }
