@@ -323,6 +323,12 @@ impl FfiHost {
             .join("Coursebot")
     }
 
+    /// Coursebot slot `slot`'s file: `course_NNN.bin`, NNN = slot + 1.
+    fn slot_path(&self, slot: usize) -> PathBuf {
+        self.coursebot_dir()
+            .join(format!("course_{:03}.bin", slot + 1))
+    }
+
     /// The Coursebot's courses as library entries (the app's own library scan doesn't look
     /// there).
     fn coursebot(&self) -> Vec<CourseEntry> {
@@ -636,19 +642,47 @@ impl Host for FfiHost {
     }
 
     fn save_course(&mut self, id: Option<&str>, course: &[u8]) -> Result<String, String> {
-        let dir = self.coursebot_dir();
-        let path = match id {
-            Some(p) => PathBuf::from(p),
-            None => {
-                std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-                (1..)
-                    .map(|n| dir.join(format!("course_{n:03}.bin")))
-                    .find(|p| !p.exists())
-                    .expect("a free name")
-            }
-        };
+        if let Some(p) = id {
+            std::fs::write(p, course).map_err(|e| format!("{p}: {e}"))?;
+            return Ok(p.to_string());
+        }
+        let free = self
+            .coursebot_slots()
+            .iter()
+            .position(Option::is_none)
+            .ok_or("the Coursebot is full")?;
+        self.save_slot(free, course)
+    }
+
+    fn coursebot_slots(&mut self) -> Vec<Option<CourseEntry>> {
+        let all = self.coursebot();
+        (0..mmk_front::host::COURSEBOT_SLOTS)
+            .map(|slot| {
+                let id = self.slot_path(slot).to_string_lossy().into_owned();
+                all.iter().find(|e| e.id == id).cloned()
+            })
+            .collect()
+    }
+
+    fn save_slot(&mut self, slot: usize, course: &[u8]) -> Result<String, String> {
+        std::fs::create_dir_all(self.coursebot_dir()).map_err(|e| e.to_string())?;
+        let path = self.slot_path(slot);
         std::fs::write(&path, course).map_err(|e| format!("{}: {e}", path.display()))?;
         Ok(path.to_string_lossy().into_owned())
+    }
+
+    fn delete_slot(&mut self, slot: usize) -> bool {
+        std::fs::remove_file(self.slot_path(slot)).is_ok()
+    }
+
+    fn course_thumbnail(&mut self, course: &[u8]) -> Option<mmk_front::Icon> {
+        let c = mmk_formats::smm2::Course::parse(course).ok()?;
+        let i = mmk_host::icon::course_view(&self.assets().cache, &c);
+        Some(mmk_front::Icon {
+            width: i.width,
+            height: i.height,
+            rgba: i.rgba,
+        })
     }
 
     fn course_data(&mut self, source: &Source) -> Result<Vec<u8>, String> {

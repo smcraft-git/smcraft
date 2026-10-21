@@ -86,10 +86,45 @@ pub fn part_icon(cache: &Cache, style: &str, part: i16) -> Option<Icon> {
     let scale = 3.0;
     let (w, h) = (((x1 - x0) * scale) as u32, ((y1 - y0) * scale) as u32);
     let mut rgba = vec![0u8; (w * h * 4) as usize];
+    let any = blit(cache, &sprites, [x0, y0, x1, y1], scale, (w, h), &mut rgba);
+    if !any {
+        return None;
+    }
+    // trimmed to what was drawn
+    let opaque = |x: u32, y: u32| rgba[((y * w + x) * 4 + 3) as usize] > 0;
+    let cols: Vec<u32> = (0..w).filter(|&x| (0..h).any(|y| opaque(x, y))).collect();
+    let rows: Vec<u32> = (0..h).filter(|&y| (0..w).any(|x| opaque(x, y))).collect();
+    let (cx0, cx1) = (*cols.first()?, *cols.last()?);
+    let (cy0, cy1) = (*rows.first()?, *rows.last()?);
+    let (tw, th) = (cx1 - cx0 + 1, cy1 - cy0 + 1);
+    let mut out = Vec::with_capacity((tw * th * 4) as usize);
+    for y in cy0..=cy1 {
+        let a = ((y * w + cx0) * 4) as usize;
+        out.extend_from_slice(&rgba[a..a + (tw * 4) as usize]);
+    }
+    Some(Icon {
+        width: tw,
+        height: th,
+        rgba: out,
+    })
+}
+
+/// Draw `sprites` (world px, y up) into an RGBA canvas of `size` showing world rectangle
+/// `area` (x0, y0, x1, y1) at `scale` px per world px, nearest texels, alpha over what is
+/// there. True if any pixel was drawn.
+fn blit(
+    cache: &Cache,
+    sprites: &[DrawSprite],
+    area: [f32; 4],
+    scale: f32,
+    (w, h): (u32, u32),
+    rgba: &mut [u8],
+) -> bool {
+    let [x0, y0, x1, y1] = area;
     let mut decoded: std::collections::HashMap<u32, Option<(u32, u32, Vec<u8>)>> =
         Default::default();
     let mut any = false;
-    for s in &sprites {
+    for s in sprites {
         let Some(t) = s.texture else { continue };
         if s.x >= x1 || s.x + s.w <= x0 || s.y >= y1 || s.y + s.h <= y0 {
             continue;
@@ -102,13 +137,18 @@ pub fn part_icon(cache: &Cache, style: &str, part: i16) -> Option<Icon> {
             })
             .as_ref();
         let Some((tw, th, px)) = tex else { continue };
-        for cy in 0..h {
+        // only the canvas rows and columns the sprite covers
+        let cy_from = (((y1 - (s.y + s.h)) * scale).floor().max(0.0)) as u32;
+        let cy_to = (((y1 - s.y) * scale).ceil().max(0.0) as u32).min(h);
+        let cx_from = (((s.x - x0) * scale).floor().max(0.0)) as u32;
+        let cx_to = (((s.x + s.w - x0) * scale).ceil().max(0.0) as u32).min(w);
+        for cy in cy_from..cy_to {
             let wy = y1 - (cy as f32 + 0.5) / scale;
             if wy < s.y || wy >= s.y + s.h {
                 continue;
             }
             let fv = (s.y + s.h - wy) / s.h;
-            for cx in 0..w {
+            for cx in cx_from..cx_to {
                 let wx = x0 + (cx as f32 + 0.5) / scale;
                 if wx < s.x || wx >= s.x + s.w {
                     continue;
@@ -136,24 +176,45 @@ pub fn part_icon(cache: &Cache, style: &str, part: i16) -> Option<Icon> {
             }
         }
     }
-    if !any {
-        return None;
+    any
+}
+
+/// A course's picture for the Coursebot: its start view (384 × 216 world px, 1 px each) as the
+/// engine draws it, on the sky colour [inf: the game keeps a screenshot taken when saving].
+/// 3D-model styles show only what has 2D art.
+pub fn course_view(cache: &Cache, course: &mmk_formats::smm2::Course) -> Icon {
+    use mmk_sim::world::{VIEW_H, VIEW_W};
+    let mut world = mmk_sim::World::from_course(course);
+    world.look_at(0.0, 0.0);
+    let (cx, cy) = (world.camera_x, world.camera_y);
+    let mut planner = crate::mesh::MeshPlanner::default();
+    let mut resolver = SpriteResolver::default();
+    let (mut sprites, mut meshes) = (Vec::new(), Vec::new());
+    planner.frame(
+        &world,
+        cache,
+        None,
+        &mut resolver,
+        &mut sprites,
+        &mut meshes,
+    );
+    let (w, h) = (VIEW_W as u32, VIEW_H as u32);
+    let sky = crate::clear_color(&world, cache);
+    let mut rgba = Vec::with_capacity((w * h * 4) as usize);
+    for _ in 0..w * h {
+        rgba.extend_from_slice(&[(sky >> 24) as u8, (sky >> 16) as u8, (sky >> 8) as u8, 255]);
     }
-    // trimmed to what was drawn
-    let opaque = |x: u32, y: u32| rgba[((y * w + x) * 4 + 3) as usize] > 0;
-    let cols: Vec<u32> = (0..w).filter(|&x| (0..h).any(|y| opaque(x, y))).collect();
-    let rows: Vec<u32> = (0..h).filter(|&y| (0..w).any(|x| opaque(x, y))).collect();
-    let (cx0, cx1) = (*cols.first()?, *cols.last()?);
-    let (cy0, cy1) = (*rows.first()?, *rows.last()?);
-    let (tw, th) = (cx1 - cx0 + 1, cy1 - cy0 + 1);
-    let mut out = Vec::with_capacity((tw * th * 4) as usize);
-    for y in cy0..=cy1 {
-        let a = ((y * w + cx0) * 4) as usize;
-        out.extend_from_slice(&rgba[a..a + (tw * 4) as usize]);
+    blit(
+        cache,
+        &sprites,
+        [cx, cy, cx + VIEW_W, cy + VIEW_H],
+        1.0,
+        (w, h),
+        &mut rgba,
+    );
+    Icon {
+        width: w,
+        height: h,
+        rgba,
     }
-    Some(Icon {
-        width: tw,
-        height: th,
-        rgba: out,
-    })
 }

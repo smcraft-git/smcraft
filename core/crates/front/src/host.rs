@@ -346,6 +346,9 @@ pub struct CourseStatus {
     pub condition: Option<Condition>,
 }
 
+/// My Courses slots of the Coursebot (SMM2 has 120, research/specs/coursebot.md A.3).
+pub const COURSEBOT_SLOTS: usize = 120;
+
 /// An RGBA picture (rows top first), e.g. a part's icon.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Icon {
@@ -444,6 +447,24 @@ pub trait Host {
     /// [`Host::library`] and loads with [`Source::Library`]).
     fn save_course(&mut self, _id: Option<&str>, _course: &[u8]) -> Result<String, String> {
         Err("this host can't save courses".into())
+    }
+    /// The Coursebot's My Courses slots ([`COURSEBOT_SLOTS`]): the course in each, if any.
+    fn coursebot_slots(&mut self) -> Vec<Option<CourseEntry>> {
+        vec![None; COURSEBOT_SLOTS]
+    }
+    /// Save raw course data into Coursebot slot `slot` (over what is there). Returns the
+    /// entry's id.
+    fn save_slot(&mut self, _slot: usize, _course: &[u8]) -> Result<String, String> {
+        Err("this host can't save courses".into())
+    }
+    /// Empty Coursebot slot `slot` (false: nothing there or not possible).
+    fn delete_slot(&mut self, _slot: usize) -> bool {
+        false
+    }
+    /// A course's picture for the Coursebot (its start view), None when the host can't draw
+    /// one.
+    fn course_thumbnail(&mut self, _course: &[u8]) -> Option<Icon> {
+        None
     }
     /// The raw course data of a library or server course (to open it in the maker).
     fn course_data(&mut self, _source: &Source) -> Result<Vec<u8>, String> {

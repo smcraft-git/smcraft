@@ -89,6 +89,21 @@ impl HostData {
         self.data_dir.as_ref().map(|d| d.join("Coursebot"))
     }
 
+    /// The id of Coursebot slot `slot`: `<data>/Coursebot/course_NNN.bin` (NNN = slot + 1),
+    /// or `memory:NNN` without a data folder.
+    pub fn slot_id(&self, slot: usize) -> String {
+        let name = format!("course_{:03}.bin", slot + 1);
+        match self.coursebot_dir() {
+            Some(d) => d.join(name).to_string_lossy().into_owned(),
+            None => format!("memory:{name}"),
+        }
+    }
+
+    /// The slot an id is (None: not a Coursebot slot).
+    pub fn slot_of(&self, id: &str) -> Option<usize> {
+        (0..mmk_front::host::COURSEBOT_SLOTS).find(|&s| self.slot_id(s) == id)
+    }
+
     /// A library course's file bytes (a Coursebot course kept in memory, or a file).
     fn course_bytes(&self, id: &str) -> Result<Vec<u8>, String> {
         if let Some((_, b)) = self.made.iter().find(|(i, _)| i == id) {
@@ -568,35 +583,77 @@ impl Host for ShellHost<'_> {
     }
 
     fn save_course(&mut self, id: Option<&str>, course: &[u8]) -> Result<String, String> {
-        let id = match self.data.coursebot_dir() {
+        // over an entry: its slot, or the file it is; else the first free slot
+        if let Some(id) = id {
+            if let Some(slot) = self.data.slot_of(id) {
+                return self.save_slot(slot, course);
+            }
+            std::fs::write(id, course).map_err(|e| format!("{id}: {e}"))?;
+            self.data.library = None;
+            return Ok(id.to_string());
+        }
+        let slots = self.coursebot_slots();
+        let free = slots
+            .iter()
+            .position(Option::is_none)
+            .ok_or("the Coursebot is full")?;
+        self.save_slot(free, course)
+    }
+
+    fn coursebot_slots(&mut self) -> Vec<Option<CourseEntry>> {
+        (0..mmk_front::host::COURSEBOT_SLOTS)
+            .map(|slot| {
+                let id = self.data.slot_id(slot);
+                let bytes = self.data.course_bytes(&id).ok()?;
+                let (c, key) = self.data.decode(&bytes).ok()?;
+                Some(front_course::entry(id.clone(), &id, false, &c, key, None))
+            })
+            .collect()
+    }
+
+    fn save_slot(&mut self, slot: usize, course: &[u8]) -> Result<String, String> {
+        let id = self.data.slot_id(slot);
+        match self.data.coursebot_dir() {
             Some(dir) => {
-                let path = match id {
-                    Some(p) if !p.starts_with("memory:") => PathBuf::from(p),
-                    _ => {
-                        std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-                        (1..)
-                            .map(|n| dir.join(format!("course_{n:03}.bin")))
-                            .find(|p| !p.exists())
-                            .expect("a free name")
-                    }
-                };
-                std::fs::write(&path, course).map_err(|e| format!("{}: {e}", path.display()))?;
-                path.to_string_lossy().into_owned()
+                std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+                std::fs::write(&id, course).map_err(|e| format!("{id}: {e}"))?;
             }
             None => {
-                let id = match id {
-                    Some(i) if self.data.made.iter().any(|(m, _)| m == i) => i.to_string(),
-                    _ => format!("memory:{}", self.data.made.len() + 1),
-                };
                 self.data.made.retain(|(m, _)| *m != id);
                 self.data.made.push((id.clone(), course.to_vec()));
-                id
             }
-        };
+        }
         // the library lists it from now on
         self.data.library = None;
         self.data.scanning = None;
         Ok(id)
+    }
+
+    fn delete_slot(&mut self, slot: usize) -> bool {
+        let id = self.data.slot_id(slot);
+        let gone = match self.data.coursebot_dir() {
+            Some(_) => std::fs::remove_file(&id).is_ok(),
+            None => {
+                let n = self.data.made.len();
+                self.data.made.retain(|(m, _)| *m != id);
+                self.data.made.len() != n
+            }
+        };
+        if gone {
+            self.data.library = None;
+            self.data.scanning = None;
+        }
+        gone
+    }
+
+    fn course_thumbnail(&mut self, course: &[u8]) -> Option<mmk_front::Icon> {
+        let c = mmk_formats::smm2::Course::parse(course).ok()?;
+        let i = mmk_host::icon::course_view(&self.game.cache, &c);
+        Some(mmk_front::Icon {
+            width: i.width,
+            height: i.height,
+            rgba: i.rgba,
+        })
     }
 
     fn course_data(&mut self, source: &Source) -> Result<Vec<u8>, String> {
@@ -698,7 +755,7 @@ mod tests {
         assert_eq!(host.player_position().map(|p| p.0), Some(0));
         // saved without a data folder: kept in memory, listed, loadable, editable again
         let id = host.save_course(None, &bytes).unwrap();
-        assert_eq!(id, "memory:1");
+        assert_eq!(id, "memory:course_001.bin");
         let lib = host.library();
         let entry = lib.iter().find(|c| c.id == id).expect("in the library");
         assert_eq!(entry.name, "Made in the maker");
@@ -714,6 +771,18 @@ mod tests {
         assert_eq!(host.library().iter().filter(|c| c.id == id).count(), 1);
         // a part's picture from the engine's art needs the art: none in placeholder mode
         assert!(host.part_icon("M1", 0, 0).is_none());
+        // the Coursebot's slots: the course in the first, the next one free; delete
+        let slots = host.coursebot_slots();
+        assert_eq!(slots.len(), 120);
+        assert_eq!(slots[0].as_ref().map(|e| e.id.as_str()), Some(id.as_str()));
+        assert!(slots[1].is_none());
+        let second = host.save_slot(5, &bytes).unwrap();
+        assert_eq!(second, "memory:course_006.bin");
+        assert!(host.coursebot_slots()[5].is_some());
+        assert!(host.delete_slot(5));
+        assert!(host.coursebot_slots()[5].is_none());
+        let pic = host.course_thumbnail(&bytes).unwrap();
+        assert_eq!((pic.width, pic.height), (384, 216));
     }
 
     #[test]
