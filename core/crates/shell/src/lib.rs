@@ -30,6 +30,10 @@ pub mod front_app;
 pub mod front_host;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod headless;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod launch;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod setup;
 pub mod ui_sound;
 #[cfg(target_arch = "wasm32")]
 pub mod web;

@@ -37,6 +37,8 @@ pub struct Game {
     ghost_sprites: Vec<DrawSprite>,
     /// No placeholder HUD strip (the front end draws the SMM2 HUD layout over the course).
     pub no_hud: bool,
+    /// A message over the course in the HUD's banner (the first-launch setup's progress).
+    pub notice: Option<(String, String)>,
     /// The cache's effects (empty: none imported) and this frame's quads.
     fx_lib: Arc<mmk_host::effects::EffectLibrary>,
     fx_frame: crate::effects::EffectFrame,
@@ -96,6 +98,7 @@ impl Game {
             on_clear: None,
             ghost_sprites: Vec::new(),
             no_hud: false,
+            notice: None,
         }
     }
 
@@ -249,6 +252,9 @@ impl Game {
         } else {
             HudText::of(w, self.session.phase)
         };
+        if self.notice.is_some() {
+            self.hud.banner = self.notice.clone();
+        }
         match &mut self.session.effects {
             Some(fx) => {
                 fx.quads(&mut self.fx_frame.quads);

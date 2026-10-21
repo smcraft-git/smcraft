@@ -853,6 +853,31 @@ mod native {
         let mut app = App::new(game, title, !args.cpu_textures);
         app.audio = audio;
         app.quit_after = args.quit_after;
+        // first launch (menus asked for, no import yet): import the player's dump from the drop
+        // folder, or say where it goes
+        if menus && let Some(drop) = mmk_shell::setup::drop_folder() {
+            let _ = std::fs::create_dir_all(&drop);
+            match (
+                mmk_shell::setup::find_dump(&drop),
+                mmk_host::paths::assets_root(),
+            ) {
+                (Some(dump), Some(out)) => {
+                    log(&format!("importing your dump from {}", drop.display()));
+                    app.setup = Some(mmk_shell::setup::Import::start(dump, out));
+                }
+                _ => {
+                    log(&format!(
+                        "no SMM2 import yet: put your SMM2 NSP (and the 3.0.3 update's) and \
+                         prod.keys in {}, or run `mmk import --nsp`",
+                        drop.display()
+                    ));
+                    app.game.notice = Some((
+                        "COPY YOUR SMM2 NSP AND PROD.KEYS TO".into(),
+                        drop.display().to_string().to_ascii_uppercase(),
+                    ));
+                }
+            }
+        }
         app.set_proxy(event_loop.create_proxy());
         event_loop
             .run_app(&mut app)

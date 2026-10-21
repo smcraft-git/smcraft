@@ -31,6 +31,8 @@ winit = "0.30.13"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 mmk-online = { path = "../online" }
+# the first-launch setup only (setup.rs): the import from the player's own dump
+mmk-import = { path = "../import" }
 clap.workspace = true
 png = "0.18.1"
 pollster = "1.0.1"

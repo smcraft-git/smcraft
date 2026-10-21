@@ -215,6 +215,10 @@ pub struct App {
     pub front: Option<Box<crate::front_app::FrontApp>>,
     /// On-screen controls (touch screens).
     pub touch: crate::touch::TouchPad,
+    /// The first-launch import under way (`crate::setup`): its progress is shown over the
+    /// course, and the front end starts when it is done.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub setup: Option<crate::setup::Import>,
 }
 
 pub fn log(msg: &str) {
@@ -248,6 +252,8 @@ impl App {
             sound: None,
             front: None,
             touch: crate::touch::TouchPad::default(),
+            #[cfg(not(target_arch = "wasm32"))]
+            setup: None,
         }
     }
 
@@ -280,7 +286,37 @@ impl App {
         }
     }
 
+    /// Show the first-launch import's progress; once it is done, start the front end over the
+    /// new asset pack.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn poll_setup(&mut self) {
+        let Some(import) = &self.setup else { return };
+        let status = import.status();
+        self.game.notice = Some(status.lines());
+        if status != crate::setup::Status::Done(Ok(())) {
+            return;
+        }
+        self.setup = None;
+        let started = crate::launch::FrontConfig::from_data_root()
+            .ok_or_else(|| "no SMM2 UI in the import".to_string())
+            .and_then(crate::launch::front);
+        match started {
+            Ok((mut game, mut front)) => {
+                if let Err(e) = crate::launch::start_sound(&mut front, &mut game) {
+                    log(&format!("sound off: {e}"));
+                }
+                self.front = Some(Box::new(front));
+                self.replace_game(game);
+            }
+            Err(e) => {
+                self.game.notice = Some(("SETUP FAILED".into(), e.to_ascii_uppercase()));
+            }
+        }
+    }
+
     fn frame(&mut self, event_loop: &ActiveEventLoop) {
+        #[cfg(not(target_arch = "wasm32"))]
+        self.poll_setup();
         let now = crate::clock::now();
         if let Some(limit) = self.quit_after {
             let first = *self.first_frame.get_or_insert(now);

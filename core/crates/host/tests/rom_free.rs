@@ -20,6 +20,7 @@ fn repo() -> PathBuf {
 const SETUP: &[&str] = &[
     "core/crates/ffi/src/import.rs",
     "core/crates/shell/src/web_import.rs",
+    "core/crates/shell/src/setup.rs",
     "core/crates/shell/web/index.html",
     "core/crates/shell/web/mmk-web.js",
     "core/crates/shell/web/mmk-import-worker.js",
