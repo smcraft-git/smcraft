@@ -70,8 +70,17 @@ sound-perfect as possible, that **never needs the ROM or key files to run**.
 
 **G7 — The smm2recomp mod options** 🔄
 - ✅ SMM1 extras (shell kicks, layering, Lanky Mario, costumes) as engine options
-- ⬜ The rest of the recomp's mods (survey `recomp/games/smm2/mods/`: quick retry, Muncher hitbox,
-  SMW goal, relabels, …) as SMCraft options; one Mods settings page
+- ✅ Muncher hit box (SMM1): `muncher_smm1_hitbox` (sim option): a 12 × 12 box for the player.
+  On the way, SMM2's own rule fixed: a wall sensor's touch hurts (0.1 px a side in a one-tile gap)
+- ✅ Overlapping pipes (SMM1): `Editor::smm1_overlap_pipes`, a pipe may go over a pipe
+- ✅ Quick level return: `mods.quick_retry=1` (`mmk-play --mod quick_retry=1`): the death sequence runs
+  8 ticks a frame, about 0.4 s instead of 3.1 s
+- ✅ SMW goal wipe (on by default, `mods.smw_goal_wipe=0` turns it off): the circle and SMW's own
+  goal-wipe sound (imported with the UI) before the clear panel in SMW courses
+- ⬜ Challenge Modes: the Endless button switches between 100 Mario and SMM2's Endless (ZL / ZR)
+- ⬜ One Mods settings page (front end) listing every option above plus the SMM1 extras; options
+  saved per player; online / replays keep them off where they change play
+- ⬜ Mid-air shell jumps checked against the recomp's test course; SMM1 course card choice
 
 **G8 — Fidelity: pixel, physics, sound** 🔄
 - 🔄 Physics: 428 / 454 player traces frame-exact → all; enemy and object traces; whole courses

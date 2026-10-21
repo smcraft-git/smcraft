@@ -122,11 +122,26 @@ pub struct CoursePlay {
     /// Captures: pause after this many engine ticks.
     pub auto_pause_tick: Option<u64>,
     engine_tick: u64,
+    /// Quick level return (the `mods.quick_retry` setting, read at the first death).
+    quick_retry: Option<bool>,
+    /// The SMW goal wipe under way: the frame (`phase_frames`) it ends on.
+    smw_wipe_until: Option<u32>,
     /// The player's character (the settings window).
     pub character: usize,
 }
 
 const RESULT_GRACE: u32 = 30;
+
+/// The setting that turns the SMW goal wipe off ("0").
+pub const SMW_GOAL_WIPE_KEY: &str = "mods.smw_goal_wipe";
+const SMW_GOAL_WIPE_SOUND: &str = "SuperMarioWorld_43_GoalWipe";
+/// The circle with the sound (0.8 s), then 0.25 s of black.
+const SMW_GOAL_WIPE_FRAMES: u32 = 48 + 15;
+
+/// The setting that turns quick level return on ("1").
+pub const QUICK_RETURN_KEY: &str = "mods.quick_retry";
+/// Engine ticks a frame while dying, with quick level return.
+const QUICK_RETURN_RATE: u32 = 8;
 
 /// Like (or boo) server course `code` as the signed-in account; false (with a message) when
 /// signed out or without a server.
@@ -187,6 +202,8 @@ impl CoursePlay {
             phase_frames: 0,
             pause_selection: 0,
             skip_done_tick: None,
+            quick_retry: None,
+            smw_wipe_until: None,
             clear_ticks: None,
             new_best: false,
             debug_skip_held: false,
@@ -295,6 +312,7 @@ impl CoursePlay {
                 }
                 cx.host.step_course(None);
                 self.engine_tick += 1;
+                self.quick_return(cx);
                 if let Some(e) = self.observe_tick(cx, run.as_deref_mut()) {
                     ev = Some(e);
                 }
@@ -651,11 +669,57 @@ impl CoursePlay {
     }
 
     fn new_attempt(&mut self, cx: &mut Cx) {
+        self.smw_wipe_until = None;
         self.attempt_ticks = 0;
         self.goal_ticks = None;
         if let Some(k) = &self.course_key {
             cx.saves.add_attempt(cx.host, k);
         }
+    }
+
+    /// Quick level return (the recomp's mod of that name): while the player is dying, the death
+    /// sequence runs [`QUICK_RETURN_RATE`] engine ticks a frame, up to the tick before the
+    /// restart, so the course is back in a fraction of SMM2's time. Lives, checkpoints and the
+    /// rest of the miss work as before; only the waiting goes.
+    fn quick_return(&mut self, cx: &mut Cx) {
+        if !cx.host.course_status().dying {
+            return;
+        }
+        let on = *self
+            .quick_retry
+            .get_or_insert_with(|| cx.host.load_value(QUICK_RETURN_KEY).as_deref() == Some("1"));
+        if !on {
+            return;
+        }
+        for _ in 1..QUICK_RETURN_RATE {
+            let st = cx.host.course_status();
+            if !st.dying || st.restart_in <= 1 {
+                break;
+            }
+            cx.host.step_course(None);
+            self.engine_tick += 1;
+        }
+    }
+
+    /// The SMW goal wipe (the recomp's mod of that name, on unless `mods.smw_goal_wipe` is
+    /// "0"): in a Super Mario World style course, once the goal sequence is over a black circle
+    /// closes on the player with SMW's own goal-wipe sound (`SuperMarioWorld_43_GoalWipe`, 0.8 s),
+    /// the screen stays black 0.25 s more, then the clear panel comes as usual. True while the
+    /// wipe holds the panel back.
+    fn smw_goal_wipe(&mut self, h: &CourseStatus, cx: &mut Cx) -> bool {
+        if let Some(until) = self.smw_wipe_until {
+            return self.phase_frames < until;
+        }
+        if h.style != 2 || cx.host.load_value(SMW_GOAL_WIPE_KEY).as_deref() == Some("0") {
+            return false;
+        }
+        let Some(s) = self.screens.as_mut() else {
+            return false;
+        };
+        s.iris_out(CourseScreens::layout_point(h.player_x, h.player_y + 12.0));
+        s.play_sound(SMW_GOAL_WIPE_SOUND);
+        self.smw_wipe_until = Some(self.phase_frames + SMW_GOAL_WIPE_FRAMES);
+        true
     }
 
     /// After each engine tick: goal time, extra lives, deaths, the clear.
@@ -787,6 +851,9 @@ impl CoursePlay {
             return None;
         }
         self.was_dying = dying;
+        if h.cleared && self.smw_goal_wipe(h, cx) {
+            return None;
+        }
         if h.cleared {
             let ticks = self.goal_ticks.unwrap_or(self.attempt_ticks);
             self.record_clear(cx, ticks);
@@ -1073,6 +1140,8 @@ pub(crate) mod tests {
         pub loaded: Vec<Source>,
         pub reports: Vec<(String, String)>,
         pub library: Vec<CourseEntry>,
+        /// Each step counts `restart_in` down while dying (and ends the death at 0).
+        pub death_clock: bool,
     }
 
     impl Host for MockHost {
@@ -1098,6 +1167,12 @@ pub(crate) mod tests {
         fn unload_course(&mut self) {}
         fn step_course(&mut self, _: Option<u32>) {
             self.steps += 1;
+            if self.death_clock && self.status.dying {
+                self.status.restart_in -= 1;
+                if self.status.restart_in < 0 {
+                    self.status.dying = false;
+                }
+            }
         }
         fn course_status(&self) -> CourseStatus {
             self.status
@@ -1221,6 +1296,92 @@ pub(crate) mod tests {
         }
         let ev = step(&mut host, &mut saves, false, Buttons::CONFIRM);
         assert_eq!(ev, Some(PlayEvent::Exit));
+    }
+
+    #[test]
+    fn quick_level_return_runs_the_death_sequence_fast() {
+        // frames from a death to playing again, quick level return on or off
+        let frames = |quick: bool| {
+            let mut host = MockHost {
+                death_clock: true,
+                ..Default::default()
+            };
+            if quick {
+                host.values.insert(QUICK_RETURN_KEY.into(), "1".into());
+            }
+            let mut saves = Saves::default();
+            let mut p = with(&mut host, &mut saves, |cx| {
+                let info = CardInfo::default();
+                CoursePlay::new(cx, "C".into(), None, None, None, info, false, true, false)
+            });
+            let mut step = |host: &mut MockHost, saves: &mut Saves| {
+                with(host, saves, |cx| {
+                    p.step(&input(false, Buttons::NONE), cx, None)
+                })
+            };
+            step(&mut host, &mut saves);
+            host.status.dying = true;
+            host.status.restart_in = 185;
+            let mut n = 0;
+            while host.status.dying {
+                step(&mut host, &mut saves);
+                n += 1;
+            }
+            n
+        };
+        assert_eq!(frames(false), 186);
+        let quick = frames(true);
+        assert!(quick <= 186 / 8 + 2, "{quick}");
+    }
+
+    #[test]
+    fn smw_goal_wipe_holds_the_clear_panel_back() {
+        // frames from the end of the goal sequence to the clear panel, by style and setting
+        let frames = |style: u32, off: bool| -> Option<u32> {
+            let ui = crate::testing::smm2()?;
+            let mut host = MockHost::default();
+            if off {
+                host.values.insert(SMW_GOAL_WIPE_KEY.into(), "0".into());
+            }
+            let mut saves = Saves::default();
+            let mut p = with(&mut host, &mut saves, |cx| {
+                let info = CardInfo::default();
+                let screens = CourseScreens::new(&ui);
+                CoursePlay::new(
+                    cx,
+                    "C".into(),
+                    None,
+                    screens,
+                    None,
+                    info,
+                    false,
+                    true,
+                    false,
+                )
+            });
+            let mut step = |host: &mut MockHost, saves: &mut Saves| {
+                with(host, saves, |cx| {
+                    p.step(&input(false, Buttons::NONE), cx, None)
+                })
+            };
+            step(&mut host, &mut saves);
+            host.status.style = style;
+            host.status.cleared = true;
+            let mut n = 0;
+            while step(&mut host, &mut saves) != Some(PlayEvent::Cleared) {
+                n += 1;
+                assert!(n < 1000);
+            }
+            Some(n)
+        };
+        let Some(smb1) = frames(0, false) else { return };
+        assert_eq!(smb1, 0);
+        assert_eq!(frames(2, true), Some(0));
+        assert_eq!(frames(2, false), Some(SMW_GOAL_WIPE_FRAMES));
+        // the goal-wipe sound is part of the UI import
+        let ui = crate::testing::smm2().unwrap();
+        let sounds = ui.cache().root().unwrap().join("ui/sound");
+        assert!(sounds.join(format!("{SMW_GOAL_WIPE_SOUND}.wav")).is_file());
     }
 
     #[test]

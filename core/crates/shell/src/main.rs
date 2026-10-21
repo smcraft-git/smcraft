@@ -242,6 +242,10 @@ mod native {
         /// "random", the default).
         #[arg(long, value_name = "ID|random")]
         costume: Option<String>,
+        /// A front-end mod setting as NAME=VALUE, kept in the data folder (repeatable):
+        /// `quick_retry=1` (quick level return).
+        #[arg(long = "mod", value_name = "NAME=VALUE")]
+        mods: Vec<String>,
         /// Any engine option as NAME=VALUE (repeatable; see `mmk_sim::Options`).
         #[arg(long = "option", value_name = "NAME=VALUE")]
         options: Vec<String>,
@@ -347,6 +351,10 @@ mod native {
                 .or_else(|| std::env::var_os("MMK_DATA").map(PathBuf::from))
                 .or_else(mmk_host::paths::play_data)
         };
+        for m in &args.mods {
+            let (name, value) = m.split_once('=').unwrap_or((m.as_str(), "1"));
+            data.store_value(&format!("mods.{}", name.trim()), value.trim());
+        }
         let opts = Options {
             boot: !args.no_opening && capture.is_none(),
             opening: args.opening.clone(),

@@ -40,6 +40,10 @@ const K_USER: &str = "4309561a";
 const K_ANIMS: &str = "a8e79f6f";
 const K_ANIM: &str = "2c49113d";
 
+/// Sounds the front end plays itself (not through a layout): SMW's goal wipe, which SMM2 keeps
+/// in its Story Mode bank (`Sound/Resource/Quest_UndoDog.bars`), for the SMW goal wipe mod.
+const EXTRA_SOUNDS: &[&str] = &["SuperMarioWorld_43_GoalWipe"];
+
 /// What the import found.
 #[derive(Default, Debug)]
 pub struct SoundReport {
@@ -249,6 +253,7 @@ pub fn run(romfs: &Path, ui: &Path) -> Result<SoundReport> {
     }
     report.users = users_json.len();
     sounds.remove("@Blank");
+    sounds.extend(EXTRA_SOUNDS.iter().map(|s| s.to_string()));
     // the sounds: wherever they are among Sound/Resource/*.bars and the bars packs
     // (Pack/*_bars.pack: the styles' and the worlds' sounds)
     let mut left = sounds.clone();

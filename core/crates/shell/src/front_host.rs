@@ -57,6 +57,26 @@ enum Answer {
 }
 
 impl HostData {
+    /// A persistent value (the data folder's file for it, or memory for captures).
+    pub fn load_value(&self, key: &str) -> Option<String> {
+        match &self.data_dir {
+            Some(d) => std::fs::read_to_string(d.join(file_name(key))).ok(),
+            None => self.memory.get(key).cloned(),
+        }
+    }
+
+    pub fn store_value(&mut self, key: &str, value: &str) {
+        match &self.data_dir {
+            Some(d) => {
+                let _ = std::fs::create_dir_all(d);
+                let _ = std::fs::write(d.join(file_name(key)), value);
+            }
+            None => {
+                self.memory.insert(key.to_string(), value.to_string());
+            }
+        }
+    }
+
     pub fn new(source: Option<DirSource>) -> Self {
         let seed = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -497,22 +517,11 @@ impl Host for ShellHost<'_> {
     }
 
     fn load_value(&mut self, key: &str) -> Option<String> {
-        match &self.data.data_dir {
-            Some(d) => std::fs::read_to_string(d.join(file_name(key))).ok(),
-            None => self.data.memory.get(key).cloned(),
-        }
+        self.data.load_value(key)
     }
 
     fn store_value(&mut self, key: &str, value: &str) {
-        match &self.data.data_dir {
-            Some(d) => {
-                let _ = std::fs::create_dir_all(d);
-                let _ = std::fs::write(d.join(file_name(key)), value);
-            }
-            None => {
-                self.data.memory.insert(key.to_string(), value.to_string());
-            }
-        }
+        self.data.store_value(key, value);
     }
 
     fn random(&mut self) -> u64 {

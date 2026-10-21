@@ -882,6 +882,15 @@ impl CourseScreens {
         self.iris_closed = true;
     }
 
+    /// Play one of the imported UI sounds (`ui/sound/<name>.wav`).
+    pub fn play_sound(&self, name: &str) {
+        self.ui.push_cues(vec![crate::sound::SoundCue {
+            name: name.to_string(),
+            volume: 1.0,
+            delay: 0.0,
+        }]);
+    }
+
     /// The course restarted: the circle opens on the player.
     pub fn iris_in(&mut self, center: [f32; 2]) {
         let Some(i) = &mut self.iris else { return };
@@ -1557,6 +1566,8 @@ impl CourseScreens {
     pub fn clear_all(&mut self) {
         self.closing = None;
         self.time_up_until = 0;
+        self.iris_closed = false;
+        self.iris_until = 0;
         self.set_mode(Mode::Play);
     }
 }
