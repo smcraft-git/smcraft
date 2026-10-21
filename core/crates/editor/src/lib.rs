@@ -86,6 +86,8 @@ pub struct Editor {
     pub area: usize,
     /// The last copied selection (copy / cut / paste).
     pub clipboard: Option<select::Clipboard>,
+    /// SMM1's rule that a pipe may overlap another pipe (an option; SMM2 refuses it).
+    pub smm1_overlap_pipes: bool,
     undo: Vec<Vec<u8>>,
     redo: Vec<Vec<u8>>,
 }
@@ -115,6 +117,7 @@ impl Editor {
             course,
             area: 0,
             clipboard: None,
+            smm1_overlap_pipes: false,
             undo: Vec::new(),
             redo: Vec::new(),
         }

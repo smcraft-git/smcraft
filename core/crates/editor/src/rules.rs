@@ -71,6 +71,9 @@ pub fn style_allows(style: &str, part: i16) -> bool {
     }
 }
 
+/// The pipe's part id.
+const PIPE: i16 = 9;
+
 /// Items a checkpoint flag or a tree can hold.
 const ITEMS: &[i16] = &[8, 10, 18, 19, 20, 33, 34, 35, 44, 64, 81, 95, 116];
 
@@ -224,7 +227,7 @@ impl Editor {
                     if !embeds && self.ground_at(x, y).is_some() {
                         return Err(EditError::Occupied);
                     }
-                    if self.solid_part_at(x, y, skip) {
+                    if self.solid_part_at(x, y, skip, o.id == PIPE && self.smm1_overlap_pipes) {
                         return Err(EditError::Occupied);
                     }
                 }
@@ -236,10 +239,21 @@ impl Editor {
         Ok(())
     }
 
-    /// A non-background, non-rider part covers the tile (`skip` ignored).
-    pub(crate) fn solid_part_at(&self, x: i32, y: i32, skip: Option<usize>) -> bool {
+    /// A non-background, non-rider part covers the tile (`skip` ignored; pipes ignored with
+    /// `pipes_pass`, SMM1's overlapping pipes).
+    pub(crate) fn solid_part_at(
+        &self,
+        x: i32,
+        y: i32,
+        skip: Option<usize>,
+        pipes_pass: bool,
+    ) -> bool {
         self.area().objects.iter().enumerate().any(|(i, p)| {
-            Some(i) != skip && !is_rider(p) && !is_background(p.id) && parts::covers(p, x, y)
+            Some(i) != skip
+                && !is_rider(p)
+                && !is_background(p.id)
+                && !(pipes_pass && p.id == PIPE)
+                && parts::covers(p, x, y)
         })
     }
 
@@ -296,6 +310,21 @@ pub const GROUND_MAX: usize = 4000;
 mod tests {
     use super::*;
     use crate::test_util::*;
+
+    #[test]
+    fn smm1_pipes_may_overlap_pipes() {
+        let mut e = flat("M1");
+        e.place(9, 20, 3).unwrap();
+        e.place(4, 30, 6).unwrap();
+        // SMM2 refuses a pipe over a pipe
+        assert_eq!(e.place(9, 20, 4), Err(EditError::Occupied));
+        // SMM1 accepts it, but a pipe still doesn't go over anything else
+        e.smm1_overlap_pipes = true;
+        e.place(9, 20, 4).unwrap();
+        assert_eq!(e.place(9, 30, 5), Err(EditError::Occupied));
+        // nor does anything else go over a pipe
+        assert_eq!(e.place(4, 20, 4), Err(EditError::Occupied));
+    }
 
     #[test]
     fn overlap_rules() {
