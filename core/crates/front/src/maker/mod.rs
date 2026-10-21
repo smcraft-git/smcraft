@@ -208,6 +208,8 @@ pub struct MakerFlow {
     window_timer: i16,
     /// An upload waiting for its answer (`Online::call` id).
     upload_call: Option<u32>,
+    /// Captures: scripted input by maker tick.
+    script: Vec<(i32, String)>,
     /// The animation that opened the left window.
     window_tab: &'static str,
     /// The course changed since the host last showed it.
@@ -282,6 +284,7 @@ impl MakerFlow {
             window_sel: 0,
             window_timer: 300,
             upload_call: None,
+            script: Vec::new(),
             window_tab: "ChangeTab00",
             dirty: true,
             shown: false,
@@ -522,6 +525,8 @@ impl MakerFlow {
 
     pub fn step(&mut self, input: &MakerInput, cx: &mut crate::Cx) -> Option<MakerEvent> {
         self.tick += 1;
+        let scripted = self.scripted(input);
+        let input = &scripted;
         let pressed = input.ui.pressed;
         let keys_pressed = input.keys & !self.keys_held;
         self.keys_held = input.keys;
@@ -2231,6 +2236,68 @@ impl MakerFlow {
         if let Some(c) = view::glove(self) {
             out.push(c);
         }
+    }
+
+    /// Captures: the scripted input of this tick added to the real one. Items `tick:what`,
+    /// what = a menu button (confirm, back, up, down, left, right, held for that tick), start,
+    /// play (the test-play key), a maker key (undo, redo, parts, next, prev, here, eraser,
+    /// area), `cursor=x;y` (put the cursor on a tile) or `slot=n`.
+    fn scripted(&mut self, input: &MakerInput) -> MakerInput {
+        let mut i = *input;
+        let due: Vec<String> = self
+            .script
+            .iter()
+            .filter(|(t, _)| *t == self.tick)
+            .map(|(_, w)| w.clone())
+            .collect();
+        for what in due {
+            if let Some(b) = Buttons::from_name(&what) {
+                i.ui.pressed = i.ui.pressed | b;
+                i.ui.held = i.ui.held | b;
+                continue;
+            }
+            if let Some(xy) = what.strip_prefix("cursor=")
+                && let Some((x, y)) = xy.split_once(';')
+                && let (Ok(x), Ok(y)) = (x.parse(), y.parse())
+            {
+                self.cur = (x, y);
+                self.follow_cursor();
+                self.glove = self.tile_center(self.cur);
+                continue;
+            }
+            if let Some(n) = what
+                .strip_prefix("slot=")
+                .and_then(|n| n.parse::<usize>().ok())
+            {
+                self.select_slot(n.min(self.palette.len().saturating_sub(1)));
+                continue;
+            }
+            match what.as_str() {
+                "start" => i.start = true,
+                "play" => i.play = true,
+                "undo" => i.keys |= keys::UNDO,
+                "redo" => i.keys |= keys::REDO,
+                "parts" => i.keys |= keys::PARTS,
+                "next" => i.keys |= keys::NEXT,
+                "prev" => i.keys |= keys::PREV,
+                "here" => i.keys |= keys::PLAY_HERE,
+                "eraser" => i.keys |= keys::ERASER,
+                "area" => i.keys |= keys::AREA,
+                _ => {}
+            }
+        }
+        i
+    }
+
+    /// Captures: set the script (see [`MakerFlow::scripted`]).
+    pub fn set_script(&mut self, s: &str) {
+        self.script = s
+            .split(',')
+            .filter_map(|item| {
+                let (t, w) = item.split_once(':')?;
+                Some((t.trim().parse().ok()?, w.trim().to_string()))
+            })
+            .collect();
     }
 
     /// An `EditModel` texture's id, if the import has it.

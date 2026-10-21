@@ -717,6 +717,10 @@ impl Front {
                     None => MakerStart::New(self.opts.maker_style.clone()),
                 };
                 self.show_maker(host, start);
+                let script = self.opts.script.clone();
+                if let Screen::Maker(m) = &mut self.screen {
+                    m.set_script(&script);
+                }
                 if let Some(what) = s.strip_prefix("maker-") {
                     let (mut cx, scr) = self.cx(host);
                     let Screen::Maker(m) = scr else {
