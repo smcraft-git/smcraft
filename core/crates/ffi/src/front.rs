@@ -93,9 +93,13 @@ pub struct MmkFrontInput {
     pub menu: u32,
     /// Engine buttons (MMK_BTN_*) for the course; START is masked (pausing is `flags` bit 0).
     pub buttons: u32,
-    /// bit 0 pause held, bit 1 the 100 Mario skip key held, bit 2 a click / tap this tick.
+    /// bit 0 pause held, bit 1 the 100 Mario skip key held, bit 2 a click / tap this tick,
+    /// bit 3 a pointer (mouse / finger) is at `click_x/y`, bit 4 its primary button / the finger
+    /// is down, bit 5 its secondary button is down, bits 8–15 the Course Maker keys
+    /// (`mmk_front::maker::keys`).
     pub flags: u32,
-    /// The click, layout units (1280 × 720 view, origin centre, y up).
+    /// The click (or, with flag bit 3, the pointer), layout units (1280 × 720 view, origin
+    /// centre, y up).
     pub click_x: f32,
     pub click_y: f32,
     /// A key typed this tick while a text field is open (`MMK_FRONT_TYPING`): a Unicode scalar,
@@ -966,8 +970,10 @@ fn front_input(i: &MmkFrontInput) -> FrontInput {
         skip: i.flags & 2 != 0,
         click: (i.flags & 4 != 0).then_some([i.click_x, i.click_y]),
         text: char::from_u32(i.text).filter(|&c| c != '\0'),
-        // (the C input has no pointer or Course Maker keys yet: taps come as clicks)
-        ..Default::default()
+        pointer: (i.flags & 8 != 0).then_some([i.click_x, i.click_y]),
+        pointer_down: i.flags & 16 != 0,
+        pointer_alt: i.flags & 32 != 0,
+        keys: ((i.flags >> 8) & 0xff) as u16,
     }
 }
 

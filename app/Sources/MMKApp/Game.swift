@@ -82,6 +82,8 @@ final class GameSession: ObservableObject, Identifiable {
     private var items: [MmkFrontItem] = []
     private var layers: [UInt32: UILayer] = [:]
     private var click: SIMD2<Float>?
+    /// The finger / mouse while it is down (the Course Maker drags with it).
+    private var pointer: SIMD2<Float>?
     private var pausePending = false
     private var reportedDone = false
 
@@ -254,12 +256,23 @@ final class GameSession: ObservableObject, Identifiable {
 
     /// A click / tap at `point` of a view `size` (points): the 16:9 view is letterboxed into it.
     func click(at point: CGPoint, in size: CGSize) {
-        guard size.width > 0, size.height > 0 else { return }
+        if let p = layoutPoint(point, in: size) { click = p }
+    }
+
+    /// The finger / mouse is down at `point` (nil: it was lifted).
+    func pointer(at point: CGPoint?, in size: CGSize) {
+        pointer = point.flatMap { layoutPoint($0, in: size) }
+    }
+
+    /// `point` of a view `size` in layout units (1280 × 720, origin centre, y up), nil outside the
+    /// letterboxed 16:9 view.
+    private func layoutPoint(_ point: CGPoint, in size: CGSize) -> SIMD2<Float>? {
+        guard size.width > 0, size.height > 0 else { return nil }
         let scale = min(size.width / 16, size.height / 9)
         let w = 16 * scale, h = 9 * scale
         let u = (point.x - (size.width - w) / 2) / w, v = (point.y - (size.height - h) / 2) / h
-        guard (0...1).contains(u), (0...1).contains(v) else { return }
-        click = SIMD2(Float((u - 0.5) * 1280), Float((0.5 - v) * 720))
+        guard (0...1).contains(u), (0...1).contains(v) else { return nil }
+        return SIMD2(Float((u - 0.5) * 1280), Float((0.5 - v) * 720))
     }
 
     private func frontTick(_ front: OpaquePointer, first: Bool) {
@@ -281,6 +294,12 @@ final class GameSession: ObservableObject, Identifiable {
             i.flags |= 1
         }
         if !InputState.typed.isEmpty { i.text = InputState.typed.removeFirst() }
+        if let p = pointer {
+            // a finger / mouse held down: the pointer (the click, if any, is at the same place)
+            i.flags |= 8 | 16
+            i.click_x = p.x
+            i.click_y = p.y
+        }
         if first, let c = click {
             click = nil
             i.flags |= 4
@@ -599,6 +618,12 @@ struct GameView: View {
                 MetalView(session: session)
                     .gesture(SpatialTapGesture().onEnded { session.click(at: $0.location, in: geo.size) },
                              including: session.front != nil ? .all : .none)
+                    // (the Course Maker paints, carries and erases with the finger held down)
+                    .simultaneousGesture(
+                        DragGesture(minimumDistance: 0)
+                            .onChanged { session.pointer(at: $0.location, in: geo.size) }
+                            .onEnded { _ in session.pointer(at: nil, in: geo.size) },
+                        including: session.front != nil ? .all : .none)
                 if session.front == nil {
                     switch session.phase {
                     case .playing: EmptyView()

@@ -609,3 +609,42 @@ fn save_as_picks_a_coursebot_slot_and_comes_back_and_load_opens_a_course() {
     assert_eq!(m.editor.course.header.name.to_string_lossy(), "Slot test");
     assert_eq!(m.entry.as_deref(), Some("slot:0"));
 }
+
+#[test]
+fn a_finger_paints_and_its_closing_tap_does_nothing_more() {
+    let (mut host, mut saves) = (MockHost::default(), Saves::default());
+    let mut m = maker(&mut host, &mut saves, MakerStart::New("M1".into()));
+    run(&mut m, &mut host, &mut saves, idle());
+    let at = |m: &MakerFlow, t: (i32, i32)| m.tile_center(t);
+    let finger = |p: [f32; 2]| MakerInput {
+        pointer: Some(p),
+        down: true,
+        ..Default::default()
+    };
+    // ground (slot 0) painted along the drag
+    let p = at(&m, (20, 5));
+    run(&mut m, &mut host, &mut saves, finger(p));
+    for x in 21..24 {
+        let p = at(&m, (x, 5));
+        run(&mut m, &mut host, &mut saves, finger(p));
+    }
+    run(&mut m, &mut host, &mut saves, idle());
+    assert!((20..24).all(|x| m.editor.has_ground(x, 5)));
+    // the tap the touch ends with lands where the finger started: ignored (it would erase
+    // nothing here but would place a second time)
+    let tap = MakerInput {
+        ui: UiInput {
+            click: Some(at(&m, (26, 5))),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    run(&mut m, &mut host, &mut saves, tap);
+    assert!(!m.editor.has_ground(26, 5));
+    // a lone tap later places
+    for _ in 0..TAP_AFTER {
+        run(&mut m, &mut host, &mut saves, idle());
+    }
+    run(&mut m, &mut host, &mut saves, tap);
+    assert!(m.editor.has_ground(26, 5));
+}

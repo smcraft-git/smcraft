@@ -225,6 +225,8 @@ pub struct MakerFlow {
     upload_call: Option<u32>,
     /// Captures: scripted input by maker tick.
     script: Vec<(i32, String)>,
+    /// The last tick a pointer was seen.
+    pointer_tick: i32,
     /// The clear-condition window while open.
     mission: Option<mission::MissionWindow>,
     /// The animation that opened the left window.
@@ -302,6 +304,7 @@ impl MakerFlow {
             window_timer: 300,
             upload_call: None,
             script: Vec::new(),
+            pointer_tick: -1000,
             mission: None,
             window_tab: "ChangeTab00",
             dirty: true,
@@ -658,10 +661,16 @@ impl MakerFlow {
         }
         // a click / press on the page's buttons
         let pointer_pressed = input.down && !self.down_was;
-        let click = input
+        // a tap that ends a finger's press arrives after it (the app's touches): the press did
+        // the work
+        if input.pointer.is_some() {
+            self.pointer_tick = self.tick;
+        }
+        let tap = input
             .ui
             .click
-            .or(if pointer_pressed { input.pointer } else { None });
+            .filter(|_| pointer_pressed || self.tick - self.pointer_tick > TAP_AFTER);
+        let click = tap.or(if pointer_pressed { input.pointer } else { None });
         if let Some(p) = click
             && self.page_click(p, cx)
         {
@@ -681,7 +690,7 @@ impl MakerFlow {
         }
         // a tap without a pointer (touch): put down / erase / pick up once where it lands
         if input.pointer.is_none()
-            && let Some(p) = input.ui.click
+            && let Some(p) = tap
             && self.drag.is_none()
         {
             self.glove = p;
@@ -2634,6 +2643,9 @@ impl MakerFlow {
 
 /// The scroll bar handle's width (`N_TransRoot_00` of `Edit_SlideAreaBtnH_00`) [obs data].
 const HANDLE: f32 = 110.0;
+
+/// Ticks after a pointer press within which a tap is the press's own.
+const TAP_AFTER: i32 = 30;
 
 /// Holding the test-play key this long plays from the start (the clapperboard's HoldWait 70)
 /// [obs data].
