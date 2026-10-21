@@ -736,6 +736,7 @@ pub unsafe extern "C" fn mmk_front_new(
             instant_fades: o.flags & MMK_FRONT_INSTANT_FADES != 0,
             script: opt_str(o.script).unwrap_or_default(),
             title_input: opt_str(o.title_input).unwrap_or_default(),
+            ..Default::default()
         };
         let front = Front::new(smm2, smm1, options, &mut h);
         Box::into_raw(Box::new(MmkFront {

@@ -160,7 +160,23 @@ pub fn glove(f: &MakerFlow) -> Option<DrawItem> {
         "NormalCursor"
     };
     let p = f.glove_at();
-    let quads = match texture(f, name) {
+    let mut quads = Vec::new();
+    // the carried part rides under the glove (its palette picture)
+    if let Some(t) = f.carried_part().and_then(|part| f.part_texture(part)) {
+        let s = 16.0 * SCALE;
+        quads.push(quad(
+            [
+                p[0] - s * 0.5,
+                p[1] - s * 0.62,
+                p[0] + s * 0.5,
+                p[1] + s * 0.62,
+            ],
+            t,
+            FULL,
+            [255, 255, 255, 220],
+        ));
+    }
+    quads.extend(match texture(f, name) {
         // the fingertip at the cursor: the glove's top-left quarter points [inf]
         Some(t) => {
             let s = 112.0;
@@ -193,7 +209,7 @@ pub fn glove(f: &MakerFlow) -> Option<DrawItem> {
                 ),
             ]
         }
-    };
+    });
     Some(DrawItem::Layout {
         ui: UiKind::Smm2,
         size: [1280.0, 720.0],

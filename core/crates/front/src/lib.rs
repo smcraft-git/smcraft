@@ -204,6 +204,9 @@ pub struct Options {
     pub script: String,
     /// Captures: title presses at title ticks (`MMK_UI_INPUT`).
     pub title_input: String,
+    /// Captures of the maker: open this course file, else a new course in this style.
+    pub maker_course: Option<String>,
+    pub maker_style: String,
 }
 
 impl Default for Options {
@@ -218,6 +221,8 @@ impl Default for Options {
             instant_fades: false,
             script: String::new(),
             title_input: String::new(),
+            maker_course: None,
+            maker_style: "M1".into(),
         }
     }
 }
@@ -702,7 +707,16 @@ impl Front {
             "storymode" => self.show_world(host, ListKind::Story, 0),
             // the Course Maker: a new course (maker), its windows, test play
             s if s == "maker" || s.starts_with("maker-") => {
-                self.show_maker(host, MakerStart::New);
+                // (a course to open: `maker_course`; a new one in `maker_style`)
+                let start = match self.opts.maker_course.clone() {
+                    Some(path) => MakerStart::Open {
+                        source: Source::Library(path),
+                        entry: None,
+                        based_on: None,
+                    },
+                    None => MakerStart::New(self.opts.maker_style.clone()),
+                };
+                self.show_maker(host, start);
                 if let Some(what) = s.strip_prefix("maker-") {
                     let (mut cx, scr) = self.cx(host);
                     let Screen::Maker(m) = scr else {

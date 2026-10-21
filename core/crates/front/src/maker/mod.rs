@@ -111,7 +111,8 @@ pub enum MakerEvent {
 pub enum MakerStart {
     /// The draft if there is one, else a new course.
     Resume,
-    New,
+    /// A new course in a game style ("M1" …).
+    New(String),
     /// A library / server course: its Coursebot id (saving overwrites it) or, for someone
     /// else's course, the credit line its copies carry.
     Open {
@@ -231,7 +232,7 @@ impl MakerFlow {
                 Some(d) => d,
                 None => (new_course("M1"), None, None),
             },
-            MakerStart::New => (new_course("M1"), None, None),
+            MakerStart::New(style) => (new_course(&style), None, None),
             MakerStart::Open {
                 source,
                 entry,
@@ -484,7 +485,8 @@ impl MakerFlow {
         let Some(r) = page.rect("L_Slider_00/L_SlideBarH_00/B_ScrollArea_00") else {
             return;
         };
-        let f = ((p[0] - (r.center[0] - r.size[0] / 2.0)) / r.size[0]).clamp(0.0, 1.0);
+        let travel = (r.size[0] - HANDLE).max(1.0);
+        let f = ((p[0] - (r.center[0] - travel / 2.0)) / travel).clamp(0.0, 1.0);
         let (w, _) = self.editor.size();
         self.cam[0] = f * (w as f32 * TILE - VIEW_W).max(0.0);
         self.clamp_cam();
@@ -498,7 +500,8 @@ impl MakerFlow {
         if let Some(p) = &mut self.page {
             p.set_translate(
                 "L_Slider_00/L_SlideBarH_00/N_TransRoot_00",
-                [-350.0 + 700.0 * f, 0.0],
+                // between the ends of the 700-unit bar (−350 … 350), the handle inside it
+                [-350.0 + HANDLE / 2.0 + (700.0 - HANDLE) * f, 0.0],
             );
         }
     }
@@ -754,9 +757,20 @@ impl MakerFlow {
 
     fn press_place(&mut self, cx: &mut crate::Cx) {
         let (tx, ty) = self.cur;
-        // a part under the cursor is picked up (ground isn't a part)
+        // a part under the cursor takes the selected part in (a block's item, a pipe's
+        // contents, a Super Mushroom makes it big), else it is picked up (ground isn't a part)
         if let Some(i) = self.editor.object_at(tx, ty) {
             self.editor.checkpoint();
+            if let Tool::Part(p) = self.tool()
+                && self.put_into(i, p)
+            {
+                self.changed();
+                self.drag = Some(Drag::Place {
+                    last: self.cur,
+                    changed: true,
+                });
+                return;
+            }
             self.drag = Some(Drag::Carry {
                 index: i,
                 from: (tx, ty),
@@ -831,6 +845,17 @@ impl MakerFlow {
             self.editor.discard_checkpoint();
             return;
         };
+        // dropped on another part that takes it in: it goes inside
+        if let Some(t) = self
+            .editor
+            .object_at(self.cur.0, self.cur.1)
+            .filter(|&t| t != index)
+            && self.put_into(t, o.id)
+        {
+            self.editor.erase_object(index);
+            self.changed();
+            return;
+        }
         if dx == 0 && dy == 0 {
             // a press without a move: the part's alternate form, as a tap on a part does
             // [inf]
@@ -851,6 +876,42 @@ impl MakerFlow {
                 refuse(cx, &self.ui, &e);
             }
         }
+    }
+
+    /// Part `part` goes into (or onto) the placed part `i`: a container's contents (blocks,
+    /// Bill Blasters, Lakitu, trees, checkpoints, a pipe's), or a Super Mushroom makes it big
+    /// [inf: as dropping an item on a part does in the game]. True if something changed.
+    fn put_into(&mut self, i: usize, part: i16) -> bool {
+        let Some(o) = self.editor.object(i).cloned() else {
+            return false;
+        };
+        if o.id == 9 {
+            return self.editor.put_in_pipe(i, part).is_ok();
+        }
+        if o.child_id != part && mmk_editor::rules::check_child(o.id, part).is_ok() {
+            return self.editor.try_set_child(i, part, DEFAULT_FLAGS).is_ok();
+        }
+        if part == 20 && mmk_editor::parts::caps(o.id).big && !o.is_big() {
+            return self.editor.toggle_big(i).is_ok();
+        }
+        false
+    }
+
+    /// What is being carried (its part id), for the glove's picture.
+    pub fn carried_part(&self) -> Option<i16> {
+        match self.drag {
+            Some(Drag::Carry { index, .. }) => self.editor.object(index).map(|o| o.id),
+            _ => None,
+        }
+    }
+
+    /// The part picture's UI texture (the palette's), if loaded.
+    pub fn part_texture(&self, part: i16) -> Option<u32> {
+        let name = self.icon_key(&self.style(), part)?;
+        self.ui
+            .cache_mut()
+            .texture_file("PartIcon", &name)
+            .map(|t| t.id)
     }
 
     fn toggle_eraser(&mut self) {
@@ -2255,6 +2316,9 @@ impl MakerFlow {
         }
     }
 }
+
+/// The scroll bar handle's width (`N_TransRoot_00` of `Edit_SlideAreaBtnH_00`) [obs data].
+const HANDLE: f32 = 110.0;
 
 /// Holding the test-play key this long plays from the start (the clapperboard's HoldWait 70)
 /// [obs data].

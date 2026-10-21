@@ -62,7 +62,7 @@ fn maker(host: &mut MockHost, saves: &mut Saves, start: MakerStart) -> MakerFlow
 #[test]
 fn a_new_course_is_shown_and_parts_go_down_where_the_cursor_is() {
     let (mut host, mut saves) = (MockHost::default(), Saves::default());
-    let mut m = maker(&mut host, &mut saves, MakerStart::New);
+    let mut m = maker(&mut host, &mut saves, MakerStart::New("M1".into()));
     assert!(m.shown && host.shows == 1, "the host draws the course");
     assert!(m.editor.has_ground(20, 0), "one row of ground");
     assert_eq!(m.tool(), Tool::Ground);
@@ -84,7 +84,7 @@ fn a_new_course_is_shown_and_parts_go_down_where_the_cursor_is() {
 #[test]
 fn ground_paints_while_held_and_back_erases() {
     let (mut host, mut saves) = (MockHost::default(), Saves::default());
-    let mut m = maker(&mut host, &mut saves, MakerStart::New);
+    let mut m = maker(&mut host, &mut saves, MakerStart::New("M1".into()));
     m.cur = (20, 4);
     run(&mut m, &mut host, &mut saves, press(Buttons::CONFIRM));
     // hold confirm and move right: the cursor steps a tile on the press, then repeats
@@ -116,7 +116,7 @@ fn ground_paints_while_held_and_back_erases() {
 #[test]
 fn a_part_picked_up_moves_with_the_cursor() {
     let (mut host, mut saves) = (MockHost::default(), Saves::default());
-    let mut m = maker(&mut host, &mut saves, MakerStart::New);
+    let mut m = maker(&mut host, &mut saves, MakerStart::New("M1".into()));
     m.editor.place(5, 15, 4).unwrap();
     m.cur = (15, 4);
     run(&mut m, &mut host, &mut saves, press(Buttons::CONFIRM));
@@ -131,7 +131,7 @@ fn a_part_picked_up_moves_with_the_cursor() {
 #[test]
 fn the_part_window_puts_its_choice_at_the_front_of_the_palette() {
     let (mut host, mut saves) = (MockHost::default(), Saves::default());
-    let mut m = maker(&mut host, &mut saves, MakerStart::New);
+    let mut m = maker(&mut host, &mut saves, MakerStart::New("M1".into()));
     run(&mut m, &mut host, &mut saves, keys(keys::PARTS));
     assert_eq!(m.mode, Mode::Ring);
     // Ground is the first Terrain part; one to the right is the gentle slope
@@ -158,7 +158,7 @@ fn the_part_window_puts_its_choice_at_the_front_of_the_palette() {
 #[test]
 fn test_play_starts_where_asked_and_comes_back() {
     let (mut host, mut saves) = (MockHost::default(), Saves::default());
-    let mut m = maker(&mut host, &mut saves, MakerStart::New);
+    let mut m = maker(&mut host, &mut saves, MakerStart::New("M1".into()));
     // a tap of the test-play key (once it was up): from Mario (the start at first)
     run(&mut m, &mut host, &mut saves, idle());
     let mut i = idle();
@@ -190,7 +190,7 @@ fn test_play_starts_where_asked_and_comes_back() {
 #[test]
 fn saving_keeps_the_entry_and_copies_of_others_courses_are_new_and_credited() {
     let (mut host, mut saves) = (MockHost::default(), Saves::default());
-    let mut m = maker(&mut host, &mut saves, MakerStart::New);
+    let mut m = maker(&mut host, &mut saves, MakerStart::New("M1".into()));
     with(&mut host, &mut saves, |cx| {
         m.save_to_coursebot(cx.host, false)
     })
@@ -249,7 +249,7 @@ fn course_data_survives_the_draft_text() {
 #[test]
 fn layouts_and_view_coordinates() {
     let (mut host, mut saves) = (MockHost::default(), Saves::default());
-    let mut m = maker(&mut host, &mut saves, MakerStart::New);
+    let mut m = maker(&mut host, &mut saves, MakerStart::New("M1".into()));
     // a tile's centre on screen and back
     let p = m.tile_center((3, 2));
     assert_eq!(m.tile_at(p), (3, 2));
@@ -322,7 +322,7 @@ fn make_save_and_find_it_in_the_coursebot() {
 #[test]
 fn the_left_column_windows_change_timer_autoscroll_style_and_theme() {
     let (mut host, mut saves) = (MockHost::default(), Saves::default());
-    let mut m = maker(&mut host, &mut saves, MakerStart::New);
+    let mut m = maker(&mut host, &mut saves, MakerStart::New("M1".into()));
     m.open_window(2);
     for b in [Buttons::UP, Buttons::UP, Buttons::RIGHT, Buttons::CONFIRM] {
         run(&mut m, &mut host, &mut saves, press(b));
@@ -362,7 +362,7 @@ fn the_scroll_bar_jumps_to_the_goal_and_back() {
     };
     let (mut host, mut saves) = (MockHost::default(), Saves::default());
     let mut m = with(&mut host, &mut saves, |cx| {
-        MakerFlow::new(&ui, cx, MakerStart::New)
+        MakerFlow::new(&ui, cx, MakerStart::New("M1".into()))
     });
     for _ in 0..30 {
         run(&mut m, &mut host, &mut saves, idle());
@@ -446,4 +446,38 @@ fn upload_sends_the_saved_course_with_its_credit_and_load_goes_to_the_coursebot(
         }
     }
     assert_eq!(ev, Some(MakerEvent::Coursebot));
+}
+
+#[test]
+fn items_go_into_blocks_and_a_mushroom_makes_an_enemy_big() {
+    let (mut host, mut saves) = (MockHost::default(), Saves::default());
+    let mut m = maker(&mut host, &mut saves, MakerStart::New("M1".into()));
+    let q = m.editor.place(5, 15, 4).unwrap();
+    let g = m.editor.place(0, 20, 1).unwrap();
+    // the Super Mushroom slot on the ? block: inside; on the Goomba: a big Goomba
+    m.slot = m.palette.iter().position(|&t| t == Tool::Part(20)).unwrap();
+    m.cur = (15, 4);
+    run(&mut m, &mut host, &mut saves, press(Buttons::CONFIRM));
+    run(&mut m, &mut host, &mut saves, idle());
+    assert_eq!(m.editor.object(q).unwrap().child_id, 20);
+    m.cur = (20, 1);
+    run(&mut m, &mut host, &mut saves, press(Buttons::CONFIRM));
+    run(&mut m, &mut host, &mut saves, idle());
+    assert!(m.editor.object(g).unwrap().is_big());
+    // one undo step each
+    run(&mut m, &mut host, &mut saves, keys(keys::UNDO));
+    run(&mut m, &mut host, &mut saves, idle());
+    assert!(!m.editor.object(g).unwrap().is_big());
+    // a coin carried onto a brick goes inside it
+    let b = m.editor.place(4, 30, 4).unwrap();
+    m.editor.place(8, 33, 4).unwrap();
+    m.cur = (33, 4);
+    run(&mut m, &mut host, &mut saves, press(Buttons::CONFIRM));
+    assert!(m.carrying());
+    m.cur = (30, 4);
+    run(&mut m, &mut host, &mut saves, held(Buttons::CONFIRM));
+    run(&mut m, &mut host, &mut saves, idle());
+    let brick = m.editor.object_at(30, 4).unwrap();
+    assert_eq!(m.editor.object(brick).unwrap().child_id, 8, "{b}");
+    assert!(m.editor.object_at(33, 4).is_none(), "the coin went in");
 }
