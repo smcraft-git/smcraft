@@ -1,7 +1,12 @@
 //! Client of the open-source course server (`mmk-server`, Phase 10): Course World browsing,
 //! downloads, uploads and statistics, a [`CourseSource`] so 100 Mario runs can draw their
 //! courses from a server, and the server-held Endless Challenge runs (`Client::endless_*`).
-//! Never talks to Nintendo's network.
+//! [`tgrcode`]: the read-only client of TGRCode's API over Nintendo's Course World; [`world`]:
+//! the Course World backend the hosts use (TGRCode, our server or the library). Never talks to
+//! Nintendo's network itself.
+
+pub mod tgrcode;
+pub mod world;
 
 use mmk_modes::Rng;
 use mmk_modes::endless::{Difficulty, Finished, HistoryEntry, Report, Ruleset, RunStatus};
@@ -457,6 +462,23 @@ impl Client {
         r.body_mut()
             .with_config()
             .limit(0x80000)
+            .read_to_vec()
+            .map_err(|e| e.to_string())
+    }
+
+    /// A course's thumbnail (`entire`: the whole-course map), a JPEG.
+    pub fn thumbnail(&self, code: &str, entire: bool) -> Result<Vec<u8>> {
+        let kind = if entire {
+            "entire_thumbnail"
+        } else {
+            "thumbnail"
+        };
+        let mut r = ureq::get(&format!("{}/api/courses/{code}/{kind}", self.base))
+            .call()
+            .map_err(|e| e.to_string())?;
+        r.body_mut()
+            .with_config()
+            .limit(1 << 20)
             .read_to_vec()
             .map_err(|e| e.to_string())
     }

@@ -1,16 +1,16 @@
 [package]
 name = "mmk-online"
-description = "Client for the open-source course server (mmk-server): search, download, upload, 100 Mario pools"
+description = "Clients for Course World: the open-source course server (mmk-server) and TGRCode (read-only, tgrcode.com/mm2)"
 edition.workspace = true
 version.workspace = true
 license.workspace = true
 publish.workspace = true
 
 [dependencies]
+mmk-formats = { path = "../formats" }
 mmk-modes = { path = "../modes" }
 serde_json.workspace = true
 ureq = "3.4.2"
 
 [dev-dependencies]
 mmk-server = { path = "../server" }
-mmk-formats = { path = "../formats" }
