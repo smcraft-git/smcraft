@@ -2668,15 +2668,10 @@ const SCENE_KEYS: [&str; 10] = [
     "Wood",
 ];
 
-/// The pane of palette slot `i` (left to right) [obs data: `L_PaletteBtn_01` is the leftmost
-/// … `_11`, then `_00`, see `slot_order`].
+/// The pane of palette slot `i` (left to right).
 pub fn slot_part(i: usize) -> String {
-    format!("L_PaletteBtn_{:02}", SLOT_ORDER[i.min(SLOTS - 1)])
+    format!("L_PaletteBtn_{:02}", SLOTS - 1 - i.min(SLOTS - 1))
 }
-
-/// Palette buttons from the left: `L_PaletteBtn_11` (x −482) … `_01` (x 394); `_00` sits among
-/// them at x −38, between `_06` and `_05` [obs data, positions in `Edit_PaletteSet_00`].
-const SLOT_ORDER: [usize; SLOTS] = [11, 10, 9, 8, 7, 6, 0, 5, 4, 3, 2, 1];
 
 /// A new course: `style`, Ground, 240 tiles wide, one row of ground [inf].
 pub fn new_course(style: &str) -> Editor {
