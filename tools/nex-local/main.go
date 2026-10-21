@@ -5,7 +5,8 @@
 // build script (scripts/nex-local.sh) fetches it, or points at a local clone, and links it
 // into a binary that stays in core/target/. It never talks to nextendo.network.
 //
-// What it runs, both on 127.0.0.1 only, plain WebSocket (no TLS):
+// What it runs, both on 127.0.0.1 only, plain WebSocket (with -tls: TLS with a throwaway
+// self-signed certificate for "nex-local.test", whose key pin it prints):
 //   - the authentication server (TicketGranting): ValidateAndRequestTicketWithParam and
 //     LoginEx. A login is accepted when the ID token in its extra data carries, in its
 //     `nnex` claim, an "nx2." game token signed with -token-secret, for the PID that logs
@@ -13,16 +14,23 @@
 //   - the secure server: SecureConnection, NATTraversal, MatchMaking, MatchmakeExtension and
 //     MatchMakingExt from the library, as a game server would register them.
 //
-// On start it prints one line, "READY auth=<ip:port> secure=<ip:port>", then logs requests.
+// On start it prints one line, "READY auth=<ip:port> secure=<ip:port>" (and with -tls
+// "pin=<SHA-256 of the certificate's SubjectPublicKeyInfo>"), then logs requests.
 package main
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/base64"
 	"flag"
 	"fmt"
+	"math/big"
 	"net"
 	"net/http"
 	"os"
@@ -41,6 +49,7 @@ func main() {
 	nexVersion := flag.Int("nex-version", 40605, "the NEX version the server encodes for")
 	secret := flag.String("token-secret", "", "the key nx2 game tokens are signed with")
 	securePassword := flag.String("secure-password", "", "the secure server account's password (random when empty)")
+	useTLS := flag.Bool("tls", false, "serve TLS (a throwaway self-signed certificate)")
 	flag.Parse()
 	if *accessKey == "" || *secret == "" {
 		fmt.Fprintln(os.Stderr, "nex-local: -access-key and -token-secret are required")
@@ -53,6 +62,11 @@ func main() {
 	authLn := listen()
 	secureLn := listen()
 	securePort := secureLn.Addr().(*net.TCPAddr).Port
+	pin := ""
+	if *useTLS {
+		cfg, p := selfSigned()
+		authLn, secureLn, pin = tls.NewListener(authLn, cfg), tls.NewListener(secureLn, cfg), " pin="+p
+	}
 
 	settings := nex.NewSwitchSettings(*accessKey, *nexVersion)
 
@@ -97,9 +111,37 @@ func main() {
 	}
 	auth.Register(nex.ProtocolTicketGranting, cfg.Handler())
 
-	fmt.Printf("READY auth=%s secure=%s\n", authLn.Addr(), secureLn.Addr())
+	fmt.Printf("READY auth=%s secure=%s%s\n", authLn.Addr(), secureLn.Addr(), pin)
 	go serve(secureLn, nex.NewServer(secure))
 	serve(authLn, nex.NewServer(auth))
+}
+
+// selfSigned makes a throwaway P-256 certificate for "nex-local.test" and returns the TLS
+// configuration (ALPN http/1.1 only, as NEX's WebSocket upgrade needs) and the key pin.
+func selfSigned() (*tls.Config, string) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		panic(err)
+	}
+	tmpl := &x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		Subject:      pkix.Name{CommonName: "nex-local.test"},
+		DNSNames:     []string{"nex-local.test"},
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     time.Now().Add(24 * time.Hour),
+		KeyUsage:     x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	if err != nil {
+		panic(err)
+	}
+	cert, _ := x509.ParseCertificate(der)
+	sum := sha256.Sum256(cert.RawSubjectPublicKeyInfo)
+	return &tls.Config{
+		Certificates: []tls.Certificate{{Certificate: [][]byte{der}, PrivateKey: key}},
+		NextProtos:   []string{"http/1.1"},
+	}, fmt.Sprintf("%x", sum)
 }
 
 func listen() net.Listener {

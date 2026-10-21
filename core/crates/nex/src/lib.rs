@@ -6,7 +6,8 @@
 //!
 //! The layers, bottom up (all written from the public protocol documentation, kinnay's
 //! NintendoClients wiki, and checked byte for byte against nextendo-nex, the server):
-//! - [`ws`]: a WebSocket client (the Switch carries NEX over WebSocket, behind TLS on :443);
+//! - [`ws`]: a WebSocket client (the Switch carries NEX over WebSocket, behind TLS on :443),
+//!   and [`tls`]: TLS with the game server's key pinned;
 //! - [`prudp`]: PRUDP Lite packets (and the older V1 codec);
 //! - [`conn`]: a PRUDP Lite connection: handshake, reliable ordered delivery, fragments, acks,
 //!   pings;
@@ -33,6 +34,7 @@ pub mod prudp;
 pub mod rmc;
 pub mod station;
 pub mod stream;
+pub mod tls;
 pub mod token;
 pub mod ws;
 
