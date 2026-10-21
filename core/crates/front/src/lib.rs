@@ -27,6 +27,7 @@ pub mod screens;
 pub mod search;
 pub mod smm1;
 pub mod sound;
+pub mod superworld;
 #[cfg(test)]
 pub(crate) mod testing;
 #[cfg(test)]
@@ -114,6 +115,9 @@ pub enum Go {
     },
     World(WorldGo),
     Challenge(ChallengeGo),
+    /// Course World's Super Worlds.
+    ShowSuperWorlds,
+    SuperWorld(superworld::SuperWorldGo),
 }
 
 /// Where the 100 Mario Challenge returns to.
@@ -219,6 +223,7 @@ pub enum Screen {
     Title(Box<Title>),
     World(Box<WorldFlow>),
     Challenge(Box<ChallengeFlow>, Back),
+    SuperWorld(Box<superworld::SuperWorldFlow>),
     /// One course with the SMM2 screens (the Swift app's library play / `MMK_COURSE`).
     Course(Box<play::CoursePlay>),
     None,
@@ -351,6 +356,17 @@ impl Front {
         *screen = Screen::Challenge(Box::new(flow), back);
     }
 
+    fn show_super_worlds(&mut self, host: &mut dyn Host) {
+        host.unload_course();
+        let lib = host.library();
+        let smm2 = self.smm2.clone();
+        let script = self.opts.script.clone();
+        let (mut cx, screen) = self.cx(host);
+        let mut f = superworld::SuperWorldFlow::new(&smm2, lib, &mut cx);
+        f.script = Script::parse(&script);
+        *screen = Screen::SuperWorld(Box::new(f));
+    }
+
     /// Play one course with the SMM2 screens (already loaded by the host): `intro` the card
     /// first. Unlimited retries, as library play.
     pub fn play_course(
@@ -404,6 +420,13 @@ impl Front {
                 let (mut cx, screen) = self.cx(host);
                 if let Screen::Challenge(f, _) = screen {
                     f.go(&mut cx, c);
+                }
+            }
+            Go::ShowSuperWorlds => self.show_super_worlds(host),
+            Go::SuperWorld(g) => {
+                let (mut cx, screen) = self.cx(host);
+                if let Screen::SuperWorld(f) = screen {
+                    f.go(&mut cx, g);
                 }
             }
         }
@@ -481,6 +504,9 @@ impl Front {
                         },
                     ));
                 }
+                Some(WorldEvent::SuperWorlds) => {
+                    after = Some((FadeKind::Black, Go::ShowSuperWorlds));
+                }
                 Some(WorldEvent::Endless) => {
                     after = Some((
                         FadeKind::Black,
@@ -505,6 +531,12 @@ impl Front {
                             Back::CourseWorld => Go::CourseWorld { selection: 3 },
                         },
                     ));
+                }
+            }
+            Screen::SuperWorld(f) => {
+                if f.step(&play, &mut cx) == Some(superworld::SuperWorldEvent::Exit) {
+                    // back to Course World's hub on its Super Worlds button [inf]
+                    after = Some((FadeKind::Black, Go::CourseWorld { selection: 5 }));
                 }
             }
             Screen::Course(p) => {
@@ -542,6 +574,7 @@ impl Front {
             Screen::Title(t) => t.draw(&mut items),
             Screen::World(f) => f.draw(&mut items),
             Screen::Challenge(f, _) => f.draw(&mut items),
+            Screen::SuperWorld(f) => f.draw(&mut items),
             Screen::Course(p) => p.draw(&mut items),
             Screen::None => {}
         }
@@ -559,6 +592,7 @@ impl Front {
             Screen::Course(p) => Some(&mut **p),
             Screen::World(w) => w.playing(),
             Screen::Challenge(c, _) => c.playing.as_mut(),
+            Screen::SuperWorld(f) => f.playing(),
             _ => None,
         };
         p.is_some_and(|p| p.phase == play::Phase::Playing)
@@ -578,7 +612,8 @@ impl Front {
     /// courseworld-leaderboards, courseworld-course-page / -comments / -post / -maker / -play /
     /// -pause / -clear of the list's first server course), challenge, challenge-map,
     /// challenge-walk, challenge-gameover, challenge-ending (`difficulty`, `cleared` for the
-    /// walk). Returns false for an unknown name.
+    /// walk), superworld, superworld-title / -map / -walk / -play / -ending (the library's test
+    /// world; `cleared` for the map). Returns false for an unknown name.
     pub fn capture(
         &mut self,
         host: &mut dyn Host,
@@ -689,6 +724,22 @@ impl Front {
                 self.run_now(host);
             }
             "storymode" => self.show_world(host, ListKind::Story, 0),
+            // Super Worlds over the library's test world: the planets, its title, the map
+            // (`cleared` courses of world 1 cleared, Mario on the next), its first course, the end
+            s if s.starts_with("superworld") => {
+                self.show_super_worlds(host);
+                if s != "superworld" {
+                    let what = &s["superworld-".len().min(s.len())..];
+                    let (mut cx, scr) = self.cx(host);
+                    let Screen::SuperWorld(f) = scr else {
+                        return false;
+                    };
+                    if !f.debug_open(&mut cx, what, cleared) {
+                        return false;
+                    }
+                }
+                self.run_now(host);
+            }
             s if s.starts_with("challenge") => {
                 self.show_challenge(host, None, Back::Title);
                 let (mut cx, scr) = self.cx(host);

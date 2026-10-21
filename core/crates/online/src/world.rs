@@ -122,6 +122,31 @@ impl Backend {
         }
     }
 
+    /// A Super World to play (TGRCode only): [`tgrcode::call`]'s `super_world` answer with its
+    /// map decrypted with the asset pack's world-map key table (`world_table`, read only when
+    /// needed) and handed over as hex (`map`), as `mmk_modes::superworld::SuperWorld::from_json`
+    /// reads it.
+    pub fn super_world(
+        &self,
+        id: &str,
+        world_table: impl FnOnce() -> Result<Vec<u8>, String>,
+    ) -> crate::Result<Value> {
+        let Backend::TgrCode(t) = self else {
+            return Err("Super Worlds come from TGRCode (set Course World to TGRCode)".into());
+        };
+        let mut v = tgrcode::call(t, "super_world", &serde_json::json!({ "id": id }))?;
+        let blob = v["map"]
+            .as_str()
+            .and_then(base64)
+            .ok_or("TGRCode sent no world map")?;
+        let table = mmk_formats::smm2::crypto::table_from_bytes(&world_table()?)
+            .map_err(|e| e.to_string())?;
+        let map = mmk_formats::smm2::world::decrypt_blob(&blob, &table, true)
+            .map_err(|e| format!("the world map: {e}"))?;
+        v["map"] = Value::String(mmk_modes::superworld::to_hex(&map));
+        Ok(v)
+    }
+
     /// A course's thumbnail (`entire`: the whole-course map) as a JPEG.
     pub fn thumbnail(&self, code: &str, entire: bool) -> crate::Result<Vec<u8>> {
         match self {
@@ -156,6 +181,30 @@ impl Backend {
     }
 }
 
+/// Standard base64 (padding optional); None for anything else.
+pub fn base64(s: &str) -> Option<Vec<u8>> {
+    let mut out = Vec::with_capacity(s.len() * 3 / 4);
+    let (mut acc, mut bits) = (0u32, 0u32);
+    for c in s.bytes().filter(|c| !c.is_ascii_whitespace()) {
+        let v = match c {
+            b'A'..=b'Z' => c - b'A',
+            b'a'..=b'z' => c - b'a' + 26,
+            b'0'..=b'9' => c - b'0' + 52,
+            b'+' => 62,
+            b'/' => 63,
+            b'=' => break,
+            _ => return None,
+        };
+        acc = (acc << 6) | v as u32;
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            out.push((acc >> bits) as u8);
+        }
+    }
+    Some(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -171,5 +220,15 @@ mod tests {
         assert_eq!(b(Some("library"), Some("http://x")), LIBRARY);
         assert!(Backend::from_setting(None, None, None).lists_by_tab());
         assert!(!Backend::Server("http://x".into()).read_only());
+    }
+
+    #[test]
+    fn base64_decodes() {
+        assert_eq!(base64("TWFu").unwrap(), b"Man");
+        assert_eq!(base64("TWE=").unwrap(), b"Ma");
+        assert_eq!(base64("TQ==").unwrap(), b"M");
+        assert_eq!(base64("AAEC/w").unwrap(), vec![0, 1, 2, 255]);
+        assert!(base64("a*b").is_none());
+        assert!(Backend::Library.super_world("x", || Ok(vec![])).is_err());
     }
 }

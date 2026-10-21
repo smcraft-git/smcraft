@@ -131,6 +131,16 @@ pub fn key_table(source: Option<&dyn AssetSource>) -> Result<Vec<u8>, String> {
         .map_err(|e| mmk_host::course::no_key_table(format!("{}: {e}", source.describe())))
 }
 
+/// The Super World maps' key table (`mmk import` stage `myworld`).
+pub fn world_table(source: Option<&dyn AssetSource>) -> Result<Vec<u8>, String> {
+    let missing = "the asset pack has no world-map key table: run the import again (or `mmk \
+                   import-myworld`)";
+    let source = source.ok_or(missing)?;
+    source
+        .read(mmk_host::course::WORLD_TABLE)
+        .map_err(|_| missing.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

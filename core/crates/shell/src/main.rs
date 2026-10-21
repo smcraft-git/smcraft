@@ -216,7 +216,10 @@ mod native {
         /// courseworld-comments, courseworld-post, courseworld-maker, courseworld-play,
         /// courseworld-pause, courseworld-clear; challenge, challenge-map,
         /// challenge-walk, challenge-gameover, challenge-ending, challenge-pause,
-        /// challenge-clear, challenge-skip, challenge-card; with --front-course: course-intro,
+        /// challenge-clear, challenge-skip, challenge-card; superworld (the planets),
+        /// superworld-title, superworld-map, superworld-walk (--cleared courses of world 1
+        /// cleared), superworld-play, superworld-ending (the library's test world); with
+        /// --front-course: course-intro,
         /// course-pause, course-clear, course-gameover, course-timeup, course-retire,
         /// course-settings, course-death, course-play (--ticks of play with the HUD).
         #[arg(long, value_name = "NAME")]

@@ -253,6 +253,10 @@ pub struct CardInfo {
     pub mode_text: Option<String>,
     /// A course of the course server (by code): the clear screen offers Like / Boo.
     pub server_code: Option<String>,
+    /// A Super World course: the card's Super World variant (AnimMyWorld, with lives).
+    pub super_world: bool,
+    /// The Super World's world number (1–8), shown before the name ("W1", TypeMyWorld).
+    pub world_no: Option<u32>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -906,7 +910,9 @@ impl CourseScreens {
     // MARK: course card
 
     fn intro_anim(&self) -> &'static str {
-        if self.info.lives {
+        if self.info.super_world {
+            "AnimMyWorld"
+        } else if self.info.lives {
             "AnimEndlessMode"
         } else {
             "AnimDefault"
@@ -931,6 +937,17 @@ impl CourseScreens {
         let sentence = cond.map(|c| sentence(&self.ui, &c, style));
         let c = self.intro.as_mut().expect("checked");
         c.text("T_CourseName_00", &self.info.name);
+        match self.info.world_no {
+            Some(n) => {
+                c.hold("TypeMyWorld", 1.0);
+                let w = self
+                    .ui
+                    .format("Play_CourseIn_00", "T_World_Number", &[n.to_string()])
+                    .unwrap_or_else(|| format!("W{n}"));
+                c.text("T_WorldNum_00", &w);
+            }
+            None => c.hold("TypeMyWorld", 0.0),
+        }
         match self.info.maker.as_deref() {
             Some(m) if !m.is_empty() => {
                 c.hold("Maker", 1.0);
@@ -969,7 +986,7 @@ impl CourseScreens {
             c.hold("Mission", 0.0);
         }
         c.text("T_Zanki_00", &zanki);
-        for a in ["AnimEndlessMode", "AnimDefault"] {
+        for a in ["AnimMyWorld", "AnimEndlessMode", "AnimDefault"] {
             c.stop(a);
         }
         c.play(anim, self.tick);
