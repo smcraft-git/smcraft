@@ -15,6 +15,33 @@ sound-perfect as possible, that **never needs the ROM or key files to run**.
   Super Worlds. **Not** Story Mode (its core stays in the tree, its screens aren't built).
 - **Platforms:** the same as smm2recomp: macOS, iOS / iPadOS, Windows, Linux, Android, plus the web.
 
+### Paused 2026-10-22 (owner: the machine's focus is on SMM2 v0.4.0) — where this stands / next
+Everything is on `main` and pushed, except `maker-audio` (pushed as a branch; see below).
+- **Merged since the revival:** import once from the NSPs + `prod.keys` (desktop drop folder,
+  macOS / web / iOS setup screens), Course World over TGRCode, the Course Maker and the Coursebot
+  (edit any course, "based on …"), Super Worlds (2D map), SMM2's own Endless Challenge and the
+  Challenge Modes switch, the Mods page, Network Play screens over Nextendo (local test server
+  only), local co-op in the sim, Android (APK, touch controls), recomp mods, sound (keys, pink
+  coins, Burners), pixels (start sign, 2D shadow, animated blocks / coins; SMB1 ground MAE
+  2.54 → 0.85), the release workflow.
+- **Nextendo sign-in now uses the fixed redirect `http://127.0.0.1:47614/callback`.** Waiting on
+  the owner: the SMCraft app on Nextendo's portal (public client / PKCE, scopes `identity
+  game.matchmaking`, that redirect) and its client ID; the game-server access key — (a) read from
+  the player's own dump at import (recommended) or (b) one Nextendo issues. Nextendo has agreed
+  to SMCraft going online.
+- **Next, in order:**
+  1. `maker-audio`: renumber its importer version (main is at 10 from the animated blocks: make it
+     11, with `GAME_PACK_VERSION`), merge, re-import the dev cache (+1.3 GB), then the maker's
+     music / part-sound hooks (list in the branch's notes and `research/specs/maker.md` C9).
+  2. Co-op in the front end: Play Together buttons, controller set-up, co-op 100 Mario / Endless
+     (sim side done: `world/coop.rs`).
+  3. Physics: re-record all 29 trace courses (the old power-up recordings were small Mario; the
+     428 / 454 count is only sound for flat / wall / slope / water), then fix the real divergences.
+  4. Pixels: finish the 90 reference frames (`research/tools/pixel-ref/pixref.py`), the colour
+     correction table, the Swift app's shadow pass, NSMBU / 3D World.
+  5. Live Network Play once the client ID and the key choice arrive; the release (CHANGELOG
+     "Unreleased" → a version; the release workflow builds every package on a `v*` tag).
+
 ### Plan
 ✅ done · 🔄 in progress · ⬜ not started · ⏳ waiting on owner
 
