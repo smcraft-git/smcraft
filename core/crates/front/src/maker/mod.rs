@@ -166,6 +166,13 @@ enum Drag {
         grab: i32,
         changed: bool,
     },
+    /// Stretching a part by its edge: its width (right column) and / or height (top row).
+    Resize {
+        index: usize,
+        width: bool,
+        height: bool,
+        changed: bool,
+    },
 }
 
 struct Test {
@@ -784,6 +791,68 @@ impl MakerFlow {
                     self.end_drag();
                 }
             }
+            Some(Drag::Resize { .. }) => {
+                if place_held {
+                    self.drag_resize();
+                } else {
+                    self.end_drag();
+                }
+            }
+        }
+    }
+
+    /// Whether a press at tile `t` on part `i` stretches it: (width, height) when `t` is on
+    /// its right column (resizable width) / top row (resizable height) [inf: the game shows
+    /// drag handles on those edges]. Pipes stretch up only when they face up.
+    fn resize_edge(&self, i: usize, t: (i32, i32)) -> Option<(bool, bool)> {
+        let o = self.editor.object(i)?;
+        let (wr, hr) = mmk_editor::parts::resize_range(o.id)?;
+        if o.id == 9 && Dir::from_flags(o.flags) != Dir::Up {
+            return None;
+        }
+        let r = mmk_editor::parts::footprint(o);
+        let width = wr.start() != wr.end() && t.0 == r.x + r.w - 1;
+        let height = hr.start() != hr.end() && t.1 == r.y + r.h - 1;
+        (width || height).then_some((width, height))
+    }
+
+    /// The stretched part follows the cursor (within the sizes the game allows).
+    fn drag_resize(&mut self) {
+        let Some(Drag::Resize {
+            index,
+            width,
+            height,
+            ..
+        }) = self.drag
+        else {
+            return;
+        };
+        let Some(o) = self.editor.object(index).cloned() else {
+            return;
+        };
+        let Some((wr, hr)) = mmk_editor::parts::resize_range(o.id) else {
+            return;
+        };
+        let r = mmk_editor::parts::footprint(&o);
+        let (tx, ty) = self.cur;
+        let w = if width {
+            (tx - r.x + 1).clamp(*wr.start() as i32, *wr.end() as i32) as u8
+        } else {
+            o.width
+        };
+        let h = if height {
+            (ty - r.y + 1).clamp(*hr.start() as i32, *hr.end() as i32) as u8
+        } else {
+            o.height
+        };
+        if (w, h) == (o.width, o.height) {
+            return;
+        }
+        if self.editor.resize(index, w, h).is_ok() {
+            if let Some(Drag::Resize { changed, .. }) = &mut self.drag {
+                *changed = true;
+            }
+            self.changed();
         }
     }
 
@@ -894,9 +963,19 @@ impl MakerFlow {
             }
         }
         // a part under the cursor takes the selected part in (a block's item, a pipe's
-        // contents, a Super Mushroom makes it big), else it is picked up (ground isn't a part)
+        // contents, a Super Mushroom makes it big), is stretched by its edge, else it is picked
+        // up (ground isn't a part)
         if let Some(i) = self.editor.object_at(tx, ty) {
             self.editor.checkpoint();
+            if let Some((width, height)) = self.resize_edge(i, (tx, ty)) {
+                self.drag = Some(Drag::Resize {
+                    index: i,
+                    width,
+                    height,
+                    changed: false,
+                });
+                return;
+            }
             if let Tool::Part(p) = self.tool()
                 && self.put_into(i, p)
             {
@@ -966,7 +1045,8 @@ impl MakerFlow {
             Some(Drag::Place { changed, .. })
             | Some(Drag::Erase { changed })
             | Some(Drag::Start { changed })
-            | Some(Drag::Goal { changed, .. }) => changed,
+            | Some(Drag::Goal { changed, .. })
+            | Some(Drag::Resize { changed, .. }) => changed,
             _ => false,
         };
         if !changed {

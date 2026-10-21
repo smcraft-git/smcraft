@@ -648,3 +648,34 @@ fn a_finger_paints_and_its_closing_tap_does_nothing_more() {
     run(&mut m, &mut host, &mut saves, tap);
     assert!(m.editor.has_ground(26, 5));
 }
+
+#[test]
+fn semisolids_and_pipes_stretch_by_their_edges() {
+    let (mut host, mut saves) = (MockHost::default(), Saves::default());
+    let mut m = maker(&mut host, &mut saves, MakerStart::New("M1".into()));
+    let s = m.editor.place(16, 20, 1).unwrap();
+    // the top-right corner tile: both ways
+    m.cur = (22, 3);
+    run(&mut m, &mut host, &mut saves, press(Buttons::CONFIRM));
+    m.cur = (25, 6);
+    run(&mut m, &mut host, &mut saves, held(Buttons::CONFIRM));
+    run(&mut m, &mut host, &mut saves, idle());
+    let o = m.editor.object(s).unwrap();
+    assert_eq!((o.width, o.height), (6, 6));
+    // a pipe's top: longer
+    m.slot = m.palette.iter().position(|&t| t == Tool::Pipe).unwrap();
+    m.cur = (40, 1);
+    run(&mut m, &mut host, &mut saves, press(Buttons::CONFIRM));
+    run(&mut m, &mut host, &mut saves, idle());
+    let p = m.editor.object_at(40, 1).unwrap();
+    m.cur = (40, 2);
+    run(&mut m, &mut host, &mut saves, press(Buttons::CONFIRM));
+    m.cur = (40, 6);
+    run(&mut m, &mut host, &mut saves, held(Buttons::CONFIRM));
+    run(&mut m, &mut host, &mut saves, idle());
+    assert_eq!(m.editor.object(p).unwrap().height, 6);
+    // one undo step for the stretch
+    run(&mut m, &mut host, &mut saves, keys(keys::UNDO));
+    run(&mut m, &mut host, &mut saves, idle());
+    assert_eq!(m.editor.object(p).unwrap().height, 2);
+}
