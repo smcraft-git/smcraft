@@ -105,6 +105,9 @@ pub enum MakerEvent {
     StoryMode,
     CourseWorld,
     Coursebot,
+    /// The Coursebot picks a slot for the course (Save As) / a course to load.
+    SaveAs,
+    Load,
 }
 
 /// How the maker opens.
@@ -1927,15 +1930,20 @@ impl MakerFlow {
             s.play(&format!("{b}/Save"), self.tick);
         }
         match b {
-            // Load: the Coursebot, where "Make" opens a course [inf: the game lists the
-            // Coursebot's courses in its own load window]
+            // Load and Save As: the Coursebot chooses the course / the slot [obs: the editor's
+            // save page requests the Coursebot's load and save sequences, coursebot.md A.1]
             "L_LoadBtn_00" => {
                 self.save_draft(cx.host);
                 self.close_save();
-                return Some(MakerEvent::Coursebot);
+                return Some(MakerEvent::Load);
+            }
+            "L_NSaveBtn_00" => {
+                self.save_draft(cx.host);
+                self.close_save();
+                return Some(MakerEvent::SaveAs);
             }
             "L_UpLoadBtn_00" => self.upload(cx),
-            _ => match self.save_to_coursebot(cx.host, b == "L_NSaveBtn_00") {
+            _ => match self.save_to_coursebot(cx.host, false) {
                 Ok(()) => cx.toast("Saved to the Coursebot."),
                 Err(e) => cx.toast(&format!("Not saved: {e}")),
             },
@@ -1978,6 +1986,18 @@ impl MakerFlow {
     /// Save into the Coursebot: over this course's entry, or as a new one (always for someone
     /// else's course, with the credit in the description).
     pub fn save_to_coursebot(&mut self, host: &mut dyn Host, as_new: bool) -> Result<(), String> {
+        self.save_into(host, if as_new { Some(None) } else { None })
+    }
+
+    /// Save into Coursebot slot `slot` (Save As's choice).
+    pub fn save_to_slot(&mut self, host: &mut dyn Host, slot: usize) -> Result<(), String> {
+        self.save_into(host, Some(Some(slot)))
+    }
+
+    /// Save with the credit of someone else's course in the description: `to` None = over this
+    /// course's entry (a new one when it has none or is someone else's), Some(None) = a new
+    /// entry, Some(Some(slot)) = that slot.
+    fn save_into(&mut self, host: &mut dyn Host, to: Option<Option<usize>>) -> Result<(), String> {
         let mut e = Editor::open(&self.editor.save().map_err(|e| format!("{e:?}"))?)
             .map_err(|e| format!("{e:?}"))?;
         if let Some(credit) = &self.based_on {
@@ -1992,12 +2012,12 @@ impl MakerFlow {
             }
         }
         let bytes = e.save().map_err(|e| format!("{e:?}"))?;
-        let id = if as_new || self.based_on.is_some() {
-            None
-        } else {
-            self.entry.as_deref()
+        let id = match to {
+            Some(Some(slot)) => host.save_slot(slot, &bytes)?,
+            Some(None) => host.save_course(None, &bytes)?,
+            None if self.based_on.is_some() => host.save_course(None, &bytes)?,
+            None => host.save_course(self.entry.as_deref(), &bytes)?,
         };
-        let id = host.save_course(id, &bytes)?;
         self.entry = Some(id);
         self.based_on = None;
         self.editor.course = e.course;
@@ -2512,6 +2532,19 @@ impl MakerFlow {
                 Some((t.trim().parse().ok()?, w.trim().to_string()))
             })
             .collect();
+    }
+
+    /// Show the course again (coming back from the Coursebot: the host drew other things).
+    pub fn redraw(&mut self) {
+        self.dirty = true;
+        self.mode = Mode::Edit;
+        self.update_page();
+    }
+
+    /// Hand the course to the host now.
+    pub fn show_now(&mut self, cx: &mut crate::Cx) {
+        self.show(cx.host);
+        self.load_icons(cx.host);
     }
 
     /// An `EditModel` texture's id, if the import has it.

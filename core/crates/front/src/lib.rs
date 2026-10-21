@@ -14,6 +14,7 @@
 pub mod account;
 pub mod boot;
 pub mod challenge;
+pub mod coursebot;
 pub mod coursepage;
 pub mod endless;
 pub mod fade;
@@ -113,6 +114,16 @@ pub enum Go {
     },
     Enter(TitleChoice),
     Maker(MakerStart),
+    /// The Coursebot; `from_maker`: the maker's course goes with it (Save As / Load) and comes
+    /// back to the maker.
+    Coursebot {
+        mode: coursebot::BotMode,
+        from_maker: bool,
+    },
+    /// Back from the Coursebot to the maker it came from.
+    BackToMaker,
+    /// The Coursebot's list again after a play.
+    CoursebotList,
     CourseWorld {
         selection: usize,
     },
@@ -227,6 +238,102 @@ impl Default for Options {
     }
 }
 
+/// The Coursebot screen: its scene, a course played from it, the maker waiting on it.
+pub struct CoursebotFlow {
+    pub scene: coursebot::CoursebotScene,
+    pub maker: Option<Box<MakerFlow>>,
+    pub playing: Option<Box<play::CoursePlay>>,
+    leaving: bool,
+}
+
+impl CoursebotFlow {
+    fn step(&mut self, input: &PlayInput, cx: &mut Cx) -> Option<(FadeKind, Go)> {
+        use coursebot::BotEvent as E;
+        if let Some(p) = &mut self.playing {
+            if p.step(input, cx, None) == Some(play::PlayEvent::Exit) && !self.leaving {
+                self.leaving = true;
+                return Some((FadeKind::Black, Go::CoursebotList));
+            }
+            return None;
+        }
+        let back_to_maker = self.maker.is_some();
+        match self.scene.step(&input.ui, cx)? {
+            E::Back if back_to_maker => Some((FadeKind::Black, Go::BackToMaker)),
+            // back to the title's Play menu, on the Coursebot button [inf]
+            E::Back => Some((
+                FadeKind::Black,
+                Go::Title {
+                    start: title::State::Category,
+                    select: Some(2),
+                },
+            )),
+            E::SaveTo(slot) => {
+                let m = self.maker.as_mut()?;
+                match m.save_to_slot(cx.host, slot) {
+                    Ok(()) => {
+                        if let Some(t) = self.scene.frame.message("0003") {
+                            cx.toast(&t);
+                        }
+                    }
+                    Err(e) => cx.toast(&format!("Not saved: {e}")),
+                }
+                Some((FadeKind::Black, Go::BackToMaker))
+            }
+            E::Edit {
+                source,
+                entry,
+                based_on,
+            } => Some((
+                FadeKind::Black,
+                Go::Maker(MakerStart::Open {
+                    source,
+                    entry,
+                    based_on,
+                }),
+            )),
+            E::New => Some((
+                FadeKind::Black,
+                Go::Maker(MakerStart::New(
+                    self.maker
+                        .as_ref()
+                        .map_or_else(|| "M1".to_string(), |m| m.style()),
+                )),
+            )),
+            E::Play(e) => {
+                match cx.host.load_course(&Source::Library(e.id.clone())) {
+                    Ok(loaded) => {
+                        let title = if loaded.name.is_empty() {
+                            e.name.clone()
+                        } else {
+                            loaded.name.clone()
+                        };
+                        let key = loaded.key.clone().or(Some(e.key.clone()));
+                        let info = screens::CardInfo {
+                            name: title.clone(),
+                            best_ticks: key.as_ref().and_then(|k| cx.saves.record(k).best_ticks),
+                            mode_label: Some("T_Mode_CourseRobot".to_string()),
+                            ..Default::default()
+                        };
+                        let s = screens::CourseScreens::new(&self.scene.ui());
+                        self.playing = Some(Box::new(play::CoursePlay::new(
+                            cx, title, key, s, None, info, true, true, false,
+                        )));
+                    }
+                    Err(err) => cx.toast(&format!("Couldn't start {}: {err}", e.name)),
+                }
+                None
+            }
+        }
+    }
+
+    fn draw(&mut self, out: &mut Vec<DrawItem>) {
+        match &mut self.playing {
+            Some(p) => p.draw(out),
+            None => self.scene.draw(out),
+        }
+    }
+}
+
 pub enum Screen {
     Boot(Box<boot::BootScene>),
     Title(Box<Title>),
@@ -236,6 +343,8 @@ pub enum Screen {
     Course(Box<play::CoursePlay>),
     /// The Course Maker.
     Maker(Box<MakerFlow>),
+    /// The Coursebot (and a course played from it, the maker waiting on it).
+    Coursebot(Box<CoursebotFlow>),
     None,
 }
 
@@ -358,6 +467,34 @@ impl Front {
         *screen = Screen::Maker(Box::new(m));
     }
 
+    /// The Coursebot: `from_maker` takes the maker along (it comes back after Save As / Load).
+    fn show_coursebot(&mut self, host: &mut dyn Host, mode: coursebot::BotMode, from_maker: bool) {
+        let maker = match std::mem::replace(&mut self.screen, Screen::None) {
+            Screen::Maker(m) if from_maker => Some(m),
+            s => {
+                self.screen = s;
+                None
+            }
+        };
+        if maker.is_none() {
+            host.unload_course();
+        }
+        let smm2 = self.smm2.clone();
+        let (mut cx, screen) = self.cx(host);
+        *screen = match coursebot::CoursebotScene::new(&smm2, mode, &mut cx) {
+            Some(scene) => Screen::Coursebot(Box::new(CoursebotFlow {
+                scene,
+                maker,
+                playing: None,
+                leaving: false,
+            })),
+            None => match maker {
+                Some(m) => Screen::Maker(m),
+                None => Screen::None,
+            },
+        };
+    }
+
     fn show_challenge(
         &mut self,
         host: &mut dyn Host,
@@ -409,11 +546,41 @@ impl Front {
             Go::Enter(c) => match c {
                 TitleChoice::StoryMode => self.show_world(host, ListKind::Story, 0),
                 TitleChoice::CourseWorld => self.show_world(host, ListKind::World, 0),
-                TitleChoice::Coursebot => self.show_world(host, ListKind::Coursebot, 0),
+                TitleChoice::Coursebot => {
+                    self.show_coursebot(host, coursebot::BotMode::Browse, false)
+                }
                 TitleChoice::HundredMario => self.show_challenge(host, None, Back::Title),
                 TitleChoice::Make => self.show_maker(host, MakerStart::Resume),
             },
             Go::Maker(start) => self.show_maker(host, start),
+            Go::Coursebot { mode, from_maker } => self.show_coursebot(host, mode, from_maker),
+            Go::BackToMaker => {
+                let screen = std::mem::replace(&mut self.screen, Screen::None);
+                self.screen = match screen {
+                    Screen::Coursebot(mut f) => match f.maker.take() {
+                        Some(mut m) => {
+                            m.redraw();
+                            Screen::Maker(m)
+                        }
+                        None => Screen::Coursebot(f),
+                    },
+                    s => s,
+                };
+                let (mut cx, screen) = self.cx(host);
+                if let Screen::Maker(m) = screen {
+                    m.show_now(&mut cx);
+                }
+            }
+            Go::CoursebotList => {
+                host.unload_course();
+                let (mut cx, screen) = self.cx(host);
+                if let Screen::Coursebot(f) = screen {
+                    f.playing = None;
+                    f.leaving = false;
+                    f.scene.reload(&mut cx);
+                    f.scene.fill(&mut cx);
+                }
+            }
             Go::CourseWorld { selection } => self.show_world(host, ListKind::World, selection),
             Go::ShowChallenge { presentation, back } => {
                 self.show_challenge(host, presentation, back)
@@ -572,10 +739,19 @@ impl Front {
                             MakerEvent::StoryMode => Go::Enter(TitleChoice::StoryMode),
                             MakerEvent::CourseWorld => Go::Enter(TitleChoice::CourseWorld),
                             MakerEvent::Coursebot => Go::Enter(TitleChoice::Coursebot),
+                            MakerEvent::SaveAs => Go::Coursebot {
+                                mode: coursebot::BotMode::Save,
+                                from_maker: true,
+                            },
+                            MakerEvent::Load => Go::Coursebot {
+                                mode: coursebot::BotMode::Load,
+                                from_maker: true,
+                            },
                         },
                     )
                 });
             }
+            Screen::Coursebot(f) => after = f.step(&play, &mut cx),
             Screen::None => {}
         }
         self.run_now(host);
@@ -594,6 +770,7 @@ impl Front {
     pub fn typing(&self) -> bool {
         match &self.screen {
             Screen::World(f) => f.typing(),
+            Screen::Coursebot(f) => f.playing.is_none() && f.scene.typing(),
             _ => false,
         }
     }
@@ -608,6 +785,7 @@ impl Front {
             Screen::Challenge(f, _) => f.draw(&mut items),
             Screen::Course(p) => p.draw(&mut items),
             Screen::Maker(m) => m.draw(&mut items),
+            Screen::Coursebot(f) => f.draw(&mut items),
             Screen::None => {}
         }
         self.fade.draw(&mut items);
@@ -705,6 +883,20 @@ impl Front {
                 self.run_now(host);
             }
             "storymode" => self.show_world(host, ListKind::Story, 0),
+            "coursebot" | "coursebot-save" | "coursebot-load" | "coursebot-window" => {
+                let mode = match screen {
+                    "coursebot-save" => coursebot::BotMode::Save,
+                    "coursebot-load" => coursebot::BotMode::Load,
+                    _ => coursebot::BotMode::Browse,
+                };
+                self.show_coursebot(host, mode, false);
+                if screen == "coursebot-window" {
+                    let (mut cx, scr) = self.cx(host);
+                    if let Screen::Coursebot(f) = scr {
+                        f.scene.debug_window(&mut cx);
+                    }
+                }
+            }
             // the Course Maker: a new course (maker), its windows, test play
             s if s == "maker" || s.starts_with("maker-") => {
                 // (a course to open: `maker_course`; a new one in `maker_style`)

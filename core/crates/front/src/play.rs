@@ -1160,22 +1160,50 @@ pub(crate) mod tests {
             Ok(LoadedCourse::default())
         }
         fn save_course(&mut self, id: Option<&str>, course: &[u8]) -> Result<String, String> {
-            self.saved.push((id.map(str::to_string), course.to_vec()));
-            let id = id.map_or_else(|| format!("bot:{}", self.saved.len()), str::to_string);
-            // it lists in the library from now on (as a made course)
-            if let Ok(c) = mmk_editor::Editor::open(course) {
-                self.library.retain(|e| e.id != id);
-                self.library.push(CourseEntry {
-                    id: id.clone(),
-                    name: c.course.header.name.to_string_lossy(),
-                    style: c.course.header.game_style.as_str_lossy(),
-                    playable: true,
-                    key: id.clone(),
-                    ..Default::default()
-                });
+            match id {
+                Some(id) if !id.starts_with("slot:") => {
+                    self.saved.push((Some(id.to_string()), course.to_vec()));
+                    self.courses.insert(id.to_string(), course.to_vec());
+                    Ok(id.to_string())
+                }
+                Some(id) => {
+                    let slot = id["slot:".len()..].parse().map_err(|_| "bad slot")?;
+                    self.save_slot(slot, course)
+                }
+                None => {
+                    let free = (0..crate::host::COURSEBOT_SLOTS)
+                        .find(|i| !self.courses.contains_key(&format!("slot:{i}")))
+                        .ok_or("full")?;
+                    self.save_slot(free, course)
+                }
             }
+        }
+        fn coursebot_slots(&mut self) -> Vec<Option<CourseEntry>> {
+            (0..crate::host::COURSEBOT_SLOTS)
+                .map(|i| {
+                    let id = format!("slot:{i}");
+                    let e = mmk_editor::Editor::open(self.courses.get(&id)?).ok()?;
+                    let h = &e.course.header;
+                    Some(CourseEntry {
+                        name: h.name.to_string_lossy(),
+                        description: h.description.to_string_lossy(),
+                        style: h.game_style.as_str_lossy(),
+                        playable: true,
+                        key: id.clone(),
+                        id,
+                        ..Default::default()
+                    })
+                })
+                .collect()
+        }
+        fn save_slot(&mut self, slot: usize, course: &[u8]) -> Result<String, String> {
+            let id = format!("slot:{slot}");
             self.courses.insert(id.clone(), course.to_vec());
+            self.saved.push((Some(id.clone()), course.to_vec()));
             Ok(id)
+        }
+        fn delete_slot(&mut self, slot: usize) -> bool {
+            self.courses.remove(&format!("slot:{slot}")).is_some()
         }
         fn course_data(&mut self, s: &Source) -> Result<Vec<u8>, String> {
             match s {

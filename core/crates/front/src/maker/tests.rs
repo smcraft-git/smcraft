@@ -195,14 +195,14 @@ fn saving_keeps_the_entry_and_copies_of_others_courses_are_new_and_credited() {
         m.save_to_coursebot(cx.host, false)
     })
     .unwrap();
-    assert_eq!(m.entry.as_deref(), Some("bot:1"));
+    assert_eq!(m.entry.as_deref(), Some("slot:0"));
     with(&mut host, &mut saves, |cx| {
         m.save_to_coursebot(cx.host, false)
     })
     .unwrap();
     assert_eq!(
         host.saved[1].0.as_deref(),
-        Some("bot:1"),
+        Some("slot:0"),
         "overwrites its entry"
     );
     // someone else's course
@@ -223,7 +223,11 @@ fn saving_keeps_the_entry_and_copies_of_others_courses_are_new_and_credited() {
     })
     .unwrap();
     let (id, data) = host.saved.last().unwrap();
-    assert_eq!(id, &None, "a new course, not over theirs");
+    assert_eq!(
+        id.as_deref(),
+        Some("slot:1"),
+        "a new course, not over theirs"
+    );
     let c = Editor::open(data).unwrap();
     assert!(
         c.course
@@ -312,11 +316,13 @@ fn make_save_and_find_it_in_the_coursebot() {
     for _ in 0..120 {
         f.tick(&crate::FrontInput::default(), &mut host);
     }
-    let crate::Screen::World(w) = &f.screen else {
-        panic!("the Coursebot list");
+    let crate::Screen::Coursebot(b) = &f.screen else {
+        panic!("the Coursebot");
     };
-    assert_eq!(w.stage_name(), "list");
-    assert!(host.library.iter().any(|e| e.name == "Goomba walk"));
+    assert_eq!(
+        b.scene.course(0).map(|e| e.name.as_str()),
+        Some("Goomba walk")
+    );
 }
 
 #[test]
@@ -409,11 +415,17 @@ fn upload_sends_the_saved_course_with_its_credit_and_load_goes_to_the_coursebot(
             based_on: Some("based on XYZ-123-456 by Them".into()),
         },
     );
-    // a new copy: Save As and Load only
+    // a new copy: Save As (the Coursebot picks the slot) and Load only
     m.open_save();
     assert_eq!(m.save_buttons(), vec!["L_NSaveBtn_00", "L_LoadBtn_00"]);
-    run(&mut m, &mut host, &mut saves, press(Buttons::CONFIRM));
+    let mut ev = None;
+    with(&mut host, &mut saves, |cx| {
+        ev = m.step(&press(Buttons::CONFIRM), cx)
+    });
+    assert_eq!(ev, Some(MakerEvent::SaveAs));
+    with(&mut host, &mut saves, |cx| m.save_to_slot(cx.host, 3)).unwrap();
     assert_eq!(host.saved.len(), 1);
+    assert_eq!(m.entry.as_deref(), Some("slot:3"));
     // now ours: Save, Save As, Upload, Load
     m.open_save();
     assert_eq!(m.save_buttons().len(), 4);
@@ -445,7 +457,7 @@ fn upload_sends_the_saved_course_with_its_credit_and_load_goes_to_the_coursebot(
             break;
         }
     }
-    assert_eq!(ev, Some(MakerEvent::Coursebot));
+    assert_eq!(ev, Some(MakerEvent::Load));
 }
 
 #[test]
