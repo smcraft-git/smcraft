@@ -405,6 +405,28 @@ fn field_model(style: &str, theme: u8) -> String {
     format!("{style}_Field_{name}")
 }
 
+/// The play field's animated parts in the 2D styles are models of their own (the game's
+/// `<style>_Field_anime_<part>_<set>`, one set per theme's SceneDB `FieldAnime`: N(ormal), D(ark),
+/// I(ce), S(now), Y(ogan), W(ater)); the sim names the part, the host adds the set and picks the
+/// frame of the model's animation [obs: SMM2 v3.0.3 frames: bricks have black mortar, ? blocks
+/// shimmer, coins spin]. The atlas tiles stay for NSMBU and 3D World (meshes by atlas index).
+pub const FIELD_ANIME_PREFIX: &str = "M1_Field_anime_";
+const FIELD_ANIME_COIN: &str = "M1_Field_anime_coin";
+
+fn field_anime(style: crate::player::Style, kind: BlockKind, on: bool) -> Option<&'static str> {
+    if matches!(style, crate::player::Style::WU | crate::player::Style::W3) {
+        return None;
+    }
+    Some(match kind {
+        BlockKind::Brick => "M1_Field_anime_block_renga",
+        BlockKind::Question => "M1_Field_anime_block_hatena",
+        BlockKind::Note => "M1_Field_anime_block_onpu",
+        BlockKind::OnOff if on => "M1_Field_anime_block_on",
+        BlockKind::OnOff => "M1_Field_anime_block_off",
+        _ => return None,
+    })
+}
+
 /// The start sign's layer: in front of the backdrop (0), behind everything else.
 pub const START_SIGN_LAYER: u32 = 1;
 
@@ -5440,7 +5462,10 @@ impl World {
             if b.kind == BlockKind::Hidden || !visible(px, py) {
                 continue;
             }
-            let mut s = tile(px, py, switch_atlas(b.kind, self.on_off), 12);
+            let mut s = match field_anime(self.style, b.kind, self.on_off) {
+                Some(model) => Self::model_sprite(model, "wait.0", px, py, TILE, TILE, false, 12),
+                None => tile(px, py, switch_atlas(b.kind, self.on_off), 12),
+            };
             if let Some(((dx, dy), n)) = self.donut_ride
                 && (dx, dy) == (bx, by)
             {
@@ -5448,10 +5473,18 @@ impl World {
             }
             out.push(s);
         }
+        let two_d = !matches!(
+            self.style,
+            crate::player::Style::WU | crate::player::Style::W3
+        );
         for c in &self.level.coins {
             let (px, py) = (c.x as f32 * TILE, c.y as f32 * TILE);
             if visible(px, py) {
-                out.push(tile(px, py, 7, 20));
+                out.push(if two_d {
+                    Self::model_sprite(FIELD_ANIME_COIN, "wait.0", px, py, TILE, TILE, false, 20)
+                } else {
+                    tile(px, py, 7, 20)
+                });
             }
         }
         // blinking blocks (solid / outline) and spike blocks [placeholder art: dotted-line

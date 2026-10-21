@@ -113,11 +113,25 @@ fn costume_stand_in(frame: &str) -> &str {
 #[derive(Debug, Default)]
 pub struct SpriteResolver {
     lookup: HashMap<(&'static str, &'static str), Resolved>,
+    /// The world's field animation set (SceneDB `FieldAnime` initial: N, D, I, S, Y, W) by
+    /// (style, theme, night), and the frame its animations are at.
+    anime_set: Option<((String, u8, bool), Option<char>)>,
+    anime_clock: u32,
+}
+
+/// The initial of a theme's field animation set (SceneDB `FieldAnime`: Normal, Dark, Ice, Snow,
+/// Yogan, Water), None when the style's table has none.
+pub fn field_anime_set(cache: &Cache, style: &str, theme: u8, night: bool) -> Option<char> {
+    let table = cache.table(&format!("{style}_SceneDB")).ok()?;
+    let rows = table.as_array()?;
+    let r = rows.get(theme as usize + if night && rows.len() >= 20 { 10 } else { 0 })?;
+    r.get("FieldAnime")?.as_str()?.chars().next()
 }
 
 impl SpriteResolver {
     pub fn reset(&mut self) {
         self.lookup.clear();
+        self.anime_set = None;
     }
 
     /// The world's sprites in draw order (stable sort by layer), placed for drawing.
@@ -127,72 +141,107 @@ impl SpriteResolver {
         out.clear();
         out.reserve(sprites.len());
         let style = world.level.style.as_str();
+        self.begin_frame(world, cache);
         for s in sprites {
             out.push(self.resolve_one(style, &s, cache));
         }
     }
 
+    /// Per frame, before `resolve_one`: the world's field animation set and clock.
+    pub fn begin_frame(&mut self, world: &World, cache: &Cache) {
+        let style = world.level.style.as_str();
+        let key = (style.to_string(), world.level.theme, world.level.night);
+        if self.anime_set.as_ref().is_none_or(|(k, _)| *k != key) {
+            let set = field_anime_set(cache, style, key.1, key.2);
+            self.anime_set = Some((key, set));
+        }
+        // the field animations run on the course's frame clock [inf]
+        self.anime_clock = world.tick as u32;
+    }
+
+    /// A field animation part (`mmk_sim::world::FIELD_ANIME_PREFIX`) in this style's model of
+    /// the world's set, at the animation's current frame.
+    fn field_anime(&self, style: &str, part: &str, cache: &Cache) -> Resolved {
+        let set = self.anime_set.as_ref()?.1?;
+        let model = format!("{style}_Field_anime_{part}_{set}");
+        let frame = cache
+            .anim(&model, "wait")
+            .and_then(|a| a.texture_at(self.anime_clock))
+            .unwrap_or("wait.0");
+        let i = cache.texture_index(&model, frame)?;
+        Some((i as u32, cache.sprite_quad(&model, frame), false))
+    }
+
     /// One sprite of a course in `style`, placed for drawing.
     pub fn resolve_one(&mut self, style: &str, s: &Sprite, cache: &Cache) -> DrawSprite {
         let key = (s.image.model, s.image.texture);
-        let found = *self.lookup.entry(key).or_insert_with(|| {
-            let resolve_tex = |model: &str, tex: &str| {
-                let i = cache.texture_index(model, tex)?;
-                Some((i as u32, cache.sprite_quad(model, tex), false))
-            };
-            // the other SMM1 extras without their art: the nearest SMM2 art
-            let smm1_stand_in = match key.0 {
-                "M1_Player_SlimMarioMdl" => Some(("M1_Player_SpMarioMdl", key.1)),
-                // the 3D-only update forms drawn as sprites (no meshes): Super Mario's art
-                "M1_Player_SquirrelMarioMdl" | "M1_Player_BoomerangMarioMdl" => {
-                    Some(("M1_Player_SpMarioMdl", key.1))
+        let anime = key
+            .0
+            .strip_prefix(mmk_sim::world::FIELD_ANIME_PREFIX)
+            .map(|part| self.field_anime(style, part, cache));
+        let found = match anime {
+            Some(f) => f,
+            None => *self.lookup.entry(key).or_insert_with(|| {
+                let resolve_tex = |model: &str, tex: &str| {
+                    let i = cache.texture_index(model, tex)?;
+                    Some((i as u32, cache.sprite_quad(model, tex), false))
+                };
+                // the other SMM1 extras without their art: the nearest SMM2 art
+                let smm1_stand_in = match key.0 {
+                    "M1_Player_SlimMarioMdl" => Some(("M1_Player_SpMarioMdl", key.1)),
+                    // the 3D-only update forms drawn as sprites (no meshes): Super Mario's art
+                    "M1_Player_SquirrelMarioMdl" | "M1_Player_BoomerangMarioMdl" => {
+                        Some(("M1_Player_SpMarioMdl", key.1))
+                    }
+                    "M1_Item_kinokofunny" | "M1_Item_CharaKinoko" => {
+                        Some(("M1_Item_kinoko", "wait.0"))
+                    }
+                    _ => None,
+                };
+                if let Some((model, tex)) = smm1_stand_in {
+                    return resolve_tex(key.0, key.1).or_else(|| {
+                        resolve_tex(model, tex)
+                            .or_else(|| resolve_tex(model, "wait.0"))
+                            .map(|(i, q, _)| (i, q, true))
+                    });
                 }
-                "M1_Item_kinokofunny" | "M1_Item_CharaKinoko" => Some(("M1_Item_kinoko", "wait.0")),
-                _ => None,
-            };
-            if let Some((model, tex)) = smm1_stand_in {
-                return resolve_tex(key.0, key.1).or_else(|| {
-                    resolve_tex(model, tex)
-                        .or_else(|| resolve_tex(model, "wait.0"))
-                        .map(|(i, q, _)| (i, q, true))
-                });
-            }
-            if key.0.starts_with(COSTUME_PREFIX) {
-                // an SMM1 costume: its own art, else small Mario standing in
-                return resolve_tex(key.0, key.1).or_else(|| {
-                    let model = "M1_Player_MarioMdl";
-                    resolve_tex(model, costume_stand_in(key.1))
-                        .or_else(|| resolve_tex(model, "wait.0"))
-                        .map(|(i, q, _)| (i, q, true))
-                });
-            }
-            // the sim names SMB1 models; other styles use the same names with their own prefix
-            // (M3_, MW_, …) and fall back to the SMB1 art where a style has no such model
-            let styled = key
-                .0
-                .strip_prefix("M1_")
-                .filter(|_| style != "M1")
-                .map(|rest| format!("{style}_{rest}"));
-            // a style with fewer animation frames: use its last lower frame ("walk.2" →
-            // "walk.1") rather than mixing in SMB1 art
-            let lower_frame = |model: &str| {
-                let (stem, n) = key.1.rsplit_once('.')?;
-                let n: u32 = n.parse().ok()?;
-                (0..n)
-                    .rev()
-                    .find_map(|k| resolve_tex(model, &format!("{stem}.{k}")))
-            };
-            // 3D World tiles without a model (pipes, note blocks, …): the NSMBU atlas
-            let wu_field = key
-                .0
-                .strip_prefix("3W_Field_")
-                .map(|t| format!("WU_Field_{t}"));
-            styled
-                .as_deref()
-                .and_then(|m| resolve_tex(m, key.1).or_else(|| lower_frame(m)))
-                .or_else(|| resolve_tex(key.0, key.1))
-                .or_else(|| wu_field.as_deref().and_then(|m| resolve_tex(m, m)))
-        });
+                if key.0.starts_with(COSTUME_PREFIX) {
+                    // an SMM1 costume: its own art, else small Mario standing in
+                    return resolve_tex(key.0, key.1).or_else(|| {
+                        let model = "M1_Player_MarioMdl";
+                        resolve_tex(model, costume_stand_in(key.1))
+                            .or_else(|| resolve_tex(model, "wait.0"))
+                            .map(|(i, q, _)| (i, q, true))
+                    });
+                }
+                // the sim names SMB1 models; other styles use the same names with their own prefix
+                // (M3_, MW_, …) and fall back to the SMB1 art where a style has no such model
+                let styled = key
+                    .0
+                    .strip_prefix("M1_")
+                    .filter(|_| style != "M1")
+                    .map(|rest| format!("{style}_{rest}"));
+                // a style with fewer animation frames: use its last lower frame ("walk.2" →
+                // "walk.1") rather than mixing in SMB1 art
+                let lower_frame = |model: &str| {
+                    let (stem, n) = key.1.rsplit_once('.')?;
+                    let n: u32 = n.parse().ok()?;
+                    (0..n)
+                        .rev()
+                        .find_map(|k| resolve_tex(model, &format!("{stem}.{k}")))
+                };
+                // 3D World tiles without a model (pipes, note blocks, …): the NSMBU atlas
+                let wu_field = key
+                    .0
+                    .strip_prefix("3W_Field_")
+                    .map(|t| format!("WU_Field_{t}"));
+                styled
+                    .as_deref()
+                    .and_then(|m| resolve_tex(m, key.1).or_else(|| lower_frame(m)))
+                    .or_else(|| resolve_tex(key.0, key.1))
+                    .or_else(|| wu_field.as_deref().and_then(|m| resolve_tex(m, m)))
+            }),
+        };
         let (texture, p) = match found {
             Some((texture, quad, stand_in)) => {
                 let t = &cache.textures[texture as usize];
