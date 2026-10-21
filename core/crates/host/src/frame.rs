@@ -246,6 +246,38 @@ pub fn clear_color(world: &World, cache: &Cache) -> u32 {
     u32::from_be_bytes([t.data[0], t.data[1], t.data[2], 0xff])
 }
 
+/// The 2D styles' drop shadow: every play-field sprite (not the backdrop) casts a flat shadow
+/// down and to the right, drawn between the backdrop and the play field, so it shows only over
+/// the backdrop [obs: SMM2 v3.0.3 frames]. From the theme's SceneDB row: `Shadow_Offset` (a
+/// fraction of the view width, the same distance across and down) and `Shadow_R/G/B/A`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FieldShadow {
+    /// Offset in world px (right, down).
+    pub offset: f32,
+    /// Colour and strength, 0…1.
+    pub color: [f32; 4],
+}
+
+/// The field shadow of a course's theme (None: the style has none, or it is off for the theme).
+pub fn field_shadow(cache: &Cache, style: &str, theme: u8, night: bool) -> Option<FieldShadow> {
+    let table = cache.table(&format!("{style}_SceneDB")).ok()?;
+    let rows = table.as_array()?;
+    let r = rows.get(theme as usize + if night && rows.len() >= 20 { 10 } else { 0 })?;
+    let f = |k: &str| {
+        r.get(k)
+            .and_then(serde_json::Value::as_f64)
+            .map(|v| v as f32)
+    };
+    let offset = f("Shadow_Offset")? * crate::scene3d::VIEW.0;
+    let color = [
+        f("Shadow_R")?,
+        f("Shadow_G")?,
+        f("Shadow_B")?,
+        f("Shadow_A")?,
+    ];
+    (offset > 0.0 && color[3] > 0.0).then_some(FieldShadow { offset, color })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -277,6 +309,39 @@ mod tests {
         u1: 1.0,
         v1: 1.0,
     };
+
+    /// The 2D shadow from the theme's SceneDB row: the offset is a fraction of the view width;
+    /// no row values (3D styles) or a zero offset or strength mean no shadow.
+    #[test]
+    fn field_shadow_reads_the_scene_row() {
+        let row = |o: f32, a: f32| {
+            format!(
+                r#"{{"Shadow_Offset":{o},"Shadow_R":0,"Shadow_G":0,"Shadow_B":0,"Shadow_A":{a}}}"#
+            )
+        };
+        let mut rows: Vec<String> = (0..20).map(|_| row(0.008, 0.5)).collect();
+        rows[10] = row(0.002, 1.0);
+        rows[5] = row(0.0, 0.0);
+        let dir = std::env::temp_dir().join(format!("mmk-shadow-test-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("textures")).unwrap();
+        std::fs::create_dir_all(dir.join("tables")).unwrap();
+        std::fs::write(dir.join("manifest.json"), "{}").unwrap();
+        std::fs::write(dir.join("textures/index.json"), "{}").unwrap();
+        std::fs::write(
+            dir.join("tables/M1_SceneDB.json"),
+            format!("[{}]", rows.join(",")),
+        )
+        .unwrap();
+        let cache = Cache::open(&dir).unwrap();
+        let day = field_shadow(&cache, "M1", 0, false).unwrap();
+        assert!((day.offset - 3.072).abs() < 1e-3);
+        assert_eq!(day.color, [0.0, 0.0, 0.0, 0.5]);
+        let night = field_shadow(&cache, "M1", 0, true).unwrap();
+        assert!((night.offset - 0.768).abs() < 1e-3 && night.color[3] == 1.0);
+        assert!(field_shadow(&cache, "M1", 5, false).is_none());
+        assert!(field_shadow(&cache, "WU", 0, false).is_none());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 
     #[test]
     fn model_sprite_uses_quad_around_origin() {

@@ -45,6 +45,8 @@ pub struct Game {
     /// The cache's effects (empty: none imported) and this frame's quads.
     fx_lib: Arc<mmk_host::effects::EffectLibrary>,
     fx_frame: crate::effects::EffectFrame,
+    /// The drop shadow of the last theme drawn: ((style, theme, night), shadow).
+    shadow: ShadowMemo,
 }
 
 impl Game {
@@ -103,6 +105,7 @@ impl Game {
             no_hud: false,
             notice: None,
             edit_view: false,
+            shadow: None,
         }
     }
 
@@ -251,6 +254,7 @@ impl Game {
             let cam = (w.camera_x, w.camera_y);
             self.build_meshes(cam, false, true);
             let w = self.maker.as_mut().expect("editing").world();
+            let shadow = field_shadow(&mut self.shadow, &self.cache, w);
             self.hud = HudText {
                 strip: status,
                 banner: None,
@@ -268,6 +272,7 @@ impl Game {
                 lights: &self.lights,
                 ghost: &[],
                 effects: &self.fx_frame,
+                shadow,
             };
         }
         let w = &self.session.world;
@@ -281,6 +286,7 @@ impl Game {
         );
         let (cam, upside_down) = ((w.camera_x, w.camera_y), w.upside_down());
         self.build_meshes(cam, upside_down, self.edit_view);
+        let shadow = field_shadow(&mut self.shadow, &self.cache, &self.session.world);
         let w = &self.session.world;
         self.ghost_sprites.clear();
         if let Some(g) = &self.session.ghost
@@ -321,6 +327,27 @@ impl Game {
             field_camera: self.field_camera,
             lights: &self.lights,
             ghost: &self.ghost_sprites,
+            shadow,
+        }
+    }
+}
+
+/// The drop shadow of the last theme drawn: ((style, theme, night), shadow).
+type ShadowMemo = Option<((String, u8, bool), Option<mmk_host::frame::FieldShadow>)>;
+
+/// The 2D drop shadow of a world's theme, looked up once per theme (`memo`).
+fn field_shadow(
+    memo: &mut ShadowMemo,
+    cache: &Cache,
+    w: &mmk_sim::World,
+) -> Option<mmk_host::frame::FieldShadow> {
+    let key = (w.level.style.clone(), w.level.theme, w.level.night);
+    match memo {
+        Some((k, s)) if *k == key => *s,
+        _ => {
+            let s = mmk_host::frame::field_shadow(cache, &key.0, key.1, key.2);
+            *memo = Some((key, s));
+            s
         }
     }
 }

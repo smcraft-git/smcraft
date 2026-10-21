@@ -103,6 +103,8 @@ pub struct Scene<'a> {
     pub ghost: &'a [DrawSprite],
     /// Particle effects (`crate::effects`), drawn over the course under the HUD.
     pub effects: &'a crate::effects::EffectFrame,
+    /// The 2D styles' drop shadow of the play field (`crate::shadow`).
+    pub shadow: Option<mmk_host::frame::FieldShadow>,
 }
 
 /// A cache texture on the GPU: not uploaded yet, unusable on this path, or ready.
@@ -168,6 +170,8 @@ enum Bind {
     Mesh(usize),
     /// The effects pass (`crate::effects`).
     Effects,
+    /// The play field's drop shadow (`crate::shadow`), between the backdrop and the field.
+    Shadow,
 }
 
 /// Mesh pipeline variant: (blend 0 / 2 / 3, cull 0 back / 1 front / 2 none, background pass).
@@ -403,6 +407,7 @@ pub struct Renderer {
     mesh_ibuf: wgpu::Buffer,
     depth: Option<(wgpu::Texture, wgpu::TextureView)>,
     effects: crate::effects::EffectsPass,
+    shadow: crate::shadow::ShadowPass,
 }
 
 pub(crate) fn make_texture(
@@ -632,6 +637,7 @@ impl Renderer {
         let mesh_vbuf = Self::buffer(device, "mesh vertices", 1 << 16, wgpu::BufferUsages::VERTEX);
         let mesh_ibuf = Self::buffer(device, "mesh indices", 1 << 16, wgpu::BufferUsages::INDEX);
         let effects = crate::effects::EffectsPass::new(gpu, format, &layout);
+        let shadow = crate::shadow::ShadowPass::new(gpu, format, &layout, Self::depth_state(false));
         let bg_vbuf = Self::buffer(
             device,
             "background vertices",
@@ -646,6 +652,7 @@ impl Renderer {
         );
         Self {
             effects,
+            shadow,
             mesh_pipelines: Default::default(),
             mesh_tex_layout,
             mesh_module,
@@ -1099,6 +1106,15 @@ impl Renderer {
         for p in meshes.pieces.iter().chain(&scene.background.pieces) {
             self.mesh_bind(gpu, p.texture, p.extra, p.wrap);
         }
+        // the 2D drop shadow: every sprite but the backdrop (layer 0) and the start sign (far
+        // behind the field, it casts none but takes the field's), moved right and down on the
+        // screen
+        self.shadow
+            .begin(scene.shadow.filter(|_| field.is_none()).map(|sh| sh.color));
+        let (shadow_dx, shadow_dy) = scene
+            .shadow
+            .map_or((0.0, 0.0), |sh| (sh.offset * sx, -sh.offset * sy));
+        let mut shadow_placed = false;
         let mut next_group = 0;
         for (k, s) in scene.sprites.iter().enumerate() {
             // mesh groups drawn before this sprite
@@ -1120,6 +1136,31 @@ impl Renderer {
             let (x1, y1) = (x0 + s.w, y0 + s.h);
             let [ax, ay] = ndc(x0, y0);
             let [bx, by] = ndc(x1, y1);
+            if self.shadow.active() && s.layer > mmk_sim::world::START_SIGN_LAYER {
+                if !shadow_placed {
+                    self.batches.push((0, 0, Bind::Shadow));
+                    shadow_placed = true;
+                }
+                if let Bind::Texture(t) = bind {
+                    let (ax, ay, bx, by) = (
+                        ax + shadow_dx,
+                        ay + shadow_dy,
+                        bx + shadow_dx,
+                        by + shadow_dy,
+                    );
+                    self.shadow.push(
+                        t,
+                        [
+                            [ax, ay, u0, s.v1],
+                            [bx, ay, u1, s.v1],
+                            [bx, by, u1, s.v0],
+                            [ax, ay, u0, s.v1],
+                            [bx, by, u1, s.v0],
+                            [ax, by, u0, s.v0],
+                        ],
+                    );
+                }
+            }
             // two triangles; v is top-down in the texture, y is up in the world
             self.push(
                 bind,
@@ -1210,6 +1251,14 @@ impl Renderer {
         gpu.queue.write_buffer(&self.vbuf, 0, bytes);
 
         let (vx, vy, vw, vh, _) = viewport(size.0, size.1, self.integer_scale);
+        let textures = &self.textures;
+        self.shadow
+            .encode_mask(gpu, encoder, size, (vx, vy, vw, vh), |t| {
+                match textures.get(t as usize) {
+                    Some(TexState::Ready(b, _)) => Some(b),
+                    _ => None,
+                }
+            });
         let depth_view = self.depth.as_ref().map(|(_, v)| v.clone());
         let attach = |load: wgpu::LoadOp<wgpu::Color>| {
             [Some(wgpu::RenderPassColorAttachment {
@@ -1284,6 +1333,12 @@ impl Renderer {
                 pass.set_vertex_buffer(0, self.vbuf.slice(..));
                 continue;
             }
+            if let Bind::Shadow = bind {
+                self.shadow.shade(&mut pass);
+                pass.set_pipeline(&self.pipeline);
+                pass.set_vertex_buffer(0, self.vbuf.slice(..));
+                continue;
+            }
             if let Bind::Effects = bind {
                 self.effects.draw(&mut pass);
                 pass.set_pipeline(&self.pipeline);
@@ -1303,7 +1358,7 @@ impl Renderer {
                 Bind::Missing(i) => &self.missing[i],
                 Bind::Sky => &self.sky.1,
                 Bind::Hud => &self.hud.1,
-                Bind::Effects => continue,
+                Bind::Effects | Bind::Shadow => continue,
             };
             pass.set_bind_group(0, group, &[]);
             pass.draw(start..start + n, 0..1);

@@ -83,6 +83,9 @@ mod native {
         /// camera is (to line frames up with reference captures; nothing else changes).
         #[arg(long, value_name = "X,Y")]
         view_at: Option<String>,
+        /// Screenshot without the HUD (to compare the course alone with reference captures).
+        #[arg(long)]
+        no_hud: bool,
         /// Decode BC textures on the CPU even if the GPU samples them (tests the fallback).
         #[arg(long)]
         cpu_textures: bool,
@@ -950,6 +953,7 @@ mod native {
             return Ok(());
         }
         if let Some(path) = &args.screenshot {
+            game.no_hud |= args.no_hud;
             if args.record_replay.is_some() {
                 game.session.record_replays();
             }

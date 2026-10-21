@@ -405,6 +405,9 @@ fn field_model(style: &str, theme: u8) -> String {
     format!("{style}_Field_{name}")
 }
 
+/// The start sign's layer: in front of the backdrop (0), behind everything else.
+pub const START_SIGN_LAYER: u32 = 1;
+
 /// Animation frame `age / rate` cycling through `frames`.
 fn walk_frame(frames: &[&'static str], age: u32, rate: u32) -> &'static str {
     frames[((age / rate) as usize) % frames.len()]
@@ -5491,6 +5494,7 @@ impl World {
             }
         }
         self.goal_sprites(&mut out);
+        self.start_sign_sprite(&mut out);
         for (i, cp) in self.level.checkpoints.iter().enumerate() {
             if !visible(cp.x, cp.y) {
                 continue;
@@ -6224,6 +6228,42 @@ impl World {
             flip_y: false,
             layer,
         }
+    }
+
+    /// The start sign (StartSignBoard, the header's fixed unit 38): model `Object_yajirushi` with
+    /// its origin at x = 40, y = 16·start_y in the main area, far behind the play field
+    /// [course-loading.md §1.5, objects/27-goal.md; x and y measured on the game's frames]. 3D
+    /// World has a model per theme; the other styles a snow variant.
+    fn start_sign_sprite(&self, out: &mut Vec<Sprite>) {
+        if self.area != 0 || self.camera_x > 64.0 + TILE {
+            return;
+        }
+        let model = match (self.style, self.level.theme) {
+            (crate::player::Style::W3, t) => match t {
+                1 => "M1_Object_yajirushi_underground",
+                2 => "M1_Object_yajirushi_castle",
+                3 => "M1_Object_yajirushi_airship",
+                4 => "M1_Object_yajirushi_water",
+                5 => "M1_Object_yajirushi_hauntedhouse",
+                6 => "M1_Object_yajirushi_snow",
+                7 => "M1_Object_yajirushi_desert",
+                8 => "M1_Object_yajirushi_athletic",
+                9 => "M1_Object_yajirushi_woods",
+                _ => "M1_Object_yajirushi_plain",
+            },
+            (_, 6) => "M1_Object_yajirushi_S",
+            _ => "M1_Object_yajirushi",
+        };
+        out.push(Self::model_sprite(
+            model,
+            "yajirushi",
+            40.0 - 24.0,
+            self.level.start.1,
+            48.0,
+            48.0,
+            false,
+            START_SIGN_LAYER,
+        ));
     }
 
     fn goal_sprites(&self, out: &mut Vec<Sprite>) {
@@ -7112,6 +7152,24 @@ mod tests {
         for _ in 0..frames {
             w.step(Input { buttons });
         }
+    }
+
+    /// The start sign stands at x = 40 on the start ground, behind the field; snow has its own.
+    #[test]
+    fn start_sign_beside_the_start() {
+        let mut w = World::with_level(Level::flat(100));
+        let sign = |w: &World| {
+            w.sprites()
+                .into_iter()
+                .find(|s| s.image.model.starts_with("M1_Object_yajirushi"))
+        };
+        let s = sign(&w).expect("a start sign");
+        assert_eq!((s.x + s.w / 2.0, s.y), (40.0, w.level.start.1));
+        assert_eq!(s.layer, START_SIGN_LAYER);
+        w.level.theme = 6;
+        assert_eq!(sign(&w).unwrap().image.model, "M1_Object_yajirushi_S");
+        w.area = 1;
+        assert!(sign(&w).is_none());
     }
 
     #[test]
