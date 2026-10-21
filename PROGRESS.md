@@ -81,7 +81,27 @@ sound-perfect as possible, that **never needs the ROM or key files to run**.
   (`mmk_embed::pool`: the ported upstream fetcher fills a local store from TGRCode's Endless pool
   when the runs open, 10 per difficulty per launch; the runs draw from it and the library, and
   play what it holds when offline)
-- ⬜ Local co-op for courses, 100 Mario and Endless (SMM2 local rules: bubbles, shared lives)
+- 🔄 Local co-op for courses, 100 Mario and Endless (SMM2 local rules: bubbles, shared lives;
+  research in `research/specs/local-coop.md`, private)
+  - ✅ Sim (`world/coop.rs`, `Camera::update_players`): every player runs the same player rules
+    (the lead runs the world tick, the others the player's part of it); a death while another
+    plays comes back in a bubble (floats after the nearest player, Jump dashes, pops on touch,
+    127 frames of invincibility); a life is lost only when nobody is in play (one shared life);
+    one camera over the players in play (spread blend, peeks, join weight), its edges push
+    players along, squeezed / below the view = death; head springboard and stomp bounce, side
+    push; the goal waits 240 (+30) frames, one player at the goal clears; a warp takes everyone
+    (out 15 frames apart); time up kills everyone. One player steps exactly as before (traces,
+    a test). 9 tests
+  - ⬜ Front end: Play Together in the Coursebot (`L_CoopModeBtn_00`) and the Course World /
+    library rows (the co-op slot now holds Make: the Report slot, labelled with the row's co-op
+    text), a controller step (2–4 players = connected controllers), `Host::set_players`,
+    `CourseStatus::players` and `dying` = all down (`World::all_down`), HUD `TypeMember`
+  - ⬜ Co-op 100 Mario / Endless (shared lives; ask "n players?" at New Game when ≥ 2
+    controllers are connected)
+  - ⬜ mmk-play: keyboard as its own player when there are fewer pads than players
+  - ⬜ Not yet: carrying players, ground-pound knock-flight, keys moving to the attacker, the
+    180-frame warp wait (the world waits instead), bubble / pop sounds, per-player clear
+    conditions
 
 **G4 — Course Maker for any course** 🔄
 - ✅ Editor core (`mmk-editor`): parts, areas, links, tracks, selection, settings, the game's limits
