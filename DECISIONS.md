@@ -2,6 +2,35 @@
 
 Newest first. Each entry: what was decided, why, and what would change it.
 
+## 2026-10-21 — Network Play on Nextendo: SMCraft's own NEX client, its own sessions, its own punch
+**Decision:** Network Play logs in to Nextendo with SMCraft's own Rust NEX client (`mmk-nex`)
+and uses only matchmaking and NAT traversal there; the match is `mmk-netplay` between the peers.
+Protocol notes in `docs/nextendo-network-play.md`. In short:
+- **Wire:** what Nextendo's Switch game servers speak (their `nextendo-nex` core is the reference):
+  WebSocket (`NEX` subprotocol) over TLS on :443, PRUDP Lite with no PRUDP encryption, SMM2's
+  handshake values (support `6`, ports 31 → 1 and 30 → 2, the Lite access-key signature), RMC
+  with structure headers and 8-byte PIDs, ValidateAndRequestTicketWithParam with an ID token
+  whose `nnex` claim is Nextendo's game token, the ticket opened with the returned source key.
+  Not raw-UDP PRUDP V1: Nextendo keeps that for one older title only (V1 is here as a codec).
+- **TLS:** the game server's key is pinned (SHA-256 of its SubjectPublicKeyInfo); no "accept any
+  certificate" mode.
+- **Kept apart from consoles:** game mode `0x5343`, attributes `SMCR` / protocol / kind / course
+  hash, application data `SMCRAFT1` + course hash, and search criteria on them.
+- **Peer addresses:** a joiner gets the host's station URLs (GetSessionURLs) and asks the server
+  to have the host probe it (RequestProbeInitiationExt → InitiateProbe); both then run SMCraft's
+  `SMCP` punch on the game socket; the host's START fixes the player order. Pia is not used.
+- **Accounts:** OAuth 2.0 + PKCE with a 127.0.0.1 callback (`mmk-online::nextendo`); the client ID
+  is configurable, default the owner's "SMM2Recomp" registration; tokens only in the host's
+  secret store; PIDs and peer addresses never logged.
+- **Testing:** a local server built from Nextendo's public core plus our small main
+  (`tools/nex-local`, `scripts/nex-local.sh`; their code is fetched, never committed); tests
+  skip without it. No connection to Nextendo's live game servers.
+**Why:** SMCraft has no game NEX/Pia code to run (unlike the recomp), and playing with consoles
+isn't a goal (2026-10-21), so only the service side of NEX is needed; our own punch
+is a few datagrams on top of what Nextendo already provides.
+**Would change it:** Nextendo asking for something else (a game server ID and access key of
+SMCraft's own, their relay, a different token), or a console-compatible mode becoming a goal.
+
 ## 2026-10-21 — SMCraft revived: import once, then no ROM or keys; the mode list
 **Decision (owner):** SMCraft is developed again, alongside smm2recomp. The goal is SMM2 rebuilt from
 scratch, every style as pixel-, physics- and sound-exact as we can make it, that does not need the

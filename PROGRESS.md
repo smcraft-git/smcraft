@@ -61,11 +61,25 @@ sound-perfect as possible, that **never needs the ROM or key files to run**.
 - ⬜ Play Super Worlds downloaded from TGRCode (world map, 5–40 courses, lives, progress)
 - ⬜ Super World maker (later)
 
-**G6 — Network Play through Nextendo** ⬜
-- ⬜ Nextendo sign-in (OAuth PKCE, `game.matchmaking`) → nex-token → NEX (PRUDP, Kerberos, secure
-  connection) in Rust, tested against a local `nextendo-nex`
-- ⬜ Matchmaking (MatchmakeExtension) for SMCraft-only sessions; then SMCraft's rollback netcode
-  (`mmk-netplay`) peer to peer, with Nextendo's NAT traversal; co-op and versus
+**G6 — Network Play through Nextendo** 🔄 (offline groundwork done; `docs/nextendo-network-play.md`)
+- ✅ NEX client in Rust (`core/crates/nex`, `mmk-nex`): WebSocket + TLS with the server's key
+  pinned, PRUDP Lite (handshake, reliable order, fragments, acks, pings; V1 codec), RMC and NEX's
+  types, the ticket, ValidateAndRequestTicketWithParam, the secure connection, Register.
+  Signatures and layouts byte-checked against `nextendo-nex`'s own code
+- ✅ Local test server: `scripts/nex-local.sh` builds Nextendo's public server core (fetched,
+  never committed) with our `tools/nex-local/main.go`; 5 integration tests (skip without it)
+- ✅ Matchmaking for SMCraft-only sessions (own game mode, attributes, course hash; never meets a
+  console's), participants, notifications; NAT check; probe requests and our UDP hole punch →
+  peer addresses for `mmk-netplay` (`play::find_match`)
+- ✅ Sign-in plumbing (`mmk-online::nextendo`): OAuth + PKCE, 127.0.0.1 callback, refresh
+  rotation, `/api/nex-token`; tokens only in the host's store (`mmk-play --nextendo-sign-in`)
+- ✅ `mmk-play --nextendo-local <addr>`: local server → match → co-op over rollback (with the
+  headless `peer` example: 1500 frames, 24 state checks, no desync)
+- ⬜ Front-end Network Play screen; versus; friend rooms; 3–4 players across NATs; a relay for
+  symmetric NATs
+- ⏳ Live: Nextendo's OK and an SMCraft app registration (or the SMM2Recomp one with loopback
+  redirects), the game server's address / key pin, the access key (from the import, or one of
+  SMCraft's own from Nextendo)
 - ⬜ Live test with the owner (needs their go-ahead and a second player)
 
 **G7 — The smm2recomp mod options** 🔄
