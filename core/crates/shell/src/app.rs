@@ -615,13 +615,25 @@ impl ApplicationHandler<UserEvent> for App {
             }
             WindowEvent::CursorMoved { position, .. } => {
                 self.mouse = (position.x, position.y);
+                if let (Some(f), Some(g)) = (&mut self.front, &self.gfx) {
+                    f.pointer_moved(Some(self.mouse), (g.config.width, g.config.height));
+                }
                 self.maker_hover();
             }
+            WindowEvent::CursorLeft { .. } => {
+                if let (Some(f), Some(g)) = (&mut self.front, &self.gfx) {
+                    f.pointer_moved(None, (g.config.width, g.config.height));
+                }
+            }
             WindowEvent::MouseInput { state, button, .. } => {
-                if state == ElementState::Pressed
-                    && let (Some(f), Some(g)) = (&mut self.front, &self.gfx)
-                {
-                    f.click(self.mouse, (g.config.width, g.config.height));
+                if let (Some(f), Some(g)) = (&mut self.front, &self.gfx) {
+                    let down = state == ElementState::Pressed;
+                    if down && button == MouseButton::Left {
+                        f.click(self.mouse, (g.config.width, g.config.height));
+                    }
+                    if matches!(button, MouseButton::Left | MouseButton::Right) {
+                        f.pointer_button(button == MouseButton::Right, down);
+                    }
                 }
                 if self.game.editing
                     && let Some(m) = self.game.maker.as_mut()

@@ -1073,6 +1073,11 @@ pub(crate) mod tests {
         pub loaded: Vec<Source>,
         pub reports: Vec<(String, String)>,
         pub library: Vec<CourseEntry>,
+        /// Course Maker: still views shown, courses saved (id given, data), test plays.
+        pub shows: u32,
+        pub saved: Vec<(Option<String>, Vec<u8>)>,
+        pub tests: Vec<(usize, Option<[f32; 2]>)>,
+        pub courses: HashMap<String, Vec<u8>>,
     }
 
     impl Host for MockHost {
@@ -1140,6 +1145,44 @@ pub(crate) mod tests {
         }
         fn random(&mut self) -> u64 {
             42
+        }
+        fn edit_show(&mut self, _: &[u8], _: usize) -> bool {
+            self.shows += 1;
+            true
+        }
+        fn test_play(
+            &mut self,
+            _: &[u8],
+            area: usize,
+            start: Option<[f32; 2]>,
+        ) -> Result<LoadedCourse, String> {
+            self.tests.push((area, start));
+            Ok(LoadedCourse::default())
+        }
+        fn save_course(&mut self, id: Option<&str>, course: &[u8]) -> Result<String, String> {
+            self.saved.push((id.map(str::to_string), course.to_vec()));
+            let id = id.map_or_else(|| format!("bot:{}", self.saved.len()), str::to_string);
+            // it lists in the library from now on (as a made course)
+            if let Ok(c) = mmk_editor::Editor::open(course) {
+                self.library.retain(|e| e.id != id);
+                self.library.push(CourseEntry {
+                    id: id.clone(),
+                    name: c.course.header.name.to_string_lossy(),
+                    style: c.course.header.game_style.as_str_lossy(),
+                    playable: true,
+                    key: id.clone(),
+                    ..Default::default()
+                });
+            }
+            self.courses.insert(id.clone(), course.to_vec());
+            Ok(id)
+        }
+        fn course_data(&mut self, s: &Source) -> Result<Vec<u8>, String> {
+            match s {
+                Source::Library(id) | Source::Server(id) => {
+                    self.courses.get(id).cloned().ok_or("no such course".into())
+                }
+            }
         }
     }
 

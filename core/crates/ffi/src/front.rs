@@ -797,6 +797,8 @@ fn front_input(i: &MmkFrontInput) -> FrontInput {
         skip: i.flags & 2 != 0,
         click: (i.flags & 4 != 0).then_some([i.click_x, i.click_y]),
         text: char::from_u32(i.text).filter(|&c| c != '\0'),
+        // (the C input has no pointer or Course Maker keys yet: taps come as clicks)
+        ..Default::default()
     }
 }
 

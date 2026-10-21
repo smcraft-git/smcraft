@@ -358,6 +358,15 @@ impl Layout {
         self.player.set_picture_texture(pane, tex)
     }
 
+    /// Draw picture `pane` with the import's texture `<group>/<name>` filling it as it is (no
+    /// masks or texture coordinate tricks of its material); false when either is missing.
+    pub fn image(&mut self, pane: &str, group: &str, name: &str) -> bool {
+        match self.ui.cache_mut().texture_file(group, name) {
+            Some(t) => self.player.set_picture_image(pane, Some(t)),
+            None => false,
+        }
+    }
+
     /// Force a pane shown / hidden (`None`: back to its animations).
     pub fn visible(&mut self, pane: &str, v: Option<bool>) {
         self.player.set_visible(pane, v);

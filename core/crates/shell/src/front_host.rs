@@ -44,6 +44,8 @@ pub struct HostData {
     online: Option<(Sender<Reply>, Receiver<Reply>)>,
     /// The record run downloaded by a `ghost` call: raced from the next start of that course.
     ghost: Option<(String, mmk_modes::replay::Replay)>,
+    /// Coursebot courses saved without a data folder (captures): ("memory:<n>", raw data).
+    made: Vec<(String, Vec<u8>)>,
 }
 
 /// A server call's id and what its thread sent back.
@@ -78,7 +80,32 @@ impl HostData {
             memory: HashMap::new(),
             online: None,
             ghost: None,
+            made: Vec::new(),
         }
+    }
+
+    /// Where the Coursebot's courses are saved (`<data>/Coursebot`), if there is a data folder.
+    pub fn coursebot_dir(&self) -> Option<PathBuf> {
+        self.data_dir.as_ref().map(|d| d.join("Coursebot"))
+    }
+
+    /// A library course's file bytes (a Coursebot course kept in memory, or a file).
+    fn course_bytes(&self, id: &str) -> Result<Vec<u8>, String> {
+        if let Some((_, b)) = self.made.iter().find(|(i, _)| i == id) {
+            return Ok(b.clone());
+        }
+        std::fs::read(id).map_err(|e| format!("{id}: {e}"))
+    }
+
+    /// The library's folders and the Coursebot's.
+    fn scan_dirs(&self) -> Vec<PathBuf> {
+        let mut d = self.library_dirs.clone();
+        if let Some(c) = self.coursebot_dir()
+            && !d.contains(&c)
+        {
+            d.push(c);
+        }
+        d
     }
 
     fn online_tx(&mut self) -> Sender<Reply> {
@@ -98,7 +125,7 @@ impl HostData {
 
     /// Scan the library on a thread (`library` waits for it).
     pub fn start_scan(&mut self) {
-        let dirs = self.library_dirs.clone();
+        let dirs = self.scan_dirs();
         let root = self
             .source
             .as_ref()
@@ -160,7 +187,7 @@ impl HostData {
     }
 
     fn load_file(&self, game: &mut Game, path: &Path) -> Result<LoadedCourse, String> {
-        let bytes = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
+        let bytes = self.course_bytes(&path.to_string_lossy())?;
         let (c, key) = self.decode(&bytes)?;
         let loaded = LoadedCourse {
             name: c.header.name.to_string_lossy(),
@@ -298,9 +325,15 @@ impl Host for ShellHost<'_> {
                 Some(rx) => rx.recv().unwrap_or_default(),
                 None => {
                     let root = self.data.source.as_ref().and_then(|s| s.dir());
-                    scan(&self.data.library_dirs, root)
+                    scan(&self.data.scan_dirs(), root)
                 }
             };
+            let mut found = found;
+            for (id, bytes) in &self.data.made {
+                if let Ok((c, key)) = self.data.decode(bytes) {
+                    found.push(front_course::entry(id.clone(), id, false, &c, key, None));
+                }
+            }
             self.data.library = Some(found);
         }
         self.data.library.clone().unwrap_or_default()
@@ -496,6 +529,93 @@ impl Host for ShellHost<'_> {
         self.game.session.world.options.affects_play()
     }
 
+    fn edit_show(&mut self, course: &[u8], area: usize) -> bool {
+        match mmk_formats::smm2::Course::parse(course) {
+            Ok(c) => {
+                self.game.show_edit(c, area);
+                true
+            }
+            Err(_) => false,
+        }
+    }
+
+    fn edit_camera(&mut self, x: f32, y: f32) {
+        self.game.session.world.look_at(x, y);
+    }
+
+    fn test_play(
+        &mut self,
+        course: &[u8],
+        area: usize,
+        start: Option<[f32; 2]>,
+    ) -> Result<LoadedCourse, String> {
+        let c = mmk_formats::smm2::Course::parse(course).map_err(|e| e.to_string())?;
+        let loaded = LoadedCourse {
+            name: c.header.name.to_string_lossy(),
+            key: None,
+            theme: c.main.header.theme,
+        };
+        self.game.test_course(c, area, start);
+        self.game.session.set_audio(self.data.audio.clone());
+        Ok(loaded)
+    }
+
+    fn player_position(&self) -> Option<(usize, [f32; 2])> {
+        let w = &self.game.session.world;
+        w.player
+            .alive()
+            .then_some((w.area, [w.player.x, w.player.y]))
+    }
+
+    fn save_course(&mut self, id: Option<&str>, course: &[u8]) -> Result<String, String> {
+        let id = match self.data.coursebot_dir() {
+            Some(dir) => {
+                let path = match id {
+                    Some(p) if !p.starts_with("memory:") => PathBuf::from(p),
+                    _ => {
+                        std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+                        (1..)
+                            .map(|n| dir.join(format!("course_{n:03}.bin")))
+                            .find(|p| !p.exists())
+                            .expect("a free name")
+                    }
+                };
+                std::fs::write(&path, course).map_err(|e| format!("{}: {e}", path.display()))?;
+                path.to_string_lossy().into_owned()
+            }
+            None => {
+                let id = match id {
+                    Some(i) if self.data.made.iter().any(|(m, _)| m == i) => i.to_string(),
+                    _ => format!("memory:{}", self.data.made.len() + 1),
+                };
+                self.data.made.retain(|(m, _)| *m != id);
+                self.data.made.push((id.clone(), course.to_vec()));
+                id
+            }
+        };
+        // the library lists it from now on
+        self.data.library = None;
+        self.data.scanning = None;
+        Ok(id)
+    }
+
+    fn course_data(&mut self, source: &Source) -> Result<Vec<u8>, String> {
+        let bytes = match source {
+            Source::Library(id) => self.data.course_bytes(id)?,
+            Source::Server(code) => {
+                let server = self.data.server.clone().ok_or("no course server")?;
+                mmk_online::Client::new(server)
+                    .download(code)
+                    .map_err(|e| e.to_string())?
+            }
+        };
+        front_course::decode(&bytes, || source::key_table(self.data.src())).map(|(_, d, _)| d)
+    }
+
+    fn part_icon(&mut self, style: &str, part: i16, _flags: u32) -> Option<mmk_front::Icon> {
+        self.game.part_icon(style, part)
+    }
+
     fn load_value(&mut self, key: &str) -> Option<String> {
         match &self.data.data_dir {
             Some(d) => std::fs::read_to_string(d.join(file_name(key))).ok(),
@@ -557,6 +677,44 @@ fn file_name(key: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn made_courses_save_to_the_coursebot_and_play_from_the_library() {
+        let mut game = Game::load(None, None).unwrap();
+        let mut data = HostData::new(None);
+        let mut host = ShellHost {
+            game: &mut game,
+            data: &mut data,
+        };
+        let mut e = mmk_front::maker::new_course("M1");
+        e.set_name("Made in the maker");
+        e.place(0, 12, 1).unwrap();
+        let bytes = e.save().unwrap();
+        // the maker's still view and its test play
+        assert!(host.edit_show(&bytes, 0));
+        assert!(host.game.edit_view);
+        host.test_play(&bytes, 0, Some([200.0, 16.0])).unwrap();
+        assert_eq!(host.game.session.world.player.x, 200.0);
+        assert_eq!(host.player_position().map(|p| p.0), Some(0));
+        // saved without a data folder: kept in memory, listed, loadable, editable again
+        let id = host.save_course(None, &bytes).unwrap();
+        assert_eq!(id, "memory:1");
+        let lib = host.library();
+        let entry = lib.iter().find(|c| c.id == id).expect("in the library");
+        assert_eq!(entry.name, "Made in the maker");
+        assert!(entry.playable && !entry.built_in);
+        let loaded = host.load_course(&Source::Library(id.clone())).unwrap();
+        assert_eq!(loaded.name, "Made in the maker");
+        assert_eq!(
+            host.course_data(&Source::Library(id.clone())).unwrap(),
+            bytes
+        );
+        // saving again over the same entry
+        assert_eq!(host.save_course(Some(&id), &bytes).unwrap(), id);
+        assert_eq!(host.library().iter().filter(|c| c.id == id).count(), 1);
+        // a part's picture from the engine's art needs the art: none in placeholder mode
+        assert!(host.part_icon("M1", 0, 0).is_none());
+    }
 
     #[test]
     fn natural_order_and_keys() {

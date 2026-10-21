@@ -50,11 +50,43 @@ sound-perfect as possible, that **never needs the ROM or key files to run**.
 
 **G4 — Course Maker for any course** 🔄
 - ✅ Editor core (`mmk-editor`): parts, areas, links, tracks, selection, settings, the game's limits
-- ⬜ SMM2's maker screens (`Edt_*` layouts): palette, tool wheel, area / settings menus, test play,
-  undo dog, eraser, sub-area, Coursebot save
-- ⬜ Edit any course (Course World, library, TGRCode): Edit button in SMM2's style; the re-upload
-  rule ("based on <code> by <maker>")
-- ⬜ Coursebot screens (save slots, upload to the own server)
+- ✅ Research: the maker scene from the v3.0.3 data + binary (private `research/specs/maker.md`
+  Part C: `Edit_MainPage_00` and its parts, the part window `Edit_RingMenu_00`, palette slots,
+  right/left columns, main menu, Save/Load, the editor models' textures, sounds; open items)
+- 🔄 SMM2's maker screens in `mmk-front` (`maker`), over `mmk-editor`, the course drawn by the host
+  as a still view (`Host::edit_show` / `edit_camera`):
+  - ✅ title Make → clap + DecideEditBtn → the maker (the draft reopens, else a new SMB1 course)
+  - ✅ `Edit_MainPage_00`: palette bar (12 slots with the parts' pictures drawn from the engine's
+    art, `Host::part_icon`; selected slot, category colour), left column (style logo, theme and
+    autoscroll pictures, timer), right column (main menu, Save/Load, eraser toggle, Reset Rocket,
+    Undodog in once there is something to undo), clapperboard; each part's In
+  - ✅ over the course: grid, the frame round the part / tile under the cursor, the glove (the
+    import's `EditModel` textures: import v5 adds the editor models' textures)
+  - ✅ placing / painting (ground, blocks, coins while held) / erasing (eraser, back held, right
+    mouse) / picking a part up and dropping it elsewhere (a tap on a part: its other form); one
+    undo step per press; undo / redo; mouse, touch taps, keyboard and pad (README keys)
+  - ✅ part window `Edit_RingMenu_00`: four categories × pages of ≤ 13 round the ring (the ring's
+    own Type / Select / Category animations), names from `PartsIconName`; the choice goes to the
+    front of the palette [page contents ours: not in the game's data]
+  - ✅ Game Style and Course Theme windows of the left column
+  - ✅ test play: from the maker's Mario (the start, then where the last test play ended), held
+    for the clapperboard's HoldWait from the start, T from the cursor; SMM2 HUD; back on death,
+    clear or the key
+  - ✅ main menu `Cmn_MainMenu_00` (Back to Title, Course Maker, Coursebot, Story Mode, Course
+    World); Save/Load `Edit_SaveLoadMenu_00` (Save, Save As) → the Coursebot (`Host::save_course`:
+    `<data>/Coursebot/course_NNN.bin`, in memory for captures) → listed in the Coursebot / Course
+    World lists and playable there
+  - ⬜ timer / autoscroll / clear-condition / sub-area windows, the bottom scroll bar and area
+    buttons (G key switches area for now), multigrab, Load, course name / description entry,
+    the part variants balloon, maker BGM and edit sounds, the trash can / reset rocket flights,
+    co-op making
+- 🔄 Edit any course: the open row of the Course World / Coursebot lists has "Make" (the co-op
+  button's slot, the Coursebot's word) → the maker; someone else's course (a code whose maker
+  isn't the signed-in player) saves as a new Coursebot course with "based on <code> by <maker>"
+  in its description ✅ · TGRCode courses ⬜ · upload of edited copies with the credit ⬜
+- ⬜ Coursebot screens `Lcl_*` (save slots, upload to the own server)
+- ⬜ The Swift app: its `MmkFrontHost` has no maker hooks (no still view / test play / save), its
+  input no pointer or maker keys
 
 **G5 — Super Worlds** ⬜
 - ⬜ Research: the `MyWorld` data and screens (v3.0.3), world map rules, save

@@ -102,6 +102,9 @@ struct MatState {
     srts: Vec<TexSrt>,
     /// Texture-pattern override per texture map.
     pattern: Vec<Option<TexRef>>,
+    /// The caller's image fills the picture as it is (`set_picture_image`): no second map, no
+    /// texture coordinate generator or SRT.
+    plain: bool,
 }
 
 fn rgba_f(c: [u8; 4]) -> [f32; 4] {
@@ -221,6 +224,8 @@ pub struct LayoutPlayer {
     /// First texture of a material set by the caller (`set_picture_texture`), by material index;
     /// wins over texture-pattern animations.
     material_textures: HashMap<usize, TexRef>,
+    /// Materials whose caller texture is a plain image (`set_picture_image`).
+    plain_materials: std::collections::HashSet<usize>,
     /// Material colours set by the caller (`set_material_color`), by material index: black,
     /// white (0–255 RGBA); win over animations.
     material_colors: HashMap<usize, MaterialColors>,
@@ -330,6 +335,7 @@ impl LayoutPlayer {
             basic_overrides: HashMap::new(),
             pane_overrides: HashMap::new(),
             material_textures: HashMap::new(),
+            plain_materials: Default::default(),
             material_colors: HashMap::new(),
         }
     }
@@ -566,6 +572,32 @@ impl LayoutPlayer {
     /// Draw picture pane `path` (`[PartPane/…/]Pane`) with `texture` as its material's first
     /// texture (e.g. the clear-condition icon the game puts into a placeholder picture), or give
     /// it back its own (`None`). False if there is no such picture or it is untextured.
+    /// Like [`Self::set_picture_texture`], but the image fills the picture as it is: the
+    /// material's other texture maps (masks), coordinate generators and SRTs are left out (a
+    /// picture the game renders into a target of its own, e.g. the maker's part icons).
+    pub fn set_picture_image(&mut self, path: &str, texture: Option<TexRef>) -> bool {
+        if !self.set_picture_texture(path, texture) {
+            return false;
+        }
+        let (parts, name) = Self::split(path);
+        let Some(p) = self.part_mut(&parts) else {
+            return false;
+        };
+        let Some(&i) = p.res.pane_index.get(name) else {
+            return false;
+        };
+        let PaneKind::Picture(pic) = &p.res.nodes[i].pane.kind else {
+            return false;
+        };
+        let m = pic.material as usize;
+        if texture.is_some() {
+            p.plain_materials.insert(m);
+        } else {
+            p.plain_materials.remove(&m);
+        }
+        true
+    }
+
     pub fn set_picture_texture(&mut self, path: &str, texture: Option<TexRef>) -> bool {
         let (parts, name) = Self::split(path);
         let Some(p) = self.part_mut(&parts) else {
@@ -748,8 +780,11 @@ impl LayoutPlayer {
             }
         }
         for (&m, &t) in &self.material_textures {
-            if let Some(slot) = mats.get_mut(m).and_then(|ms| ms.pattern.first_mut()) {
+            if let Some(ms) = mats.get_mut(m)
+                && let Some(slot) = ms.pattern.first_mut()
+            {
                 *slot = Some(t);
+                ms.plain = self.plain_materials.contains(&m);
             }
         }
         for (&i, o) in &self.overrides {
@@ -1107,6 +1142,7 @@ fn base_mats(res: &LayoutRes) -> Vec<MatState> {
             white: rgba_f(m.white),
             srts: m.tex_srts.clone(),
             pattern: vec![None; m.tex_maps.len()],
+            plain: false,
         })
         .collect()
 }
@@ -1231,7 +1267,7 @@ impl Ctx<'_> {
             white = [255; 4];
         }
         let t0 = self.texture(m, ms, 0);
-        let t1 = if m.tex_maps.len() > 1 {
+        let t1 = if m.tex_maps.len() > 1 && !ms.plain {
             self.texture(m, ms, 1)
         } else {
             None
@@ -1266,7 +1302,11 @@ impl Ctx<'_> {
                 UNIT_UV,
             ));
         }
-        let uv0 = self.uvs(m, ms, 0, sets, corners);
+        let uv0 = if ms.plain {
+            UNIT_UV
+        } else {
+            self.uvs(m, ms, 0, sets, corners)
+        };
         let uv1 = if t1.is_some() {
             self.uvs(m, ms, 1, sets, corners)
         } else {

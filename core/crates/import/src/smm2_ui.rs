@@ -17,6 +17,9 @@
 //! ui/textures/GameSkin/<name>.mtex      the game styles' logos (`Model/<style>_Lyt_Logo`; the
 //!                                       game puts them into `Cmn_GameSkin_00`, e.g. Course
 //!                                       World's course rows)
+//! ui/textures/EditModel/<name>.mtex     the Course Maker's model textures (glove cursor, grid,
+//!                                       part frame, selection rectangle, no-build zones) and
+//!                                       the theme pictures (`Model/Edit_*`, `Lyt_Edit_Icon`)
 //! ui/sound/sounds.json, <sound>.wav     the layouts' button and animation sounds
 //!                                       (`super::smm2_ui_sound`)
 //! courses/title_course_data_<n>.bcd     the title screen's demo courses (as in the RomFS)
@@ -41,7 +44,7 @@ use serde_json::{Value, json};
 use crate::smm1::{font_to_json, to_mtex};
 use crate::{ImportError, Progress, Result, read, write};
 
-pub const SMM2_UI_IMPORTER_VERSION: u32 = 4;
+pub const SMM2_UI_IMPORTER_VERSION: u32 = 5;
 
 #[derive(Clone, Debug)]
 pub struct Smm2UiConfig {
@@ -252,15 +255,36 @@ const ICON_MODELS: [(&str, &str); 2] = [
     ("_Lyt_Logo", GAME_SKIN_ICONS),
 ];
 
-/// The icon models `<style><suffix>` of the five styles: loose in `Model/`, else members of
-/// `Pack/*.pack` (v3.0.3 keeps them in `StaticModel.pack`).
+/// Texture group of the Course Maker's own models: the glove cursor, the grid, the frame round
+/// the part under the cursor, the selection rectangle, the no-build zones, and the left
+/// column's theme pictures.
+pub const EDIT_MODELS: &str = "EditModel";
+
+/// The Course Maker models whose textures go to [`EDIT_MODELS`] (`Pack/*.pack` members in
+/// v3.0.3, `Lyt_Edit_Icon` loose in `Model/`).
+const EDIT_MODEL_FILES: [&str; 6] = [
+    "Edit_mainCursor",
+    "Edit_grid",
+    "Edit_SelectCursor",
+    "Edit_RectangCursor",
+    "Edit_BanArea",
+    "Lyt_Edit_Icon",
+];
+
+/// The icon models `<style><suffix>` of the five styles.
 fn icon_models(romfs: &Path, suffix: &str) -> Vec<(String, Vec<u8>)> {
     let wanted: Vec<String> = ["M1", "M3", "MW", "WU", "3W"]
         .iter()
         .map(|s| format!("{s}{suffix}.Nin_NX_NVN.zs"))
         .collect();
+    models(romfs, &wanted)
+}
+
+/// Model files by name: loose in `Model/`, else members of `Pack/*.pack` (v3.0.3 keeps most of
+/// them in `StaticModel.pack` and the style packs).
+fn models(romfs: &Path, wanted: &[String]) -> Vec<(String, Vec<u8>)> {
     let mut out: Vec<(String, Vec<u8>)> = Vec::new();
-    for w in &wanted {
+    for w in wanted {
         if let Ok(d) = read(&romfs.join("Model").join(w)) {
             out.push((format!("Model/{w}"), d));
         }
@@ -554,12 +578,22 @@ pub fn run_smm2_ui(cfg: &Smm2UiConfig, progress: Progress) -> Result<Smm2UiRepor
     // and the style logos (Cmn_GameSkin_00)
     let mut mission_icons = 0usize;
     let mut skin_icons = 0usize;
+    let mut edit_textures = 0usize;
     let models: Vec<(&str, String, Vec<u8>)> = ICON_MODELS
         .iter()
         .flat_map(|(suffix, group)| {
             icon_models(&cfg.romfs, suffix)
                 .into_iter()
                 .map(move |(n, d)| (*group, n, d))
+        })
+        .chain({
+            let wanted: Vec<String> = EDIT_MODEL_FILES
+                .iter()
+                .map(|m| format!("{m}.Nin_NX_NVN.zs"))
+                .collect();
+            models(&cfg.romfs, &wanted)
+                .into_iter()
+                .map(|(n, d)| (EDIT_MODELS, n, d))
         })
         .collect();
     for (group, name, data) in models {
@@ -592,10 +626,10 @@ pub fn run_smm2_ui(cfg: &Smm2UiConfig, progress: Progress) -> Result<Smm2UiRepor
                             &ui.join(format!("textures/{group}/{}.mtex", t.name)),
                             &m.to_bytes(),
                         )?;
-                        if group == MISSION_ICONS {
-                            mission_icons += 1;
-                        } else {
-                            skin_icons += 1;
+                        match group {
+                            MISSION_ICONS => mission_icons += 1,
+                            GAME_SKIN_ICONS => skin_icons += 1,
+                            _ => edit_textures += 1,
                         }
                         report.textures += 1;
                     }
@@ -628,6 +662,7 @@ pub fn run_smm2_ui(cfg: &Smm2UiConfig, progress: Progress) -> Result<Smm2UiRepor
         "title_courses": title_courses,
         "mission_icons": mission_icons,
         "game_skin_icons": skin_icons,
+        "edit_model_textures": edit_textures,
         "ui_sounds": {"layouts": sound.layouts, "users": sound.users, "sounds": sound.sounds},
         "missing_part_layouts": missing_parts,
         "skipped": report.skipped,

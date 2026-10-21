@@ -2,6 +2,33 @@
 
 Newest first. Each entry: what was decided, why, and what would change it.
 
+## 2026-10-21 — The Course Maker in the front end: SMM2's maker layouts over `mmk-editor`
+**Decision:** the maker is a screen of `mmk-front` (`maker`), like the rest of the menus, so every
+host gets it; the shell's old `--edit` maker stays as a debug tool.
+- **The host draws the course, still.** `Host::edit_show(course, area)` (raw course data, after
+  each change) and `edit_camera(x, y)`; the front end never ticks it. Test play is
+  `Host::test_play(course, area, start)` then the usual `step_course` / `course_status`.
+- **Part pictures from the engine's own art.** The game renders its palette icons from the
+  parts' models at run time (no icon textures in the RomFS, research/specs/maker.md C2), so
+  `Host::part_icon` draws the part alone in a small course with the engine's sprites and copies
+  them out (the shell: CPU, the course without the part subtracted); the layout player shows it
+  with `set_picture_image` (no mask / projection of the icon material). 3D styles have none yet.
+- **The editor models' textures go into the UI import** (`EditModel`, import v5): glove, eraser
+  and holding cursors, the part frame, selection rectangle, no-build zones, theme pictures.
+  The grid's textures are placeholders in the game's files: drawn as lines.
+- **What isn't in the data is ours, marked [inf]:** the part window's pages (four categories
+  from the editor part table, ≤ 13 per page), the default palette, door / warp box partners 4
+  tiles to the right, test play returning on death / clear, the palette as a history (the
+  chosen part goes to the front).
+- **Saving is the Coursebot** (`Host::save_course`, a library entry). Someone else's course
+  (from a list row's "Make") always saves as a new course and its description carries "based on
+  <code> by <maker>" (owner's rule); the course being made is kept as a draft
+  (`store_value("maker.draft")`, zero runs compressed) and reopens with the maker.
+- **Input:** `FrontInput` gains the pointer (position, buttons) and maker keys; the C input
+  doesn't have them yet (taps still place / erase).
+**Would change it:** decoding the ring pages / default palette from the binary; the Swift app
+getting its own still view (then `edit_show` moves into the FFI host).
+
 ## 2026-10-21 — SMCraft revived: import once, then no ROM or keys; the mode list
 **Decision (owner):** SMCraft is developed again, alongside smm2recomp. The goal is SMM2 rebuilt from
 scratch, every style as pixel-, physics- and sound-exact as we can make it, that does not need the

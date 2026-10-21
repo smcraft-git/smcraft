@@ -37,6 +37,9 @@ pub struct Game {
     ghost_sprites: Vec<DrawSprite>,
     /// No placeholder HUD strip (the front end draws the SMM2 HUD layout over the course).
     pub no_hud: bool,
+    /// The front end's Course Maker shows the course still (the maker's flat view; nothing
+    /// ticks it).
+    pub edit_view: bool,
     /// The cache's effects (empty: none imported) and this frame's quads.
     fx_lib: Arc<mmk_host::effects::EffectLibrary>,
     fx_frame: crate::effects::EffectFrame,
@@ -96,6 +99,7 @@ impl Game {
             on_clear: None,
             ghost_sprites: Vec::new(),
             no_hud: false,
+            edit_view: false,
         }
     }
 
@@ -108,7 +112,183 @@ impl Game {
         self.planner.reset();
     }
 
-    /// What to draw now.
+    /// The front end's maker: show `course` still, area `area` (the player hidden outside the
+    /// main area).
+    pub fn show_edit(&mut self, course: Course, area: usize) {
+        self.set_course(Some(course));
+        self.edit_view = true;
+        let w = &mut self.session.world;
+        w.show_area(area);
+        w.player.hidden = area != 0;
+    }
+
+    /// The front end's maker test play: `course` from its start, or with the player at `start`
+    /// (world px, feet) in area `area`; the engine options and effects stay.
+    pub fn test_course(&mut self, course: Course, area: usize, start: Option<[f32; 2]>) {
+        let audio = self.session.audio.clone();
+        let options = self.session.options;
+        self.session = Session::new(Some(course));
+        self.session.effects = Some(mmk_host::effects::EffectDirector::new(self.fx_lib.clone()));
+        self.session.set_options(options);
+        self.session.set_audio(audio);
+        self.edit_view = false;
+        self.resolver.reset();
+        self.planner.reset();
+        let w = &mut self.session.world;
+        if area != 0 {
+            w.show_area(area);
+        }
+        if let Some([x, y]) = start {
+            w.player.x = x;
+            w.player.y = y;
+            w.player.vy = 0.0;
+            w.reset_camera();
+        }
+    }
+
+    /// A picture of part `part` as the engine draws it in `style`: the part alone in a small
+    /// course, its sprites copied out of the textures (RGBA, 3 px per world px). None for
+    /// parts drawn as 3D models (NSMBU / 3D World) or without art.
+    pub fn part_icon(&mut self, style: &str, part: i16) -> Option<mmk_front::Icon> {
+        let mut e = mmk_editor::Editor::new(style);
+        let (tx, ty) = (20, 6);
+        let placed = match part {
+            7 => e.paint_ground(tx, ty).is_ok(),
+            9 => e
+                .place_pipe(tx, ty, 2, mmk_editor::parts::Dir::Up, 0)
+                .is_ok(),
+            55 => e
+                .place_doors((tx, ty), (tx + 6, ty), mmk_editor::links::DoorKind::Normal)
+                .is_ok(),
+            97 => e.place_warp_boxes((tx, ty), (tx + 6, ty), false).is_ok(),
+            p => e.place(p, tx, ty).is_ok(),
+        };
+        if !placed {
+            return None;
+        }
+        let r = match e.object_at(tx, ty).and_then(|i| e.object(i)) {
+            Some(o) => mmk_editor::parts::footprint(o),
+            None => mmk_editor::Rect::new(tx, ty, 1, 1),
+        };
+        // the sprites of the course with the part, less those of the same course without it
+        // (background, scenery)
+        let cam = (r.x as f32 * 16.0 - 160.0, r.y as f32 * 16.0 - 80.0);
+        let draw = |course: &mmk_formats::smm2::Course| {
+            let mut world = mmk_sim::World::from_course(course);
+            world.player.hidden = true;
+            world.look_at(cam.0, cam.1);
+            let mut planner = mmk_host::mesh::MeshPlanner::default();
+            let mut resolver = SpriteResolver::default();
+            let (mut sprites, mut meshes) = (Vec::new(), Vec::new());
+            planner.frame(
+                &world,
+                &self.cache,
+                None,
+                &mut resolver,
+                &mut sprites,
+                &mut meshes,
+            );
+            sprites
+        };
+        let key = |s: &DrawSprite| {
+            (
+                s.texture,
+                s.x.to_bits(),
+                s.y.to_bits(),
+                s.w.to_bits(),
+                s.h.to_bits(),
+                s.u0.to_bits(),
+                s.v0.to_bits(),
+            )
+        };
+        let scenery: std::collections::HashSet<_> = draw(&mmk_editor::Editor::new(style).course)
+            .iter()
+            .map(key)
+            .collect();
+        let sprites: Vec<DrawSprite> = draw(&e.course)
+            .into_iter()
+            .filter(|s| !scenery.contains(&key(s)))
+            .collect();
+        // the part's rectangle (world px), a little margin for what sticks out (wings, the
+        // Koopa's head)
+        let m = 4.0;
+        let (x0, y0) = (r.x as f32 * 16.0 - m, r.y as f32 * 16.0 - m);
+        let (x1, y1) = ((r.x + r.w) as f32 * 16.0 + m, (r.y + r.h) as f32 * 16.0 + m);
+        let scale = 3.0;
+        let (w, h) = (((x1 - x0) * scale) as u32, ((y1 - y0) * scale) as u32);
+        let mut rgba = vec![0u8; (w * h * 4) as usize];
+        let mut decoded: std::collections::HashMap<u32, Option<(u32, u32, Vec<u8>)>> =
+            Default::default();
+        let mut any = false;
+        for s in &sprites {
+            let Some(t) = s.texture else { continue };
+            if s.x >= x1 || s.x + s.w <= x0 || s.y >= y1 || s.y + s.h <= y0 {
+                continue;
+            }
+            let tex = decoded
+                .entry(t)
+                .or_insert_with(|| {
+                    let m = self.cache.texture(t as usize)?;
+                    crate::texture::decode_rgba(m).map(|p| (m.width, m.height, p))
+                })
+                .as_ref();
+            let Some((tw, th, px)) = tex else { continue };
+            for cy in 0..h {
+                let wy = y1 - (cy as f32 + 0.5) / scale;
+                if wy < s.y || wy >= s.y + s.h {
+                    continue;
+                }
+                let fv = (s.y + s.h - wy) / s.h;
+                for cx in 0..w {
+                    let wx = x0 + (cx as f32 + 0.5) / scale;
+                    if wx < s.x || wx >= s.x + s.w {
+                        continue;
+                    }
+                    let mut fu = (wx - s.x) / s.w;
+                    if s.flip_x {
+                        fu = 1.0 - fu;
+                    }
+                    let u = s.u0 + fu * (s.u1 - s.u0);
+                    let v = s.v0 + fv * (s.v1 - s.v0);
+                    let sx = ((u * *tw as f32) as u32).min(tw - 1);
+                    let sy = ((v * *th as f32) as u32).min(th - 1);
+                    let si = ((sy * tw + sx) * 4) as usize;
+                    let a = px[si + 3] as u32;
+                    if a == 0 {
+                        continue;
+                    }
+                    let di = ((cy * w + cx) * 4) as usize;
+                    for c in 0..3 {
+                        let d = rgba[di + c] as u32;
+                        rgba[di + c] = ((px[si + c] as u32 * a + d * (255 - a)) / 255) as u8;
+                    }
+                    rgba[di + 3] = (a + rgba[di + 3] as u32 * (255 - a) / 255).min(255) as u8;
+                    any = true;
+                }
+            }
+        }
+        if !any {
+            return None;
+        }
+        // trimmed to what was drawn
+        let opaque = |x: u32, y: u32| rgba[((y * w + x) * 4 + 3) as usize] > 0;
+        let cols: Vec<u32> = (0..w).filter(|&x| (0..h).any(|y| opaque(x, y))).collect();
+        let rows: Vec<u32> = (0..h).filter(|&y| (0..w).any(|x| opaque(x, y))).collect();
+        let (cx0, cx1) = (*cols.first()?, *cols.last()?);
+        let (cy0, cy1) = (*rows.first()?, *rows.last()?);
+        let (tw, th) = (cx1 - cx0 + 1, cy1 - cy0 + 1);
+        let mut out = Vec::with_capacity((tw * th * 4) as usize);
+        for y in cy0..=cy1 {
+            let a = ((y * w + cx0) * 4) as usize;
+            out.extend_from_slice(&rgba[a..a + (tw * 4) as usize]);
+        }
+        Some(mmk_front::Icon {
+            width: tw,
+            height: th,
+            rgba: out,
+        })
+    }
+
     /// Test-play the maker's course (Enter in the editor).
     pub fn play_maker_course(&mut self) {
         let Some(bytes) = self.maker.as_ref().and_then(|m| m.course_bytes()) else {
@@ -231,7 +411,7 @@ impl Game {
             &mut self.mesh_draws,
         );
         let (cam, upside_down) = ((w.camera_x, w.camera_y), w.upside_down());
-        self.build_meshes(cam, upside_down, false);
+        self.build_meshes(cam, upside_down, self.edit_view);
         let w = &self.session.world;
         self.ghost_sprites.clear();
         if let Some(g) = &self.session.ghost

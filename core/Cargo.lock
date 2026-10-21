@@ -1297,6 +1297,8 @@ dependencies = [
 name = "mmk-front"
 version = "0.1.0"
 dependencies = [
+ "mmk-assets",
+ "mmk-editor",
  "mmk-modes",
  "mmk-ui",
  "serde_json",

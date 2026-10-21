@@ -14,8 +14,8 @@
 //! with the black fade. Inferred [inf]: the logo colour by the course's sky, the cursor
 //! (`Cmn_Cursor_00` sized to the selected button's N_Carsor_00 / B_Btn_00), how long a
 //! button's Decide plays before its choice acts. Departures: a fourth Play-menu button "100
-//! Mario Challenge" (a copy of the Coursebot button, 116 below it, with the castle icon); Make
-//! plays its clap and says "coming soon".
+//! Mario Challenge" (a copy of the Coursebot button, 116 below it, with the castle icon). Make
+//! plays its clap, then DecideEditBtn, then opens the Course Maker.
 
 use crate::host::{Host, buttons};
 use crate::layout::{Layout, Ui};
@@ -29,6 +29,8 @@ pub enum TitleChoice {
     CourseWorld,
     Coursebot,
     HundredMario,
+    /// Make: the Course Maker.
+    Make,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -43,7 +45,6 @@ pub enum State {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TitleEvent {
     Choice(TitleChoice),
-    ComingSoon,
 }
 
 pub const MAIN_BUTTONS: [&str; 2] = ["L_EditBtn_00", "L_PlayBtn_00"];
@@ -231,8 +232,13 @@ impl TitleScene {
                     self.title.play(&decide, tick);
                     let clap = self.title.length(&decide) as i32;
                     if self.main_selection == 0 {
-                        self.busy_until = tick + clap;
-                        return Some(TitleEvent::ComingSoon);
+                        // the clap, then DecideEditBtn (80: the logo grows, the clapperboards
+                        // fly off, the letters drop) and the editor [obs]
+                        self.restart("DecideEditBtn", tick + clap);
+                        self.state = State::Leaving;
+                        let out = self.title.length("DecideEditBtn") as i32;
+                        self.pending = Some((TitleChoice::Make, tick + clap + out));
+                        return None;
                     }
                     // the clap, then the menu swaps to the category buttons; the Play menu
                     // opens on Story Mode [obs]

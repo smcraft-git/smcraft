@@ -9,4 +9,6 @@ publish.workspace = true
 [dependencies]
 mmk-ui = { path = "../ui" }
 mmk-modes = { path = "../modes" }
+mmk-editor = { path = "../editor" }
+mmk-assets = { path = "../assets" }
 serde_json.workspace = true

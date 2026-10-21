@@ -185,7 +185,9 @@ mod native {
         /// courseworld-comments, courseworld-post, courseworld-maker, courseworld-play,
         /// courseworld-pause, courseworld-clear; challenge, challenge-map,
         /// challenge-walk, challenge-gameover, challenge-ending, challenge-pause,
-        /// challenge-clear, challenge-skip, challenge-card; with --front-course: course-intro,
+        /// challenge-clear, challenge-skip, challenge-card; the Course Maker on a new course:
+        /// maker, maker-parts, maker-menu, maker-save, maker-style, maker-theme, maker-play
+        /// (test play from the start, --ticks of it); with --front-course: course-intro,
         /// course-pause, course-clear, course-gameover, course-timeup, course-retire,
         /// course-settings, course-death, course-play (--ticks of play with the HUD).
         #[arg(long, value_name = "NAME")]

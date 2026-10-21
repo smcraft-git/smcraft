@@ -346,6 +346,14 @@ pub struct CourseStatus {
     pub condition: Option<Condition>,
 }
 
+/// An RGBA picture (rows top first), e.g. a part's icon.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Icon {
+    pub width: u32,
+    pub height: u32,
+    pub rgba: Vec<u8>,
+}
+
 /// A course loaded into the engine.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct LoadedCourse {
@@ -408,6 +416,44 @@ pub trait Host {
     /// replays are then neither sent nor raced.
     fn play_options_affect_play(&self) -> bool {
         false
+    }
+    /// Course Maker: show raw course data `course` as the maker's still view of area `area` (0
+    /// main, 1 sub): built as it would start, nothing moving, the player hidden outside the
+    /// main area. False: the host can't draw a course (the maker then shows no course).
+    fn edit_show(&mut self, _course: &[u8], _area: usize) -> bool {
+        false
+    }
+    /// Move the maker's still view: its bottom-left at (`x`, `y`) world px.
+    fn edit_camera(&mut self, _x: f32, _y: f32) {}
+    /// Course Maker test play: load raw course data `course` into the engine to play, the player
+    /// starting in area `area` at `start` (world px, feet; None: the course's start).
+    fn test_play(
+        &mut self,
+        _course: &[u8],
+        _area: usize,
+        _start: Option<[f32; 2]>,
+    ) -> Result<LoadedCourse, String> {
+        Err("this host can't play made courses".into())
+    }
+    /// Player 1's area and position (world px, feet) in the course playing, if known.
+    fn player_position(&self) -> Option<(usize, [f32; 2])> {
+        None
+    }
+    /// Save a made course (raw course data) to the Coursebot: as entry `id` when given
+    /// (overwrite), else as a new entry. Returns the entry's id (a library id: it then lists in
+    /// [`Host::library`] and loads with [`Source::Library`]).
+    fn save_course(&mut self, _id: Option<&str>, _course: &[u8]) -> Result<String, String> {
+        Err("this host can't save courses".into())
+    }
+    /// The raw course data of a library or server course (to open it in the maker).
+    fn course_data(&mut self, _source: &Source) -> Result<Vec<u8>, String> {
+        Err("this host can't read course files".into())
+    }
+    /// A picture of part `part` (with placement flags `flags`, e.g. 0x4 its other form) as the
+    /// engine draws it in game style `style`, for the maker's palette and part window. None:
+    /// the host has no art for it (the maker shows the part's name instead).
+    fn part_icon(&mut self, _style: &str, _part: i16, _flags: u32) -> Option<Icon> {
+        None
     }
     /// Small persistent values (save data, settings) by key.
     fn load_value(&mut self, key: &str) -> Option<String>;

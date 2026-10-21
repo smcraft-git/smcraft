@@ -20,6 +20,7 @@ pub mod fade;
 pub mod host;
 pub mod layout;
 pub mod leaderboard;
+pub mod maker;
 pub mod menu;
 pub mod online;
 pub mod play;
@@ -33,13 +34,14 @@ mod tests_online;
 pub mod title;
 pub mod world;
 
-pub use host::{CourseEntry, CourseStatus, Host, Saves, Source, WorldCourse};
+pub use host::{CourseEntry, CourseStatus, Host, Icon, Saves, Source, WorldCourse};
 pub use layout::{Layout, Ui, UiKind};
 pub use menu::{Buttons, UiInput};
 pub use sound::{SoundCue, UiSounds};
 
 use challenge::{ChallengeEvent, ChallengeFlow, ChallengeGo, Presentation};
 use fade::{FadeKind, FadeStart, SceneFade};
+use maker::{MakerEvent, MakerFlow, MakerInput, MakerStart};
 use menu::Script;
 use play::PlayInput;
 use title::{Title, TitleChoice, TitleEvent};
@@ -93,6 +95,13 @@ pub struct FrontInput {
     /// '\u{8}' to erase the last one, '\n' to finish, '\u{1b}' to cancel. Hosts without a
     /// keyboard leave it None (one key per tick; queue the rest).
     pub text: Option<char>,
+    /// The pointer (mouse) position this tick, layout units, and its buttons held (primary,
+    /// secondary). Hosts without one (touch: taps come as `click`) leave it None.
+    pub pointer: Option<[f32; 2]>,
+    pub pointer_down: bool,
+    pub pointer_alt: bool,
+    /// Course Maker keys held ([`maker::keys`]).
+    pub keys: u16,
 }
 
 /// A deferred scene change (run when its fade has covered the screen).
@@ -103,6 +112,7 @@ pub enum Go {
         select: Option<usize>,
     },
     Enter(TitleChoice),
+    Maker(MakerStart),
     CourseWorld {
         selection: usize,
     },
@@ -219,6 +229,8 @@ pub enum Screen {
     Challenge(Box<ChallengeFlow>, Back),
     /// One course with the SMM2 screens (the Swift app's library play / `MMK_COURSE`).
     Course(Box<play::CoursePlay>),
+    /// The Course Maker.
+    Maker(Box<MakerFlow>),
     None,
 }
 
@@ -332,6 +344,15 @@ impl Front {
         };
     }
 
+    fn show_maker(&mut self, host: &mut dyn Host, start: MakerStart) {
+        host.unload_course();
+        let smm2 = self.smm2.clone();
+        let (mut cx, screen) = self.cx(host);
+        let mut m = MakerFlow::new(&smm2, &mut cx, start);
+        m.load_icons(cx.host);
+        *screen = Screen::Maker(Box::new(m));
+    }
+
     fn show_challenge(
         &mut self,
         host: &mut dyn Host,
@@ -385,7 +406,9 @@ impl Front {
                 TitleChoice::CourseWorld => self.show_world(host, ListKind::World, 0),
                 TitleChoice::Coursebot => self.show_world(host, ListKind::Coursebot, 0),
                 TitleChoice::HundredMario => self.show_challenge(host, None, Back::Title),
+                TitleChoice::Make => self.show_maker(host, MakerStart::Resume),
             },
+            Go::Maker(start) => self.show_maker(host, start),
             Go::CourseWorld { selection } => self.show_world(host, ListKind::World, selection),
             Go::ShowChallenge { presentation, back } => {
                 self.show_challenge(host, presentation, back)
@@ -458,7 +481,6 @@ impl Front {
             }
             Screen::Title(t) => match t.step(&ui, cx.host) {
                 Some(TitleEvent::Choice(c)) => after = Some((FadeKind::Black, Go::Enter(c))),
-                Some(TitleEvent::ComingSoon) => cx.toast("The Course Maker is coming soon."),
                 None => {}
             },
             Screen::World(f) => match f.step(&play, &mut cx) {
@@ -476,6 +498,20 @@ impl Front {
                             select: Some(select),
                         },
                     ));
+                }
+                Some(WorldEvent::Edit {
+                    source,
+                    entry,
+                    based_on,
+                }) => {
+                    after = Some((
+                        FadeKind::Black,
+                        Go::Maker(MakerStart::Open {
+                            source,
+                            entry,
+                            based_on,
+                        }),
+                    ))
                 }
                 Some(WorldEvent::Endless) => {
                     after = Some((
@@ -508,6 +544,33 @@ impl Front {
                     self.course_done = true;
                 }
             }
+            Screen::Maker(m) => {
+                let mi = MakerInput {
+                    ui,
+                    start: input.start,
+                    play: input.skip,
+                    pointer: input.pointer,
+                    down: input.pointer_down,
+                    alt: input.pointer_alt,
+                    keys: input.keys,
+                };
+                let ev = m.step(&mi, &mut cx);
+                m.load_icons(cx.host);
+                after = ev.map(|e| {
+                    (
+                        FadeKind::Black,
+                        match e {
+                            MakerEvent::Title => Go::Title {
+                                start: title::State::Main,
+                                select: None,
+                            },
+                            MakerEvent::StoryMode => Go::Enter(TitleChoice::StoryMode),
+                            MakerEvent::CourseWorld => Go::Enter(TitleChoice::CourseWorld),
+                            MakerEvent::Coursebot => Go::Enter(TitleChoice::Coursebot),
+                        },
+                    )
+                });
+            }
             Screen::None => {}
         }
         self.run_now(host);
@@ -539,6 +602,7 @@ impl Front {
             Screen::World(f) => f.draw(&mut items),
             Screen::Challenge(f, _) => f.draw(&mut items),
             Screen::Course(p) => p.draw(&mut items),
+            Screen::Maker(m) => m.draw(&mut items),
             Screen::None => {}
         }
         self.fade.draw(&mut items);
@@ -636,6 +700,21 @@ impl Front {
                 self.run_now(host);
             }
             "storymode" => self.show_world(host, ListKind::Story, 0),
+            // the Course Maker: a new course (maker), its windows, test play
+            s if s == "maker" || s.starts_with("maker-") => {
+                self.show_maker(host, MakerStart::New);
+                if let Some(what) = s.strip_prefix("maker-") {
+                    let (mut cx, scr) = self.cx(host);
+                    let Screen::Maker(m) = scr else {
+                        return false;
+                    };
+                    if !m.debug_open(&mut cx, what) {
+                        return false;
+                    }
+                    m.load_icons(cx.host);
+                    self.run_now(host);
+                }
+            }
             s if s.starts_with("challenge") => {
                 self.show_challenge(host, None, Back::Title);
                 let (mut cx, scr) = self.cx(host);
