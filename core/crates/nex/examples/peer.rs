@@ -39,6 +39,8 @@ fn main() -> Result<(), String> {
         nat_check: None,
         wait: Duration::from_secs(300),
         log: Arc::new(|m| eprintln!("peer: {m}")),
+        cancel: None,
+        progress: None,
     })
     .map_err(|e| e.to_string())?;
     let mut world = World::new();

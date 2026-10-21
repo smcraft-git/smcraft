@@ -60,6 +60,8 @@ pub enum Error {
     Timeout(&'static str),
     /// The connection was closed.
     Closed,
+    /// The caller gave up (e.g. the player quit the search).
+    Cancelled,
 }
 
 impl PartialEq for Error {
@@ -87,6 +89,7 @@ impl fmt::Display for Error {
             ),
             Error::Timeout(what) => write!(f, "no answer in time ({what})"),
             Error::Closed => write!(f, "the server closed the connection"),
+            Error::Cancelled => write!(f, "cancelled"),
         }
     }
 }
