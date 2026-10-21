@@ -11,6 +11,7 @@ mmk-assets = { path = "../assets" }
 mmk-formats = { path = "../formats" }
 mmk-ui = { path = "../ui" }
 mmk-modes = { path = "../modes" }
+mmk-editor = { path = "../editor" }
 serde_json.workspace = true
 # Course World thumbnails (JPEG)
 jpeg-decoder = { version = "0.3", default-features = false }

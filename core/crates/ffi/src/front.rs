@@ -94,9 +94,13 @@ pub struct MmkFrontInput {
     pub menu: u32,
     /// Engine buttons (MMK_BTN_*) for the course; START is masked (pausing is `flags` bit 0).
     pub buttons: u32,
-    /// bit 0 pause held, bit 1 the 100 Mario skip key held, bit 2 a click / tap this tick.
+    /// bit 0 pause held, bit 1 the 100 Mario skip key held, bit 2 a click / tap this tick,
+    /// bit 3 a pointer (mouse / finger) is at `click_x/y`, bit 4 its primary button / the finger
+    /// is down, bit 5 its secondary button is down, bits 8–23 the Course Maker keys
+    /// (`mmk_front::maker::keys`).
     pub flags: u32,
-    /// The click, layout units (1280 × 720 view, origin centre, y up).
+    /// The click (or, with flag bit 3, the pointer), layout units (1280 × 720 view, origin
+    /// centre, y up).
     pub click_x: f32,
     pub click_y: f32,
     /// A key typed this tick while a text field is open (`MMK_FRONT_TYPING`): a Unicode scalar,
@@ -372,9 +376,63 @@ fn natural(a: &str, b: &str) -> std::cmp::Ordering {
     key(a).cmp(&key(b))
 }
 
+impl FfiHost {
+    /// Where the maker saves the Coursebot's courses: `Coursebot/` next to the downloads
+    /// folder (the app's data folder), else in the temp folder.
+    fn coursebot_dir(&self) -> PathBuf {
+        self.downloads
+            .as_ref()
+            .and_then(|d| d.parent())
+            .map(Path::to_path_buf)
+            .unwrap_or_else(std::env::temp_dir)
+            .join("Coursebot")
+    }
+
+    /// Coursebot slot `slot`'s file: `course_NNN.bin`, NNN = slot + 1.
+    fn slot_path(&self, slot: usize) -> PathBuf {
+        self.coursebot_dir()
+            .join(format!("course_{:03}.bin", slot + 1))
+    }
+
+    /// The Coursebot's courses as library entries (the app's own library scan doesn't look
+    /// there).
+    fn coursebot(&self) -> Vec<CourseEntry> {
+        let Ok(rd) = std::fs::read_dir(self.coursebot_dir()) else {
+            return Vec::new();
+        };
+        let mut out: Vec<CourseEntry> = rd
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.extension().is_some_and(|x| x == "bin"))
+            .filter_map(|p| {
+                let data = std::fs::read(&p).ok()?;
+                let c = mmk_formats::smm2::Course::parse(&data).ok()?;
+                Some(CourseEntry {
+                    id: p.to_string_lossy().into_owned(),
+                    name: c.header.name.to_string_lossy(),
+                    description: c.header.description.to_string_lossy(),
+                    style: c.header.game_style.as_str_lossy(),
+                    theme: c.main.header.theme,
+                    playable: playable(&c),
+                    key: format!("{:016x}", crate::course_info::fnv1a64(&data)),
+                    ..Default::default()
+                })
+            })
+            .collect();
+        out.sort_by(|a, b| natural(&a.id, &b.id));
+        out
+    }
+}
+
 impl Host for FfiHost {
     fn library(&mut self) -> Vec<CourseEntry> {
-        self.library.clone()
+        let mut l = self.library.clone();
+        for e in self.coursebot() {
+            if !l.iter().any(|x| x.id == e.id) {
+                l.push(e);
+            }
+        }
+        l
     }
 
     fn request_server_courses(&mut self) -> bool {
@@ -704,6 +762,120 @@ impl Host for FfiHost {
         self.engine_ref().options.affects_play()
     }
 
+    fn edit_show(&mut self, course: &[u8], area: usize) -> bool {
+        let Ok(c) = mmk_formats::smm2::Course::parse(course) else {
+            return false;
+        };
+        let e = self.engine();
+        e.world = World::from_course(&c);
+        e.world.set_options(e.options);
+        e.world.show_area(area);
+        e.world.player.hidden = area != 0;
+        e.course = Some(c);
+        e.resolver.reset();
+        e.planner.reset();
+        // a still view: no course music
+        e.director = None;
+        true
+    }
+
+    fn edit_camera(&mut self, x: f32, y: f32) {
+        self.engine().world.look_at(x, y);
+    }
+
+    fn test_play(
+        &mut self,
+        course: &[u8],
+        area: usize,
+        start: Option<[f32; 2]>,
+    ) -> Result<LoadedCourse, String> {
+        self.recording = false;
+        let loaded = self.load_bytes(course)?;
+        let w = &mut self.engine().world;
+        if area != 0 {
+            w.show_area(area);
+        }
+        if let Some([x, y]) = start {
+            w.player.x = x;
+            w.player.y = y;
+            w.player.vy = 0.0;
+            w.reset_camera();
+        }
+        Ok(loaded)
+    }
+
+    fn player_position(&self) -> Option<(usize, [f32; 2])> {
+        let w = &self.engine_ref().world;
+        w.player
+            .alive()
+            .then_some((w.area, [w.player.x, w.player.y]))
+    }
+
+    fn save_course(&mut self, id: Option<&str>, course: &[u8]) -> Result<String, String> {
+        if let Some(p) = id {
+            std::fs::write(p, course).map_err(|e| format!("{p}: {e}"))?;
+            return Ok(p.to_string());
+        }
+        let free = self
+            .coursebot_slots()
+            .iter()
+            .position(Option::is_none)
+            .ok_or("the Coursebot is full")?;
+        self.save_slot(free, course)
+    }
+
+    fn coursebot_slots(&mut self) -> Vec<Option<CourseEntry>> {
+        let all = self.coursebot();
+        (0..mmk_front::host::COURSEBOT_SLOTS)
+            .map(|slot| {
+                let id = self.slot_path(slot).to_string_lossy().into_owned();
+                all.iter().find(|e| e.id == id).cloned()
+            })
+            .collect()
+    }
+
+    fn save_slot(&mut self, slot: usize, course: &[u8]) -> Result<String, String> {
+        std::fs::create_dir_all(self.coursebot_dir()).map_err(|e| e.to_string())?;
+        let path = self.slot_path(slot);
+        std::fs::write(&path, course).map_err(|e| format!("{}: {e}", path.display()))?;
+        Ok(path.to_string_lossy().into_owned())
+    }
+
+    fn delete_slot(&mut self, slot: usize) -> bool {
+        std::fs::remove_file(self.slot_path(slot)).is_ok()
+    }
+
+    fn course_thumbnail(&mut self, course: &[u8]) -> Option<mmk_front::Icon> {
+        let c = mmk_formats::smm2::Course::parse(course).ok()?;
+        let i = mmk_host::icon::course_view(&self.assets().cache, &c);
+        Some(mmk_front::Icon {
+            width: i.width,
+            height: i.height,
+            rgba: i.rgba,
+        })
+    }
+
+    fn course_data(&mut self, source: &Source) -> Result<Vec<u8>, String> {
+        let bytes = match source {
+            Source::Library(path) => std::fs::read(path).map_err(|e| format!("{path}: {e}"))?,
+            Source::Server(code) => {
+                let server = self.server.clone().ok_or("no course server")?;
+                mmk_online::Client::new(server)
+                    .download(code)
+                    .map_err(|e| e.to_string())?
+            }
+        };
+        crate::decode_course_data(&bytes, Some(self.assets())).map(|(d, _)| d)
+    }
+
+    fn part_icon(&mut self, style: &str, part: i16, _flags: u32) -> Option<mmk_front::Icon> {
+        mmk_host::icon::part_icon(&self.assets().cache, style, part).map(|i| mmk_front::Icon {
+            width: i.width,
+            height: i.height,
+            rgba: i.rgba,
+        })
+    }
+
     fn load_value(&mut self, key: &str) -> Option<String> {
         let f = self.cb.load_value?;
         let key = CString::new(key).ok()?;
@@ -910,6 +1082,7 @@ pub unsafe extern "C" fn mmk_front_new(
             instant_fades: o.flags & MMK_FRONT_INSTANT_FADES != 0,
             script: opt_str(o.script).unwrap_or_default(),
             title_input: opt_str(o.title_input).unwrap_or_default(),
+            ..Default::default()
         };
         let front = Front::new(smm2, smm1, options, &mut h);
         Box::into_raw(Box::new(MmkFront {
@@ -994,6 +1167,10 @@ fn front_input(i: &MmkFrontInput) -> FrontInput {
         skip: i.flags & 2 != 0,
         click: (i.flags & 4 != 0).then_some([i.click_x, i.click_y]),
         text: char::from_u32(i.text).filter(|&c| c != '\0'),
+        pointer: (i.flags & 8 != 0).then_some([i.click_x, i.click_y]),
+        pointer_down: i.flags & 16 != 0,
+        pointer_alt: i.flags & 32 != 0,
+        keys: ((i.flags >> 8) & 0xffff) as u16,
     }
 }
 

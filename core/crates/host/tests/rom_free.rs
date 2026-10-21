@@ -117,7 +117,14 @@ fn runtime_never_opens_the_dump_or_keys() {
             let forbidden = KEYS
                 .iter()
                 .chain(if setup { &[][..] } else { IMPORT })
-                .find(|t| mentions(&lower, &t.to_ascii_lowercase()));
+                .find(|t| {
+                    // type names (capitals) as written; file names and the rest in any case
+                    if t.chars().any(|c| c.is_ascii_uppercase()) {
+                        mentions(code, t)
+                    } else {
+                        mentions(&lower, t)
+                    }
+                });
             if let Some(t) = forbidden {
                 hits.push(format!("{rel}:{}: {t}", n + 1));
             }

@@ -85,11 +85,63 @@ sound-perfect as possible, that **never needs the ROM or key files to run**.
 
 **G4 — Course Maker for any course** 🔄
 - ✅ Editor core (`mmk-editor`): parts, areas, links, tracks, selection, settings, the game's limits
-- ⬜ SMM2's maker screens (`Edt_*` layouts): palette, tool wheel, area / settings menus, test play,
-  undo dog, eraser, sub-area, Coursebot save
-- ⬜ Edit any course (Course World, library, TGRCode): Edit button in SMM2's style; the re-upload
-  rule ("based on <code> by <maker>")
-- ⬜ Coursebot screens (save slots, upload to the own server)
+- ✅ Research: the maker scene from the v3.0.3 data + binary (private `research/specs/maker.md`
+  Part C: `Edit_MainPage_00` and its parts, the part window `Edit_RingMenu_00`, palette slots,
+  right/left columns, main menu, Save/Load, the editor models' textures, sounds; open items)
+- 🔄 SMM2's maker screens in `mmk-front` (`maker`), over `mmk-editor`, the course drawn by the host
+  as a still view (`Host::edit_show` / `edit_camera`) — shell and Swift-app hosts both:
+  - ✅ title Make → clap + DecideEditBtn → the maker (the draft reopens, else a new SMB1 course)
+  - ✅ `Edit_MainPage_00`: palette bar (12 slots with the parts' pictures drawn from the engine's
+    art, `mmk_host::icon`; selected slot, category colour), left column (style logo, theme and
+    autoscroll pictures, timer, clear condition icon + amount), right column (main menu,
+    Save/Load, eraser toggle, Reset Rocket, Undodog in once there is something to undo),
+    clapperboard, bottom scroll bar (S / G, area button, handle); each part's In
+  - ✅ over the course: grid, the frame round the part / tile under the cursor, the glove and the
+    part it carries (the import's `EditModel` textures: import v5 adds the editor models'
+    textures)
+  - ✅ placing / painting (ground, blocks, coins while held) / erasing (eraser, back held, right
+    mouse) / picking a part up and dropping it elsewhere (a tap on a part: its other form);
+    parts put on (or dropped on) a container go inside, a Super Mushroom makes a part big; one
+    undo step per press; undo / redo; mouse, touch taps, keyboard and pad (README keys)
+  - ✅ part window `Edit_RingMenu_00`: four categories × pages of ≤ 13 round the ring (the ring's
+    own Type / Select / Category animations), names from `PartsIconName`; the choice goes to the
+    front of the palette [page contents ours: not in the game's data]
+  - ✅ left column windows: Game Style, Course Theme, Timer (selector, OK), Autoscroll (none /
+    slow / normal / fast), Clear Condition (`Edit_MissionWindow_00`: tabs, condition and amount
+    selectors with the HUD's icons and sentences, Remove)
+  - ✅ test play: from the maker's Mario (the start, then where the last test play ended), held
+    for the clapperboard's HoldWait from the start, T from the cursor; SMM2 HUD; back on death,
+    clear or the key
+  - ✅ main menu `Cmn_MainMenu_00` (Back to Title, Course Maker, Coursebot, Story Mode, Course
+    World); Save/Load `Edit_SaveLoadMenu_00` (Save, Save As, Upload as the signed-in account,
+    Load → the Coursebot) → the Coursebot (`Host::save_course`: `<data>/Coursebot/course_NNN.bin`,
+    in memory for captures; the app: `Coursebot/` next to its downloads) → listed in the
+    Coursebot / Course World lists and playable there
+  - ✅ captures `mmk-play --front-screen maker[-parts|-menu|-save|-style|-theme|-timer|
+    -autoscroll|-mission|-play]` with `--front-script` presses, maker keys, cursor tiles, slots
+  - ✅ dragging the start (its height) and the goal (its height, the course's length);
+    stretching parts by their right column / top row; multigrab (select, carry, copy, erase);
+    the sub-area turns vertical from the scroll bar
+  - ⬜ custom autoscroll and its nodes, water level, the sub-area set-up window, the vertical
+    scroll bar, the part variants balloon (Fast Conveyor …), wings / parachutes / tracks /
+    doors' partners placed by hand, pipes turned by their mouth, maker BGM
+    (`Sound/Resource/Stream/<S>_BGM_<Theme>_Edit.bwav`) and the parts' edit sounds
+    (`Sound/Resource/Edit_*.bars`) — neither imported yet, the trash can, Mario's Trail, co-op
+    making
+- 🔄 Edit any course: the open row of the Course World / Coursebot lists has "Make" (the co-op
+  button's slot, the Coursebot's word, the glove icon) → the maker; someone else's course (a
+  code whose maker isn't the signed-in player) saves as a new Coursebot course with "based on
+  <code> by <maker>" in its description, and so uploads ✅ · TGRCode courses ⬜
+- ✅ Coursebot screens `Lcl_CourseList_00` / `Lcl_CourseListContents_00` /
+  `Lcl_CourseInfoWindow_00`: 120 My Courses slots with names and pictures (the start view drawn
+  from the engine's sprites), Downloaded Courses (the library's others), the course window (Make,
+  Play, Upload, Name, Description typed, Delete; Make New Course), play from it; the maker's
+  Save As ("Select Save Location", overwrite question) and Load ("Select a Course to Load") ·
+  ⬜ moving slots, the Super World filter, the download flow from Course World, CJK glyphs in
+  names
+- 🔄 The Swift app: its host has the maker and Coursebot hooks ✅; a finger / mouse held down
+  reaches the maker (paint, carry, erase) ✅; the maker keys from its keyboard ⬜; 3D styles'
+  still view uses the play camera ⬜
 
 **G5 — Super Worlds** 🔄
 - ✅ Research (`research/specs/super-worlds.md`, public format `docs/formats/smm2-super-world.md`):

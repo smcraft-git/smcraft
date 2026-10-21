@@ -39,6 +39,9 @@ pub struct Game {
     pub no_hud: bool,
     /// A message over the course in the HUD's banner (the first-launch setup's progress).
     pub notice: Option<(String, String)>,
+    /// The front end's Course Maker shows the course still (the maker's flat view; nothing
+    /// ticks it).
+    pub edit_view: bool,
     /// The cache's effects (empty: none imported) and this frame's quads.
     fx_lib: Arc<mmk_host::effects::EffectLibrary>,
     fx_frame: crate::effects::EffectFrame,
@@ -99,6 +102,7 @@ impl Game {
             ghost_sprites: Vec::new(),
             no_hud: false,
             notice: None,
+            edit_view: false,
         }
     }
 
@@ -111,7 +115,49 @@ impl Game {
         self.planner.reset();
     }
 
-    /// What to draw now.
+    /// The front end's maker: show `course` still, area `area` (the player hidden outside the
+    /// main area).
+    pub fn show_edit(&mut self, course: Course, area: usize) {
+        self.set_course(Some(course));
+        self.edit_view = true;
+        let w = &mut self.session.world;
+        w.show_area(area);
+        w.player.hidden = area != 0;
+    }
+
+    /// The front end's maker test play: `course` from its start, or with the player at `start`
+    /// (world px, feet) in area `area`; the engine options and effects stay.
+    pub fn test_course(&mut self, course: Course, area: usize, start: Option<[f32; 2]>) {
+        let audio = self.session.audio.clone();
+        let options = self.session.options;
+        self.session = Session::new(Some(course));
+        self.session.effects = Some(mmk_host::effects::EffectDirector::new(self.fx_lib.clone()));
+        self.session.set_options(options);
+        self.session.set_audio(audio);
+        self.edit_view = false;
+        self.resolver.reset();
+        self.planner.reset();
+        let w = &mut self.session.world;
+        if area != 0 {
+            w.show_area(area);
+        }
+        if let Some([x, y]) = start {
+            w.player.x = x;
+            w.player.y = y;
+            w.player.vy = 0.0;
+            w.reset_camera();
+        }
+    }
+
+    /// A picture of part `part` as the engine draws it in `style` (`mmk_host::icon`).
+    pub fn part_icon(&mut self, style: &str, part: i16) -> Option<mmk_front::Icon> {
+        mmk_host::icon::part_icon(&self.cache, style, part).map(|i| mmk_front::Icon {
+            width: i.width,
+            height: i.height,
+            rgba: i.rgba,
+        })
+    }
+
     /// Test-play the maker's course (Enter in the editor).
     pub fn play_maker_course(&mut self) {
         let Some(bytes) = self.maker.as_ref().and_then(|m| m.course_bytes()) else {
@@ -234,7 +280,7 @@ impl Game {
             &mut self.mesh_draws,
         );
         let (cam, upside_down) = ((w.camera_x, w.camera_y), w.upside_down());
-        self.build_meshes(cam, upside_down, false);
+        self.build_meshes(cam, upside_down, self.edit_view);
         let w = &self.session.world;
         self.ghost_sprites.clear();
         if let Some(g) = &self.session.ghost

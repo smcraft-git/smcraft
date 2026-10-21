@@ -1142,6 +1142,11 @@ pub(crate) mod tests {
         pub library: Vec<CourseEntry>,
         /// Each step counts `restart_in` down while dying (and ends the death at 0).
         pub death_clock: bool,
+        /// Course Maker: still views shown, courses saved (id given, data), test plays.
+        pub shows: u32,
+        pub saved: Vec<(Option<String>, Vec<u8>)>,
+        pub tests: Vec<(usize, Option<[f32; 2]>)>,
+        pub courses: HashMap<String, Vec<u8>>,
     }
 
     impl Host for MockHost {
@@ -1215,6 +1220,72 @@ pub(crate) mod tests {
         }
         fn random(&mut self) -> u64 {
             42
+        }
+        fn edit_show(&mut self, _: &[u8], _: usize) -> bool {
+            self.shows += 1;
+            true
+        }
+        fn test_play(
+            &mut self,
+            _: &[u8],
+            area: usize,
+            start: Option<[f32; 2]>,
+        ) -> Result<LoadedCourse, String> {
+            self.tests.push((area, start));
+            Ok(LoadedCourse::default())
+        }
+        fn save_course(&mut self, id: Option<&str>, course: &[u8]) -> Result<String, String> {
+            match id {
+                Some(id) if !id.starts_with("slot:") => {
+                    self.saved.push((Some(id.to_string()), course.to_vec()));
+                    self.courses.insert(id.to_string(), course.to_vec());
+                    Ok(id.to_string())
+                }
+                Some(id) => {
+                    let slot = id["slot:".len()..].parse().map_err(|_| "bad slot")?;
+                    self.save_slot(slot, course)
+                }
+                None => {
+                    let free = (0..crate::host::COURSEBOT_SLOTS)
+                        .find(|i| !self.courses.contains_key(&format!("slot:{i}")))
+                        .ok_or("full")?;
+                    self.save_slot(free, course)
+                }
+            }
+        }
+        fn coursebot_slots(&mut self) -> Vec<Option<CourseEntry>> {
+            (0..crate::host::COURSEBOT_SLOTS)
+                .map(|i| {
+                    let id = format!("slot:{i}");
+                    let e = mmk_editor::Editor::open(self.courses.get(&id)?).ok()?;
+                    let h = &e.course.header;
+                    Some(CourseEntry {
+                        name: h.name.to_string_lossy(),
+                        description: h.description.to_string_lossy(),
+                        style: h.game_style.as_str_lossy(),
+                        playable: true,
+                        key: id.clone(),
+                        id,
+                        ..Default::default()
+                    })
+                })
+                .collect()
+        }
+        fn save_slot(&mut self, slot: usize, course: &[u8]) -> Result<String, String> {
+            let id = format!("slot:{slot}");
+            self.courses.insert(id.clone(), course.to_vec());
+            self.saved.push((Some(id.clone()), course.to_vec()));
+            Ok(id)
+        }
+        fn delete_slot(&mut self, slot: usize) -> bool {
+            self.courses.remove(&format!("slot:{slot}")).is_some()
+        }
+        fn course_data(&mut self, s: &Source) -> Result<Vec<u8>, String> {
+            match s {
+                Source::Library(id) | Source::Server(id) => {
+                    self.courses.get(id).cloned().ok_or("no such course".into())
+                }
+            }
         }
     }
 

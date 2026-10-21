@@ -52,6 +52,8 @@ pub struct HostData {
     thumbs: Option<(Sender<Thumbnail>, Receiver<Thumbnail>)>,
     /// The runs' pool entries made so far, by file.
     pool_entries: HashMap<PathBuf, Option<CourseEntry>>,
+    /// Coursebot courses saved without a data folder (captures): ("memory:<n>", raw data).
+    made: Vec<(String, Vec<u8>)>,
 }
 
 /// A thumbnail from its thread: (code, entire, JPEG; empty: none).
@@ -114,7 +116,47 @@ impl HostData {
             ghost: None,
             thumbs: None,
             pool_entries: HashMap::new(),
+            made: Vec::new(),
         }
+    }
+
+    /// Where the Coursebot's courses are saved (`<data>/Coursebot`), if there is a data folder.
+    pub fn coursebot_dir(&self) -> Option<PathBuf> {
+        self.data_dir.as_ref().map(|d| d.join("Coursebot"))
+    }
+
+    /// The id of Coursebot slot `slot`: `<data>/Coursebot/course_NNN.bin` (NNN = slot + 1),
+    /// or `memory:NNN` without a data folder.
+    pub fn slot_id(&self, slot: usize) -> String {
+        let name = format!("course_{:03}.bin", slot + 1);
+        match self.coursebot_dir() {
+            Some(d) => d.join(name).to_string_lossy().into_owned(),
+            None => format!("memory:{name}"),
+        }
+    }
+
+    /// The slot an id is (None: not a Coursebot slot).
+    pub fn slot_of(&self, id: &str) -> Option<usize> {
+        (0..mmk_front::host::COURSEBOT_SLOTS).find(|&s| self.slot_id(s) == id)
+    }
+
+    /// A library course's file bytes (a Coursebot course kept in memory, or a file).
+    fn course_bytes(&self, id: &str) -> Result<Vec<u8>, String> {
+        if let Some((_, b)) = self.made.iter().find(|(i, _)| i == id) {
+            return Ok(b.clone());
+        }
+        std::fs::read(id).map_err(|e| format!("{id}: {e}"))
+    }
+
+    /// The library's folders and the Coursebot's.
+    fn scan_dirs(&self) -> Vec<PathBuf> {
+        let mut d = self.library_dirs.clone();
+        if let Some(c) = self.coursebot_dir()
+            && !d.contains(&c)
+        {
+            d.push(c);
+        }
+        d
     }
 
     fn online_tx(&mut self) -> Sender<Reply> {
@@ -134,7 +176,7 @@ impl HostData {
 
     /// Scan the library on a thread (`library` waits for it).
     pub fn start_scan(&mut self) {
-        let dirs = self.library_dirs.clone();
+        let dirs = self.scan_dirs();
         let root = self
             .source
             .as_ref()
@@ -196,7 +238,7 @@ impl HostData {
     }
 
     fn load_file(&self, game: &mut Game, path: &Path) -> Result<LoadedCourse, String> {
-        let bytes = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
+        let bytes = self.course_bytes(&path.to_string_lossy())?;
         self.load_bytes(game, &bytes)
     }
 
@@ -395,9 +437,15 @@ impl Host for ShellHost<'_> {
                 Some(rx) => rx.recv().unwrap_or_default(),
                 None => {
                     let root = self.data.source.as_ref().and_then(|s| s.dir());
-                    scan(&self.data.library_dirs, root)
+                    scan(&self.data.scan_dirs(), root)
                 }
             };
+            let mut found = found;
+            for (id, bytes) in &self.data.made {
+                if let Ok((c, key)) = self.data.decode(bytes) {
+                    found.push(front_course::entry(id.clone(), id, false, &c, key, None));
+                }
+            }
             self.data.library = Some(found);
         }
         self.data.library.clone().unwrap_or_default()
@@ -725,6 +773,135 @@ impl Host for ShellHost<'_> {
         self.game.session.world.options.affects_play()
     }
 
+    fn edit_show(&mut self, course: &[u8], area: usize) -> bool {
+        match mmk_formats::smm2::Course::parse(course) {
+            Ok(c) => {
+                self.game.show_edit(c, area);
+                true
+            }
+            Err(_) => false,
+        }
+    }
+
+    fn edit_camera(&mut self, x: f32, y: f32) {
+        self.game.session.world.look_at(x, y);
+    }
+
+    fn test_play(
+        &mut self,
+        course: &[u8],
+        area: usize,
+        start: Option<[f32; 2]>,
+    ) -> Result<LoadedCourse, String> {
+        let c = mmk_formats::smm2::Course::parse(course).map_err(|e| e.to_string())?;
+        let loaded = LoadedCourse {
+            name: c.header.name.to_string_lossy(),
+            key: None,
+            theme: c.main.header.theme,
+        };
+        self.game.test_course(c, area, start);
+        self.game.session.set_audio(self.data.audio.clone());
+        Ok(loaded)
+    }
+
+    fn player_position(&self) -> Option<(usize, [f32; 2])> {
+        let w = &self.game.session.world;
+        w.player
+            .alive()
+            .then_some((w.area, [w.player.x, w.player.y]))
+    }
+
+    fn save_course(&mut self, id: Option<&str>, course: &[u8]) -> Result<String, String> {
+        // over an entry: its slot, or the file it is; else the first free slot
+        if let Some(id) = id {
+            if let Some(slot) = self.data.slot_of(id) {
+                return self.save_slot(slot, course);
+            }
+            std::fs::write(id, course).map_err(|e| format!("{id}: {e}"))?;
+            self.data.library = None;
+            return Ok(id.to_string());
+        }
+        let slots = self.coursebot_slots();
+        let free = slots
+            .iter()
+            .position(Option::is_none)
+            .ok_or("the Coursebot is full")?;
+        self.save_slot(free, course)
+    }
+
+    fn coursebot_slots(&mut self) -> Vec<Option<CourseEntry>> {
+        (0..mmk_front::host::COURSEBOT_SLOTS)
+            .map(|slot| {
+                let id = self.data.slot_id(slot);
+                let bytes = self.data.course_bytes(&id).ok()?;
+                let (c, key) = self.data.decode(&bytes).ok()?;
+                Some(front_course::entry(id.clone(), &id, false, &c, key, None))
+            })
+            .collect()
+    }
+
+    fn save_slot(&mut self, slot: usize, course: &[u8]) -> Result<String, String> {
+        let id = self.data.slot_id(slot);
+        match self.data.coursebot_dir() {
+            Some(dir) => {
+                std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+                std::fs::write(&id, course).map_err(|e| format!("{id}: {e}"))?;
+            }
+            None => {
+                self.data.made.retain(|(m, _)| *m != id);
+                self.data.made.push((id.clone(), course.to_vec()));
+            }
+        }
+        // the library lists it from now on
+        self.data.library = None;
+        self.data.scanning = None;
+        Ok(id)
+    }
+
+    fn delete_slot(&mut self, slot: usize) -> bool {
+        let id = self.data.slot_id(slot);
+        let gone = match self.data.coursebot_dir() {
+            Some(_) => std::fs::remove_file(&id).is_ok(),
+            None => {
+                let n = self.data.made.len();
+                self.data.made.retain(|(m, _)| *m != id);
+                self.data.made.len() != n
+            }
+        };
+        if gone {
+            self.data.library = None;
+            self.data.scanning = None;
+        }
+        gone
+    }
+
+    fn course_thumbnail(&mut self, course: &[u8]) -> Option<mmk_front::Icon> {
+        let c = mmk_formats::smm2::Course::parse(course).ok()?;
+        let i = mmk_host::icon::course_view(&self.game.cache, &c);
+        Some(mmk_front::Icon {
+            width: i.width,
+            height: i.height,
+            rgba: i.rgba,
+        })
+    }
+
+    fn course_data(&mut self, source: &Source) -> Result<Vec<u8>, String> {
+        let bytes = match source {
+            Source::Library(id) => self.data.course_bytes(id)?,
+            Source::Server(code) => {
+                let server = self.data.server.clone().ok_or("no course server")?;
+                mmk_online::Client::new(server)
+                    .download(code)
+                    .map_err(|e| e.to_string())?
+            }
+        };
+        front_course::decode(&bytes, || source::key_table(self.data.src())).map(|(_, d, _)| d)
+    }
+
+    fn part_icon(&mut self, style: &str, part: i16, _flags: u32) -> Option<mmk_front::Icon> {
+        self.game.part_icon(style, part)
+    }
+
     fn load_value(&mut self, key: &str) -> Option<String> {
         self.data.load_value(key)
     }
@@ -775,6 +952,105 @@ fn file_name(key: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn made_courses_save_to_the_coursebot_and_play_from_the_library() {
+        let mut game = Game::load(None, None).unwrap();
+        let mut data = HostData::new(None);
+        let mut host = ShellHost {
+            game: &mut game,
+            data: &mut data,
+        };
+        let mut e = mmk_front::maker::new_course("M1");
+        e.set_name("Made in the maker");
+        e.place(0, 12, 1).unwrap();
+        let bytes = e.save().unwrap();
+        // the maker's still view and its test play
+        assert!(host.edit_show(&bytes, 0));
+        assert!(host.game.edit_view);
+        host.test_play(&bytes, 0, Some([200.0, 16.0])).unwrap();
+        assert_eq!(host.game.session.world.player.x, 200.0);
+        assert_eq!(host.player_position().map(|p| p.0), Some(0));
+        // saved without a data folder: kept in memory, listed, loadable, editable again
+        let id = host.save_course(None, &bytes).unwrap();
+        assert_eq!(id, "memory:course_001.bin");
+        let lib = host.library();
+        let entry = lib.iter().find(|c| c.id == id).expect("in the library");
+        assert_eq!(entry.name, "Made in the maker");
+        assert!(entry.playable && !entry.built_in);
+        let loaded = host.load_course(&Source::Library(id.clone())).unwrap();
+        assert_eq!(loaded.name, "Made in the maker");
+        assert_eq!(
+            host.course_data(&Source::Library(id.clone())).unwrap(),
+            bytes
+        );
+        // saving again over the same entry
+        assert_eq!(host.save_course(Some(&id), &bytes).unwrap(), id);
+        assert_eq!(host.library().iter().filter(|c| c.id == id).count(), 1);
+        // a part's picture from the engine's art needs the art: none in placeholder mode
+        assert!(host.part_icon("M1", 0, 0).is_none());
+        // the Coursebot's slots: the course in the first, the next one free; delete
+        let slots = host.coursebot_slots();
+        assert_eq!(slots.len(), 120);
+        assert_eq!(slots[0].as_ref().map(|e| e.id.as_str()), Some(id.as_str()));
+        assert!(slots[1].is_none());
+        let second = host.save_slot(5, &bytes).unwrap();
+        assert_eq!(second, "memory:course_006.bin");
+        assert!(host.coursebot_slots()[5].is_some());
+        assert!(host.delete_slot(5));
+        assert!(host.coursebot_slots()[5].is_none());
+        let pic = host.course_thumbnail(&bytes).unwrap();
+        assert_eq!((pic.width, pic.height), (384, 216));
+    }
+
+    #[test]
+    fn the_makers_upload_reaches_the_course_server() {
+        let dir = std::env::temp_dir().join(format!("mmk-shell-upload-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let store = mmk_server::Store::open(&dir).unwrap();
+        let port = 20000 + (std::process::id() % 20000) as u16 + 7;
+        let addr = format!("127.0.0.1:{port}");
+        let a2 = addr.clone();
+        std::thread::spawn(move || mmk_server::serve(store, &a2));
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        let mut game = Game::load(None, None).unwrap();
+        let mut data = HostData::new(None);
+        data.server = Some(format!("http://{addr}"));
+        data.backend = mmk_online::world::Backend::Server(format!("http://{addr}"));
+        let mut host = ShellHost {
+            game: &mut game,
+            data: &mut data,
+        };
+        let mut e = mmk_front::maker::new_course("M3");
+        e.set_name("Uploaded from the maker");
+        e.set_description("based on ABC-DEF-GHJ by Someone");
+        let bytes = e.save().unwrap();
+        let args = json!({ "course": mmk_front::maker::hex_rle(&bytes), "maker": "tester" });
+        assert!(host.online(1, "upload", &args, None));
+        let mut answer = None;
+        for _ in 0..200 {
+            if let Some(a) = host.poll_online() {
+                answer = Some(a);
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        let (id, a) = answer.expect("an answer");
+        assert_eq!(id, 1);
+        let code = a.unwrap()["code"].as_str().unwrap().to_string();
+        let down = mmk_online::Client::new(format!("http://{addr}"))
+            .download(&code)
+            .unwrap();
+        let c = mmk_formats::smm2::Course::parse(&down).unwrap();
+        assert_eq!(c.header.name.to_string_lossy(), "Uploaded from the maker");
+        assert!(
+            c.header
+                .description
+                .to_string_lossy()
+                .contains("based on ABC-DEF-GHJ")
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn natural_order_and_keys() {

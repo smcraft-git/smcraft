@@ -218,7 +218,11 @@ mod native {
         /// challenge-walk, challenge-gameover, challenge-ending, challenge-pause,
         /// challenge-clear, challenge-skip, challenge-card; superworld (the planets),
         /// superworld-title, superworld-map, superworld-walk (--cleared courses of world 1
-        /// cleared), superworld-play, superworld-ending (the library's test world); with
+        /// cleared), superworld-play, superworld-ending (the library's test world); the Course
+        /// Maker on a new course: maker, maker-parts, maker-menu, maker-save, maker-style,
+        /// maker-theme, maker-timer, maker-autoscroll, maker-play (test play from the start,
+        /// --ticks of it); --style for the new course's style, --front-course to open a course
+        /// instead; with
         /// --front-course: course-intro,
         /// course-pause, course-clear, course-gameover, course-timeup, course-retire,
         /// course-settings, course-death, course-play (--ticks of play with the HUD).
@@ -506,6 +510,11 @@ mod native {
             instant_fades: capture.is_some() && std::env::var("MMK_FADES").as_deref() != Ok("1"),
             script: args.front_script.clone(),
             title_input: args.front_input.clone(),
+            maker_course: args
+                .front_course
+                .as_ref()
+                .map(|p| p.to_string_lossy().into_owned()),
+            maker_style: args.style.clone(),
             ..Default::default()
         };
         let front = {
@@ -533,6 +542,7 @@ mod native {
                 .and_then(|(w, h)| Some((w.parse().ok()?, h.parse().ok()?)))
                 .ok_or("--front-size: WxH")?;
             let course_screen = screen.starts_with("course-");
+            let course_screen = course_screen && !screen.starts_with("maker");
             if course_screen {
                 let path = args
                     .front_course

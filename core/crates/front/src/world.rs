@@ -266,12 +266,15 @@ pub const LIST_LAYOUT: &str = "Nwk_CourseListGeneral_00";
 /// above and below the list's scissor (`N_Scissor_00`, 580 high) [inf from the layout]; the
 /// player doesn't clip, so those two stay hidden.
 const VISIBLE: i64 = 3;
-/// An open row's buttons: Play, then (server courses) View comments, More info and Download.
-pub const OPEN_BUTTONS: [&str; 4] = [
+/// An open row's buttons: Play, then (server courses) View comments, More info and Download,
+/// and Make (the co-op button's slot, labelled as the Coursebot's "Make": open the course in the
+/// Course Maker) [departure: SMM2's Course World has no way to edit a course].
+pub const OPEN_BUTTONS: [&str; 5] = [
     "L_PlayBtn_00",
     "L_CommentBtn_00",
     "L_DetailBtn_00",
     "L_DownloadPlayBtn_00",
+    "L_CoopModeBtn_00",
 ];
 
 /// Which screen a course list is drawn on.
@@ -292,6 +295,8 @@ pub enum ListEvent {
     Comments(Box<WorldCourse>),
     /// "Download": keep the course in the library.
     Download(Box<WorldCourse>),
+    /// "Make": open it in the Course Maker.
+    Edit(Box<WorldCourse>),
     Back,
 }
 
@@ -581,7 +586,11 @@ impl CourseListScene {
             .courses
             .get(i as usize)
             .is_some_and(WorldCourse::is_server);
-        if server { vec![0, 1, 2, 3] } else { vec![0] }
+        if server {
+            vec![0, 1, 2, 3, 4]
+        } else {
+            vec![0, 4]
+        }
     }
 
     /// Put the courses of the window into the three visible slots (an open row takes the space
@@ -658,12 +667,25 @@ impl CourseListScene {
                 "L_ReportBtn_00",
                 "L_DeleteBtn_00",
                 "L_DpointBtn_00",
-                "L_CoopModeBtn_00",
                 "L_Rank_00",
                 "L_CommentBtn_00/L_Count_00",
             ] {
                 l.show(&format!("{row}/{p}"), false);
             }
+            // "Make" (the Coursebot's word) on the co-op button's slot
+            if let Some(t) = l
+                .ui()
+                .message("Lcl_CourseInfoWindow_00", "L_Edit_00-T_Btn_00")
+            {
+                l.text(&format!("{row}/L_CoopModeBtn_00/T_Btn_00"), &t);
+            }
+            l.visible(&format!("{row}/L_CoopModeBtn_00"), Some(true));
+            // the maker's glove for its icon, when the import has it
+            l.image(
+                &format!("{row}/L_CoopModeBtn_00/P_Icon_00"),
+                "EditModel",
+                "NormalCursor",
+            );
             // server courses: "View comments", "More info" and "Download" on the open row
             let server = c.is_server();
             for p in ["L_CommentBtn_00", "L_DetailBtn_00", "L_DownloadPlayBtn_00"] {
@@ -927,6 +949,7 @@ impl CourseListScene {
                     1 => ListEvent::Comments(c),
                     2 => ListEvent::Detail(c),
                     3 => ListEvent::Download(c),
+                    4 => ListEvent::Edit(c),
                     _ => ListEvent::Play(c),
                 };
                 self.pending = Some((e, tick + wait));
@@ -1150,7 +1173,7 @@ impl Stage {
 }
 
 /// What a step tells the owner.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum WorldEvent {
     /// Back to the title.
     Exit,
@@ -1158,6 +1181,13 @@ pub enum WorldEvent {
     Endless,
     /// Super Worlds (the owner shows them and comes back here).
     SuperWorlds,
+    /// Open a course in the Course Maker: where it comes from, the Coursebot entry it saves to
+    /// (the player's own), the credit line of someone else's.
+    Edit {
+        source: Source,
+        entry: Option<String>,
+        based_on: Option<String>,
+    },
 }
 
 /// A clear being sent: the `submit_replay` call, the course code and the time (a plain
@@ -1629,6 +1659,29 @@ impl WorldFlow {
                         } else {
                             cx.fade_to(FadeKind::Black, Go::World(WorldGo::Start(c)));
                         }
+                    }
+                    ListEvent::Edit(c) => {
+                        let mine = c.maker_id.is_some()
+                            && c.maker_id.as_deref()
+                                == cx.online.account.as_ref().map(|a| a.maker_id.as_str());
+                        // someone else's: a course with a code (the server's, or a downloaded
+                        // dataset course) whose maker isn't this player [owner's rule]
+                        let based_on = match (&c.code, mine) {
+                            (Some(code), false) => Some(match &c.maker {
+                                Some(m) => format!("based on {code} by {m}"),
+                                None => format!("based on {code}"),
+                            }),
+                            _ => None,
+                        };
+                        let entry = match &c.source {
+                            Source::Library(id) if based_on.is_none() => Some(id.clone()),
+                            _ => None,
+                        };
+                        return Some(WorldEvent::Edit {
+                            source: c.source.clone(),
+                            entry,
+                            based_on,
+                        });
                     }
                     ListEvent::Detail(c) => match CoursePageScene::new(&self.ui, *c, cx) {
                         Some(p) => self.push(Stage::Page(Box::new(p))),

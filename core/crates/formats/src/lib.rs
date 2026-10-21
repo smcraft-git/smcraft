@@ -22,6 +22,7 @@ pub mod course_id;
 pub mod error;
 pub mod fixtures;
 pub mod gx2;
+pub mod hex_rle;
 pub mod lyt;
 pub mod msbt;
 pub mod nso;

@@ -9,6 +9,7 @@ publish.workspace = true
 [dependencies]
 mmk-assets = { path = "../assets" }
 mmk-audio = { path = "../audio" }
+mmk-editor = { path = "../editor" }
 mmk-formats = { path = "../formats" }
 mmk-sim = { path = "../sim" }
 flate2.workspace = true

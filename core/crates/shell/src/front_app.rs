@@ -32,6 +32,10 @@ pub struct FrontApp {
     step: FixedStep,
     pub ui_audio: Option<Arc<UiMixer>>,
     click: Option<[f32; 2]>,
+    /// The mouse in layout units (None: outside the view), its left / right buttons held.
+    pointer: Option<[f32; 2]>,
+    pointer_down: bool,
+    pointer_alt: bool,
     /// The message shown and its texture in the SMM2 import's cache.
     toast: Option<(String, Option<mmk_ui::TexRef>)>,
     toasts: u32,
@@ -71,12 +75,16 @@ pub fn menu_input(keys: &Keyboard, pad: u32) -> FrontInput {
         k(&[KeyCode::ArrowRight, KeyCode::KeyD]) || pad & b::RIGHT != 0,
         Buttons::RIGHT,
     );
-    let confirm = k(&[
-        KeyCode::Enter,
-        KeyCode::NumpadEnter,
-        KeyCode::KeyZ,
-        KeyCode::Space,
-    ]) || pad & b::JUMP != 0;
+    let ctrl = k(&[
+        KeyCode::ControlLeft,
+        KeyCode::ControlRight,
+        KeyCode::SuperLeft,
+        KeyCode::SuperRight,
+    ]);
+    // (Ctrl+Z is the maker's undo, not a confirm)
+    let confirm = k(&[KeyCode::Enter, KeyCode::NumpadEnter, KeyCode::Space])
+        || (keys.held(KeyCode::KeyZ) && !ctrl)
+        || pad & b::JUMP != 0;
     let back =
         k(&[KeyCode::Escape, KeyCode::KeyP, KeyCode::Backspace]) || pad & (b::RUN | b::START) != 0;
     add(confirm, Buttons::CONFIRM);
@@ -87,7 +95,35 @@ pub fn menu_input(keys: &Keyboard, pad: u32) -> FrontInput {
         skip: k(&[KeyCode::Minus, KeyCode::Tab]),
         click: None,
         text: None,
+        pointer: None,
+        pointer_down: false,
+        pointer_alt: false,
+        keys: maker_keys(keys, ctrl),
     }
+}
+
+/// The Course Maker's keys: U / Ctrl+Z undo, Y / Ctrl+Shift+Z redo, Q the part window, [ ]
+/// the palette slots, T test play from the cursor, E the eraser, G the other area, M held
+/// multigrab, C copy the selection.
+pub fn maker_keys(keys: &Keyboard, ctrl: bool) -> u16 {
+    use mmk_front::maker::keys as m;
+    let shift = keys.held(KeyCode::ShiftLeft) || keys.held(KeyCode::ShiftRight);
+    let z = keys.held(KeyCode::KeyZ) && ctrl;
+    [
+        (keys.held(KeyCode::KeyU) || (z && !shift), m::UNDO),
+        (keys.held(KeyCode::KeyY) || (z && shift), m::REDO),
+        (keys.held(KeyCode::KeyQ), m::PARTS),
+        (keys.held(KeyCode::BracketRight), m::NEXT),
+        (keys.held(KeyCode::BracketLeft), m::PREV),
+        (keys.held(KeyCode::KeyT), m::PLAY_HERE),
+        (keys.held(KeyCode::KeyE), m::ERASER),
+        (keys.held(KeyCode::KeyG), m::AREA),
+        (keys.held(KeyCode::KeyM), m::MULTI),
+        (keys.held(KeyCode::KeyC) && !ctrl, m::COPY),
+    ]
+    .iter()
+    .filter(|(on, _)| *on)
+    .fold(0, |a, (_, b)| a | b)
 }
 
 impl FrontApp {
@@ -99,6 +135,9 @@ impl FrontApp {
             step: FixedStep::default(),
             ui_audio: None,
             click: None,
+            pointer: None,
+            pointer_down: false,
+            pointer_alt: false,
             toast: None,
             toasts: 0,
             typed: VecDeque::new(),
@@ -133,6 +172,9 @@ impl FrontApp {
         let n = self.step.advance(dt);
         let game_buttons = crate::input::combine(keys, pad).buttons;
         let mut input = menu_input(keys, pad);
+        input.pointer = self.pointer;
+        input.pointer_down = self.pointer_down;
+        input.pointer_alt = self.pointer_alt;
         for i in 0..n {
             input.click = if i == 0 { self.click.take() } else { None };
             input.text = self.typed.pop_front();
@@ -160,11 +202,31 @@ impl FrontApp {
 
     /// A click at window pixel `at` in a `size` window.
     pub fn click(&mut self, at: (f64, f64), size: (u32, u32)) {
+        if let Some(p) = Self::layout_point(at, size) {
+            self.click = Some(p);
+        }
+    }
+
+    /// Window pixel `at` in layout units (None: outside the view).
+    fn layout_point(at: (f64, f64), size: (u32, u32)) -> Option<[f32; 2]> {
         let (vx, vy, vw, vh, _) = crate::render::viewport(size.0, size.1, false);
         let u = (at.0 as f32 - vx) / vw;
         let v = (at.1 as f32 - vy) / vh;
-        if (0.0..=1.0).contains(&u) && (0.0..=1.0).contains(&v) {
-            self.click = Some([(u - 0.5) * 1280.0, (0.5 - v) * 720.0]);
+        ((0.0..=1.0).contains(&u) && (0.0..=1.0).contains(&v))
+            .then_some([(u - 0.5) * 1280.0, (0.5 - v) * 720.0])
+    }
+
+    /// The mouse moved to window pixel `at` (None: it left the window).
+    pub fn pointer_moved(&mut self, at: Option<(f64, f64)>, size: (u32, u32)) {
+        self.pointer = at.and_then(|a| Self::layout_point(a, size));
+    }
+
+    /// A mouse button went down / up (`secondary`: the right button).
+    pub fn pointer_button(&mut self, secondary: bool, down: bool) {
+        if secondary {
+            self.pointer_alt = down;
+        } else {
+            self.pointer_down = down;
         }
     }
 

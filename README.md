@@ -233,15 +233,47 @@ file…** (`.bcd`, `.course.zlib` or raw course data) play with the course card,
 menu; without it the page plays them directly. Sound starts on the first click or key press
 (browsers block it before that).
 
-### Course Maker (`mmk-play --edit`)
+### Course Maker (SMM2's maker screens)
+
+With the SMM2 UI import, **Make** on the title opens SMM2's Course Maker (the course you were
+making reopens; Reset Rocket starts a new one). The palette bar, the part window (the search
+button or Q), the left column (Game Style, Course Theme, Timer, Autoscroll, Clear Condition), the
+right column (main menu, Save/Load, eraser, Reset Rocket, Undodog), the scroll bar and the
+clapperboard work with the mouse, taps, keys and pads. Save As and Load go through the
+Coursebot (SMM2's own screens; `<data>/Coursebot/course_NNN.bin`), which also plays, renames,
+uploads and deletes courses; "Make" on a Course World row or a Coursebot course opens it in the
+maker (someone else's course saves as a new one, "based on <code> by <maker>").
+
+| Keys / mouse / pad | Does |
+|---|---|
+| mouse / touch | the glove follows; click / tap places (drag paints ground, blocks and coins), on a part picks it up (drop it elsewhere, or onto a block / pipe to put it inside; a tap without moving switches its form), on a part's right column / top row stretches it, on the start / goal drags their height and the course's length; right button erases |
+| arrows / d-pad | move the cursor a tile (the view follows) |
+| Z / Space / Enter / jump | place, pick up (hold and move to paint / carry) |
+| Backspace / run | erase while held |
+| E | eraser on / off |
+| Q | part window: left / right choose, up / down pages and categories, confirm takes the part |
+| [ ] | previous / next palette slot |
+| U or Ctrl+Z / Y or Ctrl+Shift+Z | undo / redo |
+| − or Tab (tap / hold) | test play from Mario / from the start; again to come back |
+| T | test play from the cursor |
+| G | main area / sub-area |
+| M (held) + drag / C | multigrab a rectangle (then carry it, erase it) / copy it to the cursor |
+| Esc / P / Start | main menu (Back to Title, Coursebot, Story Mode, Course World) |
+
+Captures: `mmk-play --front-screen maker` (and `maker-parts`, `maker-menu`, `maker-save`,
+`maker-style`, `maker-theme`, `maker-timer`, `maker-autoscroll`, `maker-mission`, `maker-play`;
+`--style`, `--front-course`, `--front-script "3:cursor=12;1,4:slot=5,5:confirm,…"`) and
+`coursebot`, `coursebot-window`, `coursebot-save`, `coursebot-load`.
+
+### Course Maker, debug (`mmk-play --edit`)
 
 ```sh
 cargo run --release -p mmk-shell -- --edit my-course.bin            # edit (a new course if the file doesn't exist)
 cargo run --release -p mmk-shell -- --edit new.bin --style M3       # new course in SMB3 style
 ```
 
-A debug-grade UI until the SMM2 maker layouts are drawn; the strip at the bottom says what
-happened (F1 lists the keys).
+A debug-grade UI with every editor feature (the SMM2 maker screens don't have them all yet);
+the strip at the bottom says what happened (F1 lists the keys).
 
 | Keys / mouse | Does |
 |---|---|

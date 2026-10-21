@@ -13,6 +13,7 @@ pub mod costume_sound;
 pub mod course;
 pub mod effects;
 pub mod frame;
+pub mod icon;
 pub mod mesh;
 pub mod paths;
 pub mod scene3d;
