@@ -84,10 +84,9 @@ fn run(android: AndroidApp, root: &Path) -> Result<(), String> {
                     shell.setup = Some(setup::Import::start(dump, out));
                 }
                 _ => {
-                    shell.game.notice = Some((
-                        "COPY YOUR SMM2 NSP AND PROD.KEYS TO".into(),
-                        drop.display().to_string().to_ascii_uppercase(),
-                    ));
+                    let (line, notice) = setup::missing_message(&drop);
+                    log(root, &line);
+                    shell.game.notice = Some(notice);
                 }
             }
             shell

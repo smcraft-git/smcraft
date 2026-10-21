@@ -20,6 +20,21 @@ pub fn drop_folder() -> Option<PathBuf> {
     mmk_host::paths::data_root().map(|d| d.join("import"))
 }
 
+/// What to tell a player who has no import yet: a log line and the two lines on screen.
+pub fn missing_message(drop: &Path) -> (String, (String, String)) {
+    (
+        format!(
+            "no SMM2 import yet: put your SMM2 NSP (and the 3.0.3 update's) and prod.keys in {}, \
+             or run `mmk import --nsp`",
+            drop.display()
+        ),
+        (
+            "COPY YOUR SMM2 NSP AND PROD.KEYS TO".into(),
+            drop.display().to_string().to_ascii_uppercase(),
+        ),
+    )
+}
+
 /// The NSPs and `prod.keys` in `dir`, if both are there.
 pub fn find_dump(dir: &Path) -> Option<DropDump> {
     let mut nsps = Vec::new();

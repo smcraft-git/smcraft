@@ -866,15 +866,9 @@ mod native {
                     app.setup = Some(mmk_shell::setup::Import::start(dump, out));
                 }
                 _ => {
-                    log(&format!(
-                        "no SMM2 import yet: put your SMM2 NSP (and the 3.0.3 update's) and \
-                         prod.keys in {}, or run `mmk import --nsp`",
-                        drop.display()
-                    ));
-                    app.game.notice = Some((
-                        "COPY YOUR SMM2 NSP AND PROD.KEYS TO".into(),
-                        drop.display().to_string().to_ascii_uppercase(),
-                    ));
+                    let (line, notice) = mmk_shell::setup::missing_message(&drop);
+                    log(&line);
+                    app.game.notice = Some(notice);
                 }
             }
         }
