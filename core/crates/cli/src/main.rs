@@ -78,19 +78,33 @@ enum Cmd {
         #[arg(long)]
         keys: Option<PathBuf>,
     },
-    /// Import the user's own extracted SMM2 RomFS + ExeFS into an engine asset cache.
+    /// Import the user's own SMM2 into an engine asset cache: from the NSP files and prod.keys
+    /// (`--nsp`, `--update`, `--keys`: every stage, the SMM2 UI too, read in place), or from an
+    /// already extracted RomFS + ExeFS (`--romfs`, `--exefs`: the game cache only).
     Import {
+        /// The base game NSP (v1.0.0).
+        #[arg(long, conflicts_with_all = ["romfs", "exefs"], requires = "keys")]
+        nsp: Option<PathBuf>,
+        /// The update NSP (3.0.3), patched over --nsp.
+        #[arg(long, requires = "nsp")]
+        update: Option<PathBuf>,
+        /// prod.keys for --nsp (read once, never stored).
+        #[arg(long, requires = "nsp")]
+        keys: Option<PathBuf>,
+        /// Message language of the UI import (--nsp).
+        #[arg(long, default_value = "USen")]
+        language: String,
         /// The base game's extracted RomFS (or one with the update already applied).
-        #[arg(long)]
-        romfs: PathBuf,
+        #[arg(long, required_unless_present = "nsp", requires = "exefs")]
+        romfs: Option<PathBuf>,
         /// The base game's extracted ExeFS.
-        #[arg(long)]
-        exefs: PathBuf,
+        #[arg(long, required_unless_present = "nsp", requires = "romfs")]
+        exefs: Option<PathBuf>,
         /// A separately extracted update's RomFS, laid over --romfs (update files win).
-        #[arg(long)]
+        #[arg(long, requires = "romfs")]
         update_romfs: Option<PathBuf>,
         /// The update's ExeFS (used instead of --exefs).
-        #[arg(long)]
+        #[arg(long, requires = "romfs")]
         update_exefs: Option<PathBuf>,
         /// Cache root (default: the SMCraft data folder's `assets`: %LOCALAPPDATA%\SMCraft on
         /// Windows, ~/Library/Application Support/SMCraft on macOS, ~/.local/share/smcraft on
@@ -1631,6 +1645,10 @@ fn main() -> ExitCode {
             }
         },
         Cmd::Import {
+            nsp,
+            update,
+            keys,
+            language,
             romfs,
             exefs,
             update_romfs,
@@ -1639,6 +1657,61 @@ fn main() -> ExitCode {
         } => {
             let Some(out_root) = out.or_else(mmk_host::paths::assets_root) else {
                 return fail("import", "no data folder: pass --out");
+            };
+            let mut last = String::new();
+            let mut progress = |stage: &str, done: usize, total: usize| {
+                if stage != last || done == total {
+                    eprintln!("{stage}: {done}/{total}");
+                    last = stage.to_string();
+                }
+            };
+            if let (Some(base), Some(keys)) = (nsp, keys) {
+                let cfg = mmk_import::NspImportConfig {
+                    base,
+                    update,
+                    keys,
+                    out_root,
+                    language,
+                };
+                return match mmk_import::run_nsp(&cfg, &mut progress) {
+                    Ok(r) => {
+                        for s in &r.ui.skipped {
+                            eprintln!("skipped: {s}");
+                        }
+                        let g = &r.game;
+                        println!(
+                            "imported SMM2 {} ({} tables, {} textures, {} sounds, {} sprite quads, {} meshes, {} animations, {} built-in courses verified) into {}",
+                            g.build,
+                            g.tables,
+                            g.textures,
+                            g.sounds,
+                            g.sprites,
+                            g.meshes,
+                            g.anims,
+                            g.builtin_courses_verified,
+                            g.out_dir.display()
+                        );
+                        println!(
+                            "imported the SMM2 {} UI ({} layouts, {} animations, {} textures, {} fonts, {} message files) into {}",
+                            r.ui.build,
+                            r.ui.layouts,
+                            r.ui.animations,
+                            r.ui.textures,
+                            r.ui.fonts,
+                            r.ui.messages,
+                            r.ui.out_dir.display()
+                        );
+                        println!("the game no longer needs the NSP files or prod.keys");
+                        ExitCode::SUCCESS
+                    }
+                    Err(e) => {
+                        eprintln!("import failed: {e}");
+                        ExitCode::FAILURE
+                    }
+                };
+            }
+            let (Some(romfs), Some(exefs)) = (romfs, exefs) else {
+                return fail("import", "pass --nsp and --keys, or --romfs and --exefs");
             };
             let exefs = update_exefs.unwrap_or(exefs);
             let merge_dir = out_root.join(".romfs-overlay");
@@ -1656,13 +1729,6 @@ fn main() -> ExitCode {
                 romfs,
                 exefs,
                 out_root,
-            };
-            let mut last = String::new();
-            let mut progress = |stage: &str, done: usize, total: usize| {
-                if stage != last || done == total {
-                    eprintln!("{stage}: {done}/{total}");
-                    last = stage.to_string();
-                }
             };
             let result = mmk_import::run(&cfg, &mut progress);
             if update_romfs.is_some() {

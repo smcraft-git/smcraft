@@ -93,13 +93,14 @@ struct CourseInfo: Hashable, Sendable {
     }
 }
 
-/// Runs `mmk_import_run` on a background thread and reports progress on the main thread.
+/// Runs the importer (`mmk_import_nsp` or `mmk_import_run`) on a background thread and reports
+/// progress on the main thread.
 final class Importer: @unchecked Sendable {
-    struct Paths {
-        var romfs: URL
-        var exefs: URL
-        var updateRomfs: URL?
-        var updateExefs: URL?
+    enum Source {
+        /// The player's NSP files and prod.keys, read in place.
+        case nsp(base: URL, update: URL?, keys: URL)
+        /// Extracted folders.
+        case folders(romfs: URL, exefs: URL, updateRomfs: URL?, updateExefs: URL?)
     }
 
     private let onProgress: (String, Int, Int) -> Void
@@ -107,17 +108,24 @@ final class Importer: @unchecked Sendable {
     init(onProgress: @escaping (String, Int, Int) -> Void) { self.onProgress = onProgress }
 
     /// Completion gets the error message on failure.
-    func run(_ p: Paths, outRoot: URL, completion: @escaping (String?) -> Void) {
+    func run(_ source: Source, outRoot: URL, completion: @escaping (String?) -> Void) {
         let thread = Thread { [self] in
             try? FileManager.default.createDirectory(at: outRoot, withIntermediateDirectories: true)
             let user = Unmanaged.passUnretained(self).toOpaque()
-            let ok = mmk_import_run(p.romfs.path, p.exefs.path, p.updateRomfs?.path, p.updateExefs?.path,
-                                    outRoot.path, { user, stage, done, total in
+            let progress: MmkImportProgress = { user, stage, done, total in
                 guard let user, let stage else { return }
                 let me = Unmanaged<Importer>.fromOpaque(user).takeUnretainedValue()
                 let s = String(cString: stage)
                 DispatchQueue.main.async { me.onProgress(s, done, total) }
-            }, user)
+            }
+            let ok: Bool
+            switch source {
+            case let .nsp(base, update, keys):
+                ok = mmk_import_nsp(base.path, update?.path, keys.path, outRoot.path, nil, progress, user)
+            case let .folders(romfs, exefs, updateRomfs, updateExefs):
+                ok = mmk_import_run(romfs.path, exefs.path, updateRomfs?.path, updateExefs?.path,
+                                    outRoot.path, progress, user)
+            }
             let err = ok ? nil : lastEngineError()
             DispatchQueue.main.async { completion(err) }
         }

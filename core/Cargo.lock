@@ -1319,6 +1319,7 @@ name = "mmk-import"
 version = "0.1.0"
 dependencies = [
  "ab_glyph",
+ "aes",
  "crc32fast",
  "mmk-assets",
  "mmk-formats",

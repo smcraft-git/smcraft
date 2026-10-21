@@ -27,7 +27,7 @@ pub mod play_status;
 pub mod ui;
 
 pub use course_info::{MmkCourseInfo, mmk_course_info};
-pub use import::{MmkImportProgress, mmk_import_run};
+pub use import::{MmkImportProgress, mmk_import_nsp, mmk_import_run};
 pub mod audio;
 use audio::Director;
 pub use audio::MmkAudio;

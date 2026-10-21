@@ -17,6 +17,32 @@ activity (the recomp's route) isn't needed because winit drives the NativeActivi
 **Would change it:** needing Android APIs NativeActivity can't reach (a document picker for the
 import, IME text entry); then a small Java activity of our own takes over.
 
+## 2026-10-21 — The importer reads the NSPs itself; keys stay in memory for the open only
+**Decision:** `mmk import --nsp <base> [--update <update>] --keys <prod.keys>` (`mmk_import::run_nsp`)
+reads the player's dump in place, with our own readers (`core/crates/import/src/nsp/`): NSP and
+ExeFS (PFS0), NCA3 (header AES-128-XTS with Nintendo's tweak; key area or the common ticket's
+title key; sections AES-128-CTR), RomFS, and the update's BKTR patch (indirect storage +
+AES-CTR-EX) over the base RomFS. The import stages see the dump through the importer's `Vfs`
+(virtual roots inside the NSP's path), so nothing is extracted and no temporary copy is made. One
+run writes the game cache (`smm2-<build>`) and the SMM2 UI (`smm2-ui-<build>`).
+- **Keys:** `prod.keys` is read once; only `header_key`, `key_area_key_application_XX` and
+  `titlekek_XX` are kept, in memory, cleared on drop, never formatted (their `Debug` shows only
+  which are there), never in an error message. Once the dump is open the keys are dropped; the
+  derived section keys live only as long as the import.
+- **Only common tickets:** a personalised ticket needs the console's own RSA key; the importer
+  says so instead of asking for it.
+- **The rest of the game never opens the dump:** `core/crates/host/tests/rom_free.rs` scans every
+  crate but the importer and `mmk` (and the Swift app) for the dump readers and key names, allows
+  starting an import only in the setup screens, checks that only the setup crates link
+  `mmk-import`, and plays a built-in course from an imported pack.
+- **Checked against the reference extractions:** every file of the base RomFS (3308) and of the
+  patched 3.0.3 RomFS (3801) and both ExeFS byte for byte (`MMK_COMPARE_ALL=1`), and an NSP import
+  identical to the folder import's cache and UI cache (`diff -r`).
+- The folder flags (`--romfs`, `--exefs`, `--update-romfs`, `--update-exefs`) stay for dumps that
+  are already extracted.
+**Would change it:** a dump format we don't read (XCI, NSZ, personalised tickets) turning out to
+be what players have; then add that reader, not a hactool step.
+
 ## 2026-10-21 — SMCraft revived: import once, then no ROM or keys; the mode list
 **Decision (owner):** SMCraft is developed again, alongside smm2recomp. The goal is SMM2 rebuilt from
 scratch, every style as pixel-, physics- and sound-exact as we can make it, that does not need the

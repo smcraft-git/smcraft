@@ -51,10 +51,14 @@ scripts/run-app.sh         # or: build and run without bundling
 The app is called SMCraft; the name, bundle id and version live only in
 `app/Sources/MMKApp/Identity.swift` (the bundle script reads them from there).
 
-- **First launch:** if no asset cache is found the app asks for the **RomFS** and **ExeFS** folders
-  extracted from your own dump (plus, optionally, the update's RomFS/ExeFS) and imports them into
-  `~/Library/Application Support/SMCraft/assets/<build>/`. Or choose **Use placeholder art** to play
+- **First launch:** if no asset cache is found the app asks for your own dump: the game's **NSP**,
+  the **3.0.3 update NSP** and your **prod.keys** (or, under **Extracted folders**, the RomFS and
+  ExeFS folders), and imports the game data and the menus into
+  `~/Library/Application Support/SMCraft/assets/`. That is needed once: afterwards the app runs
+  from the import alone, and the keys are never saved. Or choose **Use placeholder art** to play
   without a dump (coloured boxes; encrypted `.bcd` courses need imported data for their key).
+  The same import from the command line: `mmk import --nsp <game.nsp> --update <update.nsp>
+  --keys <prod.keys>`.
 - **Library** (home screen): every course file in `~/Library/Application Support/SMCraft/courses/`.
   **Add courses…** (⌘O) copies `.course.zlib`, `.bcd` or raw course files, or whole folders of
   them, into it. Search, filter (playable / cleared), sort; double-click or **Play**. Courses in
@@ -206,9 +210,9 @@ starts on the demo strip with placeholder art. **Import game data…** takes a f
 
 - an asset cache made by `mmk import` (e.g. `~/smm-work/cache/smm2-3.0.3`): copied in about
   15 s; or
-- a folder holding your dump's extracted `romfs/` and `exefs/`: imported in the page by the same
-  importers as `mmk import` and `mmk import-smm2-ui` (a few minutes, needs about 1.5 GB of
-  memory while it runs);
+- a folder holding your dump: its NSP files (the game and the 3.0.3 update) and `prod.keys`, or
+  its extracted `romfs/` and `exefs/`: imported in the page by the same importers as `mmk import`
+  (game data and menus; a few minutes, needs about 1.5 GB of memory while it runs);
 - an SMM2 UI import made by `mmk import-smm2-ui` (e.g. `~/smm-work/cache/smm2-ui-3.0.3`, about
   200 MB), or a folder holding it next to an asset cache.
 

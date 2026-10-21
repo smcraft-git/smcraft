@@ -26,15 +26,24 @@ sound-perfect as possible, that **never needs the ROM or key files to run**.
   fetcher, the embedded server crate, Endless rulesets)
 - ⬜ CI on the public repo (Linux on push; macOS / Windows / wasm / Android by hand)
 
-**G1 — Import once, then ROM-free** ⬜
-- ⬜ The importer reads the dump itself: NSP (PFS0) → NCA (header AES-XTS, sections AES-CTR,
+**G1 — Import once, then ROM-free** 🔄
+- ✅ The importer reads the dump itself (`mmk import --nsp <base> --update <update> --keys
+  <prod.keys>`, `core/crates/import/src/nsp/`): NSP (PFS0) → NCA (header AES-XTS, sections AES-CTR,
   title key from the ticket) → RomFS / ExeFS, the update's BKTR patch over the base, `prod.keys`
-  read once and never stored; one command / one setup screen, no hactool
-- ⬜ One asset pack for everything (gameplay, sound, SMM2 UI, modes data, effects); versioned, with
-  a manifest the runtime checks; incremental re-import
-- ⬜ A guard test: the game runs (menus, courses, sound) with no dump or keys anywhere, and no code
-  outside the importer opens NSP / keys
-- ⬜ Setup screen on every platform (pick the NSP, the update NSP, `prod.keys`; progress; done)
+  read once and never stored; no hactool. Every RomFS / ExeFS file matches the reference
+  extractions, and the import matches the folder import's caches byte for byte (DECISIONS.md
+  2026-10-21)
+- 🔄 One asset pack for everything: one run writes the game cache and the SMM2 UI (gameplay,
+  sound, modes data, effects, UI) into one asset root ✅; one versioned pack with a manifest the
+  runtime checks ⬜; incremental re-import ⬜
+- 🔄 A guard test (`core/crates/host/tests/rom_free.rs`): no code outside the importer and the setup
+  screens opens NSP / keys ✅, a built-in course plays from the pack alone ✅; menus and sound run
+  with no dump anywhere (an app-level run) ⬜
+- 🔄 Setup screen on every platform (pick the NSP, the update NSP, `prod.keys`; progress; done):
+  macOS app ✅ (NSP files or extracted folders, `mmk_import_nsp`); web (`mmk-play` in a browser: a
+  folder with the NSPs and `prod.keys`) ✅ builds, not yet tried in a browser; iOS / iPadOS ⬜
+  (still copies a cache made on the Mac); native `mmk-play` (Windows / Linux) ⬜ (`mmk import
+  --nsp` for now)
 
 **G2 — Course World on TGRCode** ⬜
 - ⬜ TGRCode client: search by course ID / maker ID, Popular / New / Hot lists, course details,

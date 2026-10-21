@@ -9,8 +9,9 @@
 // - an SMM2 UI import made by `mmk import-smm2-ui` (manifest.json of game SMM2 and ui/layouts/):
 //   copied into `mmk-ui/`; with it the page starts on the SMM2 menus (mmk-front);
 // - a folder holding both of the above;
-// - a folder with the extracted `romfs/` and `exefs/` of the owner's dump: imported here, in a
-//   worker running the same importer (mmk-import), straight into the browser's storage.
+// - a folder with the owner's dump: the NSP files (the game, and its update) and prod.keys, or
+//   the extracted `romfs/` and `exefs/`: imported here, in a worker running the same importer
+//   (mmk-import), straight into the browser's storage.
 
 import init, * as mmk from "./mmk-play.js";
 
@@ -267,6 +268,18 @@ async function importCache(paths, prefix) {
   await writeFile("manifest.json", manifest);
 }
 
+// The dump itself in the picked tree: its NSP files and prod.keys ({ nsps, keys }), or null.
+function findNsps(paths) {
+  const nsps = [];
+  let keys = null;
+  for (const [p, f] of paths) {
+    const name = p.split("/").pop().toLowerCase();
+    if (name.endsWith(".nsp")) nsps.push(f);
+    else if (name === "prod.keys") keys = f;
+  }
+  return nsps.length && keys ? { nsps, keys } : null;
+}
+
 async function importDump(paths, prefix) {
   const romfs = [];
   let main = null;
@@ -275,6 +288,18 @@ async function importDump(paths, prefix) {
     else if (p === prefix + "exefs/main") main = f;
   }
   status(`Importing the dump in this browser (${romfs.length} RomFS files)…`);
+  await runImport({ romfs, main });
+}
+
+// The NSP files and prod.keys, read in place by the importer: nothing is extracted, and the
+// keys are only used while the NSPs are opened (never stored).
+async function importNsps({ nsps, keys }) {
+  status(`Importing the dump in this browser (${nsps.length} NSP files)…`);
+  await runImport({ nsps, keys });
+}
+
+// Run the import worker on `message` and store what it writes.
+async function runImport(message) {
   await removeData();
   await removeData(UI_ROOT);
   const worker = new Worker(new URL("./mmk-import-worker.js", import.meta.url), { type: "module" });
@@ -328,7 +353,7 @@ async function importDump(paths, prefix) {
           reject(new Error(data.error));
         }
       };
-      worker.postMessage({ romfs, main });
+      worker.postMessage(message);
     });
   } finally {
     worker.terminate();
@@ -353,15 +378,18 @@ async function importFolder(fileList) {
   const paths = byPath(fileList);
   const cache = findCache(paths);
   const uiImport = await findUi(paths);
-  const dump = cache === null && uiImport === null ? findDump(paths) : null;
-  if (cache === null && uiImport === null && dump === null) {
+  const none = cache === null && uiImport === null;
+  const nsps = none ? findNsps(paths) : null;
+  const dump = none && nsps === null ? findDump(paths) : null;
+  if (none && nsps === null && dump === null) {
     throw new Error(
-      "that folder has no asset cache (manifest.json + textures/), no SMM2 UI import (manifest.json + ui/layouts/) and no romfs/ + exefs/main",
+      "that folder has no asset cache (manifest.json + textures/), no SMM2 UI import (manifest.json + ui/layouts/), no NSP files with prod.keys and no romfs/ + exefs/main",
     );
   }
   ui.forget.disabled = true;
   try {
     if (cache !== null) await importCache(paths, cache);
+    else if (nsps !== null) await importNsps(nsps);
     else if (dump !== null) await importDump(paths, dump);
     if (uiImport !== null) await importUi(paths, uiImport);
     await navigator.storage.persist?.();
