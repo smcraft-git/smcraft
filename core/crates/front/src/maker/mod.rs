@@ -154,6 +154,15 @@ enum Drag {
     },
     /// Dragging the scroll bar's handle.
     Slider,
+    /// Dragging the start up / down (its height), or the goal (the course's length, the goal's
+    /// height); `changed` as for `Place`.
+    Start {
+        changed: bool,
+    },
+    Goal {
+        grab: i32,
+        changed: bool,
+    },
 }
 
 struct Test {
@@ -756,6 +765,75 @@ impl MakerFlow {
                 }
             }
             Some(Drag::Slider) => {}
+            Some(Drag::Start { .. }) | Some(Drag::Goal { .. }) => {
+                if place_held {
+                    self.drag_start_goal();
+                } else {
+                    self.end_drag();
+                }
+            }
+        }
+    }
+
+    /// The start / goal follow the cursor: the start's height, the goal's height and the
+    /// course's length (the goal at the right edge).
+    fn drag_start_goal(&mut self) {
+        let (tx, ty) = self.cur;
+        let h = &self.editor.course.header;
+        let (start_y, goal_y) = (h.start_y, h.goal_y);
+        let mut did = false;
+        match self.drag {
+            Some(Drag::Start { .. }) => {
+                let y = ty.clamp(0, 25) as u8;
+                if y != start_y {
+                    self.editor.set_start_goal(y, goal_y);
+                    did = self.editor.course.header.start_y != start_y;
+                }
+            }
+            Some(Drag::Goal { grab, .. }) => {
+                let y = ty.clamp(0, 15) as u8;
+                if y != goal_y {
+                    self.editor.set_start_goal(start_y, y);
+                    did = self.editor.course.header.goal_y != goal_y;
+                }
+                let dx = tx - grab;
+                if dx != 0 {
+                    let (w, _) = self.editor.size();
+                    // shortening takes the ground past the new edge with it (parts there stop
+                    // the goal) [inf]
+                    let to = (w + dx).clamp(mmk_editor::settings::WIDTH_MIN, w);
+                    let beyond: Vec<(i32, i32)> = self
+                        .editor
+                        .area()
+                        .ground
+                        .iter()
+                        .map(|g| (g.x as i32, g.y as i32))
+                        .filter(|&(x, _)| x >= to)
+                        .collect();
+                    let parts_beyond = self
+                        .editor
+                        .objects_in(Rect::new(to, 0, (w - to).max(0), 256))
+                        .is_empty();
+                    if dx < 0 && parts_beyond {
+                        for (x, y) in beyond {
+                            self.editor.erase_ground(x, y);
+                        }
+                    }
+                    if self.editor.set_area_width(w + dx).is_ok() && self.editor.size().0 != w {
+                        did = true;
+                        if let Some(Drag::Goal { grab, .. }) = &mut self.drag {
+                            *grab = tx;
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+        if did {
+            if let Some(Drag::Start { changed } | Drag::Goal { changed, .. }) = &mut self.drag {
+                *changed = true;
+            }
+            self.changed();
         }
     }
 
@@ -784,6 +862,25 @@ impl MakerFlow {
 
     fn press_place(&mut self, cx: &mut crate::Cx) {
         let (tx, ty) = self.cur;
+        // the start and the goal are dragged, not built on (main area) [inf: as the game's
+        // start sign and goal pole are]
+        if self.editor.area == 0 && self.editor.object_at(tx, ty).is_none() {
+            let h = &self.editor.course.header;
+            let (start, goal) = self.editor.zones();
+            if start.contains(tx, ty) && ty <= h.start_y as i32 + 2 {
+                self.editor.checkpoint();
+                self.drag = Some(Drag::Start { changed: false });
+                return;
+            }
+            if goal.contains(tx, ty) && ty <= h.goal_y as i32 + 10 {
+                self.editor.checkpoint();
+                self.drag = Some(Drag::Goal {
+                    grab: tx,
+                    changed: false,
+                });
+                return;
+            }
+        }
         // a part under the cursor takes the selected part in (a block's item, a pipe's
         // contents, a Super Mushroom makes it big), else it is picked up (ground isn't a part)
         if let Some(i) = self.editor.object_at(tx, ty) {
@@ -854,7 +951,10 @@ impl MakerFlow {
     /// The press ended: keep its checkpoint only when something changed.
     fn end_drag(&mut self) {
         let changed = match self.drag.take() {
-            Some(Drag::Place { changed, .. }) | Some(Drag::Erase { changed }) => changed,
+            Some(Drag::Place { changed, .. })
+            | Some(Drag::Erase { changed })
+            | Some(Drag::Start { changed })
+            | Some(Drag::Goal { changed, .. }) => changed,
             _ => false,
         };
         if !changed {
@@ -1022,16 +1122,33 @@ impl MakerFlow {
                 format!("{bar}/L_BtnG_00/B_Btn_00"),
                 format!("{bar}/L_AreaBtn_00/B_Btn_00"),
                 format!("{bar}/L_SlideBarH_00/B_ScrollArea_00"),
+                format!("{bar}/L_VerticalBtn_00/B_Btn_00"),
             ];
             if let Some(k) = hit(page, self.tick, &slider, p) {
                 match k {
                     0 => self.cam[0] = 0.0,
                     1 => self.cam[0] = f32::MAX,
                     2 => self.switch_area(),
-                    _ => {
+                    3 => {
                         self.drag = Some(Drag::Slider);
                         self.slide_to(p);
                     }
+                    // the sub-area turns vertical / horizontal [inf: the arrow button]
+                    _ if self.editor.area == 1 => {
+                        let v = self.editor.area().header.orientation == 0;
+                        self.editor.checkpoint();
+                        match self.editor.set_vertical(v) {
+                            Ok(()) => {
+                                self.cam = [0.0, 0.0];
+                                self.changed();
+                            }
+                            Err(e) => {
+                                self.editor.discard_checkpoint();
+                                refuse(cx, &self.ui, &e);
+                            }
+                        }
+                    }
+                    _ => {}
                 }
                 self.clamp_cam();
                 return true;

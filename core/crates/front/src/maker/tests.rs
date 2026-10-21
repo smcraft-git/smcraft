@@ -515,3 +515,28 @@ fn the_clear_condition_window_sets_and_removes_the_condition() {
     run(&mut m, &mut host, &mut saves, keys(keys::UNDO));
     assert_eq!(m.clear_condition(), (3, 70, 0));
 }
+
+#[test]
+fn the_start_and_goal_drag_their_heights_and_the_course_length() {
+    let (mut host, mut saves) = (MockHost::default(), Saves::default());
+    let mut m = maker(&mut host, &mut saves, MakerStart::New("M1".into()));
+    m.cur = (2, 1);
+    run(&mut m, &mut host, &mut saves, press(Buttons::CONFIRM));
+    m.cur = (2, 5);
+    run(&mut m, &mut host, &mut saves, held(Buttons::CONFIRM));
+    run(&mut m, &mut host, &mut saves, idle());
+    assert_eq!(m.editor.course.header.start_y, 5);
+    // the goal ground starts 10 tiles from the right edge of a 240-tile course
+    m.cur = (233, 1);
+    run(&mut m, &mut host, &mut saves, press(Buttons::CONFIRM));
+    m.cur = (213, 3);
+    run(&mut m, &mut host, &mut saves, held(Buttons::CONFIRM));
+    run(&mut m, &mut host, &mut saves, idle());
+    assert_eq!(m.editor.size().0, 220, "20 tiles shorter");
+    assert_eq!(m.editor.course.header.goal_y, 3);
+    // one undo step per drag
+    run(&mut m, &mut host, &mut saves, keys(keys::UNDO));
+    run(&mut m, &mut host, &mut saves, idle());
+    assert_eq!(m.editor.size().0, 240);
+    assert_eq!(m.editor.course.header.start_y, 5);
+}
