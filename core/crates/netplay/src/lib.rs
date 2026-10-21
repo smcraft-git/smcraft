@@ -411,11 +411,20 @@ pub struct UdpLink {
 
 impl UdpLink {
     pub fn bind(addr: &str, peers: Vec<SocketAddr>) -> std::io::Result<Self> {
-        let socket = UdpSocket::bind(addr)?;
+        Self::from_socket(UdpSocket::bind(addr)?, peers)
+    }
+
+    /// A link over a socket that is already bound, e.g. the one Network Play punched through
+    /// to the peers (`mmk-nex`'s `play::Match`).
+    pub fn from_socket(socket: UdpSocket, peers: Vec<SocketAddr>) -> std::io::Result<Self> {
         socket.set_nonblocking(true)?;
         Ok(Self { socket, peers })
     }
 }
+
+/// Datagrams of Network Play's hole punch (`mmk-nex`), which can still arrive once the game
+/// runs: not ours.
+const HANDSHAKE_MAGIC: &[u8] = b"SMCP";
 
 impl Link for UdpLink {
     fn send(&mut self, p: &Packet) {
@@ -429,6 +438,9 @@ impl Link for UdpLink {
         let mut out = Vec::new();
         let mut buf = [0u8; 512];
         while let Ok((n, _)) = self.socket.recv_from(&mut buf) {
+            if buf[..n].starts_with(HANDSHAKE_MAGIC) {
+                continue;
+            }
             if let Some(p) = Packet::parse(&buf[..n]) {
                 out.push(p);
             }
