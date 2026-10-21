@@ -1393,6 +1393,7 @@ dependencies = [
  "mmk-modes",
  "mmk-netplay",
  "mmk-online",
+ "mmk-server",
  "mmk-sim",
  "mmk-ui",
  "png",

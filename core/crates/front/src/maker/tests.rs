@@ -393,3 +393,57 @@ fn the_scroll_bar_jumps_to_the_goal_and_back() {
     run(&mut m, &mut host, &mut saves, click);
     assert_eq!(m.cam[0], 0.0);
 }
+
+#[test]
+fn upload_sends_the_saved_course_with_its_credit_and_load_goes_to_the_coursebot() {
+    let (mut host, mut saves) = (MockHost::default(), Saves::default());
+    host.server = true;
+    let theirs = new_course("MW").save().unwrap();
+    host.courses.insert("lib/theirs".into(), theirs);
+    let mut m = maker(
+        &mut host,
+        &mut saves,
+        MakerStart::Open {
+            source: Source::Library("lib/theirs".into()),
+            entry: None,
+            based_on: Some("based on XYZ-123-456 by Them".into()),
+        },
+    );
+    // a new copy: Save As and Load only
+    m.open_save();
+    assert_eq!(m.save_buttons(), vec!["L_NSaveBtn_00", "L_LoadBtn_00"]);
+    run(&mut m, &mut host, &mut saves, press(Buttons::CONFIRM));
+    assert_eq!(host.saved.len(), 1);
+    // now ours: Save, Save As, Upload, Load
+    m.open_save();
+    assert_eq!(m.save_buttons().len(), 4);
+    for b in [Buttons::DOWN, Buttons::DOWN, Buttons::CONFIRM] {
+        run(&mut m, &mut host, &mut saves, press(b));
+        run(&mut m, &mut host, &mut saves, idle());
+    }
+    let call = host
+        .calls
+        .iter()
+        .find(|c| c.1 == "upload")
+        .expect("uploaded");
+    let data = un_hex_rle(call.2["course"].as_str().unwrap()).unwrap();
+    let c = Editor::open(&data).unwrap();
+    assert!(
+        c.course
+            .header
+            .description
+            .to_string_lossy()
+            .contains("XYZ-123-456")
+    );
+    // Load
+    m.open_save();
+    let mut ev = None;
+    for b in [Buttons::UP, Buttons::CONFIRM] {
+        with(&mut host, &mut saves, |cx| ev = m.step(&press(b), cx));
+        run(&mut m, &mut host, &mut saves, idle());
+        if ev.is_some() {
+            break;
+        }
+    }
+    assert_eq!(ev, Some(MakerEvent::Coursebot));
+}

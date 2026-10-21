@@ -205,6 +205,8 @@ pub struct MakerFlow {
     window_sel: usize,
     /// The timer window's value until OK.
     window_timer: i16,
+    /// An upload waiting for its answer (`Online::call` id).
+    upload_call: Option<u32>,
     /// The animation that opened the left window.
     window_tab: &'static str,
     /// The course changed since the host last showed it.
@@ -278,6 +280,7 @@ impl MakerFlow {
             save_sel: 0,
             window_sel: 0,
             window_timer: 300,
+            upload_call: None,
             window_tab: "ChangeTab00",
             dirty: true,
             shown: false,
@@ -526,6 +529,7 @@ impl MakerFlow {
         let play_released = !input.play && self.play_was;
         self.play_was = input.play;
         let click = input.ui.click;
+        self.upload_answer(cx);
         let ev = match self.mode {
             Mode::Test => {
                 self.test_tick(input, play_pressed, cx);
@@ -536,10 +540,7 @@ impl MakerFlow {
                 None
             }
             Mode::Menu => self.menu_tick(pressed, start_pressed, click, cx),
-            Mode::Save => {
-                self.save_tick(pressed, click, cx);
-                None
-            }
+            Mode::Save => self.save_tick(pressed, click, cx),
             Mode::Window(w) => {
                 self.window_tick(w, pressed, click, cx);
                 None
@@ -793,10 +794,7 @@ impl MakerFlow {
             *changed |= ok;
         }
         match r {
-            Ok(()) => {
-                self.changed();
-                self.ui.sound_key(PAGE, "UB_Decide_PaletteBtn", &[]);
-            }
+            Ok(()) => self.changed(),
             Err(e) if first => refuse(cx, &self.ui, &e),
             Err(_) => {}
         }
@@ -985,6 +983,7 @@ impl MakerFlow {
         if let Some(p) = &mut self.page {
             p.show("L_ResetRocket_00", true);
             p.play("L_ResetRocket_00/Reset", self.tick);
+            self.ui.sound_key(PAGE, "Anm_Reset_ResetRocket", &[]);
             p.play("L_RightParts_00/L_ResetBtn_00/Decide", self.tick);
         }
         self.ui
@@ -1518,6 +1517,7 @@ impl MakerFlow {
         }
         m.stop("Out");
         m.play("In", tick);
+        self.ui.sound_key(MENU, "In_Layout", &[]);
         for b in Self::menu_buttons() {
             m.hold(&format!("{b}/Select"), 0.0);
         }
@@ -1526,6 +1526,7 @@ impl MakerFlow {
 
     fn close_menu(&mut self) {
         self.mode = Mode::Edit;
+        self.ui.sound_key(MENU, "Out_Layout", &[]);
         if let Some(m) = &mut self.menu {
             m.stop("In");
             m.play("Out", self.tick);
@@ -1615,19 +1616,31 @@ impl MakerFlow {
     // ------------------------------------------------------------ Save / Load
 
     /// The window's buttons: Save (a saved course of ours) and Save As.
+    /// The window's buttons: a course saved before has Save, Save As, Upload and Load, a new
+    /// one (or someone else's) Save As and Load [obs data: the InSaved / InNew panes].
     fn save_buttons(&self) -> Vec<&'static str> {
-        if self.entry.is_some() && self.based_on.is_none() {
-            vec!["L_Save_00", "L_NSaveBtn_00"]
+        if self.saved() {
+            vec![
+                "L_Save_00",
+                "L_NSaveBtn_00",
+                "L_UpLoadBtn_00",
+                "L_LoadBtn_00",
+            ]
         } else {
-            vec!["L_NSaveBtn_00"]
+            vec!["L_NSaveBtn_00", "L_LoadBtn_00"]
         }
+    }
+
+    /// The course is one of ours in the Coursebot.
+    fn saved(&self) -> bool {
+        self.entry.is_some() && self.based_on.is_none()
     }
 
     fn open_save(&mut self) {
         self.end_drag_if_any();
         self.mode = Mode::Save;
         self.save_sel = 0;
-        let saved = self.entry.is_some() && self.based_on.is_none();
+        let saved = self.saved();
         let tick = self.tick;
         let Some(s) = &mut self.save else { return };
         for (pane, label) in [
@@ -1639,10 +1652,9 @@ impl MakerFlow {
         ] {
             s.text_from(pane, label);
         }
-        // Load and Upload come later: hidden [departure]
-        s.show("L_LoadBtn_00", false);
-        s.show("L_UpLoadBtn_00", false);
+        // (no upload counter: our server has no limit)
         s.show("L_UpLoadInfo_00", false);
+        s.show("L_UpLoadBtn_00", saved);
         for a in ["OutNew", "OutSaved", "InNew", "InSaved"] {
             s.stop(a);
         }
@@ -1652,7 +1664,7 @@ impl MakerFlow {
 
     fn close_save(&mut self) {
         self.mode = Mode::Edit;
-        let saved = self.entry.is_some() && self.based_on.is_none();
+        let saved = self.saved();
         if let Some(s) = &mut self.save {
             s.stop("InNew");
             s.stop("InSaved");
@@ -1660,7 +1672,12 @@ impl MakerFlow {
         }
     }
 
-    fn save_tick(&mut self, pressed: Buttons, click: Option<[f32; 2]>, cx: &mut crate::Cx) {
+    fn save_tick(
+        &mut self,
+        pressed: Buttons,
+        click: Option<[f32; 2]>,
+        cx: &mut crate::Cx,
+    ) -> Option<MakerEvent> {
         let buttons = self.save_buttons();
         let mut decide = false;
         if let Some(p) = click
@@ -1676,14 +1693,14 @@ impl MakerFlow {
                     || hit(s, self.tick, &close[1..], p).is_none()
                 {
                     self.close_save();
-                    return;
+                    return None;
                 }
             }
         }
         if pressed.has(Buttons::BACK) {
             self.ui.sound_back(SAVE, "normal");
             self.close_save();
-            return;
+            return None;
         }
         let n = buttons.len();
         if pressed.has(Buttons::UP) || pressed.has(Buttons::DOWN) {
@@ -1695,19 +1712,60 @@ impl MakerFlow {
                 .sound_button(SAVE, buttons[self.save_sel], Event::Select);
         }
         if !(decide || pressed.has(Buttons::CONFIRM)) {
-            return;
+            return None;
         }
         let b = buttons[self.save_sel.min(n - 1)];
         self.ui.sound_button(SAVE, b, Event::Decide);
         if let Some(s) = &mut self.save {
             s.play(&format!("{b}/Save"), self.tick);
         }
-        let as_new = b == "L_NSaveBtn_00";
-        match self.save_to_coursebot(cx.host, as_new) {
-            Ok(()) => cx.toast("Saved to the Coursebot."),
-            Err(e) => cx.toast(&format!("Not saved: {e}")),
+        match b {
+            // Load: the Coursebot, where "Make" opens a course [inf: the game lists the
+            // Coursebot's courses in its own load window]
+            "L_LoadBtn_00" => {
+                self.save_draft(cx.host);
+                self.close_save();
+                return Some(MakerEvent::Coursebot);
+            }
+            "L_UpLoadBtn_00" => self.upload(cx),
+            _ => match self.save_to_coursebot(cx.host, b == "L_NSaveBtn_00") {
+                Ok(()) => cx.toast("Saved to the Coursebot."),
+                Err(e) => cx.toast(&format!("Not saved: {e}")),
+            },
         }
         self.close_save();
+        None
+    }
+
+    /// Upload the course (as saved, with its credit) to the course server as the signed-in
+    /// account; the answer comes in a later tick.
+    fn upload(&mut self, cx: &mut crate::Cx) {
+        if let Err(e) = self.save_to_coursebot(cx.host, false) {
+            cx.toast(&format!("Not saved: {e}"));
+            return;
+        }
+        let Ok(bytes) = self.editor.save() else {
+            return;
+        };
+        let args = serde_json::json!({ "course": hex_rle(&bytes) });
+        self.upload_call = cx.online.call(cx.host, "upload", args);
+        if self.upload_call.is_none() {
+            cx.toast("No course server is set (Settings).");
+        }
+    }
+
+    /// An upload's answer: the new course's code.
+    fn upload_answer(&mut self, cx: &mut crate::Cx) {
+        let Some(id) = self.upload_call else { return };
+        let Some(a) = cx.online.take(id) else { return };
+        self.upload_call = None;
+        match a {
+            Ok(v) => {
+                let code = v["code"].as_str().unwrap_or("?").to_string();
+                cx.toast(&format!("Uploaded: {code}"));
+            }
+            Err(e) => cx.toast(&format!("Not uploaded: {e}")),
+        }
     }
 
     /// Save into the Coursebot: over this course's entry, or as a new one (always for someone

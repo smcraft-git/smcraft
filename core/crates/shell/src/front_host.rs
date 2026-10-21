@@ -490,6 +490,23 @@ impl Host for ShellHost<'_> {
                     }
                 }
             }
+            // the maker's upload: raw course data as zero-run hex (`mmk_front::maker::hex_rle`)
+            "upload" => {
+                let data = args["course"]
+                    .as_str()
+                    .and_then(mmk_front::maker::un_hex_rle);
+                let maker = args["maker"].as_str().unwrap_or("anonymous").to_string();
+                std::thread::spawn(move || {
+                    let a = match data {
+                        Some(d) => mmk_online::Client::new(server)
+                            .with_token(token)
+                            .upload(&d, &maker)
+                            .map(|l| mmk_online::listing_json(&l)),
+                        None => Err("no course data".into()),
+                    };
+                    let _ = tx.send((id, Answer::Json(a)));
+                });
+            }
             "ghost" => {
                 std::thread::spawn(move || {
                     let bytes = mmk_online::Client::new(server).record_replay(&code);
@@ -714,6 +731,54 @@ mod tests {
         assert_eq!(host.library().iter().filter(|c| c.id == id).count(), 1);
         // a part's picture from the engine's art needs the art: none in placeholder mode
         assert!(host.part_icon("M1", 0, 0).is_none());
+    }
+
+    #[test]
+    fn the_makers_upload_reaches_the_course_server() {
+        let dir = std::env::temp_dir().join(format!("mmk-shell-upload-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let store = mmk_server::Store::open(&dir).unwrap();
+        let port = 20000 + (std::process::id() % 20000) as u16 + 7;
+        let addr = format!("127.0.0.1:{port}");
+        let a2 = addr.clone();
+        std::thread::spawn(move || mmk_server::serve(store, &a2));
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        let mut game = Game::load(None, None).unwrap();
+        let mut data = HostData::new(None);
+        data.server = Some(format!("http://{addr}"));
+        let mut host = ShellHost {
+            game: &mut game,
+            data: &mut data,
+        };
+        let mut e = mmk_front::maker::new_course("M3");
+        e.set_name("Uploaded from the maker");
+        e.set_description("based on ABC-DEF-GHJ by Someone");
+        let bytes = e.save().unwrap();
+        let args = json!({ "course": mmk_front::maker::hex_rle(&bytes), "maker": "tester" });
+        assert!(host.online(1, "upload", &args, None));
+        let mut answer = None;
+        for _ in 0..200 {
+            if let Some(a) = host.poll_online() {
+                answer = Some(a);
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        let (id, a) = answer.expect("an answer");
+        assert_eq!(id, 1);
+        let code = a.unwrap()["code"].as_str().unwrap().to_string();
+        let down = mmk_online::Client::new(format!("http://{addr}"))
+            .download(&code)
+            .unwrap();
+        let c = mmk_formats::smm2::Course::parse(&down).unwrap();
+        assert_eq!(c.header.name.to_string_lossy(), "Uploaded from the maker");
+        assert!(
+            c.header
+                .description
+                .to_string_lossy()
+                .contains("based on ABC-DEF-GHJ")
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
