@@ -20,10 +20,10 @@
 </head>
 <body>
   <header>
-    <!-- a folder: an asset cache made by `mmk import` (copied), or one holding the dump's
-         extracted romfs/ + exefs/ (imported here, in a worker); either way it goes into this
-         browser's own storage and is never uploaded -->
-    <button id="import" title="An asset cache folder (mmk import), or a folder holding your dump's romfs/ and exefs/">Import game data…</button>
+    <!-- a folder: an asset cache made by `mmk import` (copied), or one holding the dump (its NSP
+         files and prod.keys, or its extracted romfs/ + exefs/; imported here, in a worker);
+         either way it goes into this browser's own storage and is never uploaded -->
+    <button id="import" title="A folder holding your game's NSP files (the game and the 3.0.3 update) and prod.keys; or an asset cache folder (mmk import); or your dump's extracted romfs/ and exefs/">Import game data…</button>
     <input id="folder" type="file" webkitdirectory multiple hidden>
     <select id="courses" title="Course"><option value="">Demo strip</option></select>
     <button id="open" title="SMM2 course data: .bcd, zlib (.course.zlib) or raw">Open course file…</button>

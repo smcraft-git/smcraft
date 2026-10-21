@@ -3,12 +3,13 @@
 //! RomFS; with an update NSP, its ExeFS and its RomFS patched over the base one (BKTR: indirect
 //! storage + AES-CTR-EX). Nothing is extracted to disk.
 //!
-//! [`Dump::open`] takes the keys by reference and keeps only the section keys it derived; the
-//! [`DumpVfs`] then serves the RomFS and ExeFS to the import stages under virtual roots inside
-//! the NSP's path, and passes everything else (the cache it writes) to the file system.
+//! [`Nsp::open`] takes the keys by reference and keeps only the section key it derived; a
+//! [`Dump`] puts the base game and its update together, and the [`DumpVfs`] serves its RomFS and
+//! ExeFS to the import stages under virtual roots inside the NSP's path, passing everything else
+//! (the cache it writes) to the file system or the host's own output.
 //!
 //! This module (and the importer) are the only code that opens NSP, NCA or key files: the
-//! runtime reads the asset pack alone (`core/crates/import/tests/rom_free.rs` checks that).
+//! runtime reads the asset pack alone (`core/crates/host/tests/rom_free.rs` checks that).
 
 pub mod bktr;
 pub mod crypto;
@@ -21,6 +22,7 @@ pub mod ticket;
 
 use std::io;
 use std::path::{Component, Path, PathBuf};
+use std::rc::Rc;
 use std::sync::Arc;
 
 use bktr::{AesCtrExStorage, IndirectStorage};
@@ -34,31 +36,8 @@ use ticket::Ticket;
 use crate::vfs::{StdFs, Vfs};
 
 /// `e` with the file it came from in front.
-fn in_file(path: &Path) -> impl Fn(io::Error) -> io::Error + '_ {
-    move |e| io::Error::new(e.kind(), format!("{}: {e}", path.display()))
-}
-
-/// The program NCA of an NSP, opened.
-fn program_nca(nsp: &Path, keys: &Keys) -> io::Result<Nca> {
-    let file: Shared = Arc::new(FileStorage::open(nsp)?);
-    let pfs = Pfs0::parse(file)?;
-    let mut tickets = Vec::new();
-    for e in pfs.entries.iter().filter(|e| e.name.ends_with(".tik")) {
-        let s = pfs.open(e)?;
-        tickets.push(Ticket::parse(&s.read_vec(0, s.size())?)?);
-    }
-    // the largest program NCA (an NSP has one; a few have extra program parts for manuals)
-    let mut best: Option<(u64, Shared)> = None;
-    for e in pfs.entries.iter().filter(|e| e.name.ends_with(".nca")) {
-        let s = pfs.open(e)?;
-        if Nca::header(&s, keys)?[0x205] == CONTENT_PROGRAM
-            && best.as_ref().is_none_or(|b| e.size > b.0)
-        {
-            best = Some((e.size, s));
-        }
-    }
-    let (_, raw) = best.ok_or_else(|| invalid("no program NCA in the NSP"))?;
-    Nca::open(raw, keys, &tickets)
+fn in_file(name: &str) -> impl Fn(io::Error) -> io::Error + '_ {
+    move |e| io::Error::new(e.kind(), format!("{name}: {e}"))
 }
 
 /// The ExeFS of a program NCA: its first PFS0 section that has `main`.
@@ -79,6 +58,62 @@ fn exefs(nca: &Nca) -> io::Result<Pfs0> {
     Err(invalid("no ExeFS (with main) in the program NCA"))
 }
 
+/// An NSP with its program NCA opened (its section key decrypted; the keys are not kept).
+pub struct Nsp {
+    /// For messages: the file name, or what the host calls it.
+    pub name: String,
+    nca: Nca,
+    romfs: (usize, nca::FsHeader),
+}
+
+impl Nsp {
+    pub fn open_file(path: &Path, keys: &Keys) -> io::Result<Self> {
+        let name = path.display().to_string();
+        let file = FileStorage::open(path).map_err(in_file(&name))?;
+        Self::open(name, Arc::new(file), keys)
+    }
+
+    pub fn open(name: String, storage: Shared, keys: &Keys) -> io::Result<Self> {
+        Self::open_program(storage, keys)
+            .map(|(nca, romfs)| Self {
+                name: name.clone(),
+                nca,
+                romfs,
+            })
+            .map_err(in_file(&name))
+    }
+
+    fn open_program(storage: Shared, keys: &Keys) -> io::Result<(Nca, (usize, nca::FsHeader))> {
+        let pfs = Pfs0::parse(storage)?;
+        let mut tickets = Vec::new();
+        for e in pfs.entries.iter().filter(|e| e.name.ends_with(".tik")) {
+            let s = pfs.open(e)?;
+            tickets.push(Ticket::parse(&s.read_vec(0, s.size())?)?);
+        }
+        // the largest program NCA (an NSP has one; a few have extra program parts for manuals)
+        let mut best: Option<(u64, Shared)> = None;
+        for e in pfs.entries.iter().filter(|e| e.name.ends_with(".nca")) {
+            let s = pfs.open(e)?;
+            if Nca::header(&s, keys)?[0x205] == CONTENT_PROGRAM
+                && best.as_ref().is_none_or(|b| e.size > b.0)
+            {
+                best = Some((e.size, s));
+            }
+        }
+        let (_, raw) = best.ok_or_else(|| invalid("no program NCA in the NSP"))?;
+        let nca = Nca::open(raw, keys, &tickets)?;
+        let romfs = nca
+            .find_section(FS_ROMFS)
+            .ok_or_else(|| invalid("no RomFS in the program NCA"))?;
+        Ok((nca, romfs))
+    }
+
+    /// An update: its RomFS is a BKTR patch over the base game's.
+    pub fn is_update(&self) -> bool {
+        self.romfs.1.encryption() == ENC_CTR_EX
+    }
+}
+
 /// A game dump opened for reading: its ExeFS and (patched) RomFS.
 pub struct Dump {
     pub exefs: Pfs0,
@@ -89,18 +124,45 @@ pub struct Dump {
 impl Dump {
     /// Open the base game NSP and, optionally, an update NSP patched over it.
     pub fn open(base: &Path, update: Option<&Path>, keys: &Keys) -> io::Result<Self> {
-        let (base_nca, base_section, base_fs) = Self::base(base, keys).map_err(in_file(base))?;
-        let program_id = base_nca.program_id();
+        let base = Nsp::open_file(base, keys)?;
+        let update = update.map(|u| Nsp::open_file(u, keys)).transpose()?;
+        Self::from_nsps(base, update)
+    }
+
+    /// Open NSPs given in any order: one base game, at most one update.
+    pub fn from_any(nsps: Vec<Nsp>) -> io::Result<Self> {
+        let (updates, bases): (Vec<Nsp>, Vec<Nsp>) = nsps.into_iter().partition(Nsp::is_update);
+        let mut bases = bases.into_iter();
+        let mut updates = updates.into_iter();
+        match (bases.next(), bases.next(), updates.next(), updates.next()) {
+            (Some(base), None, update, None) => Self::from_nsps(base, update),
+            (None, ..) => Err(invalid("no base game NSP (only an update)")),
+            (Some(_), Some(_), ..) => Err(invalid("more than one base game NSP")),
+            (.., Some(_)) => Err(invalid("more than one update NSP")),
+        }
+    }
+
+    pub fn from_nsps(base: Nsp, update: Option<Nsp>) -> io::Result<Self> {
+        if base.is_update() {
+            return Err(in_file(&base.name)(invalid(
+                "this is an update, not the base game",
+            )));
+        }
+        let program_id = base.nca.program_id();
+        let base_section = base
+            .nca
+            .section_storage(base.romfs.0)
+            .map_err(in_file(&base.name))?;
         let (exefs, romfs) = match update {
             None => {
-                let (offset, size) = base_fs.romfs_region().map_err(in_file(base))?;
+                let (offset, size) = base.romfs.1.romfs_region().map_err(in_file(&base.name))?;
                 (
-                    exefs(&base_nca).map_err(in_file(base))?,
+                    exefs(&base.nca).map_err(in_file(&base.name))?,
                     SubStorage::shared(base_section, offset, size)?,
                 )
             }
             Some(update) => {
-                Self::patch(update, keys, program_id, base_section).map_err(in_file(update))?
+                Self::patch(&update, program_id, base_section).map_err(in_file(&update.name))?
             }
         };
         Ok(Self {
@@ -110,42 +172,27 @@ impl Dump {
         })
     }
 
-    /// The base game's program NCA, its decrypted RomFS section and that section's header.
-    fn base(base: &Path, keys: &Keys) -> io::Result<(Nca, Shared, nca::FsHeader)> {
-        let nca = program_nca(base, keys)?;
-        let (index, fs) = nca
-            .find_section(FS_ROMFS)
-            .ok_or_else(|| invalid("no RomFS in the program NCA"))?;
-        let section = nca.section_storage(index)?;
-        Ok((nca, section, fs))
-    }
-
     /// The update's ExeFS and its RomFS, patched over the base RomFS section.
-    fn patch(
-        update: &Path,
-        keys: &Keys,
-        program_id: u64,
-        base_section: Shared,
-    ) -> io::Result<(Pfs0, Shared)> {
-        let nca = program_nca(update, keys)?;
+    fn patch(update: &Nsp, program_id: u64, base_section: Shared) -> io::Result<(Pfs0, Shared)> {
         // an update's program id is the game's, or the game's patch id (+0x800)
-        if nca.program_id() & !0x800 != program_id & !0x800 {
+        if update.nca.program_id() & !0x800 != program_id & !0x800 {
             return Err(invalid(
                 "the update is for a different game than the base NSP",
             ));
         }
-        let (index, fs) = nca
-            .find_section(FS_ROMFS)
-            .ok_or_else(|| invalid("no RomFS in the program NCA"))?;
-        if fs.encryption() != ENC_CTR_EX {
+        if !update.is_update() {
             return Err(invalid("not an update (its RomFS is not a BKTR patch)"));
         }
+        let (index, fs) = &update.romfs;
         let [indirect, ctr_ex] = fs.patch_info();
-        let plain = nca.ctr_section(index)?;
+        let plain = update.nca.ctr_section(*index)?;
         let data: Shared = Arc::new(AesCtrExStorage::new(plain, fs.ctr_upper(), ctr_ex)?);
         let patched: Shared = Arc::new(IndirectStorage::new(base_section, data, indirect)?);
         let (offset, size) = fs.romfs_region()?;
-        Ok((exefs(&nca)?, SubStorage::shared(patched, offset, size)?))
+        Ok((
+            exefs(&update.nca)?,
+            SubStorage::shared(patched, offset, size)?,
+        ))
     }
 }
 
@@ -156,6 +203,8 @@ pub struct DumpVfs {
     dump: Dump,
     romfs_root: PathBuf,
     exefs_root: PathBuf,
+    /// Where everything outside the dump goes.
+    out: Rc<dyn Vfs>,
 }
 
 enum Place {
@@ -184,10 +233,15 @@ fn not_found() -> io::Error {
 
 impl DumpVfs {
     pub fn new(dump: Dump, root: &Path) -> Self {
+        Self::with_output(dump, root, Rc::new(StdFs))
+    }
+    /// Over another file access than the file system (the web import's storage).
+    pub fn with_output(dump: Dump, root: &Path, out: Rc<dyn Vfs>) -> Self {
         Self {
             dump,
             romfs_root: root.join("romfs"),
             exefs_root: root.join("exefs"),
+            out,
         }
     }
     /// The RomFS as the import stages name it.
@@ -225,12 +279,12 @@ impl Vfs for DumpVfs {
                 let s = self.dump.exefs.open(e)?;
                 s.read_vec(0, s.size())
             }
-            Place::Outside => StdFs.read(path),
+            Place::Outside => self.out.read(path),
         }
     }
     fn write(&self, path: &Path, data: &[u8]) -> io::Result<()> {
         match self.place(path) {
-            Place::Outside => StdFs.write(path, data),
+            Place::Outside => self.out.write(path, data),
             _ => Err(read_only()),
         }
     }
@@ -252,19 +306,19 @@ impl Vfs for DumpVfs {
                 .map(|e| dir.join(&e.name))
                 .collect()),
             Place::ExeFs(_) => Err(not_found()),
-            Place::Outside => StdFs.read_dir(dir),
+            Place::Outside => self.out.read_dir(dir),
         }
     }
     fn is_file(&self, path: &Path) -> bool {
         match self.place(path) {
             Place::RomFs(p) => self.dump.romfs.is_file(&p),
             Place::ExeFs(p) => self.dump.exefs.find(&p).is_some(),
-            Place::Outside => StdFs.is_file(path),
+            Place::Outside => self.out.is_file(path),
         }
     }
     fn remove_dir_all(&self, dir: &Path) -> io::Result<()> {
         match self.place(dir) {
-            Place::Outside => StdFs.remove_dir_all(dir),
+            Place::Outside => self.out.remove_dir_all(dir),
             _ => Err(read_only()),
         }
     }
@@ -378,6 +432,16 @@ pub(crate) mod tests {
         fs.write(&tmp.join("out/a.json"), b"{}").unwrap();
         assert_eq!(std::fs::read(tmp.join("out/a.json")).unwrap(), b"{}");
 
+        // NSPs in any order: one base game, at most one update
+        let open = || Nsp::open_file(&path, &keys).unwrap();
+        assert!(!open().is_update());
+        assert!(Dump::from_any(vec![open()]).is_ok());
+        let two = Dump::from_any(vec![open(), open()])
+            .err()
+            .unwrap()
+            .to_string();
+        assert!(two.contains("more than one base"), "{two}");
+
         // the wrong header key is caught, without showing any key
         let wrong = Keys::parse(&format!("header_key = {}\n", "44".repeat(32))).unwrap();
         let err = Dump::open(&path, None, &wrong).err().unwrap().to_string();
@@ -396,6 +460,15 @@ pub(crate) mod tests {
             let ours = fs.read(f).unwrap_or_else(|| panic!("{f} missing")).unwrap();
             let theirs = std::fs::read(reference.join(f)).unwrap();
             assert!(ours == theirs, "{f} differs from the reference extraction");
+        }
+    }
+
+    fn compare_dumps(a: &RomFs, b: &RomFs, files: &[&str]) {
+        for f in files {
+            assert!(
+                a.read(f).unwrap().unwrap() == b.read(f).unwrap().unwrap(),
+                "{f}"
+            );
         }
     }
 
@@ -427,7 +500,15 @@ pub(crate) mod tests {
         let keys = Keys::load(&keys).unwrap();
         let plain = Dump::open(&base, None, &keys).unwrap();
         let patched = Dump::open(&base, Some(&update), &keys).unwrap();
+        // the update first: told apart by its BKTR RomFS
+        let either = Dump::from_any(vec![
+            Nsp::open_file(&update, &keys).unwrap(),
+            Nsp::open_file(&base, &keys).unwrap(),
+        ])
+        .unwrap();
         drop(keys);
+        assert_eq!(either.romfs.files().count(), patched.romfs.files().count());
+        compare_dumps(&either.romfs, &patched.romfs, SAMPLE);
         assert!(plain.romfs.files().count() > 1000);
         // MMK_COMPARE_ALL=1: every file, and no file missing on either side (minutes in release)
         let all = std::env::var_os("MMK_COMPARE_ALL").is_some();

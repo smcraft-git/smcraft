@@ -1,4 +1,5 @@
-//! `mmk_import_run`: the first-launch importer (same code as `mmk import`) for the app.
+//! `mmk_import_nsp` / `mmk_import_run`: the first-launch importer (same code as `mmk import`) for
+//! the app: from the player's NSP files and `prod.keys`, or from extracted RomFS / ExeFS folders.
 
 use std::ffi::{CStr, CString, c_char, c_void};
 use std::path::PathBuf;
@@ -18,6 +19,61 @@ fn opt_path(p: *const c_char) -> Option<PathBuf> {
     }
     let s = unsafe { CStr::from_ptr(p) }.to_string_lossy().into_owned();
     (!s.is_empty()).then(|| PathBuf::from(s))
+}
+
+/// The C progress callback as the importer's.
+fn progress_fn(progress: MmkImportProgress, user: *mut c_void) -> impl FnMut(&str, usize, usize) {
+    move |stage: &str, done: usize, total: usize| {
+        if let Some(f) = progress {
+            let stage = CString::new(stage).unwrap_or_default();
+            unsafe { f(user, stage.as_ptr(), done, total) };
+        }
+    }
+}
+
+/// Run every import stage (the game cache `<out_root>/smm2-<build>/` and the SMM2 UI
+/// `<out_root>/smm2-ui-<build>/`) from the player's own base game NSP, optionally its update NSP,
+/// and `prod.keys`, read in place. The keys are used while the dump is opened and never stored;
+/// afterwards the game needs neither file. `language` may be NULL (`USen`). Blocks until done:
+/// call it off the main thread. `progress` may be NULL. Returns false and sets the last error
+/// (on this thread) on failure.
+///
+/// # Safety
+/// Path arguments must be NUL-terminated strings (`update` and `language` may be NULL); `user`
+/// is passed through to `progress` untouched.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mmk_import_nsp(
+    base: *const c_char,
+    update: *const c_char,
+    keys: *const c_char,
+    out_root: *const c_char,
+    language: *const c_char,
+    progress: MmkImportProgress,
+    user: *mut c_void,
+) -> bool {
+    guard(false, || {
+        let (Some(base), Some(keys), Some(out_root)) =
+            (opt_path(base), opt_path(keys), opt_path(out_root))
+        else {
+            set_error("base, keys and out_root are required");
+            return false;
+        };
+        let cfg = mmk_import::NspImportConfig {
+            base,
+            update: opt_path(update),
+            keys,
+            out_root,
+            language: opt_path(language)
+                .map_or_else(|| "USen".into(), |l| l.to_string_lossy().into_owned()),
+        };
+        match mmk_import::run_nsp(&cfg, &mut progress_fn(progress, user)) {
+            Ok(_) => true,
+            Err(e) => {
+                set_error(e.to_string());
+                false
+            }
+        }
+    })
 }
 
 /// Run the importer on the user's own extracted RomFS + ExeFS (optionally with a separate update
@@ -64,13 +120,7 @@ pub unsafe extern "C" fn mmk_import_run(
             exefs,
             out_root,
         };
-        let mut cb = |stage: &str, done: usize, total: usize| {
-            if let Some(f) = progress {
-                let stage = CString::new(stage).unwrap_or_default();
-                unsafe { f(user, stage.as_ptr(), done, total) };
-            }
-        };
-        let result = mmk_import::run(&cfg, &mut cb);
+        let result = mmk_import::run(&cfg, &mut progress_fn(progress, user));
         if update_romfs.is_some() {
             let _ = std::fs::remove_dir_all(&merge_dir);
         }
@@ -157,6 +207,83 @@ mod tests {
         assert!(!out.join(".romfs-overlay").exists());
         eprintln!("imported into {}", dir.display());
         std::fs::remove_dir_all(&out).unwrap();
+    }
+
+    /// End to end from the owner's NSPs (skipped unless the paths are given; CI has no game
+    /// data): MMK_TEST_NSP, MMK_TEST_PROD_KEYS [MMK_TEST_UPDATE_NSP]. Run it in release.
+    #[test]
+    fn import_real_nsp_when_available() {
+        let var = |k: &str| std::env::var(k).ok().map(|s| CString::new(s).unwrap());
+        let (Some(base), Some(keys)) = (var("MMK_TEST_NSP"), var("MMK_TEST_PROD_KEYS")) else {
+            return;
+        };
+        let update = var("MMK_TEST_UPDATE_NSP");
+        let out = std::env::temp_dir().join(format!("mmk-import-nsp-test-{}", std::process::id()));
+        let out_c = CString::new(out.to_string_lossy().as_bytes()).unwrap();
+        let ok = unsafe {
+            mmk_import_nsp(
+                base.as_ptr(),
+                update.as_ref().map_or(std::ptr::null(), |c| c.as_ptr()),
+                keys.as_ptr(),
+                out_c.as_ptr(),
+                std::ptr::null(),
+                None,
+                std::ptr::null_mut(),
+            )
+        };
+        assert!(
+            ok,
+            "{}",
+            unsafe { CStr::from_ptr(crate::mmk_last_error()) }.to_string_lossy()
+        );
+        let names: Vec<String> = std::fs::read_dir(&out)
+            .unwrap()
+            .flatten()
+            .filter(|e| e.path().join("manifest.json").is_file())
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        assert!(names.iter().any(|n| n.starts_with("smm2-ui-")), "{names:?}");
+        assert!(
+            names.iter().any(|n| !n.starts_with("smm2-ui-")),
+            "{names:?}"
+        );
+        std::fs::remove_dir_all(&out).unwrap();
+    }
+
+    #[test]
+    fn nsp_import_reports_a_bad_keys_file() {
+        let dir = std::env::temp_dir().join(format!("mmk-nsp-ffi-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let (nsp, keys) = (dir.join("game.nsp"), dir.join("prod.keys"));
+        std::fs::write(&nsp, b"not an nsp").unwrap();
+        std::fs::write(&keys, "").unwrap();
+        let c = |p: &std::path::Path| CString::new(p.to_string_lossy().as_bytes()).unwrap();
+        let ok = unsafe {
+            mmk_import_nsp(
+                c(&nsp).as_ptr(),
+                std::ptr::null(),
+                c(&keys).as_ptr(),
+                c(&dir.join("out")).as_ptr(),
+                std::ptr::null(),
+                None,
+                std::ptr::null_mut(),
+            )
+        };
+        assert!(!ok);
+        let err = unsafe { CStr::from_ptr(crate::mmk_last_error()) }.to_string_lossy();
+        assert!(err.contains("prod.keys"), "{err}");
+        assert!(!unsafe {
+            mmk_import_nsp(
+                std::ptr::null(),
+                std::ptr::null(),
+                std::ptr::null(),
+                std::ptr::null(),
+                std::ptr::null(),
+                None,
+                std::ptr::null_mut(),
+            )
+        });
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

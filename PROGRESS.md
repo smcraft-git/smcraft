@@ -39,7 +39,11 @@ sound-perfect as possible, that **never needs the ROM or key files to run**.
 - 🔄 A guard test (`core/crates/host/tests/rom_free.rs`): no code outside the importer and the setup
   screens opens NSP / keys ✅, a built-in course plays from the pack alone ✅; menus and sound run
   with no dump anywhere (an app-level run) ⬜
-- ⬜ Setup screen on every platform (pick the NSP, the update NSP, `prod.keys`; progress; done)
+- 🔄 Setup screen on every platform (pick the NSP, the update NSP, `prod.keys`; progress; done):
+  macOS app ✅ (NSP files or extracted folders, `mmk_import_nsp`); web (`mmk-play` in a browser: a
+  folder with the NSPs and `prod.keys`) ✅ builds, not yet tried in a browser; iOS / iPadOS ⬜
+  (still copies a cache made on the Mac); native `mmk-play` (Windows / Linux) ⬜ (`mmk import
+  --nsp` for now)
 
 **G2 — Course World on TGRCode** ⬜
 - ⬜ TGRCode client: search by course ID / maker ID, Popular / New / Hot lists, course details,

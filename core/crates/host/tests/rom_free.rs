@@ -3,8 +3,8 @@
 //!
 //! - The sources of everything that runs the game (every crate but the importer and the `mmk`
 //!   tool, and the Swift app) have no code that opens an NSP, NCA, ticket or key file. Only the
-//!   setup screens start an import, and they go through `mmk_import::run_nsp`, never the dump
-//!   readers themselves.
+//!   setup screens start an import (`mmk_import::run_nsp`, or the web import's
+//!   `mmk_import::open_nsps` over the picked files), and even they leave the keys to the importer.
 //! - A built-in course plays from an imported pack alone (skipped without one, as in CI:
 //!   `MMK_ASSETS=<pack dir>`, else the newest import in the data folder, else
 //!   ~/smm-work/cache/smm2-3.0.3). This test links no importer code at all.
@@ -20,28 +20,27 @@ fn repo() -> PathBuf {
 const SETUP: &[&str] = &[
     "core/crates/ffi/src/import.rs",
     "core/crates/shell/src/web_import.rs",
-    "core/crates/shell/src/setup.rs",
+    "core/crates/shell/web/index.html",
+    "core/crates/shell/web/mmk-web.js",
+    "core/crates/shell/web/mmk-import-worker.js",
     "app/Sources/MMKApp/ImportView.swift",
     "app/Sources/MMKApp/Bridge.swift",
 ];
 
-/// The dump readers and keys: not used outside the importer, setup screens included.
-const DUMP_READERS: &[&str] = &[
-    "mmk_import::nsp",
-    "nsp::",
-    "Keys::load",
-    "Keys::parse",
-    "DumpVfs",
-    "FileStorage",
+/// Key handling: only in the importer, setup screens included (they hand it the file or its
+/// text, the importer reads it).
+const KEYS: &[&str] = &[
+    "Keys::",
     "header_key",
     "titlekek",
     "key_area_key",
     ".nca\"",
     ".tik\"",
+    "FileStorage",
 ];
 
-/// Starting an import: only in the setup screens.
-const IMPORT: &[&str] = &["mmk_import::", "prod.keys", ".nsp"];
+/// The dump readers and starting an import: only in the setup screens.
+const IMPORT: &[&str] = &["mmk_import::", "nsp::", "DumpVfs", "prod.keys", ".nsp"];
 
 fn sources(dir: &Path, out: &mut Vec<PathBuf>) {
     let Ok(rd) = std::fs::read_dir(dir) else {
@@ -55,7 +54,10 @@ fn sources(dir: &Path, out: &mut Vec<PathBuf>) {
             {
                 sources(&p, out);
             }
-        } else if p.extension().is_some_and(|x| x == "rs" || x == "swift") {
+        } else if p
+            .extension()
+            .is_some_and(|x| ["rs", "swift", "js", "html"].iter().any(|e| x == *e))
+        {
             out.push(p);
         }
     }
@@ -101,7 +103,7 @@ fn runtime_never_opens_the_dump_or_keys() {
                 continue; // doc comments name the importer's modules
             }
             let lower = code.to_ascii_lowercase();
-            let forbidden = DUMP_READERS
+            let forbidden = KEYS
                 .iter()
                 .chain(if setup { &[][..] } else { IMPORT })
                 .find(|t| lower.contains(&t.to_ascii_lowercase()));

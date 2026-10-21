@@ -162,7 +162,13 @@ const char *mmk_assets_costume_name(const MmkAssets *assets, uint32_t index);
 bool mmk_audio_add_smm1_sprites(MmkAudio *audio, const char *path);
 void mmk_engine_use_costumes(MmkEngine *engine, const MmkAssets *assets);
 
-// Blocks until done; run off the main thread. update_* may be NULL. Writes <out_root>/smm2-<build>/.
+// From the player's own NSP(s) and prod.keys, read in place (the keys are never stored): every
+// stage, writing <out_root>/smm2-<build>/ and <out_root>/smm2-ui-<build>/. update and language
+// may be NULL (language: "USen"). Blocks until done; run off the main thread.
+bool mmk_import_nsp(const char *base, const char *update, const char *keys, const char *out_root,
+                    const char *language, MmkImportProgress progress, void *user);
+// From extracted folders. Blocks until done; run off the main thread. update_* may be NULL.
+// Writes <out_root>/smm2-<build>/.
 bool mmk_import_run(const char *romfs, const char *exefs, const char *update_romfs,
                     const char *update_exefs, const char *out_root,
                     MmkImportProgress progress, void *user);

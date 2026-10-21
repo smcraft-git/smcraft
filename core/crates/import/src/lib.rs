@@ -501,6 +501,20 @@ fn open_dump(cfg: &NspImportConfig) -> Result<nsp::Dump> {
         .map_err(|e| ImportError::Invalid(e.to_string()))
 }
 
+/// Open a dump from NSPs a host supplies as storages (the web import's picked files), in any
+/// order (the base game, optionally its update), with the text of `prod.keys`. The keys are
+/// dropped before this returns.
+pub fn open_nsps(nsps: Vec<(String, nsp::storage::Shared)>, keys: &str) -> Result<nsp::Dump> {
+    let invalid = |e: std::io::Error| ImportError::Invalid(e.to_string());
+    let keys = nsp::keys::Keys::parse(keys).map_err(invalid)?;
+    let nsps = nsps
+        .into_iter()
+        .map(|(name, storage)| nsp::Nsp::open(name, storage, &keys))
+        .collect::<std::io::Result<Vec<_>>>()
+        .map_err(invalid)?;
+    nsp::Dump::from_any(nsps).map_err(invalid)
+}
+
 /// Every import stage (gameplay, sound, modes, effects, the SMM2 UI) from the NSP(s), read in
 /// place through [`nsp::DumpVfs`]. After this the game needs neither the dump nor the keys.
 pub fn run_nsp(cfg: &NspImportConfig, progress: Progress) -> Result<NspImportReport> {
