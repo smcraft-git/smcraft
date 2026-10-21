@@ -481,3 +481,37 @@ fn items_go_into_blocks_and_a_mushroom_makes_an_enemy_big() {
     assert_eq!(m.editor.object(brick).unwrap().child_id, 8, "{b}");
     assert!(m.editor.object_at(33, 4).is_none(), "the coin went in");
 }
+
+#[test]
+fn the_clear_condition_window_sets_and_removes_the_condition() {
+    let Some(ui) = crate::testing::smm2() else {
+        return;
+    };
+    let (mut host, mut saves) = (MockHost::default(), Saves::default());
+    let mut m = with(&mut host, &mut saves, |cx| {
+        MakerFlow::new(&ui, cx, MakerStart::New("M1".into()))
+    });
+    m.open_mission();
+    assert_eq!(m.mode, Mode::Mission);
+    // Parts: Goombas (the first), amount 1 → 3, OK
+    for b in [Buttons::RIGHT, Buttons::UP, Buttons::UP, Buttons::CONFIRM] {
+        run(&mut m, &mut host, &mut saves, press(b));
+        run(&mut m, &mut host, &mut saves, idle());
+    }
+    assert_eq!(m.mode, Mode::Edit);
+    assert_eq!(m.clear_condition(), (1, 1, 3));
+    // Actions (L): without taking damage
+    m.open_mission();
+    run(&mut m, &mut host, &mut saves, keys(keys::PREV));
+    run(&mut m, &mut host, &mut saves, press(Buttons::CONFIRM));
+    assert_eq!(m.clear_condition(), (3, 70, 0));
+    // Remove (L from Actions wraps to it)
+    m.open_mission();
+    run(&mut m, &mut host, &mut saves, keys(keys::PREV));
+    run(&mut m, &mut host, &mut saves, idle());
+    run(&mut m, &mut host, &mut saves, press(Buttons::CONFIRM));
+    assert_eq!(m.clear_condition(), (0, 0, 0));
+    // one undo brings the action back
+    run(&mut m, &mut host, &mut saves, keys(keys::UNDO));
+    assert_eq!(m.clear_condition(), (3, 70, 0));
+}

@@ -31,6 +31,7 @@
 //! ([`Host::store_value`] "maker.draft") so the maker reopens on it.
 
 pub mod catalog;
+pub mod mission;
 pub mod view;
 
 use mmk_editor::parts::Dir;
@@ -128,8 +129,10 @@ enum Mode {
     Ring,
     Menu,
     Save,
-    /// A left-column window: 0 game style, 1 course theme.
+    /// A left-column window: 0 game style, 1 course theme, 2 timer, 3 autoscroll.
     Window(u8),
+    /// The clear-condition window.
+    Mission,
     Test,
 }
 
@@ -210,6 +213,8 @@ pub struct MakerFlow {
     upload_call: Option<u32>,
     /// Captures: scripted input by maker tick.
     script: Vec<(i32, String)>,
+    /// The clear-condition window while open.
+    mission: Option<mission::MissionWindow>,
     /// The animation that opened the left window.
     window_tab: &'static str,
     /// The course changed since the host last showed it.
@@ -285,6 +290,7 @@ impl MakerFlow {
             window_timer: 300,
             upload_call: None,
             script: Vec::new(),
+            mission: None,
             window_tab: "ChangeTab00",
             dirty: true,
             shown: false,
@@ -423,6 +429,7 @@ impl MakerFlow {
         p.show("L_Play_00/L_PlayBtn_00/T_Text_00", false);
         self.update_page();
         self.update_timer();
+        self.update_mission_button();
     }
 
     // ------------------------------------------------------------ coordinates
@@ -551,6 +558,21 @@ impl MakerFlow {
             Mode::Save => self.save_tick(pressed, click, cx),
             Mode::Window(w) => {
                 self.window_tick(w, pressed, click, cx);
+                None
+            }
+            Mode::Mission => {
+                let tabs = match keys_pressed {
+                    k if k & keys::NEXT != 0 => 1,
+                    k if k & keys::PREV != 0 => -1,
+                    _ => 0,
+                };
+                let ev = self
+                    .mission
+                    .as_mut()
+                    .and_then(|m| m.step(pressed, tabs, click));
+                if let Some(e) = ev {
+                    self.mission_done(e);
+                }
                 None
             }
             Mode::Edit => {
@@ -977,7 +999,7 @@ impl MakerFlow {
             self.select_slot(i);
             return true;
         }
-        let buttons: [(&str, u8); 10] = [
+        let buttons: [(&str, u8); 11] = [
             ("L_PaletteSet_00/L_SearchBtn_00/B_Btn_00", 0),
             ("L_Play_00/L_PlayBtn_00/B_Btn_00", 1),
             ("L_RightParts_00/L_UndoBtn_00/B_Btn_00", 2),
@@ -988,6 +1010,7 @@ impl MakerFlow {
             ("L_LeftParts_00/L_SceneBtn_00/B_Btn_00", 7),
             ("L_LeftParts_00/L_TimerBtn_00/B_Btn_00", 8),
             ("L_LeftParts_00/L_ScrollBtn_00/B_Btn_00", 9),
+            ("L_LeftParts_00/L_MissionBtn_00/B_Btn_00", 10),
         ];
         let panes: Vec<String> = buttons.iter().map(|b| b.0.to_string()).collect();
         let Some(i) = hit(page, self.tick, &panes, p) else {
@@ -1031,6 +1054,7 @@ impl MakerFlow {
             3 => self.toggle_eraser(),
             4 => self.open_menu(),
             5 => self.open_save(),
+            10 => self.open_mission(),
             w => self.open_window(w - 6),
         }
         true
@@ -2180,6 +2204,75 @@ impl MakerFlow {
         self.close_window();
     }
 
+    // ------------------------------------------------------------ the clear condition
+
+    /// The course's clear condition: (category, condition-list index, amount).
+    pub fn clear_condition(&self) -> (u8, u8, i16) {
+        let h = &self.editor.course.header;
+        let index = mmk_formats::smm2::clear::index(h.clear_condition).unwrap_or(0);
+        (
+            h.clear_condition_category,
+            index,
+            h.clear_condition_magnitude,
+        )
+    }
+
+    fn open_mission(&mut self) {
+        let current = self.clear_condition();
+        self.mission = mission::MissionWindow::new(&self.ui, &self.style(), current);
+        if self.mission.is_some() {
+            self.mode = Mode::Mission;
+        }
+    }
+
+    fn mission_done(&mut self, e: mission::MissionEvent) {
+        use mission::MissionEvent as M;
+        let before = self.clear_condition();
+        let change = match e {
+            M::Set(c, i, n) => Some((c, i, n)),
+            M::Remove => Some((0, 0, 0)),
+            M::Close => None,
+        };
+        if let Some((c, i, n)) = change
+            && (c, i, n) != before
+        {
+            self.editor.checkpoint();
+            if self.editor.set_clear_condition(c, i, n).is_ok() {
+                self.changed();
+            } else {
+                self.editor.discard_checkpoint();
+            }
+        }
+        if let Some(m) = &mut self.mission {
+            m.layout.play("Out", m.tick);
+        }
+        self.mission = None;
+        self.mode = Mode::Edit;
+        self.update_mission_button();
+    }
+
+    /// The left column's clear-condition button: the condition's icon and amount.
+    fn update_mission_button(&mut self) {
+        let (c, i, n) = self.clear_condition();
+        let cond = mission::condition(c, i, n).filter(|_| c != 0);
+        let style = STYLES.iter().position(|s| *s == self.style()).unwrap_or(0);
+        let Some(p) = &mut self.page else { return };
+        let b = "L_LeftParts_00/L_MissionBtn_00";
+        p.show(&format!("{b}/P_None_00"), cond.is_none());
+        p.show(&format!("{b}/P_CountBase_00"), cond.is_some() && n > 0);
+        p.show(&format!("{b}/T_Mission_00"), cond.is_some() && n > 0);
+        p.text(&format!("{b}/T_Mission_00"), &n.to_string());
+        match &cond {
+            Some(k) => {
+                p.show(&format!("{b}/P_MissionIcon_00"), true);
+                crate::screens::set_icon(p, k, &format!("{b}/P_MissionIcon_00"), style);
+            }
+            None => {
+                p.picture(&format!("{b}/P_MissionIcon_00"), "MissionIcon", None);
+            }
+        }
+    }
+
     /// After a style change: parts the style lacks leave the palette.
     fn reset_palette_for_style(&mut self) {
         let style = self.style();
@@ -2225,6 +2318,10 @@ impl MakerFlow {
             let pane = format!("{}/B_Btn_00", Self::menu_buttons()[self.menu_sel]);
             self.cursor.place(m, &pane, tick, 1.0);
             self.cursor.draw(tick, out);
+        } else if self.mode == Mode::Mission
+            && let Some(m) = &mut self.mission
+        {
+            push_layout(out, &mut m.layout, m.tick);
         } else if self.mode == Mode::Save {
             let b = self.save_buttons();
             let pane = format!("{}/B_Btn_00", b[self.save_sel.min(b.len() - 1)]);
@@ -2337,6 +2434,7 @@ impl MakerFlow {
             "theme" => self.open_window(1),
             "timer" => self.open_window(2),
             "autoscroll" => self.open_window(3),
+            "mission" => self.open_mission(),
             "play" => self.start_test(cx, Some(None)),
             _ => return false,
         }
