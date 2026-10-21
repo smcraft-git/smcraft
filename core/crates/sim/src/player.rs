@@ -387,6 +387,8 @@ pub struct Player {
     pub wind: f32,
     /// Moving solid the head bonked this frame (POW blocks react).
     pub head_solid: Option<u32>,
+    /// The moving solid a wall sensor ran into this frame (pushed out of it), if any.
+    pub wall_solid: Option<u32>,
     was_in_water: bool,
     /// Jump pressed in the last 20 frames (a jump out of the water when leaving it).
     exit_window: i32,
@@ -578,6 +580,7 @@ impl Player {
             low_gravity: false,
             wind: 0.0,
             head_solid: None,
+            wall_solid: None,
             was_in_water: false,
             exit_window: 0,
             skid: SkidPhase::None,
@@ -1222,6 +1225,7 @@ impl Player {
         self.cues = 0;
         let was_ground = self.on_ground;
         self.head_solid = None;
+        self.wall_solid = None;
         self.throw = false;
         if !self.step_control() {
             return;
@@ -2539,6 +2543,7 @@ impl Player {
             }
             let (l, r) = (self.x - s.wall_x, self.x + s.wall_x);
             if r > b.x0 && l < b.x1 {
+                self.wall_solid = Some(b.owner);
                 if self.x < (b.x0 + b.x1) / 2.0 {
                     self.x = b.x0 - s.wall_x - 0.001;
                     self.vx = self.vx.min(0.0);

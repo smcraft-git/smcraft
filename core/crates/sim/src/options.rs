@@ -66,21 +66,26 @@ pub struct Options {
     /// ones): hosts set the costumes they have art for ([`Options::set_costume_pool`]). Empty =
     /// ids 0 … 99. Not a user setting, so not among [`Options::NAMES`].
     pub costume_pool: [u32; 7],
+    /// SMM1's Muncher hit box: for the player a Muncher is a box 2 px smaller on every side
+    /// (12 × 12, a big one's scaled with it), so a one-tile gap between Munchers is 20 px wide
+    /// for him instead of 16. Enemies and items still meet the whole box.
+    pub muncher_smm1_hitbox: bool,
 }
 
 impl Options {
     /// Option names, as the FFI and the command lines spell them.
-    pub const NAMES: [&'static str; 4] = [
+    pub const NAMES: [&'static str; 5] = [
         "smm1_shell_kicks",
         "smm1_layering",
         "smb1_mushroom",
         "costume",
+        "muncher_smm1_hitbox",
     ];
 
     /// Whether these options change how a course plays (not just how it looks). Replays and
     /// online play assume SMM2 rules, so hosts skip replays and turn these off online.
     pub fn affects_play(&self) -> bool {
-        self.smm1_shell_kicks || self.smb1_mushroom != MushroomSwap::Off
+        self.smm1_shell_kicks || self.smb1_mushroom != MushroomSwap::Off || self.muncher_smm1_hitbox
     }
 
     /// The same options with only the look-only ones kept (for replays and online play).
@@ -88,6 +93,7 @@ impl Options {
         Self {
             smm1_shell_kicks: false,
             smb1_mushroom: MushroomSwap::Off,
+            muncher_smm1_hitbox: false,
             ..*self
         }
     }
@@ -118,6 +124,7 @@ impl Options {
         match name {
             "smm1_shell_kicks" => self.smm1_shell_kicks = value != 0,
             "smm1_layering" => self.smm1_layering = value != 0,
+            "muncher_smm1_hitbox" => self.muncher_smm1_hitbox = value != 0,
             "smb1_mushroom" => match MushroomSwap::from_code(value) {
                 Some(m) => self.smb1_mushroom = m,
                 None => return false,
@@ -141,6 +148,7 @@ impl Options {
         Some(match name {
             "smm1_shell_kicks" => self.smm1_shell_kicks as i32,
             "smm1_layering" => self.smm1_layering as i32,
+            "muncher_smm1_hitbox" => self.muncher_smm1_hitbox as i32,
             "smb1_mushroom" => self.smb1_mushroom.code(),
             "costume" => self.costume.map_or(-1, i32::from),
             _ => return None,

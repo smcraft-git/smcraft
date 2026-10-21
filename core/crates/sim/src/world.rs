@@ -2889,8 +2889,9 @@ impl World {
                 i += 1;
                 continue;
             }
-            if let (Kind::Muncher, Some((x0, y0, x1, y1, _))) = (a.kind, a.solid_box()) {
+            if let (Kind::Muncher, Some(b)) = (a.kind, a.solid_box()) {
                 // a Muncher hurts on every side, including from on top (not through a shoe)
+                let (x0, y0, x1, y1) = self.muncher_player_box(b);
                 let shod = self.player.shoe.is_some() && self.player.y >= y1 - 2.0;
                 if self.player.spinning && self.player.vy < 0.0 && self.player.y >= y1 - 4.0 {
                     // spin-jumping onto a Muncher bounces off it ("Pass")
@@ -2898,7 +2899,11 @@ impl World {
                     i += 1;
                     continue;
                 }
-                if overlap(hurt, (x0 - 1.5, y0 - 1.5, x1 + 1.5, y1 + 1.5))
+                // the game's spike check runs on the terrain sensors: a wall sensor that entered
+                // the box (pushed out of it this frame) hurts too, so a one-tile gap between
+                // Munchers is 0.1 px wide a side for the 7.9 px wall sensors (57-muncher.md)
+                let pushed = self.player.wall_solid == Some(a.id);
+                if (pushed || overlap(hurt, (x0 - 1.5, y0 - 1.5, x1 + 1.5, y1 + 1.5)))
                     && !star
                     && !shod
                     && self.player.hurt()
@@ -4473,6 +4478,18 @@ impl World {
 
     // ---------------------------------------------------------------- platforms
 
+    /// A Muncher's box as the player meets it (its solid sides and its spike): the whole box, or
+    /// with SMM1's hit box 2 px smaller on every side (a big Muncher's 4 px: 12/16 of the box
+    /// about its centre).
+    fn muncher_player_box(&self, b: (f32, f32, f32, f32, bool)) -> (f32, f32, f32, f32) {
+        let (x0, y0, x1, y1, _) = b;
+        if !self.options.muncher_smm1_hitbox {
+            return (x0, y0, x1, y1);
+        }
+        let inset = (x1 - x0) / 8.0;
+        (x0 + inset, y0 + inset, x1 - inset, y1 - inset)
+    }
+
     /// Moving solids step before the player; riders are carried by their movement. A spring
     /// launches its rider: 6.0, or 4.43 with the jump button held (the held-jump gravity then
     /// gives the high bounce) (10-spring.md).
@@ -4523,11 +4540,19 @@ impl World {
                 }
             }
         }
-        self.level.solids = self
+        let world = &*self;
+        let solids = self
             .actors
             .iter()
             .filter_map(|a| {
                 a.solid_box()
+                    .map(|b| match a.kind {
+                        Kind::Muncher => {
+                            let (x0, y0, x1, y1) = world.muncher_player_box(b);
+                            (x0, y0, x1, y1, b.4)
+                        }
+                        _ => b,
+                    })
                     .map(|(x0, y0, x1, y1, top_only)| crate::level::Solid {
                         x0,
                         y0,
@@ -4541,6 +4566,7 @@ impl World {
                     })
             })
             .collect();
+        self.level.solids = solids;
         // tree canopies: platforms you can jump up through [inf: top-only — the canopy is a
         // model collision (tree init 0x710085cf10 → 0x71008fd2f0, flags 0x401) whose shape and
         // pass-through attribute come from the BellTree collision asset]
@@ -7461,6 +7487,40 @@ mod tests {
             clown: false,
             alt: false,
         }
+    }
+
+    #[test]
+    fn smm1_muncher_hit_box_widens_a_one_tile_gap() {
+        // two Muncher columns, three high, with a one-tile gap between them; small Mario drops
+        // straight down the gap a little off its centre
+        let drop = |offset: f32, smm1: bool| {
+            let mut lvl = Level::flat(40);
+            for ty in 2..5 {
+                for tx in [10, 12] {
+                    let x = tx as f32 * TILE + 8.0;
+                    lvl.spawns.push(spawn(Kind::Muncher, x, ty as f32 * TILE));
+                }
+            }
+            let mut w = World::with_level(lvl);
+            w.set_options(crate::options::Options {
+                muncher_smm1_hitbox: smm1,
+                ..Default::default()
+            });
+            w.player.x = 11.0 * TILE + 8.0 + offset;
+            w.player.y = 6.0 * TILE;
+            for _ in 0..60 {
+                w.step(Input::default());
+                w.player.x = 11.0 * TILE + 8.0 + offset;
+                w.player.vx = 0.0;
+            }
+            w.player.alive() && w.player.y <= 2.0 * TILE + 0.5
+        };
+        // dead centre fits either way; 0.8 px off only fits SMM1's box
+        assert!(drop(0.0, false));
+        assert!(drop(0.0, true));
+        assert!(!drop(0.8, false));
+        assert!(drop(0.8, true));
+        assert!(!drop(3.0, true));
     }
 
     #[test]
