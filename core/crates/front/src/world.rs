@@ -563,6 +563,13 @@ impl CourseListScene {
             {
                 l.text(&format!("{row}/L_CoopModeBtn_00/T_Btn_00"), &t);
             }
+            l.visible(&format!("{row}/L_CoopModeBtn_00"), Some(true));
+            // the maker's glove for its icon, when the import has it
+            l.image(
+                &format!("{row}/L_CoopModeBtn_00/P_Icon_00"),
+                "EditModel",
+                "NormalCursor",
+            );
             // server courses: "View comments" and "More info" on the open row
             let server = c.is_server();
             for p in ["L_CommentBtn_00", "L_DetailBtn_00"] {
