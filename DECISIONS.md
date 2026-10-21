@@ -2,6 +2,36 @@
 
 Newest first. Each entry: what was decided, why, and what would change it.
 
+## 2026-10-21b — Course World through a TGRCode client of our own; the source is a setting
+**Decision:** Course World talks to TGRCode (`https://tgrcode.com/mm2`, TheGreatRambler's
+MariOver) directly, through `mmk_online::tgrcode`, and to nothing of Nintendo's.
+- **Shapes:** the client answers the front end's calls (`info`, `search`, `comments`, `maker`) in
+  the course server's JSON (`listing_json` + `record_holder_name`, `first_clear_name`, `tags`), so
+  the screens are the same for both; writes (likes, comments, clears, accounts) are refused:
+  TGRCode is read-only. A course code is checked with the game's checksum before any request.
+- **Politeness:** one request at a time in the whole process, 2 s apart (nginx answered 429 to
+  requests 0.5–3 s apart while checking), a 429 waited out (Retry-After, else 5 s doubling, 3
+  times); every answer cached (lists 10 min, records 30 min, course files and thumbnails for
+  good, an Endless draw never) in the data folder's `TGRCode/cache`; when TGRCode can't be
+  reached a cached answer of any age is used.
+- **Downloads** are TGRCode's encrypted `.bcd`, decrypted with the asset pack's course key table
+  (`keys/course_table.bin`), the same way `server/src/upstream.rs` does; Download writes the plain
+  course into the library (`Downloaded/<code>.course`).
+- **Tabs:** TGRCode has no "hot" list: Hot is a fresh draw from the Endless pool (normal),
+  Popular is the course-point ranking at normal (one request, not four), New the 20 newest.
+  Over TGRCode Course World lists TGRCode only; the library stays in Coursebot.
+- **The source is a setting** (`mmk_online::world::Backend`): TGRCode (default), our own server
+  (as before; chosen when only a server URL is given), or the library. Thumbnails are JPEGs
+  decoded in the front end (`jpeg-decoder`) into textures of the UI cache.
+- **100 Mario / Endless:** the ported upstream fetcher (`mmk_server::upstream`) fills a local
+  store (`mmk_embed::pool`, `TGRCode/pool`) through the same client (so its requests are paced
+  with Course World's), started when the runs first open; 10 courses per difficulty per launch,
+  no thumbnails. The runs draw from it and the library; offline they play what it holds.
+- **Never in git:** TGRCode's course data, thumbnails or answers; the tests use made-up records,
+  a made-up key table, and a live test that is `#[ignore]`d and passes offline.
+**Would change it:** TGRCode asking for other limits (or an API key), the owner wanting the library
+mixed into Course World again, TGRCode going away (the own server stays).
+
 ## 2026-10-21 — SMCraft revived: import once, then no ROM or keys; the mode list
 **Decision (owner):** SMCraft is developed again, alongside smm2recomp. The goal is SMM2 rebuilt from
 scratch, every style as pixel-, physics- and sound-exact as we can make it, that does not need the

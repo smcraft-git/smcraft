@@ -1,7 +1,8 @@
 //! The portable shell as the front end's [`mmk_front::Host`]: the engine (the shell's [`Game`]),
 //! the course library (a folder of course files plus the asset cache's built-in courses, with
-//! the dataset's `index.json` statistics), the course server (`mmk-online`, on a thread), and
-//! small files for save data and settings.
+//! the dataset's `index.json` statistics), Course World's source (`mmk_online::world`: TGRCode,
+//! the course server or the library; calls on threads), the runs' pool of TGRCode courses
+//! (`mmk_embed::pool`), and small files for save data and settings.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -11,6 +12,7 @@ use std::sync::mpsc::{Receiver, Sender};
 use mmk_front::host::{CourseMeta, LoadedCourse};
 use mmk_front::{CourseEntry, CourseStatus, Host, Source, WorldCourse};
 use mmk_host::audio::AudioOut;
+use mmk_online::world::Backend;
 use serde_json::{Value, json};
 
 pub use crate::front_course::fnv1a64;
@@ -28,6 +30,8 @@ pub struct HostData {
     pub ui_dir: Option<PathBuf>,
     /// Course server base URL.
     pub server: Option<String>,
+    /// Where Course World's courses come from (`MmkFrontOptions`-like setting, see main).
+    pub backend: Backend,
     /// Where save data and settings go (None: nowhere, captures).
     pub data_dir: Option<PathBuf>,
     /// The player's buttons this tick (engine bits).
@@ -44,7 +48,14 @@ pub struct HostData {
     online: Option<(Sender<Reply>, Receiver<Reply>)>,
     /// The record run downloaded by a `ghost` call: raced from the next start of that course.
     ghost: Option<(String, mmk_modes::replay::Replay)>,
+    /// Thumbnails from their threads: (code, entire, JPEG; empty: none).
+    thumbs: Option<(Sender<Thumbnail>, Receiver<Thumbnail>)>,
+    /// The runs' pool entries made so far, by file.
+    pool_entries: HashMap<PathBuf, Option<CourseEntry>>,
 }
+
+/// A thumbnail from its thread: (code, entire, JPEG; empty: none).
+type Thumbnail = (String, bool, Vec<u8>);
 
 /// A server call's id and what its thread sent back.
 type Reply = (u32, Answer);
@@ -54,6 +65,8 @@ enum Answer {
     Json(Result<Value, String>),
     /// A `ghost` call: the course code and the replay's bytes.
     Ghost(String, Result<Vec<u8>, String>),
+    /// A `download` call: the file written into the library.
+    Download(Result<PathBuf, String>),
 }
 
 impl HostData {
@@ -67,6 +80,7 @@ impl HostData {
             library_dirs: Vec::new(),
             ui_dir: None,
             server: None,
+            backend: Backend::Library,
             data_dir: None,
             input: 0,
             audio: None,
@@ -78,6 +92,8 @@ impl HostData {
             memory: HashMap::new(),
             online: None,
             ghost: None,
+            thumbs: None,
+            pool_entries: HashMap::new(),
         }
     }
 
@@ -161,7 +177,11 @@ impl HostData {
 
     fn load_file(&self, game: &mut Game, path: &Path) -> Result<LoadedCourse, String> {
         let bytes = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
-        let (c, key) = self.decode(&bytes)?;
+        self.load_bytes(game, &bytes)
+    }
+
+    fn load_bytes(&self, game: &mut Game, bytes: &[u8]) -> Result<LoadedCourse, String> {
+        let (c, key) = self.decode(bytes)?;
         let loaded = LoadedCourse {
             name: c.header.name.to_string_lossy(),
             key: Some(key),
@@ -170,6 +190,59 @@ impl HostData {
         game.set_course(Some(c));
         game.session.set_audio(self.audio.clone());
         Ok(loaded)
+    }
+}
+
+impl HostData {
+    /// The course key table's bytes (TGRCode's downloads decrypt with it).
+    fn key_table(&self) -> Result<Vec<u8>, String> {
+        source::key_table(self.src())
+    }
+
+    /// Where downloads go: the first library folder's `Downloaded/` (else the data folder's).
+    fn download_dir(&self) -> Option<PathBuf> {
+        self.library_dirs
+            .first()
+            .or(self.data_dir.as_ref())
+            .map(|d| d.join("Downloaded"))
+    }
+
+    /// The library entry of a course file (None: not a course the engine reads).
+    fn entry_of(&self, path: &Path, meta: CourseMeta) -> Option<CourseEntry> {
+        let bytes = std::fs::read(path).ok()?;
+        let (c, key) = self.decode(&bytes).ok()?;
+        let stem = path
+            .file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let mut e = front_course::entry(
+            path.to_string_lossy().into_owned(),
+            &stem,
+            false,
+            &c,
+            key,
+            None,
+        );
+        e.meta = meta;
+        Some(e)
+    }
+}
+
+/// A Course World listing's statistics as library metadata.
+fn meta_of_pool(m: &mmk_server::Meta) -> CourseMeta {
+    let n = |v: u64| Some(v as i64);
+    CourseMeta {
+        clear_rate: (m.attempts > 0).then(|| m.clears as f64 * 100.0 / m.attempts as f64),
+        bucket: None,
+        maker: Some(m.maker.clone()).filter(|s| !s.is_empty()),
+        code: Some(m.code.clone()),
+        world_record_ms: (m.record_ms > 0).then_some(m.record_ms as i64),
+        plays: n(m.plays),
+        likes: n(m.likes),
+        clears: n(m.clears),
+        attempts: n(m.attempts),
+        uploaded: (m.uploaded > 0).then_some(m.uploaded as i64),
+        tags: Vec::new(),
     }
 }
 
@@ -307,22 +380,97 @@ impl Host for ShellHost<'_> {
     }
 
     fn request_server_courses(&mut self) -> bool {
-        let Some(server) = self.data.server.clone() else {
+        self.request_world_list("popular")
+    }
+
+    fn course_world(&self) -> &str {
+        self.data.backend.name()
+    }
+
+    fn world_lists_by_tab(&self) -> bool {
+        self.data.backend.lists_by_tab()
+    }
+
+    fn request_world_list(&mut self, tab: &str) -> bool {
+        if !self.data.backend.online() {
             return false;
-        };
+        }
+        let backend = self.data.backend.clone();
+        let tab = tab.to_string();
         let (tx, rx) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
-            let found = mmk_online::Client::new(server)
-                .search("", None, "popular", 0, 100)
-                .unwrap_or_default();
-            let list = found
-                .iter()
-                .filter_map(|l| WorldCourse::server(&mmk_online::listing_json(l)))
-                .collect();
+            let list = match backend.list(&tab) {
+                Ok(l) => l.iter().filter_map(WorldCourse::server).collect(),
+                Err(e) => {
+                    eprintln!("[course world] {tab}: {e}");
+                    Vec::new()
+                }
+            };
             let _ = tx.send(list);
         });
         self.data.rx = Some(rx);
         true
+    }
+
+    fn request_thumbnail(&mut self, code: &str, entire: bool) -> bool {
+        if !self.data.backend.online() {
+            return false;
+        }
+        let tx = self
+            .data
+            .thumbs
+            .get_or_insert_with(std::sync::mpsc::channel)
+            .0
+            .clone();
+        let backend = self.data.backend.clone();
+        let code = code.to_string();
+        std::thread::spawn(move || {
+            let jpeg = backend.thumbnail(&code, entire).unwrap_or_default();
+            let _ = tx.send((code, entire, jpeg));
+        });
+        true
+    }
+
+    fn poll_thumbnail(&mut self) -> Option<(String, bool, Vec<u8>)> {
+        self.data.thumbs.as_ref()?.1.try_recv().ok()
+    }
+
+    fn challenge_courses(&mut self) -> Vec<CourseEntry> {
+        let (Backend::TgrCode(tgr), Some(dir)) = (&self.data.backend, &self.data.data_dir) else {
+            return Vec::new();
+        };
+        let Some(table) = self
+            .data
+            .key_table()
+            .ok()
+            .and_then(|b| mmk_formats::smm2::crypto::table_from_bytes(&b).ok())
+        else {
+            return Vec::new();
+        };
+        let Some(pool) = mmk_embed::pool::Pool::get(&dir.join("TGRCode/pool"), tgr, table) else {
+            return Vec::new();
+        };
+        let mut out = Vec::new();
+        for c in pool.courses() {
+            if !self.data.pool_entries.contains_key(&c.path) {
+                let e = self
+                    .data
+                    .entry_of(&c.path, meta_of_pool(&c.meta))
+                    .map(|mut e| {
+                        e.name = c.meta.name.clone();
+                        e
+                    });
+                self.data.pool_entries.insert(c.path.clone(), e);
+            }
+            if let Some(Some(e)) = self.data.pool_entries.get(&c.path) {
+                out.push(e.clone());
+            }
+        }
+        crate::app::log(&format!(
+            "100 Mario / Endless: {} TGRCode courses held for the runs",
+            out.len()
+        ));
+        out
     }
 
     fn poll_server_courses(&mut self) -> Option<Vec<WorldCourse>> {
@@ -334,8 +482,19 @@ impl Host for ShellHost<'_> {
     fn load_course(&mut self, source: &Source) -> Result<LoadedCourse, String> {
         match source {
             Source::Library(path) => self.data.load_file(self.game, Path::new(path)),
+            Source::Server(code) if !matches!(self.data.backend, Backend::Server(_)) => {
+                // TGRCode: its file (cached by the client), decrypted with the pack's key table
+                let key_table = self.data.key_table();
+                let body = self.data.backend.download(code, || key_table)?;
+                self.data.load_bytes(self.game, &body)
+            }
             Source::Server(code) => {
-                let server = self.data.server.clone().ok_or("no course server")?;
+                let server = self
+                    .data
+                    .backend
+                    .server()
+                    .ok_or("no course server")?
+                    .to_string();
                 let dir = self
                     .data
                     .data_dir
@@ -421,22 +580,47 @@ impl Host for ShellHost<'_> {
     }
 
     fn report(&mut self, code: &str, what: &str) {
-        let Some(server) = self.data.server.clone() else {
+        if self.data.backend.server().is_none() {
             return;
-        };
+        }
+        let backend = self.data.backend.clone();
         let (code, what) = (code.to_string(), what.to_string());
-        std::thread::spawn(move || {
-            let _ = mmk_online::Client::new(server).report(&code, &what);
-        });
+        std::thread::spawn(move || backend.report(&code, &what));
     }
 
     fn online(&mut self, id: u32, action: &str, args: &Value, token: Option<&str>) -> bool {
-        let Some(server) = self.data.server.clone() else {
+        if !self.data.backend.online() {
             return false;
-        };
+        }
+        let backend = self.data.backend.clone();
         let tx = self.data.online_tx();
         let token = token.filter(|t| !t.is_empty()).map(str::to_string);
         let code = args["code"].as_str().unwrap_or_default().to_string();
+        if action == "download" {
+            let key_table = self.data.key_table();
+            let dir = self.data.download_dir();
+            std::thread::spawn(move || {
+                let r = (|| {
+                    let dir = dir.ok_or("no library folder")?;
+                    let body = backend.download(&code, || key_table)?;
+                    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+                    let file = dir.join(format!("{code}.course"));
+                    std::fs::write(&file, body).map_err(|e| e.to_string())?;
+                    Ok(file)
+                })();
+                let _ = tx.send((id, Answer::Download(r)));
+            });
+            return true;
+        }
+        let Some(server) = backend.server().map(str::to_string) else {
+            // TGRCode: the read-only calls
+            let (action, args) = (action.to_string(), args.clone());
+            std::thread::spawn(move || {
+                let a = backend.call(token.as_deref(), &action, &args);
+                let _ = tx.send((id, Answer::Json(a)));
+            });
+            return true;
+        };
         match action {
             "submit_replay" => {
                 // the run just cleared (kept by the session since the course started)
@@ -480,6 +664,16 @@ impl Host for ShellHost<'_> {
             id,
             match a {
                 Answer::Json(r) => r,
+                Answer::Download(r) => r.map(|file| {
+                    // the library has it from now on
+                    if let Some(e) = self.data.entry_of(&file, CourseMeta::default())
+                        && let Some(lib) = &mut self.data.library
+                    {
+                        lib.retain(|x| x.id != e.id);
+                        lib.push(e);
+                    }
+                    json!({ "file": file.to_string_lossy() })
+                }),
                 Answer::Ghost(code, bytes) => bytes.and_then(|b| {
                     let r = mmk_modes::replay::Replay::decode(&b)
                         .ok_or_else(|| "the record's run isn't a replay".to_string())?;

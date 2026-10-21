@@ -4,6 +4,8 @@
 //! account; with an upstream source (`tgrcode`) the Endless Challenge and 100 Mario courses come
 //! from there ([`mmk_server::upstream`]).
 
+pub mod pool;
+
 use std::ffi::{CStr, c_char};
 use std::path::Path;
 use std::sync::{Arc, OnceLock};

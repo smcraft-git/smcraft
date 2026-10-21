@@ -13,7 +13,8 @@
 //!   `Nwk_CommentPosting_00` in its text form to type a comment (signed in) [inf: the game posts
 //!   from the course's pause and clear screens].
 //!
-//! Thumbnails, Miis, flags, medals, tags (the server has none: the layout's "none" marks),
+//! The course's picture and whole-course map when the source has them (TGRCode; our server's
+//! from its upstream) and its tags (the layout's "none" marks without). Miis, flags, medals,
 //! drawings, stamps, spoilers and reporting are hidden [departure].
 
 use std::collections::HashMap;
@@ -91,10 +92,21 @@ impl CoursePageScene {
         l.show("L_UpLoadInfo_00", false);
         l.show("L_LoadingIcon_00", false);
         let d = DETAIL;
+        // the course's picture and whole-course map, when the source has them (`set_thumbnail`)
+        let server = course.is_server();
+        for p in ["L_Thumbnail_00", "L_Thumbnail_01"] {
+            let t = format!("{d}/{p}");
+            if server {
+                l.show(&format!("{t}/P_DummyThumbnail_00"), false);
+                l.play_loop(&format!("{t}/L_LoadingIcon_00/Wait"), 0);
+            } else {
+                l.show(&t, false);
+            }
+        }
+        if !server {
+            l.show(&format!("{d}/P_DummyThumbnailBG_00"), false);
+        }
         for p in [
-            "L_Thumbnail_00",
-            "L_Thumbnail_01",
-            "P_DummyThumbnailBG_00",
             "T_MakerClearTime_00",
             "L_NationalFlag_00",
             "N_BadgeList_00",
@@ -125,8 +137,6 @@ impl CoursePageScene {
         ] {
             l.text_from(&format!("{d}/{pane}"), label);
         }
-        // no tags on the server: the layout's "none" marks (TypeTag 2)
-        l.hold(&format!("{d}/TypeTag"), 2.0);
         // the players column: the layout's own "no one yet" [departure: no player lists]
         let none = l.message("NoData_0014").unwrap_or_default();
         set_loading(
@@ -136,6 +146,14 @@ impl CoursePageScene {
             0,
         );
         let busy = l.ticks("In", 1);
+        // names the listing brings (TGRCode's) need no lookups
+        let names: HashMap<String, String> = [
+            (&course.record_holder, &course.record_holder_name),
+            (&course.first_clear, &course.first_clear_name),
+        ]
+        .into_iter()
+        .filter_map(|(id, name)| Some((id.clone()?, name.clone()?)))
+        .collect();
         let mut s = Self {
             ui: ui.clone(),
             layout: l,
@@ -143,7 +161,7 @@ impl CoursePageScene {
             tick: 0,
             course,
             selection: 0,
-            names: HashMap::new(),
+            names,
             calls: Vec::new(),
             busy_until: busy,
             leaving: false,
@@ -156,6 +174,28 @@ impl CoursePageScene {
         s.ask_names(cx);
         s.fill();
         Some(s)
+    }
+
+    /// A thumbnail arrived (`entire`: the whole-course map; None: there is none).
+    pub fn set_thumbnail(&mut self, entire: bool, stem: Option<&str>) {
+        let t = if entire {
+            format!("{DETAIL}/L_Thumbnail_01")
+        } else {
+            format!("{DETAIL}/L_Thumbnail_00")
+        };
+        match stem {
+            Some(stem) => {
+                let pic = format!("{t}/P_DummyThumbnail_00");
+                self.layout.visible(&pic, None);
+                self.layout.picture(&pic, crate::thumbs::GROUP, Some(stem));
+                self.layout.show(&format!("{t}/L_LoadingIcon_00"), false);
+            }
+            None => self.layout.show(&t, false),
+        }
+    }
+
+    pub fn server_code(&self) -> Option<&str> {
+        self.course.server_code()
     }
 
     fn code(&self) -> Option<String> {
@@ -201,6 +241,17 @@ impl CoursePageScene {
             &format!("{d}/T_PlayerName_00"),
             c.maker.as_deref().unwrap_or("-"),
         );
+        // tags: TypeTag 0 two, 1 one, 2 none (the layout's "none" marks: our server has none)
+        let tags: Vec<String> = c
+            .tags
+            .iter()
+            .take(2)
+            .filter_map(|t| l.message(&(1000 + t).to_string()))
+            .collect();
+        l.hold(&format!("{d}/TypeTag"), (2 - tags.len()) as f32);
+        for (k, t) in tags.iter().enumerate() {
+            l.text(&format!("{d}/T_Tag_{k:02}"), t);
+        }
         let n = |v: Option<i64>| v.map_or("-".to_string(), |v| v.to_string());
         l.text(&format!("{d}/L_GoodCount_00/T_Count_00"), &n(c.likes));
         l.text(&format!("{d}/L_PlayerCount_00/T_Count_00"), &n(c.plays));
@@ -270,6 +321,14 @@ impl CoursePageScene {
             match (call, a) {
                 (Call::Info, Ok(v)) => {
                     if let Some(mut fresh) = WorldCourse::server(&v) {
+                        for (id, name) in [
+                            (&fresh.record_holder, &fresh.record_holder_name),
+                            (&fresh.first_clear, &fresh.first_clear_name),
+                        ] {
+                            if let (Some(id), Some(name)) = (id, name) {
+                                self.names.insert(id.clone(), name.clone());
+                            }
+                        }
                         fresh.cleared = self.course.cleared;
                         fresh.best_ticks = self.course.best_ticks;
                         fresh.key = self.course.key.clone();

@@ -31,6 +31,8 @@ winit = "0.30.13"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 mmk-online = { path = "../online" }
+mmk-embed = { path = "../embed" }
+mmk-server = { path = "../server" }
 clap.workspace = true
 png = "0.18.1"
 pollster = "1.0.1"

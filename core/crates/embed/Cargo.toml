@@ -1,6 +1,6 @@
 [package]
 name = "mmk-embed"
-description = "The course server inside an app: a static library with a C interface (mmk_embed_start)"
+description = "The course server inside an app (a static library with a C interface, mmk_embed_start) and the Course World course pool of the front end's runs"
 edition.workspace = true
 version.workspace = true
 license.workspace = true
@@ -10,4 +10,8 @@ publish.workspace = true
 crate-type = ["staticlib", "rlib"]
 
 [dependencies]
+mmk-formats = { path = "../formats" }
+mmk-modes = { path = "../modes" }
+mmk-online = { path = "../online" }
 mmk-server = { path = "../server" }
+serde_json.workspace = true

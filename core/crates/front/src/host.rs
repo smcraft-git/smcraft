@@ -133,6 +133,9 @@ pub struct WorldCourse {
     pub record_holder: Option<String>,
     pub first_clear: Option<String>,
     pub record_verified: bool,
+    /// The record holder's and first clearer's names when the listing has them (TGRCode).
+    pub record_holder_name: Option<String>,
+    pub first_clear_name: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -172,12 +175,15 @@ impl WorldCourse {
             record_holder: None,
             first_clear: None,
             record_verified: false,
+            record_holder_name: None,
+            first_clear_name: None,
         }
     }
 
     /// A server search result (`mmk_online::listing_json`: code, name, maker, style, plays,
     /// clears, attempts, likes, description, uploaded, maker_id, record_ms, record_holder,
-    /// first_clear, record_verified; missing keys are unknown).
+    /// first_clear, record_verified; TGRCode's also record_holder_name, first_clear_name, tags;
+    /// missing keys are unknown).
     pub fn server(j: &Value) -> Option<Self> {
         let code = j["code"].as_str()?.to_string();
         let n = |k: &str| j[k].as_i64();
@@ -208,12 +214,27 @@ impl WorldCourse {
             best_ticks: None,
             world_record_ms: n("record_ms").filter(|&r| r > 0),
             playable: true,
-            tags: Vec::new(),
+            // (TGRCode gives two tags, the same one twice for a course with one)
+            tags: j["tags"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_u64)
+                .filter(|&t| t > 0)
+                .map(|t| t as u32)
+                .fold(Vec::new(), |mut v, t| {
+                    if !v.contains(&t) {
+                        v.push(t);
+                    }
+                    v
+                }),
             key: None,
             maker_id: id("maker_id"),
             record_holder: id("record_holder"),
             first_clear: id("first_clear"),
             record_verified: j["record_verified"].as_bool().unwrap_or(false),
+            record_holder_name: id("record_holder_name"),
+            first_clear_name: id("first_clear_name"),
         })
     }
 
@@ -362,6 +383,35 @@ pub trait Host {
     fn request_server_courses(&mut self) -> bool;
     /// The server's courses once they arrived (empty if it couldn't be reached).
     fn poll_server_courses(&mut self) -> Option<Vec<WorldCourse>>;
+    /// Course World's source: `tgrcode`, `server` or `library` (`mmk_online::world`).
+    fn course_world(&self) -> &str {
+        "server"
+    }
+    /// Course World's tabs are lists of their own (TGRCode's), asked for one at a time with
+    /// [`Host::request_world_list`]; else the one server list is sorted per tab.
+    fn world_lists_by_tab(&self) -> bool {
+        false
+    }
+    /// Start fetching one tab's list (`hot`, `popular`, `new`); it arrives through
+    /// [`Host::poll_server_courses`]. False: no online source.
+    fn request_world_list(&mut self, _tab: &str) -> bool {
+        self.request_server_courses()
+    }
+    /// Start fetching a Course World course's thumbnail (`entire`: the whole-course map).
+    /// False: none to be had.
+    fn request_thumbnail(&mut self, _code: &str, _entire: bool) -> bool {
+        false
+    }
+    /// A thumbnail that arrived: (code, entire, JPEG bytes; empty when there is none).
+    fn poll_thumbnail(&mut self) -> Option<(String, bool, Vec<u8>)> {
+        None
+    }
+    /// Courses for 100 Mario / Endless runs besides the library's: Course World courses the
+    /// host keeps on disk (TGRCode's Endless pool, fetched in the background; offline, the
+    /// ones fetched before).
+    fn challenge_courses(&mut self) -> Vec<CourseEntry> {
+        Vec::new()
+    }
     /// Load a course into the engine (a library file, or a server course: download it).
     fn load_course(&mut self, source: &Source) -> Result<LoadedCourse, String>;
     /// How many title demo courses there are; load one (false: unreadable).
@@ -396,6 +446,8 @@ pub trait Host {
     /// `submit_replay {code}` (the replay of the run just cleared) and `ghost {code}` (download
     /// the record's replay and race it from the next start of that course). `token`: the
     /// signed-in account's. The answer comes back from [`Host::poll_online`] under `id`.
+    /// Also `download {code}`: keep a Course World course in the library (answer `{name,
+    /// file}`).
     /// False: no server configured (nothing will come back).
     fn online(&mut self, _id: u32, _action: &str, _args: &Value, _token: Option<&str>) -> bool {
         false

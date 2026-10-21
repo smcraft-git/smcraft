@@ -7,6 +7,10 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+mmk-assets = { path = "../assets" }
+mmk-formats = { path = "../formats" }
 mmk-ui = { path = "../ui" }
 mmk-modes = { path = "../modes" }
 serde_json.workspace = true
+# Course World thumbnails (JPEG)
+jpeg-decoder = { version = "0.3", default-features = false }

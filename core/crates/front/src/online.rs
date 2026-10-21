@@ -77,6 +77,11 @@ impl Online {
         }
     }
 
+    /// Call `id`'s answer is here (not taken yet).
+    pub fn answered(&self, id: u32) -> bool {
+        self.answers.iter().any(|(k, _)| *k == id)
+    }
+
     /// The answer to call `id`, once (None: not yet).
     pub fn take(&mut self, id: u32) -> Option<Result<Value, String>> {
         let i = self.answers.iter().position(|(k, _)| *k == id)?;

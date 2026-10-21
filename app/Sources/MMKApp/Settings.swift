@@ -32,6 +32,9 @@ enum SettingsKey {
     /// String (default empty): the open-source course server Course World also lists courses
     /// from (e.g. "http://localhost:8640"); empty = the local library only.
     static let courseServer = "online.server"
+    /// String (default "tgrcode"): where Course World's courses come from: "tgrcode"
+    /// (tgrcode.com/mm2, read-only), "server" (the course server above) or "library".
+    static let courseWorld = "online.courseWorld"
     /// Int 0–3 (default 0): player 1's character, Mario / Luigi / Toad / Toadette (also set from
     /// the SMM2 pause menu's Settings).
     static let character = "player.character"
@@ -46,7 +49,8 @@ enum SettingsKey {
         UserDefaults.standard.register(defaults: [
             volumeMaster: 1.0, volumeMusic: 1.0, volumeSfx: 1.0,
             integerScale: true, fullscreen: false, usePlaceholder: false, touchControls: true,
-            bootOpening: true, hundredPresentation: "smm2", courseServer: "", character: 0,
+            bootOpening: true, hundredPresentation: "smm2", courseServer: "", courseWorld: "tgrcode",
+            character: 0,
         ])
     }
 }
@@ -414,6 +418,7 @@ private struct GameSettings: View {
     @AppStorage(SettingsKey.bootOpening) private var opening = true
     @AppStorage(SettingsKey.hundredPresentation) private var hundred = "smm2"
     @AppStorage(SettingsKey.courseServer) private var server = ""
+    @AppStorage(SettingsKey.courseWorld) private var courseWorld = "tgrcode"
     @AppStorage(SettingsKey.character) private var character = 0
     @AppStorage(SettingsKey.smm1ShellKicks) private var shellKicks = false
     @AppStorage(SettingsKey.smm1Layering) private var layering = false
@@ -433,8 +438,13 @@ private struct GameSettings: View {
                 Text("Super Mario Maker 2 (Endless Challenge style)").tag("smm2")
                 Text("Super Mario Maker (original)").tag("smm1")
             }
+            Picker("Course World", selection: $courseWorld) {
+                Text("TGRCode (Nintendo's Course World, read-only)").tag("tgrcode")
+                Text("Course server").tag("server")
+                Text("My courses only").tag("library")
+            }
             TextField("Course server", text: $server, prompt: Text("http://localhost:8640"))
-            Text("Course World lists your library and, when set, an open-source course server (mmk server). It never talks to Nintendo's network.")
+            Text("Course World searches and plays courses through TGRCode (tgrcode.com, a third-party service), or lists an open-source course server (mmk server). The app never talks to Nintendo's network itself.")
                 .font(.footnote).foregroundStyle(.secondary)
             Section("Super Mario Maker extras") {
                 Toggle("SMM1 shell physics (mid-air kicks, shell jumps)", isOn: $shellKicks)

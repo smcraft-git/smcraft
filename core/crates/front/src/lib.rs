@@ -24,12 +24,14 @@ pub mod menu;
 pub mod online;
 pub mod play;
 pub mod screens;
+pub mod search;
 pub mod smm1;
 pub mod sound;
 #[cfg(test)]
 pub(crate) mod testing;
 #[cfg(test)]
 mod tests_online;
+pub mod thumbs;
 pub mod title;
 pub mod world;
 
@@ -339,7 +341,9 @@ impl Front {
         back: Back,
     ) {
         host.unload_course();
-        let lib = host.library();
+        // the library, then the Course World courses the host keeps for the runs
+        let mut lib = host.library();
+        lib.extend(host.challenge_courses());
         let (smm2, smm1) = (self.smm2.clone(), self.smm1.clone());
         let wanted = presentation.unwrap_or(self.opts.hundred);
         let (mut cx, screen) = self.cx(host);
@@ -588,9 +592,43 @@ impl Front {
                 self.show_title(host, start, sel);
             }
             "courseworld" => self.show_world(host, ListKind::World, 0),
-            "courseworld-list" => {
+            "courseworld-list" | "courseworld-list-popular" | "courseworld-list-new" => {
                 self.show_world(host, ListKind::World, 0);
                 self.apply(host, Go::World(WorldGo::List));
+                let (mut cx, scr) = self.cx(host);
+                let Screen::World(f) = scr else {
+                    return false;
+                };
+                let tab = match screen {
+                    "courseworld-list-popular" => world::Tab::Popular,
+                    "courseworld-list-new" => world::Tab::New,
+                    _ => world::Tab::Hot,
+                };
+                f.debug_tab(tab);
+                f.wait_server(&mut cx, 6000);
+                f.wait_details(&mut cx, 6000);
+            }
+            // the ID search's window, and its answer for an ID ("courseworld-id:<ID>")
+            "courseworld-search" => {
+                self.show_world(host, ListKind::World, 7);
+                let (mut cx, scr) = self.cx(host);
+                let Screen::World(f) = scr else {
+                    return false;
+                };
+                if !f.debug_open(&mut cx, "search") {
+                    return false;
+                }
+            }
+            id if id.starts_with("courseworld-id:") => {
+                self.show_world(host, ListKind::World, 7);
+                let (mut cx, scr) = self.cx(host);
+                let Screen::World(f) = scr else {
+                    return false;
+                };
+                if !f.debug_open(&mut cx, &id["courseworld-".len()..]) {
+                    return false;
+                }
+                f.wait_details(&mut cx, 6000);
             }
             // the online screens (a server: --server / MMK_SERVER; MMK_FRONT_REALTIME=1 gives
             // its answers time to arrive)
@@ -629,9 +667,12 @@ impl Front {
                 let Screen::World(f) = scr else {
                     return false;
                 };
-                f.wait_server(&mut cx, 500);
+                f.wait_server(&mut cx, 6000);
                 if !f.debug_open(&mut cx, what) {
                     return false;
+                }
+                if matches!(what, "page" | "maker") {
+                    f.wait_details(&mut cx, 6000);
                 }
                 self.run_now(host);
             }
