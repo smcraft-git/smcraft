@@ -34,6 +34,8 @@ mmk-online = { path = "../online" }
 # the first-launch setup only (setup.rs): the import from the player's own dump
 mmk-import = { path = "../import" }
 mmk-nex = { path = "../nex" }
+mmk-embed = { path = "../embed" }
+mmk-server = { path = "../server" }
 clap.workspace = true
 png = "0.18.1"
 pollster = "1.0.1"

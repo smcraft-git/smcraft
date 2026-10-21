@@ -20,6 +20,7 @@ mmk-modes = { path = "../modes" }
 mmk-ui = { path = "../ui" }
 mmk-host = { path = "../host" }
 mmk-online = { path = "../online" }
+mmk-embed = { path = "../embed" }
 mmk-front = { path = "../front" }
 libc = "0.2.191"
 serde_json.workspace = true

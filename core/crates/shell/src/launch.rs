@@ -54,6 +54,7 @@ pub fn front(cfg: FrontConfig) -> Result<(Game, FrontApp), String> {
     // the library is read on a thread while the opening plays
     data.start_scan();
     data.data_dir = cfg.data_dir;
+    data.backend = backend(&data);
     let front = {
         let mut host = ShellHost {
             game: &mut game,
@@ -84,4 +85,17 @@ pub fn start_sound(app: &mut FrontApp, game: &mut Game) -> Result<(), String> {
     app.audio_stream = Some(a);
     game.session.set_audio(app.data.audio.clone());
     Ok(())
+}
+
+/// Course World's backend, as `mmk-play` picks it: `$MMK_COURSE_WORLD`, else the player's
+/// setting (`course_world.json` in the data folder), else TGRCode.
+fn backend(data: &HostData) -> mmk_online::world::Backend {
+    let setting = std::env::var("MMK_COURSE_WORLD")
+        .ok()
+        .or_else(|| std::fs::read_to_string(data.data_dir.as_ref()?.join("course_world.json")).ok())
+        .map(|s| s.trim().trim_matches('"').to_string());
+    let cache = std::env::var_os("MMK_TGRCODE_CACHE")
+        .map(PathBuf::from)
+        .or_else(|| data.data_dir.as_ref().map(|d| d.join("TGRCode/cache")));
+    mmk_online::world::Backend::from_setting(setting.as_deref(), data.server.as_deref(), cache)
 }

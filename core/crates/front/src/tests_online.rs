@@ -415,3 +415,94 @@ fn pause_votes_go_to_the_server() {
     assert_eq!(votes[1].2, json!({"code": "DDD-DDD-DDD", "like": false}));
     assert_eq!(p.screens.as_ref().unwrap().voted, Some(false));
 }
+
+#[test]
+fn tab_lists_arrive_per_tab_in_the_sources_order() {
+    let Some(ui) = smm2() else { return };
+    let mut s = CourseListScene::new(&ui).unwrap();
+    s.use_tab_lists();
+    assert_eq!(s.want_tab, Some(Tab::Hot));
+    s.want_tab = None;
+    // (TGRCode's order, not sorted by date or likes)
+    let hot: Vec<WorldCourse> = [1, 9, 4]
+        .iter()
+        .map(|&k| server_course(&format!("AAA-AAA-AA{k}"), k))
+        .collect();
+    s.set_tab_courses(Tab::Hot, hot);
+    let codes = |s: &CourseListScene| -> Vec<String> {
+        s.courses.iter().filter_map(|c| c.code.clone()).collect()
+    };
+    assert_eq!(codes(&s), ["AAA-AAA-AA1", "AAA-AAA-AA9", "AAA-AAA-AA4"]);
+    let mut sc = Script::default();
+    for _ in 0..30 {
+        s.step(&idle(), &mut sc);
+    }
+    let p = center(&mut s.layout, s.tick, "L_LatestBtn_00/B_Btn_00");
+    s.step(&click(p), &mut sc);
+    assert_eq!((s.tab, s.want_tab), (Tab::New, Some(Tab::New)));
+    assert!(s.courses.is_empty(), "the New list hasn't arrived");
+    s.set_tab_courses(Tab::New, vec![server_course("BBB-BBB-BB2", 0)]);
+    assert_eq!(codes(&s), ["BBB-BBB-BB2"]);
+    // back on Hot: kept, not asked for again
+    let p = center(&mut s.layout, s.tick, "L_PickUpBtn_00/B_Btn_00");
+    s.want_tab = None;
+    s.step(&click(p), &mut sc);
+    assert_eq!((s.tab, s.want_tab), (Tab::Hot, None));
+    assert_eq!(codes(&s).len(), 3);
+    // a server row's Download button
+    s.step(&press(Buttons::CONFIRM), &mut sc);
+    for _ in 0..20 {
+        s.step(&idle(), &mut sc);
+    }
+    let pane = format!("{}/L_DownloadPlayBtn_00/B_Btn_00", s.row_pane(0));
+    let p = center(&mut s.layout, s.tick, &pane);
+    let mut ev = s.step(&click(p), &mut sc);
+    for _ in 0..90 {
+        if ev.is_some() {
+            break;
+        }
+        ev = s.step(&idle(), &mut sc);
+    }
+    match ev {
+        Some(ListEvent::Download(c)) => assert_eq!(c.code.as_deref(), Some("AAA-AAA-AA1")),
+        e => panic!("{e:?}"),
+    }
+}
+
+#[test]
+fn the_id_search_takes_a_typed_course_or_maker_id() {
+    use crate::search::{IdSearchScene, SearchEvent};
+    let Some(ui) = smm2() else { return };
+    let code = mmk_formats::course_id::smm2_data_id_to_code(5000, false);
+    let maker = mmk_formats::course_id::smm2_data_id_to_code(77, true);
+    for (id, want) in [
+        (code.clone(), SearchEvent::Course(code.clone())),
+        (maker.replace('-', ""), SearchEvent::Maker(maker.clone())),
+    ] {
+        let mut s = IdSearchScene::new(&ui).unwrap();
+        s.step(&idle());
+        let mut ev = None;
+        for c in id.chars().chain(['\n']) {
+            ev = ev.or(s.step(&typed(c)));
+        }
+        assert_eq!(ev, Some(want));
+    }
+    // not an ID: stays, with a note
+    let mut s = IdSearchScene::new(&ui).unwrap();
+    for c in "ABC-DEF-GHJ\n".chars() {
+        assert_eq!(s.step(&typed(c)), None);
+    }
+    assert!(s.typing());
+}
+
+#[test]
+fn tgrcode_listings_bring_names_and_tags() {
+    let c = WorldCourse::server(&json!({
+        "code": "AAA-AAA-AAA", "name": "N", "record_holder": "Q8V-RKX-8MG",
+        "record_holder_name": "Bo", "first_clear": "Q8V-RKX-8MG", "first_clear_name": "Bo",
+        "tags": [5, 5], "source": "tgrcode",
+    }))
+    .unwrap();
+    assert_eq!(c.record_holder_name.as_deref(), Some("Bo"));
+    assert_eq!(c.tags, [5], "the same tag twice is one tag");
+}

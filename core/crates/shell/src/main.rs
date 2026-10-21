@@ -102,6 +102,12 @@ mod native {
         /// Course server (open-source mmk-server) for --code and the maker's Ctrl+U upload.
         #[arg(long)]
         server: Option<String>,
+        /// Front end: where Course World's courses come from: tgrcode (tgrcode.com/mm2, the
+        /// default), server (--server's), library (default $MMK_COURSE_WORLD, else the data
+        /// folder's `course_world` value; with --server and none of those, the server).
+        /// TGRCode's answers are cached in the data folder's `TGRCode/` ($MMK_TGRCODE_CACHE).
+        #[arg(long, value_name = "SOURCE")]
+        course_world: Option<String>,
         /// Download this course code from --server and play it.
         #[arg(long)]
         code: Option<String>,
@@ -203,7 +209,9 @@ mod native {
         #[arg(long)]
         data_dir: Option<PathBuf>,
         /// Headless front end capture (with --screenshot, --ticks): boot, title, title-main,
-        /// title-play, courseworld, courseworld-list, storymode, with --server (and
+        /// title-play, courseworld, courseworld-list (-popular, -new: the other tabs; the list
+        /// and its thumbnails are waited for), courseworld-search (the ID search),
+        /// courseworld-id:<course or maker ID> (its answer), storymode, with --server (and
         /// MMK_FRONT_REALTIME=1): account, courseworld-leaderboards, courseworld-course-page,
         /// courseworld-comments, courseworld-post, courseworld-maker, courseworld-play,
         /// courseworld-pause, courseworld-clear; challenge, challenge-map,
@@ -463,6 +471,23 @@ mod native {
             let (name, value) = m.split_once('=').unwrap_or((m.as_str(), "1"));
             data.store_value(&format!("mods.{}", name.trim()), value.trim());
         }
+        let setting = args
+            .course_world
+            .clone()
+            .or_else(|| std::env::var("MMK_COURSE_WORLD").ok())
+            .or_else(|| {
+                let d = data.data_dir.as_ref()?;
+                std::fs::read_to_string(d.join("course_world.json")).ok()
+            })
+            .map(|s| s.trim().trim_matches('"').to_string());
+        let cache = std::env::var_os("MMK_TGRCODE_CACHE")
+            .map(PathBuf::from)
+            .or_else(|| data.data_dir.as_ref().map(|d| d.join("TGRCode/cache")));
+        data.backend = mmk_online::world::Backend::from_setting(
+            setting.as_deref(),
+            data.server.as_deref(),
+            cache,
+        );
         let opts = Options {
             boot: !args.no_opening && capture.is_none(),
             opening: args.opening.clone(),
@@ -489,10 +514,10 @@ mod native {
         };
         let mut app = FrontApp::new(front, data);
         log(&format!(
-            "front end: {} (library {:?}, server {})",
+            "front end: {} (library {:?}, Course World {:?})",
             ui_dir.display(),
             app.data.library_dirs,
-            app.data.server.as_deref().unwrap_or("none")
+            app.data.backend
         ));
         if let Some(screen) = capture {
             let out = args

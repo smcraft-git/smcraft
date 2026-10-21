@@ -42,7 +42,9 @@ use crate::leaderboard::{BoardEvent, LeaderboardScene};
 use crate::menu::{Buttons, Loading, MenuCursor, Script, UiInput, hit, nearest, set_loading};
 use crate::play::{CoursePlay, PlayEvent, PlayInput};
 use crate::screens::{CardInfo, CourseScreens};
+use crate::search::{IdSearchScene, SearchEvent};
 use crate::sound::Event;
+use crate::thumbs::{Thumb, Thumbs};
 use crate::{Cx, DrawItem, Go, civil, push_layout};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -51,11 +53,12 @@ pub enum HubChoice {
     Leaderboards,
     Endless,
     Account,
+    IdSearch,
     Unavailable,
 }
 
 /// The buttons (parts of `N_Btn_00`, then the player card) and what they open.
-pub const HUB_BUTTONS: [(&str, HubChoice); 7] = [
+pub const HUB_BUTTONS: [(&str, HubChoice); 8] = [
     ("L_Course_00", HubChoice::Courses),
     ("L_Maker_00", HubChoice::Leaderboards),
     ("L_MultiPlay_00", HubChoice::Unavailable),
@@ -63,6 +66,7 @@ pub const HUB_BUTTONS: [(&str, HubChoice); 7] = [
     ("L_EventCourseBtn_00", HubChoice::Unavailable),
     ("L_MyWBtn_00", HubChoice::Unavailable),
     ("L_PlayerBody_00", HubChoice::Account),
+    ("L_IDSearchBtn_00", HubChoice::IdSearch),
 ];
 
 const HUB: &str = "Nwk_Title_00";
@@ -103,8 +107,7 @@ impl HubScene {
         l.play_loop("L_MyWBtn_00/SelectLoop", 0);
         // no event running: the Ninji button without its period line [inf]
         l.hold("L_EventCourseBtn_00/TypePeriod", 1.0);
-        // the ID search: no keyboard search here; the player card without a Mii [departure]
-        l.show("L_IDSearchBtn_00", false);
+        // the player card without a Mii [departure]
         l.show("L_PlayerBody_00/N_MiiScissor_00", false);
         for (b, _) in HUB_BUTTONS {
             l.hold(&format!("{b}/Select"), 0.0);
@@ -236,6 +239,19 @@ pub enum Tab {
     New,
 }
 
+impl Tab {
+    pub const ALL: [Tab; 3] = [Tab::Hot, Tab::Popular, Tab::New];
+
+    /// The host's name of the tab's list (`Host::request_world_list`).
+    pub fn name(self) -> &'static str {
+        match self {
+            Tab::Hot => "hot",
+            Tab::Popular => "popular",
+            Tab::New => "new",
+        }
+    }
+}
+
 const TABS: [&str; 3] = [
     "L_PickUpBtn_00",
     "L_CoursePointRankBtn_00",
@@ -248,8 +264,13 @@ pub const LIST_LAYOUT: &str = "Nwk_CourseListGeneral_00";
 /// above and below the list's scissor (`N_Scissor_00`, 580 high) [inf from the layout]; the
 /// player doesn't clip, so those two stay hidden.
 const VISIBLE: i64 = 3;
-/// An open row's buttons: Play, then (server courses) View comments and More info.
-pub const OPEN_BUTTONS: [&str; 3] = ["L_PlayBtn_00", "L_CommentBtn_00", "L_DetailBtn_00"];
+/// An open row's buttons: Play, then (server courses) View comments, More info and Download.
+pub const OPEN_BUTTONS: [&str; 4] = [
+    "L_PlayBtn_00",
+    "L_CommentBtn_00",
+    "L_DetailBtn_00",
+    "L_DownloadPlayBtn_00",
+];
 
 /// Which screen a course list is drawn on.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -267,6 +288,8 @@ pub enum ListEvent {
     Detail(Box<WorldCourse>),
     /// "View comments".
     Comments(Box<WorldCourse>),
+    /// "Download": keep the course in the library.
+    Download(Box<WorldCourse>),
     Back,
 }
 
@@ -292,6 +315,15 @@ pub struct CourseListScene {
     name: &'static str,
     /// A maker's profile: the server call bringing their courses.
     pub source_call: Option<u32>,
+    /// A course found by its ID (the window's call is `info`).
+    pub found_by_id: bool,
+    /// The tabs are lists of their own (TGRCode's), kept here once they arrived.
+    pub by_tab: bool,
+    tab_lists: [Option<Vec<WorldCourse>>; 3],
+    /// A tab shown whose list hasn't been asked for yet (the flow asks the host).
+    pub want_tab: Option<Tab>,
+    /// Course thumbnails: code → texture stem (in `thumbs::GROUP`), None: none to be had.
+    thumbs: std::collections::HashMap<String, Option<String>>,
 }
 
 impl CourseListScene {
@@ -378,6 +410,11 @@ impl CourseListScene {
             variant,
             name,
             source_call: None,
+            found_by_id: false,
+            by_tab: false,
+            tab_lists: [None, None, None],
+            want_tab: None,
+            thumbs: std::collections::HashMap::new(),
         };
         if variant == ListVariant::General {
             s.select_tab(Tab::Hot);
@@ -393,6 +430,49 @@ impl CourseListScene {
         self.all = list;
         self.set_loading(loading);
         self.apply_tab(true);
+    }
+
+    /// The profile window's name line (the maker's name once it is known).
+    pub fn set_title(&mut self, name: &str) {
+        self.layout.text("T_PlayerName_00", name);
+    }
+
+    /// The tabs are lists of their own: the current tab's is asked for.
+    pub fn use_tab_lists(&mut self) {
+        self.by_tab = true;
+        self.want_tab = Some(self.tab);
+        self.all.clear();
+        self.apply_tab(false);
+        self.set_loading(true);
+    }
+
+    /// A tab's list arrived.
+    pub fn set_tab_courses(&mut self, tab: Tab, list: Vec<WorldCourse>) {
+        self.tab_lists[tab as usize] = Some(list);
+        if tab == self.tab {
+            self.all = self.tab_lists[tab as usize].clone().unwrap_or_default();
+            self.set_loading(false);
+            self.apply_tab(false);
+        }
+    }
+
+    /// The codes of the server courses on screen and just around (for their thumbnails).
+    pub fn thumbnail_codes(&self) -> Vec<String> {
+        let lo = (self.first - 1).max(0) as usize;
+        let hi = ((self.first + VISIBLE + 1).max(0) as usize).min(self.courses.len());
+        self.courses
+            .get(lo..hi)
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|c| c.server_code().map(str::to_string))
+            .filter(|c| !self.thumbs.contains_key(c))
+            .collect()
+    }
+
+    /// A thumbnail is ready (Some stem) or there is none.
+    pub fn set_thumbnail(&mut self, code: &str, stem: Option<String>) {
+        self.thumbs.insert(code.to_string(), stem);
+        self.fill();
     }
 
     /// The loading icon while waiting with nothing to show; the screen's "no courses" message
@@ -417,6 +497,8 @@ impl CourseListScene {
             .then(|| self.courses[self.selection as usize].id.clone());
         let mut c = self.all.clone();
         match self.tab {
+            // the source's own order
+            _ if self.by_tab => {}
             // the library first, then the server's courses, each newest first [inf]
             Tab::Hot => c.sort_by(|a, b| {
                 a.is_server()
@@ -458,6 +540,19 @@ impl CourseListScene {
 
     fn select_tab(&mut self, t: Tab) {
         self.tab = t;
+        if self.by_tab {
+            match self.tab_lists[t as usize].clone() {
+                Some(list) => {
+                    self.all = list;
+                    self.set_loading(false);
+                }
+                None => {
+                    self.all.clear();
+                    self.want_tab = Some(t);
+                    self.set_loading(true);
+                }
+            }
+        }
         for (k, p) in TABS.iter().enumerate() {
             // the current tab keeps its Decide look (dark), the others their plain one [inf]
             let a = format!("{p}/Decide");
@@ -484,7 +579,7 @@ impl CourseListScene {
             .courses
             .get(i as usize)
             .is_some_and(WorldCourse::is_server);
-        if server { vec![0, 1, 2] } else { vec![0] }
+        if server { vec![0, 1, 2, 3] } else { vec![0] }
     }
 
     /// Put the courses of the window into the three visible slots (an open row takes the space
@@ -529,8 +624,29 @@ impl CourseListScene {
             ) {
                 l.show(&format!("{row}/L_GameSkin_00"), false);
             }
+            // the course's picture when the source has one (a loading icon on its way)
+            let thumb = c.server_code().map(|code| self.thumbs.get(code));
+            let t = format!("{row}/L_Thumbnail_00");
+            match thumb {
+                Some(Some(Some(stem))) => {
+                    l.visible(&t, None);
+                    l.visible(&format!("{t}/P_DummyThumbnail_00"), None);
+                    l.picture(
+                        &format!("{t}/P_DummyThumbnail_00"),
+                        crate::thumbs::GROUP,
+                        Some(stem),
+                    );
+                    l.show(&format!("{t}/L_LoadingIcon_00"), false);
+                }
+                Some(None) => {
+                    l.visible(&t, None);
+                    l.show(&format!("{t}/P_DummyThumbnail_00"), false);
+                    l.visible(&format!("{t}/L_LoadingIcon_00"), None);
+                    l.play_loop(&format!("{t}/L_LoadingIcon_00/Wait"), 0);
+                }
+                _ => l.show(&t, false),
+            }
             for p in [
-                "L_Thumbnail_00",
                 "L_GoodCheck_00",
                 "L_MyWIcon_00",
                 "L_MiiBtn_00",
@@ -542,14 +658,13 @@ impl CourseListScene {
                 "L_DpointBtn_00",
                 "L_CoopModeBtn_00",
                 "L_Rank_00",
-                "L_DownloadPlayBtn_00",
                 "L_CommentBtn_00/L_Count_00",
             ] {
                 l.show(&format!("{row}/{p}"), false);
             }
-            // server courses: "View comments" and "More info" on the open row
+            // server courses: "View comments", "More info" and "Download" on the open row
             let server = c.is_server();
-            for p in ["L_CommentBtn_00", "L_DetailBtn_00"] {
+            for p in ["L_CommentBtn_00", "L_DetailBtn_00", "L_DownloadPlayBtn_00"] {
                 l.visible(
                     &format!("{row}/{p}"),
                     if server { None } else { Some(false) },
@@ -564,6 +679,7 @@ impl CourseListScene {
                 "L_PlayBtn_00-T_Btn_00",
                 "L_CommentBtn_00-T_Btn_00",
                 "L_DetailBtn_00-T_Btn_00",
+                "L_DownloadPlayBtn_00-T_Btn_00",
             ] {
                 if let Some(s) = l.message(&format!("L_CourseList_00-L_CourseData_00-{p}")) {
                     l.text(&format!("{row}/{}", p.replace('-', "/")), &s);
@@ -606,8 +722,9 @@ impl CourseListScene {
             }
             let c = c.clone();
             Self::fill_detail(l, &row, &c);
-            // Play downloads a server course first (no separate Download button) [departure]
-            l.hold(&format!("{row}/TypeBtn"), 0.0);
+            // Play downloads a server course first; Download keeps it in the library (TypeBtn
+            // 3: the Download button, no Report / Delete) [inf from the layout]
+            l.hold(&format!("{row}/TypeBtn"), if server { 3.0 } else { 0.0 });
             let toggle = format!("{row}/Toggle");
             if i == self.selection && self.open {
                 l.hold_end(&toggle);
@@ -740,7 +857,7 @@ impl CourseListScene {
         if self.variant == ListVariant::General {
             let tabs: Vec<String> = TABS.iter().map(|t| format!("{t}/B_Btn_00")).collect();
             if let Some(k) = hit(&mut self.layout, tick, &tabs, p) {
-                let t = [Tab::Hot, Tab::Popular, Tab::New][k];
+                let t = Tab::ALL[k];
                 if t != self.tab {
                     self.ui.sound_button(self.name, TABS[k], Event::Decide);
                     self.layout.play(&format!("{}/Decide", TABS[k]), tick);
@@ -807,6 +924,7 @@ impl CourseListScene {
                 let e = match self.button {
                     1 => ListEvent::Comments(c),
                     2 => ListEvent::Detail(c),
+                    3 => ListEvent::Download(c),
                     _ => ListEvent::Play(c),
                 };
                 self.pending = Some((e, tick + wait));
@@ -986,6 +1104,7 @@ enum Stage {
     Page(Box<CoursePageScene>),
     Comments(Box<CommentsScene>),
     Post(Box<PostScene>),
+    Search(Box<IdSearchScene>),
 }
 
 impl Stage {
@@ -993,7 +1112,11 @@ impl Stage {
     fn overlay(&self) -> bool {
         matches!(
             self,
-            Stage::Account(_) | Stage::Page(_) | Stage::Comments(_) | Stage::Post(_)
+            Stage::Account(_)
+                | Stage::Page(_)
+                | Stage::Comments(_)
+                | Stage::Post(_)
+                | Stage::Search(_)
         ) || matches!(self, Stage::List(s) if s.variant == ListVariant::Maker)
     }
 
@@ -1019,6 +1142,7 @@ impl Stage {
             Stage::Page(p) => p.draw(out),
             Stage::Comments(c) => c.draw(out),
             Stage::Post(p) => p.draw(out),
+            Stage::Search(s) => s.draw(out),
         }
     }
 }
@@ -1138,6 +1262,11 @@ pub struct WorldFlow {
     sending: ClearSender,
     /// The dim drawn under the windows.
     veil: Option<Option<Layout>>,
+    /// The tab whose list the host is fetching (lists by tab).
+    waiting_tab: Tab,
+    thumbs: Thumbs,
+    /// `download` calls on their way: (call, course name).
+    downloads: Vec<(u32, String)>,
     /// Captures: menu presses at global UI ticks.
     pub script: Script,
 }
@@ -1164,6 +1293,9 @@ impl WorldFlow {
             leaving: false,
             sending: ClearSender::default(),
             veil: None,
+            waiting_tab: Tab::Hot,
+            thumbs: Thumbs::default(),
+            downloads: Vec::new(),
             script: Script::default(),
         };
         if kind != ListKind::World {
@@ -1215,8 +1347,15 @@ impl WorldFlow {
                 c
             })
             .collect();
-        self.waiting_server = kind == ListKind::World && cx.host.request_server_courses();
-        s.set_courses(self.local.clone(), self.waiting_server);
+        if kind == ListKind::World && cx.host.world_lists_by_tab() {
+            // Course World is the source's lists, one per tab (the library is Coursebot's)
+            self.local.clear();
+            self.waiting_server = false;
+            s.use_tab_lists();
+        } else {
+            self.waiting_server = kind == ListKind::World && cx.host.request_server_courses();
+            s.set_courses(self.local.clone(), self.waiting_server);
+        }
         // the list replaces whatever was over the hub
         self.under
             .retain(|st| matches!(st, Stage::Hub(_)) && kind == ListKind::World);
@@ -1236,6 +1375,74 @@ impl WorldFlow {
             s.set_courses(Vec::new(), false);
         }
         self.push(Stage::List(Box::new(s)));
+    }
+
+    /// A course found by its ID: the profile window with that one course [departure: the game
+    /// opens the course's own window].
+    fn show_found(&mut self, cx: &mut Cx, code: &str) {
+        let Some(mut s) = CourseListScene::maker(&self.ui, code) else {
+            return;
+        };
+        s.found_by_id = true;
+        // one course, not the maker's uploads: no list tab
+        s.layout.show("L_OwnedCourseBtn_00", false);
+        s.source_call = cx.online.call(cx.host, "info", json!({ "code": code }));
+        if s.source_call.is_none() {
+            s.set_courses(Vec::new(), false);
+        }
+        self.push(Stage::List(Box::new(s)));
+    }
+
+    /// Thumbnails of the list on screen: ask for the rows', hand over the ones that arrived.
+    fn step_thumbnails(&mut self, cx: &mut Cx) {
+        if let Stage::Page(p) = &mut self.stage {
+            if let Some(code) = p.server_code().map(str::to_string) {
+                let keys = [(code.clone(), false), (code.clone(), true)];
+                let open: Vec<_> = keys
+                    .into_iter()
+                    .filter(|k| !matches!(self.thumbs.get(&k.0, k.1), Some(Thumb::Missing)))
+                    .collect();
+                self.thumbs.want(open);
+                self.thumbs.step(cx, &self.ui);
+                for entire in [false, true] {
+                    match self.thumbs.get(&code, entire) {
+                        Some(Thumb::Ready(stem)) => p.set_thumbnail(entire, Some(stem)),
+                        Some(Thumb::Missing) => p.set_thumbnail(entire, None),
+                        _ => {}
+                    }
+                }
+            } else {
+                self.thumbs.step(cx, &self.ui);
+            }
+            return;
+        }
+        let Stage::List(s) = &mut self.stage else {
+            self.thumbs.step(cx, &self.ui);
+            return;
+        };
+        let codes = s.thumbnail_codes();
+        self.thumbs.want(codes.iter().map(|c| (c.clone(), false)));
+        self.thumbs.step(cx, &self.ui);
+        for c in codes {
+            match self.thumbs.get(&c, false) {
+                Some(Thumb::Ready(stem)) => s.set_thumbnail(&c, Some(stem.clone())),
+                Some(Thumb::Missing) => s.set_thumbnail(&c, None),
+                _ => {}
+            }
+        }
+    }
+
+    /// Answers to the downloads.
+    fn collect_downloads(&mut self, cx: &mut Cx) {
+        for (id, name) in std::mem::take(&mut self.downloads) {
+            match cx.online.take(id) {
+                None => self.downloads.push((id, name)),
+                Some(Ok(_)) => cx.toast(&format!(
+                    "Downloaded \u{201c}{name}\u{201d} to your courses."
+                )),
+                Some(Err(e)) => cx.toast(&format!("Couldn't download {name}: {e}")),
+            }
+        }
     }
 
     pub fn go(&mut self, cx: &mut Cx, g: WorldGo) {
@@ -1314,12 +1521,15 @@ impl WorldFlow {
         match &self.stage {
             Stage::Account(a) => a.typing(),
             Stage::Post(p) => p.typing(),
+            Stage::Search(s) => s.typing(),
             _ => false,
         }
     }
 
     pub fn step(&mut self, input: &PlayInput, cx: &mut Cx) -> Option<WorldEvent> {
         self.sending.collect(cx);
+        self.collect_downloads(cx);
+        self.step_thumbnails(cx);
         if self.stage.overlay()
             && let Some(u) = self.under.last_mut()
         {
@@ -1351,6 +1561,15 @@ impl WorldFlow {
                                 self.push(Stage::Account(Box::new(a)));
                             }
                         }
+                        HubChoice::IdSearch => {
+                            if cx.host.course_world() == "library" {
+                                cx.toast(
+                                    "Course World is set to your library: pick TGRCode or a course server in Settings.",
+                                );
+                            } else if let Some(s) = IdSearchScene::new(&self.ui) {
+                                self.push(Stage::Search(Box::new(s)));
+                            }
+                        }
                         HubChoice::Unavailable => {
                             cx.toast("This needs Nintendo's network, which this engine never uses.")
                         }
@@ -1363,23 +1582,27 @@ impl WorldFlow {
                     && let Some(found) = cx.host.poll_server_courses()
                 {
                     self.waiting_server = false;
-                    let mut all = self.local.clone();
-                    all.extend(found);
-                    s.set_courses(all, false);
+                    if s.by_tab {
+                        s.set_tab_courses(self.waiting_tab, dated(found, cx));
+                    } else {
+                        let mut all = self.local.clone();
+                        all.extend(found);
+                        s.set_courses(all, false);
+                    }
                 }
-                if let Some(id) = s.source_call
-                    && let Some(a) = cx.online.take(id)
+                // lists by tab: the shown tab's, one request at a time
+                if s.by_tab
+                    && !self.waiting_server
+                    && let Some(t) = s.want_tab.take()
                 {
-                    s.source_call = None;
-                    let list = match a {
-                        Ok(v) => maker_courses(&v, cx),
-                        Err(e) => {
-                            cx.toast(&format!("The server couldn't be reached: {e}"));
-                            Vec::new()
-                        }
-                    };
-                    s.set_courses(list, false);
+                    if cx.host.request_world_list(t.name()) {
+                        self.waiting_server = true;
+                        self.waiting_tab = t;
+                    } else {
+                        s.set_tab_courses(t, Vec::new());
+                    }
                 }
+                take_source(s, cx);
                 let variant = s.variant;
                 match s.step(&input.ui, &mut self.script)? {
                     ListEvent::Back => {
@@ -1413,8 +1636,33 @@ impl WorldFlow {
                             None => s.resume(),
                         }
                     }
+                    ListEvent::Download(c) => {
+                        s.resume();
+                        let code = c.server_code().unwrap_or_default().to_string();
+                        let args = json!({ "code": code, "name": c.name });
+                        match cx.online.call(cx.host, "download", args) {
+                            Some(id) => {
+                                cx.toast(&format!("Downloading {}…", c.name));
+                                self.downloads.push((id, c.name.clone()));
+                            }
+                            None => cx.toast("No Course World source is set."),
+                        }
+                    }
                 }
             }
+            Stage::Search(v) => match v.step(ui)? {
+                SearchEvent::Cancel => {
+                    self.pop();
+                }
+                SearchEvent::Maker(id) => {
+                    self.pop();
+                    self.show_maker(cx, &id, &id);
+                }
+                SearchEvent::Course(code) => {
+                    self.pop();
+                    self.show_found(cx, &code);
+                }
+            },
             Stage::Account(a) => match a.step(ui, cx)? {
                 AccountEvent::Back => {
                     self.pop();
@@ -1518,7 +1766,7 @@ impl WorldFlow {
     }
 
     /// Captures: the stage shown ("hub", "list", "maker", "playing", "account", "leaderboards",
-    /// "page", "comments", "post").
+    /// "page", "comments", "post", "search").
     pub fn stage_name(&self) -> &'static str {
         match &self.stage {
             Stage::Hub(_) => "hub",
@@ -1530,10 +1778,12 @@ impl WorldFlow {
             Stage::Page(_) => "page",
             Stage::Comments(_) => "comments",
             Stage::Post(_) => "post",
+            Stage::Search(_) => "search",
         }
     }
 
-    /// Captures and tests: open a screen directly ("account", "leaderboards", the course page /
+    /// Captures and tests: open a screen directly ("account", "leaderboards", "search", "id:<a
+    /// course or maker ID>" the ID search's answer, the course page /
     /// comments / comment form of the list's first server course, "maker" of its uploader,
     /// "play" it, its "pause" menu or its "clear" screen).
     pub fn debug_open(&mut self, cx: &mut Cx, what: &str) -> bool {
@@ -1548,6 +1798,15 @@ impl WorldFlow {
                 }
             }
             "leaderboards" => self.go(cx, WorldGo::Leaderboards),
+            "search" => match IdSearchScene::new(&self.ui) {
+                Some(s) => self.push(Stage::Search(Box::new(s))),
+                None => return false,
+            },
+            id if id.starts_with("id:") => match crate::search::parse_id(&id[3..]) {
+                Some((id, true)) => self.show_maker(cx, &id, &id),
+                Some((code, false)) => self.show_found(cx, &code),
+                None => return false,
+            },
             "clear" | "play" | "pause" => {
                 let Some(c) = self.first_server_course() else {
                     return false;
@@ -1611,6 +1870,14 @@ impl WorldFlow {
 
     /// Captures: wait for the server's course list (at most `ticks` polls of 10 ms).
     pub fn wait_server(&mut self, cx: &mut Cx, ticks: u32) {
+        if let Stage::List(s) = &mut self.stage
+            && s.by_tab
+            && !self.waiting_server
+            && let Some(t) = s.want_tab.take()
+        {
+            self.waiting_server = cx.host.request_world_list(t.name());
+            self.waiting_tab = t;
+        }
         for _ in 0..ticks {
             if !self.waiting_server {
                 return;
@@ -1619,14 +1886,96 @@ impl WorldFlow {
                 && let Some(found) = cx.host.poll_server_courses()
             {
                 self.waiting_server = false;
-                let mut all = self.local.clone();
-                all.extend(found);
-                s.set_courses(all, false);
+                if s.by_tab {
+                    s.set_tab_courses(self.waiting_tab, dated(found, cx));
+                } else {
+                    let mut all = self.local.clone();
+                    all.extend(found);
+                    s.set_courses(all, false);
+                }
                 return;
             }
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
     }
+
+    /// Captures: show tab `t` of the course list.
+    pub fn debug_tab(&mut self, t: Tab) {
+        if let Stage::List(s) = &mut self.stage
+            && s.tab != t
+        {
+            s.select_tab(t);
+            s.apply_tab(false);
+        }
+    }
+
+    /// Captures: wait for the open list window's answer and the thumbnails of the rows on
+    /// screen (at most `ticks` polls of 10 ms).
+    pub fn wait_details(&mut self, cx: &mut Cx, ticks: u32) {
+        for _ in 0..ticks {
+            cx.online.poll(cx.host);
+            if let Stage::List(s) = &mut self.stage {
+                take_source(s, cx);
+            }
+            self.step_thumbnails(cx);
+            let busy = match &self.stage {
+                Stage::List(s) => s.source_call.is_some() || !s.thumbnail_codes().is_empty(),
+                Stage::Page(p) => p.server_code().is_some_and(|c| {
+                    [false, true]
+                        .iter()
+                        .any(|&e| matches!(self.thumbs.get(c, e), Some(Thumb::Waiting) | None))
+                }),
+                _ => false,
+            };
+            if !busy {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+    }
+}
+
+/// A list window's call answered (a maker's courses, a course found by its ID).
+fn take_source(s: &mut CourseListScene, cx: &mut Cx) {
+    if let Some(id) = s.source_call
+        && let Some(a) = cx.online.take(id)
+    {
+        s.source_call = None;
+        let list = match a {
+            Ok(v) if s.found_by_id => {
+                let found: Vec<WorldCourse> = WorldCourse::server(&v).into_iter().collect();
+                if let Some(m) = found.first().and_then(|c| c.maker.clone()) {
+                    s.set_title(&m);
+                }
+                dated(found, cx)
+            }
+            Ok(v) => {
+                if let Some(n) = v["maker"]["name"].as_str() {
+                    s.set_title(n);
+                }
+                maker_courses(&v, cx)
+            }
+            Err(e) => {
+                cx.toast(&if s.found_by_id {
+                    e
+                } else {
+                    format!("The server couldn't be reached: {e}")
+                });
+                Vec::new()
+            }
+        };
+        s.set_courses(list, false);
+    }
+}
+
+/// Listings with their local date offsets.
+fn dated(list: Vec<WorldCourse>, cx: &mut Cx) -> Vec<WorldCourse> {
+    list.into_iter()
+        .map(|mut c| {
+            c.date_offset = c.date.map_or(0, |d| cx.host.local_offset(d));
+            c
+        })
+        .collect()
 }
 
 /// A `maker` answer's courses as list entries (cleared marks from the save data when known).

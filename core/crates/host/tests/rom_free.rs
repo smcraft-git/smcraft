@@ -44,6 +44,15 @@ const KEYS: &[&str] = &[
 /// The dump readers and starting an import: only in the setup screens.
 const IMPORT: &[&str] = &["mmk_import::", "nsp::", "DumpVfs", "prod.keys", ".nsp"];
 
+/// `line` mentions `token`: a token that starts with a name character must start a name there
+/// (`Keys::` is the importer's key file, `CourseKeys::` the course key table from the pack).
+fn mentions(line: &str, token: &str) -> bool {
+    let name = |c: char| c.is_ascii_alphanumeric() || c == '_';
+    let starts_name = token.chars().next().is_some_and(name);
+    line.match_indices(token)
+        .any(|(i, _)| !starts_name || !line[..i].chars().next_back().is_some_and(name))
+}
+
 fn sources(dir: &Path, out: &mut Vec<PathBuf>) {
     let Ok(rd) = std::fs::read_dir(dir) else {
         return;
@@ -108,7 +117,7 @@ fn runtime_never_opens_the_dump_or_keys() {
             let forbidden = KEYS
                 .iter()
                 .chain(if setup { &[][..] } else { IMPORT })
-                .find(|t| lower.contains(&t.to_ascii_lowercase()));
+                .find(|t| mentions(&lower, &t.to_ascii_lowercase()));
             if let Some(t) = forbidden {
                 hits.push(format!("{rel}:{}: {t}", n + 1));
             }

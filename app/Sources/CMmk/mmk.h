@@ -374,6 +374,9 @@ void mmk_front_free(MmkFront *front);
 // attempts, uploaded, tags}}]
 void mmk_front_set_library(MmkFront *front, const char *json);
 void mmk_front_set_server(MmkFront *front, const char *server);
+// Course World's source: "tgrcode" (default), "server" (mmk_front_set_server's), "library";
+// dir: TGRCode's folder in the app's data (cache/, the 100 Mario / Endless pool/), or NULL
+void mmk_front_set_course_world(MmkFront *front, const char *source, const char *dir);
 void mmk_front_tick(MmkFront *front, const MmkFrontInput *input);
 // valid until the next mmk_front_frame
 size_t mmk_front_frame(MmkFront *front, const MmkFrontItem **out);

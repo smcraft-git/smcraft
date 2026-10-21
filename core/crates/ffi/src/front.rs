@@ -20,6 +20,7 @@ use mmk_front::{
     Buttons, CourseEntry, CourseStatus, DrawItem, Front, FrontInput, Host, Options, Source, Ui,
     UiKind, WorldCourse,
 };
+use mmk_online::world::Backend;
 use mmk_sim::player::{Control, DOWN_FALL_FRAMES};
 use mmk_sim::world::Event;
 use mmk_sim::{Input, World};
@@ -174,6 +175,14 @@ struct FfiHost {
     library: Vec<CourseEntry>,
     server: Option<String>,
     downloads: Option<PathBuf>,
+    /// Course World's source setting (`mmk_front_set_course_world`) and TGRCode's folder.
+    course_world: Option<String>,
+    tgr_dir: Option<PathBuf>,
+    backend: Backend,
+    thumbs_tx: Sender<(String, bool, Vec<u8>)>,
+    thumbs_rx: Receiver<(String, bool, Vec<u8>)>,
+    /// The runs' pool entries made so far, by file.
+    pool_entries: std::collections::HashMap<PathBuf, Option<CourseEntry>>,
     /// Engine buttons this tick.
     input: u32,
     title: Option<Vec<PathBuf>>,
@@ -274,6 +283,47 @@ impl FfiHost {
         self.title.as_deref().unwrap_or(&[])
     }
 
+    /// Course World's source again from the settings.
+    fn rebuild_backend(&mut self) {
+        self.backend = Backend::from_setting(
+            self.course_world.as_deref(),
+            self.server.as_deref(),
+            self.tgr_dir.as_ref().map(|d| d.join("cache")),
+        );
+    }
+
+    /// The course key table's bytes (TGRCode's downloads decrypt with it).
+    fn key_table(&self) -> Result<Vec<u8>, String> {
+        let path = self.assets().cache.root.join(mmk_host::course::KEY_TABLE);
+        std::fs::read(&path)
+            .map_err(|e| mmk_host::course::no_key_table(format!("{}: {e}", path.display())))
+    }
+
+    /// The library entry of a course file (None: not a course the engine reads).
+    fn entry_of(&self, path: &Path, meta: CourseMeta) -> Option<CourseEntry> {
+        let bytes = std::fs::read(path).ok()?;
+        let (data, _) = crate::decode_course_data(&bytes, Some(self.assets())).ok()?;
+        let c = mmk_formats::smm2::Course::parse(&data).ok()?;
+        let own = c.header.name.to_string_lossy();
+        Some(CourseEntry {
+            id: path.to_string_lossy().into_owned(),
+            name: if own.is_empty() {
+                path.file_stem()?.to_string_lossy().into_owned()
+            } else {
+                own
+            },
+            description: c.header.description.to_string_lossy(),
+            style: c.header.game_style.as_str_lossy(),
+            theme: c.main.header.theme,
+            playable: playable(&c),
+            built_in: false,
+            collection: None,
+            key: format!("{:016x}", crate::course_info::fnv1a64(&data)),
+            modified: None,
+            meta,
+        })
+    }
+
     fn spawn_online(&self, id: u32, f: impl FnOnce() -> Result<Value, String> + Send + 'static) {
         let tx = self.online_tx.clone();
         std::thread::spawn(move || {
@@ -317,22 +367,93 @@ impl Host for FfiHost {
     }
 
     fn request_server_courses(&mut self) -> bool {
-        let Some(server) = self.server.clone() else {
+        self.request_world_list("popular")
+    }
+
+    fn course_world(&self) -> &str {
+        self.backend.name()
+    }
+
+    fn world_lists_by_tab(&self) -> bool {
+        self.backend.lists_by_tab()
+    }
+
+    fn request_world_list(&mut self, tab: &str) -> bool {
+        if !self.backend.online() {
             return false;
-        };
+        }
+        let backend = self.backend.clone();
+        let tab = tab.to_string();
         let (tx, rx) = channel();
         std::thread::spawn(move || {
-            let found = mmk_online::Client::new(server)
-                .search("", None, "popular", 0, 100)
+            let list = backend
+                .list(&tab)
+                .map(|l| l.iter().filter_map(WorldCourse::server).collect())
                 .unwrap_or_default();
-            let list = found
-                .iter()
-                .filter_map(|l| WorldCourse::server(&mmk_online::listing_json(l)))
-                .collect();
             let _ = tx.send(list);
         });
         self.servers = Some(rx);
         true
+    }
+
+    fn request_thumbnail(&mut self, code: &str, entire: bool) -> bool {
+        if !self.backend.online() {
+            return false;
+        }
+        let (backend, tx, code) = (
+            self.backend.clone(),
+            self.thumbs_tx.clone(),
+            code.to_string(),
+        );
+        std::thread::spawn(move || {
+            let jpeg = backend.thumbnail(&code, entire).unwrap_or_default();
+            let _ = tx.send((code, entire, jpeg));
+        });
+        true
+    }
+
+    fn poll_thumbnail(&mut self) -> Option<(String, bool, Vec<u8>)> {
+        self.thumbs_rx.try_recv().ok()
+    }
+
+    fn challenge_courses(&mut self) -> Vec<CourseEntry> {
+        let (Backend::TgrCode(tgr), Some(dir)) = (&self.backend, &self.tgr_dir) else {
+            return Vec::new();
+        };
+        let (tgr, dir) = (tgr.clone(), dir.join("pool"));
+        let Some(table) = self
+            .key_table()
+            .ok()
+            .and_then(|b| mmk_formats::smm2::crypto::table_from_bytes(&b).ok())
+        else {
+            return Vec::new();
+        };
+        let Some(pool) = mmk_embed::pool::Pool::get(&dir, &tgr, table) else {
+            return Vec::new();
+        };
+        let mut out = Vec::new();
+        for c in pool.courses() {
+            if !self.pool_entries.contains_key(&c.path) {
+                let m = &c.meta;
+                let meta = CourseMeta {
+                    clear_rate: (m.attempts > 0)
+                        .then(|| m.clears as f64 * 100.0 / m.attempts as f64),
+                    maker: Some(m.maker.clone()).filter(|s| !s.is_empty()),
+                    code: Some(m.code.clone()),
+                    plays: Some(m.plays as i64),
+                    likes: Some(m.likes as i64),
+                    clears: Some(m.clears as i64),
+                    attempts: Some(m.attempts as i64),
+                    ..CourseMeta::default()
+                };
+                let e = self.entry_of(&c.path, meta);
+                self.pool_entries.insert(c.path.clone(), e);
+            }
+            if let Some(Some(e)) = self.pool_entries.get(&c.path) {
+                out.push(e.clone());
+            }
+        }
+        out
     }
 
     fn poll_server_courses(&mut self) -> Option<Vec<WorldCourse>> {
@@ -347,8 +468,15 @@ impl Host for FfiHost {
                 self.recording = false;
                 self.load_file(Path::new(path))
             }
+            Source::Server(code) if !matches!(self.backend, Backend::Server(_)) => {
+                // TGRCode: its file (cached by the client), decrypted with the pack's key table
+                let key_table = self.key_table();
+                let body = self.backend.download(code, || key_table)?;
+                self.recording = false;
+                self.load_bytes(&body)
+            }
             Source::Server(code) => {
-                let server = self.server.clone().ok_or("no course server")?;
+                let server = self.backend.server().ok_or("no course server")?.to_string();
                 let dir = self
                     .downloads
                     .clone()
@@ -482,13 +610,12 @@ impl Host for FfiHost {
     }
 
     fn report(&mut self, code: &str, what: &str) {
-        let Some(server) = self.server.clone() else {
+        if self.backend.server().is_none() {
             return;
-        };
+        }
+        let backend = self.backend.clone();
         let (code, what) = (code.to_string(), what.to_string());
-        std::thread::spawn(move || {
-            let _ = mmk_online::Client::new(server).report(&code, &what);
-        });
+        std::thread::spawn(move || backend.report(&code, &what));
     }
 
     fn cleared(&mut self, _ticks: i64) {
@@ -500,11 +627,32 @@ impl Host for FfiHost {
     }
 
     fn online(&mut self, id: u32, action: &str, args: &Value, token: Option<&str>) -> bool {
-        let Some(server) = self.server.clone() else {
+        if !self.backend.online() {
             return false;
-        };
+        }
+        let backend = self.backend.clone();
         let token = token.map(str::to_string);
         let code = args["code"].as_str().unwrap_or_default().to_string();
+        if action == "download" {
+            // into the downloads folder (the app's library has it at its next scan)
+            let key_table = self.key_table();
+            let dir = self.downloads.clone();
+            self.spawn_online(id, move || {
+                let dir = dir.ok_or("no downloads folder")?;
+                let body = backend.download(&code, || key_table)?;
+                std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+                let file = dir.join(format!("{code}.course"));
+                std::fs::write(&file, body).map_err(|e| e.to_string())?;
+                Ok(json!({ "file": file.to_string_lossy() }))
+            });
+            return true;
+        }
+        let Some(server) = backend.server().map(str::to_string) else {
+            // TGRCode: the read-only calls
+            let (action, args) = (action.to_string(), args.clone());
+            self.spawn_online(id, move || backend.call(token.as_deref(), &action, &args));
+            return true;
+        };
         match action {
             "submit_replay" => {
                 let Some(replay) = self.cleared_replay.take() else {
@@ -699,6 +847,8 @@ pub unsafe extern "C" fn mmk_front_new(
             .map_or(1, |d| d.as_nanos() as u64)
             | 1;
         let (online_tx, online_rx) = channel();
+        let (thumbs_tx, thumbs_rx) = channel();
+        let server = opt_str(o.server);
         let mut h = FfiHost {
             engine,
             assets,
@@ -706,8 +856,14 @@ pub unsafe extern "C" fn mmk_front_new(
             cb: host,
             ui_dir,
             library: Vec::new(),
-            server: opt_str(o.server),
+            backend: Backend::from_setting(None, server.as_deref(), None),
+            server,
             downloads: opt_str(o.downloads).map(PathBuf::from),
+            course_world: None,
+            tgr_dir: None,
+            thumbs_tx,
+            thumbs_rx,
+            pool_entries: std::collections::HashMap::new(),
             input: 0,
             title: None,
             servers: None,
@@ -786,6 +942,29 @@ pub unsafe extern "C" fn mmk_front_set_server(front: *mut MmkFront, server: *con
     guard((), || {
         if let Some(f) = unsafe { front.as_mut() } {
             f.host.server = opt_str(server);
+            f.host.rebuild_backend();
+        }
+    })
+}
+
+/// Where Course World's courses come from (Settings): `source` "tgrcode" (the default),
+/// "server" (the course server's, `mmk_front_set_server`) or "library"; `dir` TGRCode's folder
+/// in the app's data (its answers cached in `dir/cache`, the 100 Mario / Endless pool in
+/// `dir/pool`), or NULL (memory only, no pool). Screens opened afterwards use it.
+///
+/// # Safety
+/// `front` live; `source`, `dir` NULL or NUL-terminated.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mmk_front_set_course_world(
+    front: *mut MmkFront,
+    source: *const c_char,
+    dir: *const c_char,
+) {
+    guard((), || {
+        if let Some(f) = unsafe { front.as_mut() } {
+            f.host.course_world = opt_str(source);
+            f.host.tgr_dir = opt_str(dir).map(PathBuf::from);
+            f.host.rebuild_backend();
         }
     })
 }
@@ -1324,6 +1503,7 @@ mod tests {
             let a = crate::mmk_assets_placeholder();
             let e = crate::mmk_engine_new(a);
             let (online_tx, online_rx) = channel();
+            let (thumbs_tx, thumbs_rx) = channel();
             let mut h = FfiHost {
                 engine: e,
                 assets: a,
@@ -1336,8 +1516,14 @@ mod tests {
                 },
                 ui_dir: PathBuf::new(),
                 library: Vec::new(),
+                backend: Backend::Server(server.clone()),
                 server: Some(server),
                 downloads: Some(dir.join("downloads")),
+                course_world: None,
+                tgr_dir: None,
+                thumbs_tx,
+                thumbs_rx,
+                pool_entries: std::collections::HashMap::new(),
                 input: 0,
                 title: None,
                 servers: None,

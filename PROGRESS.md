@@ -22,8 +22,11 @@ sound-perfect as possible, that **never needs the ROM or key files to run**.
 - ✅ Clone of github.com/smcraft-git/smcraft (snapshot `8bdb0ff` = tag `smcraft-final` without
   `recomp/`); builds, 763 tests pass
 - 🔄 Goal and plan written down (this section, DECISIONS.md 2026-10-21); README no longer "archived"
-- ⬜ Bring over the course-server work done on smm2recomp since the split (TGRCode upstream
-  fetcher, the embedded server crate, Endless rulesets)
+- ✅ Brought over the course-server work done on smm2recomp since the split (`smcraft-final..main`):
+  the TGRCode upstream fetcher (`server/src/upstream.rs`, `mmk server --upstream tgrcode`),
+  thumbnails and whole-course maps on the server, Played / Liked lists, `based_on` uploads, the
+  listener that recovers from a failed accept, the `mmk-embed` crate, Endless's run slot per
+  ruleset and no-repeat pool, the relay's 1450-byte messages; licence GPL-3.0-or-later
 - ⬜ CI on the public repo (Linux on push; macOS / Windows / wasm / Android by hand)
 
 **G1 — Import once, then ROM-free** 🔄
@@ -51,16 +54,33 @@ sound-perfect as possible, that **never needs the ROM or key files to run**.
   end starts (`shell/src/setup.rs`, `launch.rs`; checked on macOS from an empty data folder:
   import → title, then the second launch from the pack alone) · a file picker ⬜
 
-**G2 — Course World on TGRCode** ⬜
-- ⬜ TGRCode client: search by course ID / maker ID, Popular / New / Hot lists, course details,
-  download (decrypted with the pack's key table), thumbnails
-- ⬜ Course World screens over TGRCode (course list, course page, maker page, play, Download to
-  Coursebot); the own server stays as a setting
-- ⬜ Leaderboards / Ninji where TGRCode has data
+**G2 — Course World on TGRCode** 🔄
+- ✅ TGRCode client (`mmk_online::tgrcode`, endpoints checked live 2026-10-21): course / maker
+  by ID (the game's checksum first), Popular / New / Endless lists, a maker's posted / liked /
+  played / first-clear / record lists, comments, Super Worlds, downloads decrypted with the
+  pack's course key table, thumbnails; polite (one request at a time, 2 s apart, 429 waited
+  out), cached on disk, offline answers from the cache; read-only calls in the server's JSON
+  shapes (`tgrcode::call`)
+- ✅ Course World's source a setting (`mmk_online::world::Backend`: TGRCode default / own server /
+  library; `--course-world`, `MMK_COURSE_WORLD`, the app's Settings > Game > Course World,
+  `mmk_front_set_course_world`)
+- ✅ Screens over TGRCode: the tabs are TGRCode's lists (Hot = a fresh Endless draw, Popular =
+  course points at normal, New), thumbnails in the rows (JPEG → texture), the open row's
+  Download (TypeBtn 3) into the library, the course page with its picture and whole-course map,
+  tags and the record holder / first clearer, comments (text ones), the maker's profile with
+  their uploads; the hub's ID button (course ID → the course, maker ID → the profile; typed into
+  the comment window)
+- ⬜ Play without a pause: the download blocks a tick while it runs (the cache makes it once)
+- ⬜ Popular across difficulties / TGRCode's sort options; more than 20 New courses (paging)
+- ⬜ Leaderboards / Ninji where TGRCode has data; Super Worlds screens (G5; the client has
+  `super_world`)
 
 **G3 — Challenges** 🔄
 - ✅ 100 Mario Challenge (SMM2 and SMM1 presentation, rules from SMM1)
-- 🔄 Endless Challenge: rules ✅; SMM2 screens on SMM2's own rules ⬜; courses from TGRCode ⬜
+- 🔄 Endless Challenge: rules ✅; SMM2 screens on SMM2's own rules ⬜; courses from TGRCode ✅
+  (`mmk_embed::pool`: the ported upstream fetcher fills a local store from TGRCode's Endless pool
+  when the runs open, 10 per difficulty per launch; the runs draw from it and the library, and
+  play what it holds when offline)
 - ⬜ Local co-op for courses, 100 Mario and Endless (SMM2 local rules: bubbles, shared lives)
 
 **G4 — Course Maker for any course** 🔄

@@ -180,6 +180,9 @@ final class GameSession: ObservableObject, Identifiable {
         }
         guard let f else { throw EngineError(lastEngineError()) }
         front = f
+        let courseWorld = env["MMK_COURSE_WORLD"] ?? d.string(forKey: SettingsKey.courseWorld) ?? "tgrcode"
+        let tgrDir = AppPaths.support.appendingPathComponent("TGRCode", isDirectory: true).path
+        mmk_front_set_course_world(f, courseWorld, tgrDir)
         setLibrary(library)
         applyVolumes()
     }

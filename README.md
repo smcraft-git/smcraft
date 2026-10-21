@@ -66,9 +66,12 @@ The app is called SMCraft; the name, bundle id and version live only in
 - **SMM2 front end** (with the owner's SMM2 UI import, `mmk import-smm2-ui`): the game's opening
   at launch (Settings > Game turns it off), the title (any button → Make / Play → Story Mode,
   Course World, Coursebot, 100 Mario Challenge), fades between screens, and the game's menu
-  sounds. **Course World**: the hub (Courses, Endless Challenge; the network-only buttons say
-  so) and the course list (Hot / Popular / New; confirm opens a course, Play starts it) over the
-  library and, when set in Settings > Game, an open-source course server.
+  sounds. **Course World**: the hub (Courses, Endless Challenge, ID search; the network-only
+  buttons say so) and the course list (Hot / Popular / New with thumbnails; confirm opens a
+  course: Play, Download, More info, View comments) over **TGRCode** (tgrcode.com, a
+  third-party read-only view of Nintendo's Course World; the default), an open-source course
+  server, or the library alone (Settings > Game > Course World). Over TGRCode the 100 Mario
+  runs also draw from TGRCode's Endless pool, kept on disk for offline play.
 - **In game:** Esc / P / controller + pauses: Continue, Restart course, Exit to library. Library
   and Course World courses have **no lives** (like SMM2's Course World): deaths restart the course.
   With the SMM2 UI import the screens are SMM2's own layouts: the HUD per game style, the course
@@ -103,6 +106,7 @@ The app is called SMCraft; the name, bundle id and version live only in
 | `boot.opening` | Bool | true | SMM2's opening at launch |
 | `hundred.presentation` | String | `smm2` | 100 Mario screens: `smm2` (Endless Challenge style) or `smm1` |
 | `online.server` | String | empty | open-source course server Course World also lists (e.g. `http://localhost:8640`) |
+| `online.courseWorld` | String | `tgrcode` | Course World's source: `tgrcode`, `server` (the one above), `library` |
 | `player.character` | Int 0–3 | 0 | Mario / Luigi / Toad / Toadette (also the SMM2 pause menu's Settings) |
 
 Read them with `UserDefaults.standard.double(forKey: "volume.music")` etc.; defaults are
@@ -175,9 +179,13 @@ same core; see [docs/architecture.md](docs/architecture.md) §5b. Linux needs `l
 
 Without a course, and with the SMM2 UI import (`mmk import-smm2-ui`; `--ui-cache`,
 `$MMK_UI_CACHE` or `~/smm-work/cache/smm2-ui-3.0.3`), it starts like the Swift app: the opening,
-the title, Course World over a course folder (`--library`, default `~/smm-work/courses`) and a
-course server (`--server`), 100 Mario (`--hundred smm1` for SMM1's screens), with the SMM2
-in-course screens (`mmk-front`). With a server, Course World is online on SMM2's own screens:
+the title, Course World over TGRCode (`--course-world tgrcode`, the default; `server` with
+`--server`, or `library` for the course folder alone: `--library`, default
+`~/smm-work/courses`), 100 Mario (`--hundred smm1` for SMM1's screens), with the SMM2 in-course
+screens (`mmk-front`). Over TGRCode Course World is read-only: the lists, the ID search, course
+pages with thumbnails, comments, maker profiles, Play and Download (decrypted with the asset
+pack's course key table; answers cached in the data folder's `TGRCode/`). With a server, Course
+World is online on SMM2's own screens:
 an account from the hub's player card, leaderboards, course pages, comments, likes / boos on
 the clear screen, maker profiles, clears sent as verified replays, the record's ghost. Menus:
 arrows/WASD, Return/Z/Space confirm, Esc/P back, mouse clicks; − or Tab held skips a 100 Mario
