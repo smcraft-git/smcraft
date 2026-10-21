@@ -1,0 +1,25 @@
+[package]
+name = "mmk-cli"
+description = "Command-line tool: inspect courses, round-trip checks, (later) import and headless runs"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "mmk"
+path = "src/main.rs"
+
+[dependencies]
+mmk-formats = { path = "../formats" }
+mmk-import = { path = "../import" }
+mmk-sim = { path = "../sim" }
+mmk-assets = { path = "../assets" }
+mmk-server = { path = "../server" }
+mmk-online = { path = "../online" }
+mmk-editor = { path = "../editor" }
+mmk-host = { path = "../host" }
+mmk-audio = { path = "../audio" }
+clap.workspace = true
+flate2.workspace = true
+serde_json.workspace = true
