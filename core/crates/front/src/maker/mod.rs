@@ -148,6 +148,8 @@ enum Drag {
         index: usize,
         from: (i32, i32),
     },
+    /// Dragging the scroll bar's handle.
+    Slider,
 }
 
 struct Test {
@@ -201,6 +203,10 @@ pub struct MakerFlow {
     menu_sel: usize,
     save_sel: usize,
     window_sel: usize,
+    /// The timer window's value until OK.
+    window_timer: i16,
+    /// The animation that opened the left window.
+    window_tab: &'static str,
     /// The course changed since the host last showed it.
     dirty: bool,
     /// The host draws the course.
@@ -271,6 +277,8 @@ impl MakerFlow {
             menu_sel: 1,
             save_sel: 0,
             window_sel: 0,
+            window_timer: 300,
+            window_tab: "ChangeTab00",
             dirty: true,
             shown: false,
             test: None,
@@ -407,6 +415,7 @@ impl MakerFlow {
         // the clapperboard's "Play from start" text only while it is held [inf]
         p.show("L_Play_00/L_PlayBtn_00/T_Text_00", false);
         self.update_page();
+        self.update_timer();
     }
 
     // ------------------------------------------------------------ coordinates
@@ -463,6 +472,32 @@ impl MakerFlow {
             self.cam[1] = y1 - VIEW_H + mt;
         }
         self.clamp_cam();
+    }
+
+    /// Scroll to where pointer `p` is along the scroll bar.
+    fn slide_to(&mut self, p: [f32; 2]) {
+        let Some(page) = &mut self.page else { return };
+        page.apply(self.tick);
+        let Some(r) = page.rect("L_Slider_00/L_SlideBarH_00/B_ScrollArea_00") else {
+            return;
+        };
+        let f = ((p[0] - (r.center[0] - r.size[0] / 2.0)) / r.size[0]).clamp(0.0, 1.0);
+        let (w, _) = self.editor.size();
+        self.cam[0] = f * (w as f32 * TILE - VIEW_W).max(0.0);
+        self.clamp_cam();
+    }
+
+    /// The scroll bar's handle where the view is.
+    fn place_slider(&mut self) {
+        let (w, _) = self.editor.size();
+        let span = (w as f32 * TILE - VIEW_W).max(1.0);
+        let f = (self.cam[0] / span).clamp(0.0, 1.0);
+        if let Some(p) = &mut self.page {
+            p.set_translate(
+                "L_Slider_00/L_SlideBarH_00/N_TransRoot_00",
+                [-350.0 + 700.0 * f, 0.0],
+            );
+        }
     }
 
     /// The host shows the course as edited (after changes).
@@ -539,6 +574,7 @@ impl MakerFlow {
             }
         };
         if self.mode != Mode::Test {
+            self.place_slider();
             self.show(cx.host);
         }
         self.held = input.ui.held;
@@ -587,8 +623,17 @@ impl MakerFlow {
             && self.page_click(p, cx)
         {
             // the press is the button's: no course edit
-            self.drag = None;
+            if self.drag != Some(Drag::Slider) {
+                self.drag = None;
+            }
             self.down_was = true;
+            return;
+        }
+        if self.drag == Some(Drag::Slider) {
+            match (input.down, input.pointer) {
+                (true, Some(p)) => self.slide_to(p),
+                _ => self.drag = None,
+            }
             return;
         }
         // a tap without a pointer (touch): put down / erase / pick up once where it lands
@@ -679,6 +724,7 @@ impl MakerFlow {
                     self.drop_carried(cx, index, from);
                 }
             }
+            Some(Drag::Slider) => {}
         }
     }
 
@@ -691,6 +737,7 @@ impl MakerFlow {
         self.dirty = true;
         self.unsaved = true;
         self.update_page();
+        self.update_timer();
     }
 
     fn undo(&mut self) {
@@ -866,7 +913,7 @@ impl MakerFlow {
             self.select_slot(i);
             return true;
         }
-        let buttons: [(&str, u8); 8] = [
+        let buttons: [(&str, u8); 10] = [
             ("L_PaletteSet_00/L_SearchBtn_00/B_Btn_00", 0),
             ("L_Play_00/L_PlayBtn_00/B_Btn_00", 1),
             ("L_RightParts_00/L_UndoBtn_00/B_Btn_00", 2),
@@ -875,9 +922,33 @@ impl MakerFlow {
             ("L_RightParts_00/L_SaveBtn_00/B_Btn_00", 5),
             ("L_LeftParts_00/L_SkinBtn_00/B_Btn_00", 6),
             ("L_LeftParts_00/L_SceneBtn_00/B_Btn_00", 7),
+            ("L_LeftParts_00/L_TimerBtn_00/B_Btn_00", 8),
+            ("L_LeftParts_00/L_ScrollBtn_00/B_Btn_00", 9),
         ];
         let panes: Vec<String> = buttons.iter().map(|b| b.0.to_string()).collect();
         let Some(i) = hit(page, self.tick, &panes, p) else {
+            // the scroll bar: S / G jump to the start / the goal, the area button switches
+            // area, the bar itself scrolls [inf: as the game's handle]
+            let bar = "L_Slider_00";
+            let slider = [
+                format!("{bar}/L_BtnS_00/B_Btn_00"),
+                format!("{bar}/L_BtnG_00/B_Btn_00"),
+                format!("{bar}/L_AreaBtn_00/B_Btn_00"),
+                format!("{bar}/L_SlideBarH_00/B_ScrollArea_00"),
+            ];
+            if let Some(k) = hit(page, self.tick, &slider, p) {
+                match k {
+                    0 => self.cam[0] = 0.0,
+                    1 => self.cam[0] = f32::MAX,
+                    2 => self.switch_area(),
+                    _ => {
+                        self.drag = Some(Drag::Slider);
+                        self.slide_to(p);
+                    }
+                }
+                self.clamp_cam();
+                return true;
+            }
             // the Reset Rocket: a new course (undo brings the old one back)
             let reset = ["L_RightParts_00/L_ResetBtn_00/B_Btn_00".to_string()];
             if hit(page, self.tick, &reset, p).is_some() {
@@ -1684,7 +1755,8 @@ impl MakerFlow {
 
     // ------------------------------------------------------------ the left column windows
 
-    /// The window's choices: (button part, value).
+    /// The window's choices: (button part, value). Window 0 game style, 1 course theme, 3
+    /// autoscroll; the timer window (2) has a selector instead.
     fn window_choices(w: u8) -> Vec<(String, u8)> {
         match w {
             0 => (0..5)
@@ -1692,37 +1764,60 @@ impl MakerFlow {
                 .collect(),
             // theme of each scene button: its layout's number − 1 (Edit_SceneListBtn_01 …
             // _10 sit in the left column then the right) [inf]
-            _ => [0u8, 5, 1, 6, 2, 7, 3, 8, 4, 9]
+            1 => [0u8, 5, 1, 6, 2, 7, 3, 8, 4, 9]
                 .iter()
                 .enumerate()
                 .map(|(i, &t)| (format!("L_SceneListBtn_{i:02}"), t))
                 .collect(),
+            // none, slow, normal, fast (custom needs its nodes: not here yet)
+            3 => [
+                ("N_AutoScroll_00/L_NoAutoScrollBtn_00", 0u8),
+                ("N_AutoScroll_00/N_MainBtn_00/L_AutoScrollBtn_00", 1),
+                ("N_AutoScroll_00/N_MainBtn_00/L_AutoScrollBtn_01", 2),
+                ("N_AutoScroll_00/N_MainBtn_00/L_AutoScrollBtn_02", 3),
+            ]
+            .iter()
+            .map(|(b, v)| (b.rsplit('/').next().unwrap_or(b).to_string(), *v))
+            .collect(),
+            _ => vec![("L_TimerDecideBtn_00".to_string(), 0)],
+        }
+    }
+
+    fn window_value(&self, w: u8) -> u8 {
+        match w {
+            0 => {
+                let style = self.style();
+                STYLES.iter().position(|s| *s == style).unwrap_or(0) as u8
+            }
+            1 => self.editor.theme().0,
+            3 => self.editor.area().header.autoscroll_type.min(3),
+            _ => 0,
         }
     }
 
     fn open_window(&mut self, w: u8) {
         self.mode = Mode::Window(w);
-        let style = self.style();
-        let theme = self.editor.theme().0;
-        let current = if w == 0 {
-            STYLES.iter().position(|s| *s == style).unwrap_or(0) as u8
-        } else {
-            theme
-        };
+        let current = self.window_value(w);
         let choices = Self::window_choices(w);
         self.window_sel = choices.iter().position(|c| c.1 == current).unwrap_or(0);
+        self.window_timer = self.editor.course.header.timer;
         let tick = self.tick;
         let ui = self.ui.clone();
         let Some(p) = &mut self.page else { return };
         let left = "L_LeftParts_00";
         p.show(&format!("{left}/N_Content_00"), true);
         p.hold(&format!("{left}/Type"), w as f32);
-        p.play(&format!("{left}/ChangeTab00"), tick);
+        // the window opens wide for autoscroll (ChangeTab01), else normal (ChangeTab00)
+        // [obs data: the two frame widths]
+        let tab = if w == 3 { "ChangeTab01" } else { "ChangeTab00" };
+        self.window_tab = tab;
+        p.play(&format!("{left}/{tab}"), tick);
         p.play(&format!("{left}/InContent"), tick);
-        let title = if w == 0 {
-            "ContentName_GameSkin"
-        } else {
-            "ContentName_SceneSkin"
+        let title = match w {
+            0 => "ContentName_GameSkin",
+            1 => "ContentName_SceneSkin",
+            2 => "ContentName_Timer",
+            _ => "ContentName_AutoScrl",
         };
         if let Some(t) = ui.message(PAGE, title) {
             p.text(&format!("{left}/T_ContentName_00"), &t);
@@ -1737,41 +1832,106 @@ impl MakerFlow {
                 &format!("{pane}/Select"),
                 if k == self.window_sel { 2.0 } else { 0.0 },
             );
-            let label = if w == 0 {
-                format!("{left}-{b}-T_Balloon_00")
-            } else {
-                format!("SceneName_{}", SCENE_KEYS[*v as usize])
-            };
-            if let Some(t) = ui.message(PAGE, &label) {
-                p.text(&format!("{pane}/T_Balloon_00"), &t);
-            }
             let sample = format!("{pane}/P_Sample_00");
-            if w == 0 {
-                p.image(
-                    &sample,
-                    "GameSkin",
-                    &format!("{}_Lyt_Logo_00", STYLES[*v as usize]),
-                );
-            } else {
-                p.image(
-                    &sample,
-                    view::GROUP,
-                    &format!("Lyt_E_Scene_{}_00", THEME_TEXTURES[*v as usize]),
-                );
+            match w {
+                0 => {
+                    if let Some(t) = ui.message(PAGE, &format!("{left}-{b}-T_Balloon_00")) {
+                        p.text(&format!("{pane}/T_Balloon_00"), &t);
+                    }
+                    p.image(
+                        &sample,
+                        "GameSkin",
+                        &format!("{}_Lyt_Logo_00", STYLES[*v as usize]),
+                    );
+                }
+                1 => {
+                    let label = format!("SceneName_{}", SCENE_KEYS[*v as usize]);
+                    if let Some(t) = ui.message(PAGE, &label) {
+                        p.text(&format!("{pane}/T_Balloon_00"), &t);
+                    }
+                    p.image(
+                        &sample,
+                        view::GROUP,
+                        &format!("Lyt_E_Scene_{}_00", THEME_TEXTURES[*v as usize]),
+                    );
+                }
+                _ => {}
             }
         }
-        p.show(&format!("{left}/L_SkinBtn_00/N_Text_00"), false);
+        match w {
+            2 => {
+                p.text_from(
+                    &format!("{left}/L_TimerDecideBtn_00/T_Btn_00"),
+                    "L_LeftParts_00-L_TimerDecideBtn_00-T_Btn_00",
+                );
+                p.show(&format!("{left}/L_TimerDecideBtn_00/T_KeyBtn_00"), false);
+            }
+            3 => {
+                for (pane, label) in [
+                    (
+                        "L_NoAutoScrollBtn_00/T_NoAuto_00",
+                        "L_NoAutoScrollBtn_00-T_NoAuto_00",
+                    ),
+                    (
+                        "L_AutoScrollBtn_00/T_Slow_00",
+                        "L_AutoScrollBtn_00-T_Slow_00",
+                    ),
+                    (
+                        "L_AutoScrollBtn_01/T_Normal_00",
+                        "L_AutoScrollBtn_01-T_Normal_00",
+                    ),
+                    (
+                        "L_AutoScrollBtn_02/T_Fast_00",
+                        "L_AutoScrollBtn_02-T_Fast_00",
+                    ),
+                    (
+                        "L_ScrollDecideBtn_00/T_Btn_00",
+                        "L_ScrollDecideBtn_00-T_Btn_00",
+                    ),
+                ] {
+                    p.text_from(&format!("{left}/{pane}"), &format!("{left}-{label}"));
+                }
+                // custom autoscroll needs its nodes drawn: not offered here yet
+                p.show(&format!("{left}/L_AutoScrollBtn_06"), false);
+            }
+            _ => {}
+        }
+        let button = [
+            "L_SkinBtn_00",
+            "L_SceneBtn_00",
+            "L_TimerBtn_00",
+            "L_ScrollBtn_00",
+        ][w.min(3) as usize];
+        p.show(&format!("{left}/{button}/N_Text_00"), false);
         self.ui
-            .sound_button(PAGE, &format!("{left}/L_SkinBtn_00"), Event::Decide);
+            .sound_button(PAGE, &format!("{left}/{button}"), Event::Decide);
+        self.update_timer();
+    }
+
+    /// The timer window's number and the timer button's.
+    fn update_timer(&mut self) {
+        let t = if self.mode == Mode::Window(2) {
+            self.window_timer
+        } else {
+            self.editor.course.header.timer
+        };
+        let Some(p) = &mut self.page else { return };
+        let left = "L_LeftParts_00";
+        p.text(&format!("{left}/L_TimerBtn_00/T_Timer_00"), &t.to_string());
+        p.text(
+            &format!("{left}/L_Timer_00/L_CenterButton_00/T_Timer_00"),
+            &t.to_string(),
+        );
     }
 
     fn close_window(&mut self) {
         self.mode = Mode::Edit;
         if let Some(p) = &mut self.page {
-            p.stop("L_LeftParts_00/ChangeTab00");
+            p.stop(&format!("L_LeftParts_00/{}", self.window_tab));
             p.stop("L_LeftParts_00/InContent");
             p.show("L_LeftParts_00/N_Content_00", false);
         }
+        self.update_timer();
     }
 
     fn window_tick(
@@ -1782,37 +1942,80 @@ impl MakerFlow {
         cx: &mut crate::Cx,
     ) {
         let _ = cx;
+        let left = "L_LeftParts_00";
         let choices = Self::window_choices(w);
         let mut decide = false;
-        if let Some(p) = click
-            && let Some(page) = &mut self.page
-        {
-            let panes: Vec<String> = choices
-                .iter()
-                .map(|c| format!("L_LeftParts_00/{}/B_Btn_00", c.0))
-                .collect();
-            match hit(page, self.tick, &panes, p) {
-                Some(i) => {
-                    self.window_sel = i;
-                    decide = true;
-                }
-                None => {
-                    self.close_window();
-                    return;
-                }
-            }
-        }
+        let mut timer_step = 0i16;
         if pressed.has(Buttons::BACK) {
             self.ui.sound_back(PAGE, "normal");
             self.close_window();
             return;
         }
+        if let Some(p) = click
+            && let Some(page) = &mut self.page
+        {
+            let panes: Vec<String> = choices
+                .iter()
+                .map(|c| format!("{left}/{}/B_Btn_00", c.0))
+                .collect();
+            let arrows = [
+                format!("{left}/L_Timer_00/L_UpBtn_00"),
+                format!("{left}/L_Timer_00/L_DownBtn_00"),
+            ];
+            if let Some(i) = hit(page, self.tick, &panes, p) {
+                self.window_sel = i;
+                decide = true;
+            } else if w == 2
+                && let Some(a) = hit(page, self.tick, &arrows, p)
+            {
+                timer_step = if a == 0 { 10 } else { -10 };
+            } else {
+                let window = [format!("{left}/N_Content_00/N_Scissor_00")];
+                if hit(page, self.tick, &window, p).is_none() {
+                    self.close_window();
+                    return;
+                }
+            }
+        }
+        if w == 2 {
+            // the timer: up / down by 10 s (left / right by 100) within 10–500 [obs: the
+            // course validator's range, Part A §3]
+            timer_step += match pressed {
+                b if b.has(Buttons::UP) => 10,
+                b if b.has(Buttons::DOWN) => -10,
+                b if b.has(Buttons::RIGHT) => 100,
+                b if b.has(Buttons::LEFT) => -100,
+                _ => 0,
+            };
+            if timer_step != 0 {
+                self.window_timer = (self.window_timer + timer_step).clamp(10, 500);
+                if let Some(p) = &mut self.page {
+                    let a = if timer_step > 0 { "Up" } else { "Down" };
+                    p.play(
+                        &format!("{left}/L_Timer_00/L_CenterButton_00/{a}"),
+                        self.tick,
+                    );
+                }
+                self.update_timer();
+            }
+            if decide || pressed.has(Buttons::CONFIRM) {
+                if self.window_timer != self.editor.course.header.timer {
+                    self.editor.checkpoint();
+                    self.editor.set_timer(self.window_timer);
+                    self.changed();
+                }
+                self.ui
+                    .sound_button(PAGE, &format!("{left}/L_TimerDecideBtn_00"), Event::Decide);
+                self.close_window();
+            }
+            return;
+        }
         let n = choices.len();
-        // both windows are two buttons wide [obs data]
-        let cols = 2;
+        // the style and theme windows are two buttons wide, autoscroll one [obs data]
+        let cols = if w == 3 { 1 } else { 2 };
         let step = match pressed {
-            b if b.has(Buttons::RIGHT) => Some(1),
-            b if b.has(Buttons::LEFT) => Some(n - 1),
+            b if b.has(Buttons::RIGHT) && cols > 1 => Some(1),
+            b if b.has(Buttons::LEFT) && cols > 1 => Some(n - 1),
             b if b.has(Buttons::DOWN) => Some(cols),
             b if b.has(Buttons::UP) => Some(n - cols),
             _ => None,
@@ -1821,9 +2024,9 @@ impl MakerFlow {
             let old = self.window_sel;
             self.window_sel = (self.window_sel + s) % n;
             if let Some(p) = &mut self.page {
-                p.hold(&format!("L_LeftParts_00/{}/Select", choices[old].0), 0.0);
+                p.hold(&format!("{left}/{}/Select", choices[old].0), 0.0);
                 p.play(
-                    &format!("L_LeftParts_00/{}/Select", choices[self.window_sel].0),
+                    &format!("{left}/{}/Select", choices[self.window_sel].0),
                     self.tick,
                 );
             }
@@ -1832,26 +2035,22 @@ impl MakerFlow {
             return;
         }
         let v = choices[self.window_sel].1;
-        self.editor.checkpoint();
-        if w == 0 {
-            let style = STYLES[v as usize % 5];
-            if style != self.style() {
-                self.editor.set_style(style);
-                self.icons.clear();
-                self.reset_palette_for_style();
-                self.changed();
-            } else {
-                self.editor.discard_checkpoint();
+        if v != self.window_value(w) {
+            self.editor.checkpoint();
+            match w {
+                0 => {
+                    self.editor.set_style(STYLES[v as usize % 5]);
+                    self.icons.clear();
+                    self.reset_palette_for_style();
+                }
+                1 => self.editor.set_theme(v),
+                _ => self.editor.set_autoscroll(v),
             }
-        } else if v != self.editor.theme().0 {
-            self.editor.set_theme(v);
             self.changed();
-        } else {
-            self.editor.discard_checkpoint();
         }
         self.ui.sound_button(
             PAGE,
-            &format!("L_LeftParts_00/{}", choices[self.window_sel].0),
+            &format!("{left}/{}", choices[self.window_sel].0),
             Event::Decide,
         );
         self.close_window();
@@ -1950,6 +2149,8 @@ impl MakerFlow {
             "save" => self.open_save(),
             "style" => self.open_window(0),
             "theme" => self.open_window(1),
+            "timer" => self.open_window(2),
+            "autoscroll" => self.open_window(3),
             "play" => self.start_test(cx, Some(None)),
             _ => return false,
         }

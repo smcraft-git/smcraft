@@ -318,3 +318,78 @@ fn make_save_and_find_it_in_the_coursebot() {
     assert_eq!(w.stage_name(), "list");
     assert!(host.library.iter().any(|e| e.name == "Goomba walk"));
 }
+
+#[test]
+fn the_left_column_windows_change_timer_autoscroll_style_and_theme() {
+    let (mut host, mut saves) = (MockHost::default(), Saves::default());
+    let mut m = maker(&mut host, &mut saves, MakerStart::New);
+    m.open_window(2);
+    for b in [Buttons::UP, Buttons::UP, Buttons::RIGHT, Buttons::CONFIRM] {
+        run(&mut m, &mut host, &mut saves, press(b));
+        run(&mut m, &mut host, &mut saves, idle());
+    }
+    assert_eq!(m.editor.course.header.timer, 420);
+    assert_eq!(m.mode, Mode::Edit);
+    m.open_window(3);
+    for b in [Buttons::DOWN, Buttons::DOWN, Buttons::CONFIRM] {
+        run(&mut m, &mut host, &mut saves, press(b));
+        run(&mut m, &mut host, &mut saves, idle());
+    }
+    assert_eq!(m.editor.area().header.autoscroll_type, 2, "normal");
+    m.open_window(0);
+    for b in [Buttons::RIGHT, Buttons::CONFIRM] {
+        run(&mut m, &mut host, &mut saves, press(b));
+        run(&mut m, &mut host, &mut saves, idle());
+    }
+    assert_eq!(m.style(), "M3");
+    m.open_window(1);
+    for b in [Buttons::DOWN, Buttons::CONFIRM] {
+        run(&mut m, &mut host, &mut saves, press(b));
+        run(&mut m, &mut host, &mut saves, idle());
+    }
+    assert_eq!(m.editor.theme().0, 1, "underground, under ground");
+    // back out of a window changes nothing
+    m.open_window(2);
+    run(&mut m, &mut host, &mut saves, press(Buttons::UP));
+    run(&mut m, &mut host, &mut saves, press(Buttons::BACK));
+    assert_eq!(m.editor.course.header.timer, 420);
+}
+
+#[test]
+fn the_scroll_bar_jumps_to_the_goal_and_back() {
+    let Some(ui) = crate::testing::smm2() else {
+        return;
+    };
+    let (mut host, mut saves) = (MockHost::default(), Saves::default());
+    let mut m = with(&mut host, &mut saves, |cx| {
+        MakerFlow::new(&ui, cx, MakerStart::New)
+    });
+    for _ in 0..30 {
+        run(&mut m, &mut host, &mut saves, idle());
+    }
+    let centre = |m: &mut MakerFlow, pane: &str| {
+        let p = m.page.as_mut().unwrap();
+        p.apply(m.tick);
+        p.rect(pane).unwrap().center
+    };
+    let g = centre(&mut m, "L_Slider_00/L_BtnG_00/B_Btn_00");
+    let click = MakerInput {
+        ui: UiInput {
+            click: Some(g),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    run(&mut m, &mut host, &mut saves, click);
+    assert_eq!(m.cam[0], 240.0 * 16.0 - VIEW_W, "at the goal");
+    let s = centre(&mut m, "L_Slider_00/L_BtnS_00/B_Btn_00");
+    let click = MakerInput {
+        ui: UiInput {
+            click: Some(s),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    run(&mut m, &mut host, &mut saves, click);
+    assert_eq!(m.cam[0], 0.0);
+}
