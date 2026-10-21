@@ -696,6 +696,18 @@ impl Host for FfiHost {
     }
 
     fn online(&mut self, id: u32, action: &str, args: &Value, token: Option<&str>) -> bool {
+        // the maker's uploads go to our own course server whichever Course World is shown
+        // (TGRCode is read-only)
+        if action == "upload" {
+            let Some(server) = self.server.clone().filter(|s| !s.is_empty()) else {
+                return false;
+            };
+            let (token, args) = (token.map(str::to_string), args.clone());
+            self.spawn_online(id, move || {
+                mmk_online::call(&server, token.as_deref(), "upload", &args)
+            });
+            return true;
+        }
         if !self.backend.online() {
             return false;
         }

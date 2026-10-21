@@ -458,7 +458,9 @@ pub trait Host {
     /// the record's replay and race it from the next start of that course). `token`: the
     /// signed-in account's. The answer comes back from [`Host::poll_online`] under `id`.
     /// Also `download {code}`: keep a Course World course in the library (answer `{name,
-    /// file}`).
+    /// file}`), and `upload {course, maker?}` (the maker's course as `mmk_formats::hex_rle`
+    /// text): always to the own course server, whichever Course World is shown (false
+    /// without one).
     /// False: no server configured (nothing will come back).
     fn online(&mut self, _id: u32, _action: &str, _args: &Value, _token: Option<&str>) -> bool {
         false

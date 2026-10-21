@@ -22,6 +22,7 @@ use std::collections::HashMap;
 
 use crate::host::{COURSEBOT_SLOTS, CourseEntry, Source};
 use crate::layout::{Layout, Ui};
+use crate::maker::UPLOAD_NEEDS_SERVER;
 use crate::menu::{Buttons, MenuCursor, UiInput, hit};
 use crate::sound::Event;
 use crate::{Cx, DrawItem, push_layout};
@@ -689,7 +690,7 @@ impl CoursebotScene {
                 let args = serde_json::json!({ "course": mmk_formats::hex_rle::hex_rle(&b) });
                 self.upload = cx.online.call(cx.host, "upload", args);
                 if self.upload.is_none() {
-                    cx.toast("No course server is set (Settings).");
+                    cx.toast(UPLOAD_NEEDS_SERVER);
                 }
             }
             Err(e) => cx.toast(&format!("Not uploaded: {e}")),
