@@ -48,20 +48,21 @@ scripts/build-windows.sh          # → dist/SMCraft-windows-x64.zip
 SMCraft keeps everything in `%LOCALAPPDATA%\SMCraft` (set `MMK_HOME` to use another folder):
 imports in `assets\`, your course library in `courses\`, saves in `play\`.
 
-1. **Game data** (art, sounds, models, course keys) from your extracted dump:
+1. **Game data and menus** (art, sounds, models, course keys, the SMM2 screens) from your own
+   dump: the base game NSP, the 3.0.3 update NSP and your `prod.keys`. They are read in place,
+   nothing is extracted:
    ```powershell
-   mmk.exe import --romfs D:\dump\romfs --exefs D:\dump\exefs
+   mmk.exe import --nsp D:\dump\MarioMaker2.nsp --update D:\dump\update-3.0.3.nsp --keys D:\dump\prod.keys
    ```
-   If the update is extracted separately, add it and SMCraft lays it over the base game (using
-   links, so nothing is copied when both are on the same drive):
+   This writes `%LOCALAPPDATA%\SMCraft\assets\smm2-<version>` (about 2 GB) and
+   `smm2-ui-<version>` (the menus, about 200 MB). From then on SMCraft needs neither the NSP files
+   nor `prod.keys`; the keys are only read during the import and are never saved.
+2. Or, from a dump you already extracted (RomFS and ExeFS folders; the update laid over the base
+   with links, so nothing is copied when both are on the same drive), the game data and the menus
+   separately:
    ```powershell
    mmk.exe import --romfs D:\dump\base\romfs --exefs D:\dump\base\exefs `
                   --update-romfs D:\dump\update\romfs --update-exefs D:\dump\update\exefs
-   ```
-   This writes `%LOCALAPPDATA%\SMCraft\assets\smm2-<version>` (about 2 GB; a few minutes).
-2. **Menus** (the SMM2 title, Course World, course screens) from the same RomFS (with the update
-   applied):
-   ```powershell
    mmk.exe import-smm2-ui D:\dump\romfs "$env:LOCALAPPDATA\SMCraft\assets\smm2-ui-3.0.3" --exefs D:\dump\exefs
    ```
 3. Optional, from your Wii U dump: the original 100 Mario screens and the costumes
@@ -69,11 +70,11 @@ imports in `assets\`, your course library in `courses\`, saves in `play\`.
    mmk.exe import-smm1 D:\wiiu\base\content D:\wiiu\update\content "$env:LOCALAPPDATA\SMCraft\assets\smm1-v208"
    ```
 
-Without step 1 SMCraft still runs, with placeholder shapes instead of the game's art.
+Without the import SMCraft still runs, with placeholder shapes instead of the game's art.
 
 ## Play
 
-- `mmk-play.exe` starts on the SMM2 menus (when the menu import from step 2 is there).
+- `mmk-play.exe` starts on the SMM2 menus (when the menu import is there).
 - Put course files (`.bcd`, or raw / zlib course data) in `%LOCALAPPDATA%\SMCraft\courses` to see
   them in Course World and use them for 100 Mario.
 - `mmk-play.exe path\to\course.bcd` plays one course directly; `mmk-play.exe --edit new.bin` opens
@@ -91,7 +92,7 @@ problems; leave it open while playing.
 
 - **"assets: none, drawing placeholder boxes"** in the console: the import didn't run or went to
   another folder. Pass `--assets "%LOCALAPPDATA%\SMCraft\assets\smm2-3.0.3"` or set `MMK_ASSETS`.
-- **No menus, straight into a demo course:** the menu import (step 2) is missing; or pass
+- **No menus, straight into a demo course:** the menu import (`smm2-ui-…`) is missing; or pass
   `--ui-cache <folder>`.
 - **Black window / graphics errors:** update your graphics driver. `--cpu-textures` decodes
   textures on the CPU if the GPU rejects compressed textures.

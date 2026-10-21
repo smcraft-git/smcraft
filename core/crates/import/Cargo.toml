@@ -1,6 +1,6 @@
 [package]
 name = "mmk-import"
-description = "First-launch importer: the user's own extracted RomFS/ExeFS → engine asset cache"
+description = "First-launch importer: the user's own NSP + prod.keys (or extracted RomFS/ExeFS) → engine asset cache"
 edition.workspace = true
 version.workspace = true
 license.workspace = true
@@ -13,3 +13,4 @@ serde_json.workspace = true
 ab_glyph.workspace = true
 thiserror.workspace = true
 crc32fast.workspace = true
+aes.workspace = true

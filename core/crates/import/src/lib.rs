@@ -1,5 +1,7 @@
-//! First-launch importer: the user's own extracted SMM2 RomFS + ExeFS → engine asset cache, and
-//! (module [`smm1`]) the SMM1 UI assets (layouts, textures, fonts, text) for the layout player.
+//! First-launch importer: the user's own SMM2 → engine asset cache, and (module [`smm1`]) the
+//! SMM1 UI assets (layouts, textures, fonts, text) for the layout player. The SMM2 source is the
+//! player's NSP files and `prod.keys`, read in place by module [`nsp`] ([`run_nsp`]: every stage,
+//! the SMM2 UI too), or an already extracted RomFS + ExeFS ([`run`], [`run_smm2_ui`]).
 //!
 //! Stages implemented so far (docs/architecture.md §4): identify, course key table, tables,
 //! textures, audio, sprites (2D quad placement + texture-pattern timing), meshes (NSMBU / 3D
@@ -26,6 +28,7 @@ use serde_json::{Value, json};
 pub mod env;
 pub mod meshes;
 pub mod modes;
+pub mod nsp;
 pub mod overlay;
 pub mod sprites;
 
@@ -463,5 +466,70 @@ pub fn run(cfg: &ImportConfig, progress: Progress) -> Result<ImportReport> {
         anims: counts.meshes.anims,
         builtin_courses_verified: courses.len(),
         modes: modes_report,
+    })
+}
+
+/// The one-time import from the player's own dump files: no extracted folders, no hactool.
+#[derive(Clone, Debug)]
+pub struct NspImportConfig {
+    /// The base game NSP (v1.0.0).
+    pub base: PathBuf,
+    /// The update NSP (3.0.3), patched over the base.
+    pub update: Option<PathBuf>,
+    /// `prod.keys`: read once while the dump is opened, never stored.
+    pub keys: PathBuf,
+    /// Asset root: the game cache goes to `<out_root>/smm2-<build>/`, the UI to
+    /// `<out_root>/smm2-ui-<build>/`.
+    pub out_root: PathBuf,
+    /// Message language of the UI import, e.g. `USen`.
+    pub language: String,
+}
+
+#[derive(Clone, Debug)]
+pub struct NspImportReport {
+    pub game: ImportReport,
+    pub ui: Smm2UiReport,
+}
+
+/// Open the dump with the keys, which are dropped (and cleared) before any stage runs.
+fn open_dump(cfg: &NspImportConfig) -> Result<nsp::Dump> {
+    let keys = nsp::keys::Keys::load(&cfg.keys).map_err(|source| ImportError::Io {
+        path: cfg.keys.clone(),
+        source,
+    })?;
+    nsp::Dump::open(&cfg.base, cfg.update.as_deref(), &keys)
+        .map_err(|e| ImportError::Invalid(e.to_string()))
+}
+
+/// Every import stage (gameplay, sound, modes, effects, the SMM2 UI) from the NSP(s), read in
+/// place through [`nsp::DumpVfs`]. After this the game needs neither the dump nor the keys.
+pub fn run_nsp(cfg: &NspImportConfig, progress: Progress) -> Result<NspImportReport> {
+    progress("open", 0, 1);
+    let dump = open_dump(cfg)?;
+    progress("open", 1, 1);
+    let dump = std::rc::Rc::new(nsp::DumpVfs::new(dump, &cfg.base));
+    let (romfs, exefs) = (
+        dump.romfs_root().to_path_buf(),
+        dump.exefs_root().to_path_buf(),
+    );
+    vfs::with_vfs(dump, || {
+        let game = run(
+            &ImportConfig {
+                romfs: romfs.clone(),
+                exefs: exefs.clone(),
+                out_root: cfg.out_root.clone(),
+            },
+            progress,
+        )?;
+        let ui = run_smm2_ui(
+            &Smm2UiConfig {
+                romfs,
+                exefs: Some(exefs),
+                out: cfg.out_root.join(format!("smm2-ui-{}", game.build)),
+                language: cfg.language.clone(),
+            },
+            progress,
+        )?;
+        Ok(NspImportReport { game, ui })
     })
 }
