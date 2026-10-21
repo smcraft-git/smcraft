@@ -148,6 +148,8 @@ pub enum Activity {
     Goal,
     /// Dead, or entering a pipe/door: the view does not move.
     Frozen,
+    /// Several players: in a bubble (or otherwise out of play): not followed at all.
+    Away,
 }
 
 /// The player as the camera needs it this frame.
@@ -185,6 +187,70 @@ fn toward(a: f32, b: f32, step: f32) -> f32 {
 /// Truncate to 0.01 px.
 fn hundredths(v: f32) -> f32 {
     (v * 100.0).trunc() * 0.01
+}
+
+/// What the followers need from the focus stage.
+struct Follow {
+    focus: Rect,
+    must: Option<Rect>,
+    /// The followed velocity (one player's, or the average of several).
+    vx: f32,
+    vy: f32,
+    /// x motion of the followed box this frame (0 on the frame goal mode starts).
+    motion_x: f32,
+    mode: Mode,
+    /// Any followed player is high up (low-camera ceiling lift).
+    high: bool,
+    /// Join weight of the follower caps (1 for one player).
+    join: f32,
+}
+
+/// Several players (local-coop.md §4): frames a dead player still counts, the spread at which
+/// the focus starts to lean toward the peeks, and how far the peeks reach.
+const DOWN_TRACKED: i32 = 45;
+const SPREAD_FROM: f32 = 192.0;
+const SPREAD_RANGE: f32 = 128.0;
+const PEEK: f32 = 64.0;
+
+/// The join-weight curve: a Hermite segment from 0 to 1 with end slopes 0.1 (local-coop.md
+/// §4.4), on a time that steps 0.1 a frame and restarts when a player drops out.
+fn join_weight(t: f32) -> f32 {
+    if t <= 0.0 {
+        0.0
+    } else if t >= 1.0 {
+        1.0
+    } else {
+        ((-1.8 * t + 2.7) * t + 0.1) * t
+    }
+}
+
+/// One player's place in a several-player camera.
+#[derive(Clone, Debug)]
+struct Seat {
+    tracker: Tracker,
+    falling: bool,
+    grounded: bool,
+    was_goal: bool,
+    /// Frames a dead player is still followed (reloaded while alive).
+    down: i32,
+    /// Look-ahead offsets of the must-contain box: left (≤ 0), right (≥ 0), and the direction
+    /// they last moved for (0 none, 1 right, 2 left, 3 hold).
+    peek: (f32, f32),
+    peek_dir: u8,
+}
+
+impl Seat {
+    fn new(x: f32, y: f32, view: &Rect) -> Self {
+        Self {
+            tracker: Tracker::reset(x, y, view),
+            falling: false,
+            grounded: true,
+            was_goal: false,
+            down: DOWN_TRACKED,
+            peek: (0.0, 0.0),
+            peek_dir: 0,
+        }
+    }
 }
 
 /// The player tracker: filtered y, dead-zone box and the outputs derived from them.
@@ -384,6 +450,12 @@ pub struct Camera {
     strategy: u8,
     speed_y: f32,
     weight: f32,
+    /// Several players: one seat per player (empty with one player), the join-weight time, the
+    /// active count last frame and last frame's union of the active players' boxes.
+    seats: Vec<Seat>,
+    join_t: f32,
+    active_n: usize,
+    union_prev: Option<Rect>,
 }
 
 impl Camera {
@@ -404,6 +476,10 @@ impl Camera {
             strategy: 0,
             speed_y: 0.0,
             weight: 0.0,
+            seats: Vec::new(),
+            join_t: 0.0,
+            active_n: 0,
+            union_prev: None,
         };
         cam.reset(area, (x, y + 16.0), (x, y), solid);
         cam
@@ -481,7 +557,7 @@ impl Camera {
     pub fn update(&mut self, area: &Area, target: &Target, solid: impl Fn(i32, i32) -> bool) {
         let mode = match target.activity {
             // the view stays where it is
-            Activity::Frozen => return,
+            Activity::Frozen | Activity::Away => return,
             Activity::Goal => Mode::Goal,
             Activity::Floating => Mode::Floating,
             Activity::Play => {
@@ -525,13 +601,260 @@ impl Camera {
         });
         let focus = self.focus.unwrap_or(home);
         let must = self.tracker.must_contain(mode, target.vx, &self.view);
+        let high = self.tracker.high;
+        self.follow(
+            area,
+            &Follow {
+                focus,
+                must,
+                vx: target.vx,
+                vy: target.vy,
+                motion_x: if goal_starts { 0.0 } else { motion.0 },
+                mode,
+                high,
+                join: JOIN_WEIGHT,
+            },
+            &solid,
+        );
+    }
 
-        // low-camera ceiling lifts by a tile while the player is high up
-        let lift = if area.low() && self.tracker.high {
-            HIGH_OFFSET
-        } else {
-            0.0
+    /// Re-centre on `centre` with a seat for each of several players (feet positions).
+    pub fn reset_players(
+        &mut self,
+        area: &Area,
+        centre: (f32, f32),
+        players: &[(f32, f32)],
+        solid: impl Fn(i32, i32) -> bool,
+    ) {
+        self.reset(
+            area,
+            centre,
+            players.first().copied().unwrap_or(centre),
+            solid,
+        );
+        let view = self.view;
+        self.seats = players
+            .iter()
+            .map(|&(x, y)| Seat::new(x, y, &view))
+            .collect();
+        self.union_prev = None;
+        self.active_n = 0;
+    }
+
+    /// One frame with several players (local-coop.md §4): one shared view over the players in
+    /// play. Bubbles (`Away`) aren't followed; a dead player is for 45 frames; the focus is the
+    /// union of the followed players' boxes, leaning toward their look-ahead peeks once they
+    /// spread over more than 192 px; the followers take the players' average speed and are held
+    /// back for 10 frames after someone drops out (the join weight). There is no leader.
+    pub fn update_players(
+        &mut self,
+        area: &Area,
+        targets: &[Target],
+        solid: impl Fn(i32, i32) -> bool,
+    ) {
+        if self.seats.len() != targets.len() {
+            let view = self.view;
+            self.seats = targets.iter().map(|t| Seat::new(t.x, t.y, &view)).collect();
+        }
+        // who is followed this frame
+        let mut active = vec![false; targets.len()];
+        for (k, (s, t)) in self.seats.iter_mut().zip(targets).enumerate() {
+            active[k] = match t.activity {
+                Activity::Away => false,
+                Activity::Frozen => {
+                    s.down -= 1;
+                    s.down > 0
+                }
+                _ => {
+                    s.down = DOWN_TRACKED;
+                    true
+                }
+            };
+        }
+        let n = active.iter().filter(|&&a| a).count();
+        let all_down = targets
+            .iter()
+            .zip(&active)
+            .all(|(t, &a)| !a || t.activity == Activity::Frozen);
+        if n == 0 || all_down {
+            return; // nobody to follow, or everyone followed is dead: the view holds
+        }
+        if n < self.active_n {
+            self.join_t = 0.0;
+        }
+        let count_changed = n != self.active_n;
+        self.active_n = n;
+        self.join_t = toward(self.join_t, 1.0, 0.1);
+        let join = join_weight(self.join_t);
+
+        // trackers, peeks and the unions
+        let view = self.view;
+        let mut boxes: Option<Rect> = None;
+        let mut homes: Option<Rect> = None;
+        let mut peeks: Option<Rect> = None;
+        let mut must: Option<(u8, Rect)> = None;
+        let (mut vx, mut vy) = (0.0f32, 0.0f32);
+        let (mut goal, mut goal_starts, mut floating, mut high) = (false, false, true, false);
+        let union = |a: Option<Rect>, b: Rect| {
+            Some(a.map_or(b, |a| {
+                Rect::new(
+                    a.left.min(b.left),
+                    a.bottom.min(b.bottom),
+                    a.right.max(b.right),
+                    a.top.max(b.top),
+                )
+            }))
         };
+        for (k, (s, t)) in self.seats.iter_mut().zip(targets).enumerate() {
+            if !active[k] {
+                continue;
+            }
+            let mode = match t.activity {
+                Activity::Goal => Mode::Goal,
+                Activity::Floating => Mode::Floating,
+                // a dead player's tracked y follows the body
+                Activity::Frozen => Mode::Fall,
+                _ => {
+                    if t.on_ground || t.vy > 0.0 {
+                        s.falling = false;
+                    } else if s.grounded {
+                        s.falling = true;
+                    }
+                    if s.falling { Mode::Fall } else { Mode::Ground }
+                }
+            };
+            s.grounded = t.on_ground;
+            goal |= mode == Mode::Goal;
+            goal_starts |= mode == Mode::Goal && !s.was_goal;
+            s.was_goal = mode == Mode::Goal;
+            floating &= mode == Mode::Floating;
+            s.tracker.update(mode, t.x, t.y, area.low());
+            high |= s.tracker.high;
+            vx += t.vx;
+            vy += t.vy;
+            let tr = &s.tracker;
+            boxes = union(boxes, Rect::new(tr.x - 8.0, tr.y, tr.x + 8.0, tr.y + 32.0));
+            homes = union(homes, tr.home());
+            // priority: goal 1, standing 6, running into a view edge 4, else 5
+            let p = if mode == Mode::Goal {
+                1
+            } else if t.vx.abs() <= EPS {
+                6
+            } else if (t.vx <= 0.0 && tr.x < view.left + 16.0)
+                || (t.vx > 0.0 && tr.x > view.right - 16.0)
+            {
+                4
+            } else {
+                5
+            };
+            // peeks: moving → the far side reaches out 64 px at 1 px/frame; standing with a
+            // direction holds them; otherwise they come back at 5 px/frame
+            let (mut l, mut r) = s.peek;
+            s.peek_dir = match p {
+                4 | 5 if t.vx > 0.0 => {
+                    l = toward(l, 0.0, 1.0);
+                    r = toward(r, PEEK, 1.0);
+                    1
+                }
+                4 | 5 => {
+                    l = toward(l, -PEEK, 1.0);
+                    r = toward(r, 0.0, 1.0);
+                    2
+                }
+                6 if s.peek_dir != 0 => 3,
+                _ => {
+                    l = toward(l, 0.0, 5.0);
+                    r = toward(r, 0.0, 5.0);
+                    0
+                }
+            };
+            let reach_r = view.right + if s.peek_dir == 1 { PEEK } else { 0.0 } - tr.x;
+            let reach_l = view.left - if s.peek_dir == 2 { PEEK } else { 0.0 } - tr.x;
+            s.peek = (l.max(reach_l.min(0.0)), r.min(reach_r.max(0.0)));
+            let cy = tr.y + 16.0;
+            let m = Rect::new(tr.x - 8.0, cy, tr.x + 8.0, cy + 32.0);
+            let pk = Rect::new(
+                m.left.min(tr.x + s.peek.0),
+                m.bottom,
+                m.right.max(tr.x + s.peek.1),
+                m.top,
+            );
+            peeks = union(peeks, pk);
+            must = match must {
+                Some((q, r)) if q < p => Some((q, r)),
+                Some((q, r)) if q == p => union(Some(r), m).map(|u| (p, u)),
+                _ => Some((p, m)),
+            };
+        }
+        let (Some(boxes), Some(mut home), Some(peeks)) = (boxes, homes, peeks) else {
+            return;
+        };
+        vx /= n as f32;
+        vy /= n as f32;
+        // the spread leans the focus toward the peeks (x edges only, as v3.0.3 does locally)
+        let w = ((peeks.width() - SPREAD_FROM) / SPREAD_RANGE).clamp(0.0, 1.0);
+        if w > 0.0 {
+            home.left = home.left * (1.0 - w) + peeks.left * w;
+            home.right = home.right * (1.0 - w) + peeks.right * w;
+        }
+        // the union's motion (none on the frame the count changes, so the focus eases over)
+        let motion = match self.union_prev {
+            Some(u) if !count_changed => (boxes.cx() - u.cx(), boxes.cy() - u.cy()),
+            _ => (0.0, 0.0),
+        };
+        self.union_prev = Some(boxes);
+        self.focus = Some(match self.focus {
+            None => home,
+            Some(f) => {
+                let (dx, dy) = (home.cx() - f.cx(), home.cy() - f.cy());
+                let len = (dx * dx + dy * dy).sqrt();
+                let (ux, uy) = if len > 0.0 {
+                    (dx / len, dy / len)
+                } else {
+                    (0.0, 0.0)
+                };
+                let cx = toward(f.cx(), home.cx(), motion.0.abs() + ux.abs());
+                let cy = toward(f.cy(), home.cy(), motion.1.abs() + uy.abs());
+                Rect::centred(cx, cy, home.width(), home.height())
+            }
+        });
+        let focus = self.focus.unwrap_or(home);
+        let mode = if goal {
+            Mode::Goal
+        } else if floating {
+            Mode::Floating
+        } else {
+            Mode::Ground
+        };
+        self.follow(
+            area,
+            &Follow {
+                focus,
+                must: must.filter(|&(p, _)| p < 5).map(|(_, m)| m),
+                vx,
+                vy,
+                motion_x: if goal_starts { 0.0 } else { motion.0 },
+                mode,
+                high,
+                join,
+            },
+            &solid,
+        );
+    }
+
+    /// From the focus on: limits, target, both followers, the must-contain nudge (shared by one
+    /// and several players).
+    fn follow(&mut self, area: &Area, f: &Follow, solid: &impl Fn(i32, i32) -> bool) {
+        let Follow {
+            focus,
+            must,
+            mode,
+            high,
+            join,
+            ..
+        } = *f;
+        // low-camera ceiling lifts by a tile while the player is high up
+        let lift = if area.low() && high { HIGH_OFFSET } else { 0.0 };
         self.top_offset = toward(self.top_offset, lift, 1.0);
 
         if self.entering {
@@ -559,7 +882,7 @@ impl Camera {
             desired = desired.shifted(contain_shift_x(&m, &desired), contain_shift_y(&m, &desired));
         }
 
-        self.update_limits(area, &desired, &solid);
+        self.update_limits(area, &desired, solid);
         let goal_rect = desired
             .shifted_into(&self.limits)
             .shifted_into(&area.bounds);
@@ -567,27 +890,23 @@ impl Camera {
         // followers
         let vx_toward = {
             let (cx, tx) = (self.view.cx(), goal_rect.cx());
-            let toward_target = if tx <= cx {
-                target.vx < 0.0
-            } else {
-                target.vx > 0.0
-            };
-            if toward_target { target.vx.abs() } else { 0.0 }
+            let toward_target = if tx <= cx { f.vx < 0.0 } else { f.vx > 0.0 };
+            if toward_target { f.vx.abs() } else { 0.0 }
         };
-        let motion_x = if goal_starts { 0.0 } else { motion.0 };
         let cx = follow_x(
             self.view.cx(),
             goal_rect.cx(),
             vx_toward,
-            motion_x,
+            f.motion_x,
             mode == Mode::Goal,
+            join,
         );
         let requested = match mode {
             Mode::Goal => 4,
             Mode::Floating => 3,
             _ => 1,
         };
-        let cy = self.follow_y(area, self.view.cy(), goal_rect.cy(), target.vy, requested);
+        let cy = self.follow_y(area, self.view.cy(), goal_rect.cy(), f.vy, requested, join);
         self.view = Rect::centred(cx, cy, VIEW_W, VIEW_H);
 
         // keep the must-contain region in view, at most 1 px per frame
@@ -671,7 +990,15 @@ impl Camera {
     }
 
     /// Vertical follower [spec §4.6].
-    fn follow_y(&mut self, area: &Area, cy: f32, ty: f32, vy: f32, requested: u8) -> f32 {
+    fn follow_y(
+        &mut self,
+        area: &Area,
+        cy: f32,
+        ty: f32,
+        vy: f32,
+        requested: u8,
+        join: f32,
+    ) -> f32 {
         let mut s = requested;
         if self.strategy == 0 && area.main && area.low() && ty < cy {
             s = 0;
@@ -687,7 +1014,7 @@ impl Camera {
         } else {
             floor
         };
-        let v = strategy_speed(s, goal - cy);
+        let v = strategy_speed(s, goal - cy, join);
         self.weight = toward(self.weight, 1.0, 0.1);
         if self.speed_y.abs() <= v.abs() {
             let step = ((v - self.speed_y) * self.weight).abs().max(0.1);
@@ -719,7 +1046,7 @@ impl Default for Camera {
 
 /// Horizontal follower, normal state [spec §4.5]. `vx_toward` is |vx| when the player moves the
 /// way the camera must move, else 0; `motion_x` is the player's x motion this frame.
-fn follow_x(cx: f32, tx: f32, vx_toward: f32, motion_x: f32, goal: bool) -> f32 {
+fn follow_x(cx: f32, tx: f32, vx_toward: f32, motion_x: f32, goal: bool, join: f32) -> f32 {
     let a = (tx - cx).abs();
     let distance_cap = if a >= 32.0 {
         let r = ((a - 32.0) / 64.0).clamp(0.0, 1.0);
@@ -730,7 +1057,7 @@ fn follow_x(cx: f32, tx: f32, vx_toward: f32, motion_x: f32, goal: bool) -> f32 
     let floor = if goal { 2.0 } else { 1.0 };
     let s = motion_x.abs() * 1.5 + 1.0;
     let player_cap = if floor <= s {
-        (JOIN_WEIGHT * 5.0 + 1.0).min(s)
+        (join * 5.0 + 1.0).min(s)
     } else {
         floor
     };
@@ -741,7 +1068,7 @@ fn follow_x(cx: f32, tx: f32, vx_toward: f32, motion_x: f32, goal: bool) -> f32 
 }
 
 /// Vertical strategy speeds for a distance `d` (target − current) [spec §4.6 table].
-fn strategy_speed(strategy: u8, d: f32) -> f32 {
+fn strategy_speed(strategy: u8, d: f32, join: f32) -> f32 {
     let a = d.abs();
     let curve = |cap_up: f32, cap_down: f32| {
         let f = a / 16.0;
@@ -754,7 +1081,7 @@ fn strategy_speed(strategy: u8, d: f32) -> f32 {
         if v < 0.01 {
             0.01
         } else {
-            v.min(JOIN_WEIGHT * cap + 0.01)
+            v.min(join * cap + 0.01)
         }
     };
     match strategy {
@@ -767,7 +1094,7 @@ fn strategy_speed(strategy: u8, d: f32) -> f32 {
         }
         1 => curve(4.99, 7.99),
         2 => a * 0.5,
-        3 => (a * 0.1).min(8.0 * JOIN_WEIGHT),
+        3 => (a * 0.1).min(8.0 * join),
         4 => curve(4.99, 4.99),
         _ => a,
     }
@@ -1004,11 +1331,11 @@ mod tests {
 
     #[test]
     fn vertical_follow_is_gentler_upward() {
-        assert!(strategy_speed(1, 64.0) < strategy_speed(1, -64.0));
-        assert!((strategy_speed(1, 200.0) - 5.0).abs() < 1e-4);
-        assert!((strategy_speed(1, -200.0) - 8.0).abs() < 1e-4);
-        assert_eq!(strategy_speed(0, 50.0), 0.0);
-        assert!((strategy_speed(0, -50.0) - 5.0).abs() < 1e-4);
+        assert!(strategy_speed(1, 64.0, JOIN_WEIGHT) < strategy_speed(1, -64.0, JOIN_WEIGHT));
+        assert!((strategy_speed(1, 200.0, JOIN_WEIGHT) - 5.0).abs() < 1e-4);
+        assert!((strategy_speed(1, -200.0, JOIN_WEIGHT) - 8.0).abs() < 1e-4);
+        assert_eq!(strategy_speed(0, 50.0, JOIN_WEIGHT), 0.0);
+        assert!((strategy_speed(0, -50.0, JOIN_WEIGHT) - 5.0).abs() < 1e-4);
     }
 
     #[test]
@@ -1112,10 +1439,10 @@ mod tests {
     #[test]
     fn follower_catch_up_is_capped() {
         // far behind and the player stopped: 5..8.5 px per frame
-        assert!((follow_x(0.0, 20.0, 0.0, 0.0, false) - 1.0).abs() < 1e-4);
-        assert!((follow_x(0.0, 200.0, 0.0, 10.0, false) - 6.0).abs() < 1e-4);
-        assert!((follow_x(0.0, 200.0, 0.0, 0.0, false) - 1.0).abs() < 1e-4);
+        assert!((follow_x(0.0, 20.0, 0.0, 0.0, false, JOIN_WEIGHT) - 1.0).abs() < 1e-4);
+        assert!((follow_x(0.0, 200.0, 0.0, 10.0, false, JOIN_WEIGHT) - 6.0).abs() < 1e-4);
+        assert!((follow_x(0.0, 200.0, 0.0, 0.0, false, JOIN_WEIGHT) - 1.0).abs() < 1e-4);
         // the player's speed is added when moving the same way
-        assert!((follow_x(0.0, 200.0, 3.0, 3.0, false) - 8.5).abs() < 1e-4);
+        assert!((follow_x(0.0, 200.0, 3.0, 3.0, false, JOIN_WEIGHT) - 8.5).abs() < 1e-4);
     }
 }

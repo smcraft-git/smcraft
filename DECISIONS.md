@@ -1508,3 +1508,20 @@ under `recomp/private|generated|build/`, and text that looks like disassembly or
   `research/specs/audio.md` §11: pan depth 0.5, the attenuation reference (the view's edge),
   effect sends at 1.0, limit types other than 2 needing a strictly higher priority, the Yoshi
   layer's 30-frame fade, footsteps every 9 px of walk cycle, the low-pass cutoff mapping.
+
+## 2026-10-22 — Local co-op: SMM2's local rules, one shared life
+- Co-op follows SMM2's same-console Play Together as read from the binary
+  (`research/specs/local-coop.md`, private): no bubble by button (only after a death), bubbles
+  pop on touch, the goal waits for the others, warps take everyone, players never hurt each
+  other. SMM2 itself has no lives there (Coursebot / Course World); the owner's rule adds one
+  shared life counter for the party, lost only when nobody is left in play — the model of
+  SMM2's Super World co-op.
+- Engine shape: one player in play (the lead) runs the world's tick and the others the
+  player's part of it (`World::step` with `coop.extra`), each swapped into `World::player` with
+  the world fields that belong to a player. One player never takes these paths, so its results
+  (and replays, which are one player) are unchanged: no SIM_VERSION bump. Co-op itself changes
+  netplay's rules, so peers must run the same build.
+- Departures: the warp's 180-frame wait for stragglers isn't modelled (the world waits while
+  the leader travels, as in single player); the other pole players slide and walk in after the
+  winner without SMM2's height-ordered choreography details.
+

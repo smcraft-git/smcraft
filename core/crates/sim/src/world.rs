@@ -28,6 +28,7 @@ use crate::render::{Sprite, SpriteImage};
 use crate::warp::{self, SideHold, Transit};
 
 mod bosses;
+pub mod coop;
 mod debug;
 mod smm1;
 use smm1::Smm1Shell;
@@ -127,6 +128,9 @@ pub enum Event {
     Explode,
     PropellerBox,
     KillerBreak,
+    /// Co-op: a player came back in a bubble; a bubble popped.
+    Bubble,
+    BubblePop,
 }
 
 /// P-switch duration: 540 frames, reloaded by every press (the course switch state's P timer,
@@ -331,6 +335,8 @@ pub struct World {
     pub v3: v3::V3World,
     /// World state of the update power-ups (world/powerups.rs).
     pu: powerups::PuWorld,
+    /// Local co-op (world/coop.rs): empty with one player.
+    pub coop: coop::Coop,
 }
 
 impl Default for World {
@@ -534,6 +540,7 @@ impl World {
             style,
             others: Vec::new(),
             other_chars: Vec::new(),
+            coop: Default::default(),
             main_char: 0,
             yoshi_mouth: None,
             tongue: 0,
@@ -616,6 +623,7 @@ impl World {
         }
         self.mark_taken_big_coins();
         self.custom_scroll = None;
+        self.coop.reset = true;
         let (px, py) = (self.player.x, self.player.y);
         for (k, o) in self.others.iter_mut().enumerate() {
             *o = Player::new(px - 12.0 * (k + 1) as f32, py);
@@ -1602,9 +1610,13 @@ impl World {
         } else {
             input
         };
-        self.events.clear();
-        self.fx.clear();
-        self.tick += 1;
+        // co-op: an extra player's pass (world/coop.rs) runs only the player's part of the tick
+        let main_pass = !self.coop.extra;
+        if main_pass {
+            self.events.clear();
+            self.fx.clear();
+            self.tick += 1;
+        }
 
         // death sequence: the world is frozen; restart when the fall ends
         if !self.player.alive() {
@@ -1642,18 +1654,22 @@ impl World {
         self.player.style = self.style;
         self.player.on_ice = self.ice_under_player();
         self.player.low_gravity = self.level.theme == 8 && self.level.night;
-        self.step_wind();
-        self.player.wind = if self.player.alive() { self.wind } else { 0.0 };
-        if let Some(l) = &mut self.liquid {
-            l.step();
+        if main_pass {
+            self.step_wind();
+            if let Some(l) = &mut self.liquid {
+                l.step();
+            }
         }
+        self.player.wind = if self.player.alive() { self.wind } else { 0.0 };
         self.player.in_water = self
             .liquid
             .is_some_and(|l| l.water() && l.covers(self.player.y + 8.0))
             || (self.level.theme == 2 && self.level.night); // castle night: swim in the air
         self.jump_pressed_now = jump_held && !self.prev_jump_tramp;
         self.prev_jump_tramp = jump_held;
-        self.step_platforms(jump_held, input.dir_x());
+        if main_pass {
+            self.step_platforms(jump_held, input.dir_x());
+        }
         self.conveyor_carry();
         let prev_x = self.player.x;
         if self.player.clown.is_some() {
@@ -1792,7 +1808,7 @@ impl World {
                 self.events.push(Event::Death);
                 return;
             }
-            for a in &mut self.actors {
+            for a in self.actors.iter_mut().filter(|_| main_pass) {
                 if a.alive()
                     && l.covers(a.y + 2.0)
                     && !a.kind.is_platform()
@@ -1803,13 +1819,23 @@ impl World {
                 }
             }
         }
-        self.snuff_superballs();
+        if main_pass {
+            self.snuff_superballs();
+        }
         self.collect_coins();
         self.step_donuts();
-        self.step_p_switch();
-        self.step_v3();
+        if main_pass {
+            self.step_p_switch();
+            self.step_v3();
+        }
         self.step_powerups();
-        self.step_area_timer();
+        if main_pass {
+            self.step_area_timer();
+        }
+        if !main_pass {
+            self.extra_player_rest(input, jump_held);
+            return;
+        }
 
         // blocks, actors, effects
         for r in self.blocks.step() {
@@ -1957,8 +1983,8 @@ impl World {
         }
         self.escort_toad_comeback();
 
-        // timer: one count per second of play
-        if self.time > 0 {
+        // timer: one count per second of play (stopped while a co-op goal waits)
+        if self.time > 0 && !self.coop.goal_waiting() {
             self.time -= 1;
             if self.time == HURRY_SECONDS * 60 {
                 self.events.push(Event::Hurry);
@@ -2005,85 +2031,6 @@ impl World {
             let mut t = Actor::new(Kind::EscortToad, p.x - 16.0 * p.facing as f32, p.y);
             t.dir = p.facing;
             self.add_actor(t);
-        }
-    }
-
-    /// Local multiplayer: `n` players in all (1–4). The extra players join beside player 1.
-    pub fn set_players(&mut self, n: usize) {
-        let n = n.clamp(1, 4) - 1;
-        let (px, py) = (self.player.x, self.player.y);
-        self.others = (0..n)
-            .map(|k| Player::new(px - 12.0 * (k + 1) as f32, py))
-            .collect();
-        self.other_chars = (1..=n).collect();
-    }
-
-    /// One tick with an input per player (player 1 first). Extra players run the same player
-    /// rules — physics, coins, items, enemies, the goal — swapped into player 1's place one at a
-    /// time. One who dies, or drops out of the view, comes back beside player 1 [inf: SMM2 puts
-    /// them in a bubble — player state 97 Balloon (0x71009c10e0 / 0x71009c12d0), which belongs
-    /// in player.rs]; any player reaching the goal clears the course for everyone.
-    pub fn step_players(&mut self, inputs: &[Input]) {
-        self.step(inputs.first().copied().unwrap_or_default());
-        let mut i = 0;
-        while i < self.others.len() {
-            let input = inputs.get(i + 1).copied().unwrap_or_default();
-            let goal_before = self.goal_phase != GoalPhase::None;
-            std::mem::swap(&mut self.player, &mut self.others[i]);
-            self.step_extra_player(input);
-            let took_goal = !goal_before && self.goal_phase != GoalPhase::None;
-            if took_goal {
-                // this player finishes the course: they become player 1 for the goal demo
-                std::mem::swap(&mut self.main_char, &mut self.other_chars[i]);
-            } else {
-                std::mem::swap(&mut self.player, &mut self.others[i]);
-            }
-            i += 1;
-        }
-    }
-
-    /// The per-player part of a tick for an extra player (in `self.player` meanwhile).
-    fn step_extra_player(&mut self, input: Input) {
-        if self.goal_phase != GoalPhase::None || self.transit.is_some() {
-            return;
-        }
-        let jump_held = input.held(input::JUMP);
-        self.player.style = self.style;
-        self.player.in_water = self
-            .liquid
-            .is_some_and(|l| l.water() && l.covers(self.player.y + 8.0));
-        self.player.step(input, &self.level);
-        if !self.player.alive() {
-            if self.player.restart_due() {
-                self.rejoin();
-            }
-            return;
-        }
-        if self.player.spiked && self.player.hurt() {
-            self.events.push(Event::PowerDown);
-        }
-        self.collect_coins();
-        self.player_interactions(jump_held);
-        self.check_goal();
-        let v = self.view_rect(64.0);
-        let p = &self.player;
-        if p.x < v.0 || p.x > v.2 || p.y < v.1 - 64.0 {
-            self.rejoin();
-        }
-    }
-
-    /// An extra player (in `self.player`) comes back beside player 1 (held in `others`).
-    fn rejoin(&mut self) {
-        let lead = self
-            .others
-            .iter()
-            .find(|o| o.alive())
-            .map(|o| (o.x, o.y))
-            .unwrap_or(self.level.start);
-        let form = self.player.form;
-        self.player = Player::new(lead.0, lead.1 + 32.0);
-        if self.player.alive() && form != Form::Small {
-            self.player.form = form;
         }
     }
 
@@ -4871,6 +4818,9 @@ impl World {
             self.add_actor(a);
             self.donut_ride = None;
         }
+        if self.coop.extra {
+            return;
+        }
         for a in &mut self.actors {
             if a.kind == Kind::Donut && a.y < -2.0 * TILE && a.mode != Mode::Dead {
                 a.mode = Mode::Dead;
@@ -4921,6 +4871,9 @@ impl World {
             (self.carry - 0.2).max(target)
         };
         self.player.x += self.carry;
+        if self.coop.extra {
+            return;
+        }
         // walkers on belts move with them
         let belts = self.level.conveyors.clone();
         for a in &mut self.actors {
@@ -5073,7 +5026,12 @@ impl World {
         self.player.pose = Pose::Pole;
         self.player.star = 0;
         self.add_score(award, x0 + 16.0, y);
-        self.goal_phase = GoalPhase::Hold { t: 10 };
+        if self.others.is_empty() {
+            self.goal_phase = GoalPhase::Hold { t: 10 };
+        } else {
+            // co-op: on the pole while the goal waits for the others (world/coop.rs)
+            self.coop_goal_touch();
+        }
         self.events.push(Event::Goal);
     }
 
@@ -5191,6 +5149,9 @@ impl World {
 
     /// Follow camera (camera.rs, research spec camera.md).
     fn update_camera(&mut self) {
+        if !self.others.is_empty() {
+            return; // co-op: the shared camera runs once everyone has moved (world/coop.rs)
+        }
         let p = &self.player;
         // frozen while dead and while travelling through a pipe/door (reset at the exit)
         let activity = if !p.alive() || self.transit.is_some() {
@@ -5222,9 +5183,13 @@ impl World {
         let area = self.camera_area();
         let (x, y) = (self.player.x, self.player.y);
         let level = &self.level;
-        self.camera.reset(&area, (x, y + 16.0), (x, y), |tx, ty| {
-            level.cell(tx, ty) == Cell::Solid
-        });
+        if self.others.is_empty() {
+            self.camera.reset(&area, (x, y + 16.0), (x, y), |tx, ty| {
+                level.cell(tx, ty) == Cell::Solid
+            });
+        } else {
+            self.coop_reset_camera();
+        }
         let v = self.camera.view(&self.camera_area());
         self.autoscroll_pos = if self.level.vertical {
             v.bottom
@@ -6086,6 +6051,7 @@ impl World {
                 out.push(s);
             }
         }
+        self.bubble_sprites(&mut out);
         self.yoshi_sprites(&mut out);
         if let Some(mut s) = self.player_sprite() {
             if self.player.yoshi.is_some() {
@@ -8472,44 +8438,6 @@ mod tests {
         );
         let pos = |w: &World| w.actors.iter().map(|x| (x.x, x.y)).collect::<Vec<_>>();
         assert_eq!(pos(&a), pos(&b));
-    }
-
-    #[test]
-    fn local_multiplayer_players_move_collect_and_rejoin() {
-        let mut lvl = Level::flat(60);
-        for x in 14..16 {
-            lvl.coins.push(CoinTile { x, y: 2 });
-        }
-        let mut w = World::with_level(lvl);
-        w.set_players(2);
-        assert_eq!(w.others.len(), 1);
-        let x0 = w.others[0].x;
-        // player 2 runs right, player 1 stands still
-        for _ in 0..90 {
-            w.step_players(&[
-                Input::default(),
-                Input {
-                    buttons: input::RIGHT,
-                },
-            ]);
-        }
-        assert!(w.others[0].x > x0 + 50.0, "player 2 moved");
-        assert!(w.player.x < 70.0, "player 1 stayed");
-        // player 2 walks into the coins
-        for _ in 0..120 {
-            w.step_players(&[
-                Input::default(),
-                Input {
-                    buttons: input::RIGHT,
-                },
-            ]);
-        }
-        assert!(w.coins >= 1, "coins count for everyone");
-        // far out of the view: back beside player 1
-        w.others[0].x = 5000.0;
-        w.step_players(&[Input::default(), Input::default()]);
-        assert!((w.others[0].x - w.player.x).abs() < 1.0);
-        assert!(w.sprites().len() > 2);
     }
 
     #[test]

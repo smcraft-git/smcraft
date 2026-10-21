@@ -142,6 +142,9 @@ impl World {
         self.pu_pick();
         self.pu_sword();
         self.pu_shield();
+        if self.coop.extra {
+            return; // the projectiles are the world's (world/coop.rs)
+        }
         self.pu_projectiles();
         self.pu_thrown();
         self.pu_red_pow();
