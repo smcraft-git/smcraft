@@ -1,0 +1,137 @@
+name: release
+
+# Builds SMCraft for every platform on a version tag (v*) and publishes a GitHub release with
+# the packages; started by hand (Actions → release → Run workflow) it builds them all as
+# artifacts and publishes nothing.
+# The packages hold the game only: no Nintendo data. Players import their own dump at the first
+# launch (drop folder or setup screen), after which the game never needs the dump or the keys.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: core
+    steps:
+      - uses: actions/checkout@v4
+      - run: cargo build --release -p mmk-shell -p mmk-cli
+      - shell: pwsh
+        run: |
+          $out = "../dist/SMCraft-windows-x64"
+          New-Item -ItemType Directory -Force $out | Out-Null
+          Copy-Item target/release/mmk-play.exe "$out/SMCraft.exe"
+          Copy-Item target/release/mmk.exe "$out/mmk.exe"
+          Copy-Item ../docs/windows.md "$out/README-windows.md"
+          Copy-Item ../LICENSE "$out/"
+          Compress-Archive -Path $out -DestinationPath ../dist/SMCraft-windows-x64.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: dist/SMCraft-windows-x64.zip
+
+  linux:
+    strategy:
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            arch: x86_64
+          - runner: ubuntu-24.04-arm
+            arch: aarch64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      # cpal links ALSA, gilrs libudev
+      - run: sudo apt-get update && sudo apt-get install -y libasound2-dev libudev-dev pkg-config
+      - run: cargo build --release -p mmk-shell -p mmk-cli
+        working-directory: core
+      - run: |
+          out=dist/SMCraft-linux-${{ matrix.arch }}
+          mkdir -p "$out"
+          cp core/target/release/mmk-play "$out/smcraft"
+          cp core/target/release/mmk "$out/mmk"
+          strip "$out/smcraft" "$out/mmk"
+          cp LICENSE README.md "$out/"
+          tar -C dist -czf "dist/SMCraft-linux-${{ matrix.arch }}.tar.gz" "SMCraft-linux-${{ matrix.arch }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-${{ matrix.arch }}
+          path: dist/SMCraft-linux-${{ matrix.arch }}.tar.gz
+
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: scripts/make-app.sh
+      - run: |
+          mkdir -p dist
+          ditto -c -k --keepParent build/SMCraft.app dist/SMCraft-macos.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: dist/SMCraft-macos.zip
+
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - run: rustup target add aarch64-linux-android
+        working-directory: core
+      # the runner's SDK has build-tools, platforms and NDKs; a release key from the repository's
+      # secrets keeps the signature the same across releases (else a fresh debug key)
+      - env:
+          ANDROID_NDK: ${{ env.ANDROID_NDK_LATEST_HOME }}
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+        run: |
+          mkdir -p build
+          if [ -n "$KEYSTORE_B64" ]; then echo "$KEYSTORE_B64" | base64 -d > build/android-debug.keystore; fi
+          scripts/build-android.sh
+          mkdir -p dist && cp build/SMCraft.apk dist/SMCraft-android-arm64.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android
+          path: dist/SMCraft-android-arm64.apk
+
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup target add wasm32-unknown-unknown
+        working-directory: core
+      - run: |
+          v=$(grep -A1 '^name = "wasm-bindgen"$' core/Cargo.lock | sed -n 's/^version = "\(.*\)"/\1/p')
+          cargo install wasm-bindgen-cli --version "$v" --locked
+      - run: |
+          scripts/build-web.sh dist/SMCraft-web
+          (cd dist && zip -qr SMCraft-web.zip SMCraft-web)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web
+          path: dist/SMCraft-web.zip
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [windows, linux, macos, android, web]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: packages
+          merge-multiple: true
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          notes=$(sed -n "/^## ${GITHUB_REF_NAME}/,/^## /p" CHANGELOG.md 2>/dev/null | sed '1d;$d')
+          gh release create "$GITHUB_REF_NAME" packages/* --title "SMCraft ${GITHUB_REF_NAME#v}" \
+            --notes "${notes:-SMCraft ${GITHUB_REF_NAME#v}}"
