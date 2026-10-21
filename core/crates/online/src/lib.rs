@@ -1,7 +1,9 @@
 //! Client of the open-source course server (`mmk-server`, Phase 10): Course World browsing,
 //! downloads, uploads and statistics, a [`CourseSource`] so 100 Mario runs can draw their
 //! courses from a server, and the server-held Endless Challenge runs (`Client::endless_*`).
-//! Never talks to Nintendo's network.
+//! Never talks to Nintendo's network. [`nextendo`]: signing in to Nextendo Network (Network Play).
+
+pub mod nextendo;
 
 use mmk_modes::Rng;
 use mmk_modes::endless::{Difficulty, Finished, HistoryEntry, Report, Ruleset, RunStatus};

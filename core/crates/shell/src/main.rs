@@ -141,6 +141,29 @@ mod native {
         /// Online play: which player we are (0 = player 1 … 3 = player 4).
         #[arg(long, default_value_t = 0)]
         net_player: usize,
+        /// Network Play through a local NEX test server (scripts/nex-local.sh), named by its
+        /// authentication address, e.g. 127.0.0.1:52601: sign-in, matchmaking (SMCraft-only
+        /// sessions) and NAT traversal there, then co-op over the rollback netcode. Every player
+        /// gives the same course (--net-players: how many, default 2).
+        #[arg(long, value_name = "ADDR")]
+        nextendo_local: Option<String>,
+        /// Network Play: the game server's PRUDP access key (default $SMCRAFT_NEX_ACCESS_KEY).
+        #[arg(long)]
+        nex_access_key: Option<String>,
+        /// With --nextendo-local: the test server's token secret (default
+        /// $SMCRAFT_NEX_TOKEN_SECRET), to make the test account's game token.
+        #[arg(long)]
+        nex_token_secret: Option<String>,
+        /// With --nextendo-local: the test account's PID (default: a random one).
+        #[arg(long)]
+        nex_pid: Option<u64>,
+        /// Sign in to Nextendo Network in the browser (OAuth with PKCE; the sign-in is kept in
+        /// the player data folder, private), then exit.
+        #[arg(long)]
+        nextendo_sign_in: bool,
+        /// Forget the Nextendo sign-in, then exit.
+        #[arg(long)]
+        nextendo_sign_out: bool,
         /// Local multiplayer: 1–4 players (keyboard + first pad, then one pad each).
         #[arg(long, default_value_t = 1)]
         players: usize,
@@ -277,6 +300,91 @@ mod native {
             o.apply(a)?;
         }
         Ok(o)
+    }
+
+    /// Network Play against a local NEX server: a test account (a game token made with the
+    /// server's secret, as Nextendo's account server would make it), then matchmaking and the
+    /// hole punch (`mmk_nex::play`).
+    fn network_play_local(
+        args: &Args,
+        addr: &str,
+        course: Option<&[u8]>,
+    ) -> Result<mmk_nex::play::Match, String> {
+        use mmk_nex::{crypto, play, token};
+        let env = |k: &str| std::env::var(k).ok().filter(|v| !v.is_empty());
+        let key = args
+            .nex_access_key
+            .clone()
+            .or_else(|| env("SMCRAFT_NEX_ACCESS_KEY"))
+            .ok_or("--nextendo-local needs --nex-access-key (or $SMCRAFT_NEX_ACCESS_KEY)")?;
+        let secret = args
+            .nex_token_secret
+            .clone()
+            .or_else(|| env("SMCRAFT_NEX_TOKEN_SECRET"))
+            .ok_or("--nextendo-local needs --nex-token-secret (or $SMCRAFT_NEX_TOKEN_SECRET)")?;
+        let pid = args.nex_pid.unwrap_or_else(|| {
+            1_000_000
+                + u64::from(u32::from_le_bytes(
+                    crypto::random_bytes(4).try_into().unwrap(),
+                )) % 1_000_000_000
+        });
+        let nx2 = token::nx2_token_for_a_day(secret.as_bytes(), pid, "player");
+        let id_token = token::id_token(pid, &nx2, &crypto::random_bytes(32));
+        let course_hash = course.map_or(0, |c| {
+            u64::from_le_bytes(crypto::sha256(c)[..8].try_into().unwrap())
+        });
+        let bind = args.net_bind.clone().unwrap_or_else(|| "0.0.0.0:0".into());
+        log("Network Play: signing in to the local NEX server");
+        play::find_match(play::PlayConfig {
+            server: mmk_nex::GameServer::smm2(&format!("ws://{addr}/"), &key),
+            pid,
+            id_token,
+            kind: mmk_nex::matchmaking::smcraft::KIND_COOP,
+            players: args.net_players.unwrap_or(2) as u16,
+            course: course_hash,
+            bind: bind
+                .parse()
+                .map_err(|e| format!("--net-bind {bind}: {e}"))?,
+            advertise: None,
+            nat_check: None,
+            wait: std::time::Duration::from_secs(300),
+            log: Arc::new(|m: &str| log(m)),
+        })
+        .map_err(|e| format!("Network Play: {}", mmk_nex::client::describe(&e)))
+    }
+
+    /// --nextendo-sign-in / --nextendo-sign-out: the account sign-in, kept privately.
+    fn nextendo_account(sign_in: bool) -> Result<(), String> {
+        use mmk_online::nextendo::{Account, Config, FileStore};
+        let path = mmk_host::paths::play_data()
+            .ok_or("no player data folder")?
+            .join("nextendo.json");
+        let store = FileStore { path };
+        let acct = Account {
+            cfg: Config::from_env(),
+            store: &store,
+        };
+        if !sign_in {
+            acct.sign_out();
+            println!("Signed out of Nextendo.");
+            return Ok(());
+        }
+        let g = acct.sign_in(
+            |url| {
+                println!("Sign in to Nextendo in your browser:\n{url}");
+                let opener = if cfg!(target_os = "macos") {
+                    "open"
+                } else if cfg!(windows) {
+                    "explorer"
+                } else {
+                    "xdg-open"
+                };
+                let _ = std::process::Command::new(opener).arg(url).status();
+            },
+            std::time::Duration::from_secs(300),
+        )?;
+        println!("Signed in to Nextendo as {}.", g.username);
+        Ok(())
     }
 
     fn default_assets() -> Option<PathBuf> {
@@ -482,6 +590,9 @@ mod native {
 
     pub fn run() -> Result<(), String> {
         let args = Args::parse();
+        if args.nextendo_sign_in || args.nextendo_sign_out {
+            return nextendo_account(args.nextendo_sign_in);
+        }
         if let Some(name) = &args.layout {
             let dir = args
                 .ui_cache
@@ -515,6 +626,7 @@ mod native {
             && args.code.is_none()
             && args.net_bind.is_none()
             && args.net_relay.is_none()
+            && args.nextendo_local.is_none()
             && args.map.is_none()
             && !args.check_textures
             && !args.no_menus
@@ -662,8 +774,23 @@ mod native {
         if args.players > 1 {
             game.session.world.set_players(args.players);
         }
+        // kept until the window closes: the secure connection stays open, then leaves the
+        // gathering
+        let mut _network_play = None;
+        let mut me = args.net_player;
         let link: Option<(Box<dyn mmk_netplay::Link>, usize, String)> =
-            if let Some(relay) = &args.net_relay {
+            if let Some(addr) = &args.nextendo_local {
+                let m = network_play_local(&args, addr, course.as_deref())?;
+                let l = mmk_netplay::UdpLink::from_socket(
+                    m.socket.try_clone().map_err(|e| e.to_string())?,
+                    m.peers.clone(),
+                )
+                .map_err(|e| e.to_string())?;
+                me = m.me;
+                let n = m.players;
+                _network_play = Some(m);
+                Some((Box::new(l), n, "Network Play (local NEX server)".into()))
+            } else if let Some(relay) = &args.net_relay {
                 use std::net::ToSocketAddrs;
                 let at = relay
                     .to_socket_addrs()
@@ -694,7 +821,7 @@ mod native {
                 None
             };
         if let Some((link, n, how)) = link {
-            game.session.go_online(link, n, args.net_player);
+            game.session.go_online(link, n, me);
             let s = &game.session.net.as_ref().unwrap().0;
             log(&format!(
                 "online: player {} of {}, {how}",

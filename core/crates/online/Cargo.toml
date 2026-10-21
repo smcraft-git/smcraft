@@ -8,6 +8,7 @@ publish.workspace = true
 
 [dependencies]
 mmk-modes = { path = "../modes" }
+mmk-nex = { path = "../nex" }
 serde_json.workspace = true
 ureq = "3.4.2"
 
