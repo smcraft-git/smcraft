@@ -84,19 +84,29 @@ sound-perfect as possible, that **never needs the ROM or key files to run**.
     Coursebot / Course World lists and playable there
   - ✅ captures `mmk-play --front-screen maker[-parts|-menu|-save|-style|-theme|-timer|
     -autoscroll|-mission|-play]` with `--front-script` presses, maker keys, cursor tiles, slots
-  - ⬜ custom autoscroll and its nodes, water level, the sub-area set-up window and vertical
-    sub-areas from the bar, the course's length (dragging the goal), start / goal heights,
-    multigrab, course name / description entry, the part variants balloon (Fast Conveyor …),
-    wings / parachutes / tracks / doors' partners placed by hand, maker BGM and the parts' edit
-    sounds (`Sound/Resource/Edit_*.bars`, not imported), the trash can, Mario's Trail, co-op
+  - ✅ dragging the start (its height) and the goal (its height, the course's length);
+    stretching parts by their right column / top row; multigrab (select, carry, copy, erase);
+    the sub-area turns vertical from the scroll bar
+  - ⬜ custom autoscroll and its nodes, water level, the sub-area set-up window, the vertical
+    scroll bar, the part variants balloon (Fast Conveyor …), wings / parachutes / tracks /
+    doors' partners placed by hand, pipes turned by their mouth, maker BGM
+    (`Sound/Resource/Stream/<S>_BGM_<Theme>_Edit.bwav`) and the parts' edit sounds
+    (`Sound/Resource/Edit_*.bars`) — neither imported yet, the trash can, Mario's Trail, co-op
     making
 - 🔄 Edit any course: the open row of the Course World / Coursebot lists has "Make" (the co-op
   button's slot, the Coursebot's word, the glove icon) → the maker; someone else's course (a
   code whose maker isn't the signed-in player) saves as a new Coursebot course with "based on
   <code> by <maker>" in its description, and so uploads ✅ · TGRCode courses ⬜
-- ⬜ Coursebot screens `Lcl_*` (save slots, the course window's Make / Play / Upload)
-- 🔄 The Swift app: its host has the maker hooks ✅; its input has no pointer or maker keys yet
-  (taps place / erase, the buttons work) ⬜; 3D styles' still view uses the play camera ⬜
+- ✅ Coursebot screens `Lcl_CourseList_00` / `Lcl_CourseListContents_00` /
+  `Lcl_CourseInfoWindow_00`: 120 My Courses slots with names and pictures (the start view drawn
+  from the engine's sprites), Downloaded Courses (the library's others), the course window (Make,
+  Play, Upload, Name, Description typed, Delete; Make New Course), play from it; the maker's
+  Save As ("Select Save Location", overwrite question) and Load ("Select a Course to Load") ·
+  ⬜ moving slots, the Super World filter, the download flow from Course World, CJK glyphs in
+  names
+- 🔄 The Swift app: its host has the maker and Coursebot hooks ✅; a finger / mouse held down
+  reaches the maker (paint, carry, erase) ✅; the maker keys from its keyboard ⬜; 3D styles'
+  still view uses the play camera ⬜
 
 **G5 — Super Worlds** ⬜
 - ⬜ Research: the `MyWorld` data and screens (v3.0.3), world map rules, save

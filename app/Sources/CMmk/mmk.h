@@ -333,7 +333,7 @@ typedef struct {
     uint32_t buttons;           // engine buttons (MMK_BTN_*) for the course
     uint32_t flags;             // bit 0 pause held, bit 1 skip held, bit 2 click this tick,
                                 // bit 3 pointer at click_x/y, bit 4 pointer down, bit 5
-                                // secondary down, bits 8-15 Course Maker keys
+                                // secondary down, bits 8-23 Course Maker keys
     float click_x, click_y;     // layout units (1280x720 view, origin centre, y up)
     uint32_t text;              // typed key while MMK_FRONT_TYPING: a Unicode scalar, 8 erase,
                                 // 10 finish, 27 cancel, 0 none (one per tick)
