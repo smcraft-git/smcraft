@@ -156,6 +156,17 @@ enum Cmd {
         /// The cache folder, e.g. ~/smm-work/cache/smm2-3.0.3
         out: PathBuf,
     },
+    /// Run only the `myworld` stage of `import` (the Super World maps' key table, found in the
+    /// user's own `main` with the RomFS's `MyWorld/new_layout_data.ldt`) into an existing SMM2
+    /// asset cache folder.
+    ImportMyworld {
+        /// Extracted RomFS (update applied).
+        romfs: PathBuf,
+        /// Extracted ExeFS (needs `main`).
+        exefs: PathBuf,
+        /// The cache folder, e.g. ~/smm-work/cache/smm2-3.0.3
+        out: PathBuf,
+    },
     /// Run only the effects stage of `import` (particle effects and their links, from the
     /// user's own extracted RomFS) into an existing asset cache folder (`<root>/smm2-<build>`).
     ImportEffects {
@@ -1318,6 +1329,27 @@ fn main() -> ExitCode {
                         out.join("audio").display()
                     );
                     ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("import failed: {e}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
+        Cmd::ImportMyworld { romfs, exefs, out } => {
+            let r = mmk_import::identify(&exefs)
+                .and_then(|(nso, _)| mmk_import::myworld::import_world_keys(&romfs, &nso, &out));
+            match r {
+                Ok(true) => {
+                    println!(
+                        "wrote {}",
+                        out.join(mmk_import::myworld::TABLE_FILE).display()
+                    );
+                    ExitCode::SUCCESS
+                }
+                Ok(false) => {
+                    eprintln!("this RomFS has no Super Worlds (a build before 3.0.0)");
+                    ExitCode::FAILURE
                 }
                 Err(e) => {
                     eprintln!("import failed: {e}");
