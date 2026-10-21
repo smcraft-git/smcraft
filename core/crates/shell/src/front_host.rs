@@ -661,6 +661,23 @@ impl Host for ShellHost<'_> {
     }
 
     fn online(&mut self, id: u32, action: &str, args: &Value, token: Option<&str>) -> bool {
+        // the maker's uploads go to our own course server whichever Course World is shown
+        // (TGRCode is read-only)
+        if action == "upload" {
+            let Some(server) = self.data.server.clone().filter(|s| !s.is_empty()) else {
+                return false;
+            };
+            let tx = self.data.online_tx();
+            let (token, args) = (
+                token.filter(|t| !t.is_empty()).map(str::to_string),
+                args.clone(),
+            );
+            std::thread::spawn(move || {
+                let a = mmk_online::call(&server, token.as_deref(), "upload", &args);
+                let _ = tx.send((id, Answer::Json(a)));
+            });
+            return true;
+        }
         if !self.data.backend.online() {
             return false;
         }
@@ -1016,7 +1033,8 @@ mod tests {
         let mut game = Game::load(None, None).unwrap();
         let mut data = HostData::new(None);
         data.server = Some(format!("http://{addr}"));
-        data.backend = mmk_online::world::Backend::Server(format!("http://{addr}"));
+        // (Course World on TGRCode: uploads still go to the own server)
+        data.server = Some(format!("http://{addr}"));
         let mut host = ShellHost {
             game: &mut game,
             data: &mut data,

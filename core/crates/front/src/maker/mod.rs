@@ -2160,7 +2160,7 @@ impl MakerFlow {
         let args = serde_json::json!({ "course": hex_rle(&bytes) });
         self.upload_call = cx.online.call(cx.host, "upload", args);
         if self.upload_call.is_none() {
-            cx.toast("No course server is set (Settings).");
+            cx.toast(UPLOAD_NEEDS_SERVER);
         }
     }
 
@@ -2829,6 +2829,10 @@ impl MakerFlow {
 
 /// The scroll bar handle's width (`N_TransRoot_00` of `Edit_SlideAreaBtnH_00`) [obs data].
 const HANDLE: f32 = 110.0;
+
+/// Why an upload went nowhere: uploads go to the own course server (the host sends them there
+/// whichever Course World is shown); TGRCode only reads.
+pub const UPLOAD_NEEDS_SERVER: &str = "Uploading needs your own course server (TGRCode is read-only): set it in Settings or with --server.";
 
 /// Ticks after a pointer press within which a tap is the press's own.
 const TAP_AFTER: i32 = 30;
