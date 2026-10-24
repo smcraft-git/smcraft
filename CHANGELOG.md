@@ -151,6 +151,12 @@ SMCraft is back in development (it was archived in October 2026).
   press, a piece per step as you drag, on from an end (open ends stay open), back to take pieces
   away. A door or warp box brings its partner a tile to the right. Riders and parachutes stay out
   of stacks.
+- **Course Maker: what is inside**: hold a block (or anything holding a part) still and a balloon
+  shows what is in it, with its wings or parachute, as SMM2 does; moving on carries the block.
+  Track joints are written the way SMM2 writes them (a down-right diagonal's ends were swapped:
+  opening its upper-left end opened the other one in play). A door or warp box whose partner's
+  tile is taken can't be put there (it went to the next free column). The part balloon opens on
+  the side of the part SMM2 chooses.
 - **SMM2's colours on its screens**: buttons, banners and text now show the colours SMM2 shows
   (the yellow OK and menu buttons were orange), and windows with flipped frames are whole again
   (the tips' window lost its bottom edge). Import the SMM2 UI again for the maker's new pictures

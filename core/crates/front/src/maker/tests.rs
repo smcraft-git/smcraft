@@ -1972,3 +1972,85 @@ fn custom_autoscroll_comes_from_the_window_with_its_tip_once() {
     // the sub-area has no custom autoscroll
     assert!(MakerFlow::window_choices(3, false).iter().all(|c| c.1 < 4));
 }
+
+#[test]
+fn holding_a_container_still_shows_what_is_inside_it() {
+    let (mut host, mut saves) = (MockHost::default(), Saves::default());
+    let mut m = maker(&mut host, &mut saves, MakerStart::New("M1".into()));
+    // a ? block with a winged Goomba in it
+    let q = m.editor.place(5, 12, 4).unwrap();
+    m.editor
+        .try_set_child(q, 0, mmk_editor::DEFAULT_FLAGS | 0x2)
+        .unwrap();
+    m.cur = (12, 4);
+    hold_on_part(&mut m, &mut host, &mut saves, attr::HOLD - 1);
+    assert!(m.contents_shown().is_none(), "not yet");
+    run(&mut m, &mut host, &mut saves, held(Buttons::CONFIRM));
+    // the contents balloon comes instead of the attribute one (0x7100e9e400 first)
+    assert_eq!(
+        m.contents_shown(),
+        Some((0, mmk_editor::DEFAULT_FLAGS | 0x2))
+    );
+    assert!(m.attr_options_shown().is_none());
+    assert!(m.carrying(), "the press still holds the block");
+    let c = m.contents.as_ref().unwrap();
+    assert!(!c.big());
+    assert_eq!(
+        c.picture_flags() & 0x2,
+        0,
+        "the wings are the layout's dummies"
+    );
+    // held on: still shown; moved: the block is carried and the balloon goes
+    for _ in 0..10 {
+        run(&mut m, &mut host, &mut saves, held(Buttons::CONFIRM));
+    }
+    assert!(m.contents_shown().is_some());
+    m.cur = (14, 4);
+    run(&mut m, &mut host, &mut saves, held(Buttons::CONFIRM));
+    assert!(m.contents_shown().is_none());
+    assert!(m.carrying());
+    run(&mut m, &mut host, &mut saves, idle());
+    assert_eq!(
+        m.editor.object_at(14, 4),
+        Some(q),
+        "carried, contents and all"
+    );
+    // shown again on a new hold, and gone when the press ends
+    hold_on_part(&mut m, &mut host, &mut saves, attr::HOLD);
+    assert!(m.contents_shown().is_some());
+    run(&mut m, &mut host, &mut saves, idle());
+    assert!(m.contents_shown().is_none());
+    assert_eq!(m.editor.object_at(14, 4), Some(q), "not moved");
+    // an empty block opens its attribute balloon as before
+    m.editor.place(5, 20, 4).unwrap();
+    m.cur = (20, 4);
+    hold_on_part(&mut m, &mut host, &mut saves, attr::HOLD);
+    assert!(m.contents_shown().is_none());
+    assert!(m.attr_options_shown().is_some());
+}
+
+#[test]
+fn balloons_take_the_side_the_game_picks_from_the_screen_place() {
+    // the attribute balloon (0x71018bb490): left of x 20, below above y 40
+    let side = |x, y| attr::direction([x, y], 20.0, 40.0);
+    assert_eq!(
+        [
+            side(0.0, 0.0),
+            side(21.0, 0.0),
+            side(21.0, 40.0),
+            side(20.0, 41.0)
+        ],
+        [0, 1, 2, 3]
+    );
+    // the contents balloon (0x71018c4450): left of x −350, below above y 160
+    let side = |x, y| attr::direction([x, y], -350.0, 160.0);
+    assert_eq!(
+        [
+            side(-400.0, 0.0),
+            side(0.0, 0.0),
+            side(0.0, 200.0),
+            side(-400.0, 200.0)
+        ],
+        [0, 1, 2, 3]
+    );
+}

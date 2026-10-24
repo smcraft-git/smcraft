@@ -286,27 +286,18 @@ impl Editor {
     }
 
     /// Put down a door (55) or warp box (97) as the game does: its partner comes with it one
-    /// tile to the right at the same height with the pair's other warp id (0x7100ec9c00: the
-    /// new door's x + 16 px, id + 1, then moved clear of what is there by 0x7100e9b840) [obs];
-    /// where that tile is taken the partner goes to the nearest free column, right first [inf:
-    /// 0x7100e9b840 not read].
+    /// tile to the right at the same height with the pair's other warp id (0x7100ec9c00 /
+    /// 0x7100f461c0: the new door's x + 16 px, id + 1, snapped to the grid by 0x7100e9b840).
+    /// Nothing moves the partner: a door may be put only when it and its partner can both be
+    /// (0x7100eca770, the door's vt +0x278), so with that tile taken the pair is refused
+    /// [obs v3.0.3].
     pub fn put_pair(&mut self, part: i16, at: (i32, i32)) -> Result<(usize, usize), EditError> {
-        let mut first = None;
-        for d in [1, 2, -1, 3, -2, 4, -3, 5, -4] {
-            let b = (at.0 + d, at.1);
-            let r = if part == 55 {
-                self.place_doors(at, b, DoorKind::Normal)
-            } else {
-                self.place_warp_boxes(at, b, false)
-            };
-            match r {
-                Ok(p) => return Ok(p),
-                Err(e) => {
-                    first.get_or_insert(e);
-                }
-            }
+        let b = (at.0 + 1, at.1);
+        if part == 55 {
+            self.place_doors(at, b, DoorKind::Normal)
+        } else {
+            self.place_warp_boxes(at, b, false)
         }
-        Err(first.unwrap_or(EditError::Occupied))
     }
 
     fn place_pair(
@@ -539,10 +530,13 @@ mod tests {
         assert_eq!((fp(&e, a).x, fp(&e, b).x), (20, 21));
         assert_eq!(fp(&e, b).y, 2, "the same height");
         assert_eq!(e.partner(a), Some(b));
-        // that tile taken: the nearest free column, right first
+        // that tile taken: nothing moves the partner, the pair is refused (0x7100eca770)
         e.place(6, 31, 2).unwrap();
-        let (c, d) = e.put_pair(55, (30, 2)).unwrap();
-        assert_eq!((fp(&e, c).x, fp(&e, d).x), (30, 32));
+        let before = e.area().objects.items.len();
+        assert!(e.put_pair(55, (30, 2)).is_err());
+        assert_eq!(e.area().objects.items.len(), before, "neither door stays");
+        let (c, d) = e.put_pair(55, (32, 2)).unwrap();
+        assert_eq!((fp(&e, c).x, fp(&e, d).x), (32, 33));
         round_trip(&e);
         // warp boxes (3D World) the same way
         let mut e = flat("3W");
