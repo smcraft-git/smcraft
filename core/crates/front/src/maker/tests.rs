@@ -669,6 +669,17 @@ fn semisolids_and_pipes_stretch_by_their_edges() {
     run(&mut m, &mut host, &mut saves, idle());
     let o = m.editor.object(s).unwrap();
     assert_eq!((o.width, o.height), (6, 6));
+    let heard: Vec<&str> = host
+        .edit_sounds
+        .iter()
+        .filter(|(u, _)| u == "M1_EditGroundBox")
+        .map(|(_, k)| k.as_str())
+        .collect();
+    assert_eq!(
+        heard,
+        ["drag", "move", "set"],
+        "picked by its edge, stretched, let go"
+    );
     // a pipe's top: longer
     m.slot = m.palette.iter().position(|&t| t == Tool::Pipe).unwrap();
     m.cur = (40, 1);

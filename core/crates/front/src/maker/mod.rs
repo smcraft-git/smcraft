@@ -820,6 +820,7 @@ impl MakerFlow {
                 Some(Drag::MoveSelection { .. }) => Some(7),
                 Some(Drag::Start { .. }) => Some(START_GROUND),
                 Some(Drag::Goal { .. }) => Some(GOAL_GROUND),
+                Some(Drag::Resize { index, .. }) => self.editor.object(index).map(|o| o.id),
                 _ => None,
             };
             if let Some(p) = part {
@@ -1210,6 +1211,9 @@ impl MakerFlow {
                     height,
                     changed: false,
                 });
+                if let Some(id) = self.editor.object(i).map(|o| o.id) {
+                    self.sound(id, "drag");
+                }
                 return;
             }
             if let Tool::Part(p) = self.tool()
@@ -1299,6 +1303,16 @@ impl MakerFlow {
         match self.drag {
             Some(Drag::Start { changed: true }) => self.sound(START_GROUND, "set"),
             Some(Drag::Goal { changed: true, .. }) => self.sound(GOAL_GROUND, "set"),
+            // a stretched part, as one put down [inf]
+            Some(Drag::Resize {
+                index,
+                changed: true,
+                ..
+            }) => {
+                if let Some(id) = self.editor.object(index).map(|o| o.id) {
+                    self.sound(id, "set");
+                }
+            }
             _ => {}
         }
         let changed = match self.drag.take() {
