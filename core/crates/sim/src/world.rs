@@ -5223,7 +5223,11 @@ impl World {
         self.actors.iter().any(|a| {
             // (the walkers, and Piranha Plants outside 3D World; other enemies keep the
             // next-frame rule)
-            let kind_ok = a.kind.is_walker() || (!w3 && matches!(a.kind, Kind::Piranha { .. }));
+            // (a Goomba's Shoe too, a Basic-action walker [obs: Ryujinx trace W_3145588, a big
+            // Stiletto coming down onto the player: dead that frame])
+            let kind_ok = a.kind.is_walker()
+                || matches!(a.kind, Kind::ShoeGoomba { .. })
+                || (!w3 && matches!(a.kind, Kind::Piranha { .. }));
             // (a winged one too [obs: Ryujinx trace W_3051605, a big Paragoomba walked into
             // while falling past its top: dead that frame])
             if !(kind_ok && a.alive() && a.mode == Mode::Normal && !a.held)
@@ -9788,7 +9792,8 @@ mod tests {
             .push(spawn(Kind::ShoeGoomba { heels: false }, 300.0, 32.0));
         let mut w = World::with_level(lvl);
         w.player.x = 150.0;
-        run(&mut w, 0, 49);
+        // (the 50-frame pause and the 24-frame wind-up)
+        run(&mut w, 0, 73);
         assert!(w.actors[0].on_ground);
         run(&mut w, 0, 3);
         assert!(

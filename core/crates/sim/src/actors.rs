@@ -899,10 +899,18 @@ impl Actor {
     /// The solid surface this actor offers (for platforms): (x0, y0, x1, y1, top_only).
     pub fn solid_box(&self) -> Option<(f32, f32, f32, f32, bool)> {
         match self.kind {
-            // the P Switch is stood on (16 px; 4.8 once pressed) [obs: Ryujinx trace M1_pswitch]
+            // the P Switch is stood on (16 px; 4.8 once pressed) [obs: Ryujinx trace M1_pswitch];
+            // unpressed, its sides stop the player too [obs: Ryujinx trace W_3145588, walking
+            // into one: x held 7.9 px from its side]
             Kind::PSwitch if self.alive() => {
                 let h = if self.phase > 0 { 4.8 } else { 16.0 };
-                Some((self.x - 8.0, self.y, self.x + 8.0, self.y + h, true))
+                Some((
+                    self.x - 8.0,
+                    self.y,
+                    self.x + 8.0,
+                    self.y + h,
+                    self.phase > 0,
+                ))
             }
             Kind::Thwomp { .. } if self.mode == Mode::Normal => {
                 let hw = if self.big { 32.0 } else { 16.0 };
@@ -2083,7 +2091,11 @@ impl Actor {
     fn step_normal(&mut self, level: &Level, player_x: f32) -> Option<Actor> {
         if self.wings {
             match self.kind {
-                Kind::Goomba | Kind::Goombrat | Kind::Koopa { .. } | Kind::Thwomp { .. } => {} // their own wing behaviour
+                Kind::Goomba
+                | Kind::Goombrat
+                | Kind::Koopa { .. }
+                | Kind::Thwomp { .. }
+                | Kind::ShoeGoomba { .. } => {} // their own wing behaviour
                 Kind::Bowser { .. } | Kind::BoomBoom { .. } | Kind::BowserJr { .. } => {}
                 k if k.is_w3() => {} // their own wing behaviour (actors/w3.rs)
                 k if k.is_v3() => {} // their own wing behaviour (actors/v3.rs)
@@ -3471,11 +3483,18 @@ impl Actor {
     /// pauses 50 frames, then hops toward the player (vy 4.5, vx 1.5); in the air a wall flips
     /// it (4-frame lock). Pause in `timer`.
     fn step_shoe_goomba(&mut self, level: &Level) {
+        if self.wings {
+            self.step_shoe_wings(level);
+            return;
+        }
         let (px, _) = self.target;
+        // the 50-frame pause, then the hop's wind-up animation: it hops once that ends (Walk
+        // 0x71006fef60 waits for the animation helper's state 2), 24 frames [obs: Ryujinx trace
+        // W_3145588, a big Stiletto's first hop 74 frames after it appears]
         if self.on_ground {
             self.vx -= self.vx.clamp(-0.5, 0.5);
             if self.timer <= 0 {
-                self.timer = 50;
+                self.timer = 50 + 24;
             }
             self.timer -= 1;
             if self.timer == 0 {
@@ -3485,16 +3504,100 @@ impl Actor {
                 self.on_ground = false;
             }
         }
-        self.vy = (self.vy + ENEMY_GRAVITY).max(MAX_FALL);
-        self.collide(level);
-        if self.wall && !self.on_ground && self.turn_lock == 0 {
+        // in the air, last frame's wall flips it before this frame's move (Walk 0x71006fef60
+        // reads the wall flag of the last move) [obs: Ryujinx trace W_3145588, a big Stiletto
+        // against a wall a frame, then off it at 1.5]
+        if std::mem::take(&mut self.wall_prev) && !self.on_ground && self.turn_lock == 0 {
             self.turn();
             self.vx = 1.5 * self.dir as f32;
             self.turn_lock = 4;
         }
+        self.vy = (self.vy + ENEMY_GRAVITY).max(MAX_FALL);
+        self.collide(level);
+        self.wall_prev = self.wall && !self.on_ground;
         if self.on_ground && self.vy <= 0.0 && self.timer <= 0 {
-            self.timer = 50;
+            self.timer = 50 + 24;
         }
+    }
+
+    /// A winged Goomba's Shoe (KutsuKuribo Wing, Jump 0x71006ff480 / exe 0x71006ff530): on the
+    /// ground it brakes, waits 50 frames and its 12-frame wind-up, then hops (vy 4.0, 0.5 toward
+    /// the player); from the hop's top it hovers, y moved by amplitude · sin θ a frame (θ from 0
+    /// stepping −5°, the amplitude rising from 0 by 0.5 to 1, gravity off) for 60 frames, then
+    /// holds that last step 40 frames, then falls (−0.1875) to the ground [obs: Ryujinx trace
+    /// W_3145588, a winged Stiletto]. Phases 0 ground, 1 hop / hover, 2 hold, 3 fall; θ steps in
+    /// `hops`, the amplitude in `speed`, frames in `timer`.
+    fn step_shoe_wings(&mut self, level: &Level) {
+        let (px, _) = self.target;
+        // the engine's sine: 256 steps a turn, linear between them (a 24-bit fraction); θ after k
+        // steps of −1/72 turn (0xfc71c720) [obs: the y steps of the trace, 0.49997 at −30°]
+        let sin = |k: u8| {
+            let a = (k as u32).wrapping_mul(0xfc71_c720);
+            let i = (a >> 24) as f64;
+            let s0 = libm::sin(i * std::f64::consts::TAU / 256.0) as f32;
+            let s1 = libm::sin((i + 1.0) * std::f64::consts::TAU / 256.0) as f32;
+            s0 + (s1 - s0) * (a & 0xff_ffff) as f32 * 5.960_464_5e-8
+        };
+        let mut gravity = true;
+        match self.phase {
+            0 => {
+                if self.on_ground {
+                    self.vx -= self.vx.clamp(-0.5, 0.5);
+                    if self.timer <= 0 {
+                        self.timer = 50 + 12;
+                    }
+                    self.timer -= 1;
+                    if self.timer == 0 {
+                        self.speed = self.vy.abs();
+                        self.dir = if px < self.x { -1 } else { 1 };
+                        self.vx = 0.5 * self.dir as f32;
+                        if self.vy <= 0.0 {
+                            self.vy = 4.0;
+                        }
+                        self.on_ground = false;
+                        self.timer = 60;
+                        self.hops = 0;
+                        self.phase = 1;
+                    }
+                }
+            }
+            1 => {
+                if self.vy <= 0.0 {
+                    self.y += self.speed * sin(self.hops);
+                    self.hops = self.hops.wrapping_add(1);
+                    if self.speed < 1.0 {
+                        self.speed = (self.speed + 0.5).min(1.0);
+                    }
+                    self.vy = 0.0;
+                    gravity = false;
+                    self.timer -= 1;
+                    if self.timer <= 0 {
+                        self.timer = 40;
+                        self.phase = 2;
+                    }
+                }
+            }
+            2 => {
+                self.timer -= 1;
+                if self.timer <= 0 {
+                    self.phase = 3;
+                } else {
+                    self.y += self.speed * sin(self.hops);
+                    self.vy = 0.0;
+                    gravity = false;
+                }
+            }
+            _ => {
+                if self.on_ground {
+                    self.phase = 0;
+                    self.timer = 50 + 12;
+                }
+            }
+        }
+        if gravity {
+            self.vy = (self.vy + ENEMY_GRAVITY).max(MAX_FALL);
+        }
+        self.collide(level);
     }
 
     /// The style power-up. SMB1's Big Mushroom and 3D World's Super Bell are ItemDefault items
@@ -4257,8 +4360,13 @@ impl Actor {
                 | Kind::DryBones
         ) && !self.big
             && self.mode == Mode::Normal;
+        // a big Goomba's Shoe meets walls 14 px out [obs: Ryujinx trace W_3145588, a big Stiletto
+        // held at x 862.0 off a wall at 848]
+        let big_shoe = matches!(self.kind, Kind::ShoeGoomba { .. }) && self.big;
         let (side_hw, gap) = if shell {
             (6.0, 0.0)
+        } else if big_shoe {
+            (14.0, 0.0)
         } else if basic {
             (hw, -0.1)
         } else {

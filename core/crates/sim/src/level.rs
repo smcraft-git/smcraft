@@ -1073,7 +1073,11 @@ impl Level {
             let bottom_px = o.y as f32 / 10.0 - 8.0;
             let tx = (left_px / TILE).round() as i32;
             let ty = (bottom_px / TILE).round() as i32;
-            let actorish = o.flags & 0x2 != 0 || o.flags & 0x400 != 0; // winged / on track → actor (step 6)
+            // winged / on track → actor (step 6); a coin under a parachute too (a Coin actor
+            // drifting down, never a P Switch brick) [obs: Ryujinx trace W_3145588, a big
+            // Stiletto hopping up through a row of parachute coins while a P Switch runs]
+            let actorish =
+                o.flags & 0x2 != 0 || o.flags & 0x400 != 0 || (o.id == 8 && o.flags & 0x8000 != 0);
             let big = o.flags & 0x6000 == 0x4000;
             let wings = o.flags & 0x2 != 0;
             let actor = part_kind(o, &lvl);
