@@ -1618,7 +1618,9 @@ impl Level {
                 }
                 16 | 14 | 17 | 71 => {
                     // semisolid / mushroom platform / bridge / half-collision platform: one-way top row
-                    let y_top = ty + hgt - 1;
+                    // (a bridge's: its bottom row, the deck under its rails [obs: Ryujinx trace
+                    // W_3006094, landing on a 4×2 bridge at its lower row's top])
+                    let y_top = if o.id == 17 { ty } else { ty + hgt - 1 };
                     for dx in 0..w {
                         lvl.set(tx + dx, y_top, Cell::SemiTop);
                         let atlas = match o.id {

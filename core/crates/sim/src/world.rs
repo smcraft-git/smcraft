@@ -2425,7 +2425,8 @@ impl World {
         self.step_phantos();
         self.tally_defeats();
         self.drop_shoes();
-        self.despawn();
+        // (off-screen actors are dropped against this frame's view, after the camera's move
+        // below)
         self.actors.retain(|a| a.mode != Mode::Dead);
         // action conditions: damage taken this frame, landings
         let was = self.clear.violated;
@@ -2467,6 +2468,10 @@ impl World {
         }
         self.update_camera();
         self.autoscroll_push();
+        // actors off screen go against the view after this frame's camera move [obs: Ryujinx
+        // trace W_3006094, a red Koopa 112 px left of the view gone before its next move]
+        self.despawn();
+        self.actors.retain(|a| a.mode != Mode::Dead);
     }
 
     /// The escort Toad knocked out doesn't fail the run [obs ChaseKinopio states, init

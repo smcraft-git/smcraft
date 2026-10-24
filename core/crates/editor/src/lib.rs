@@ -693,7 +693,9 @@ mod tests {
         assert_eq!(lvl.cell(15, 5), Cell::SemiTop, "semisolid top row, 6 wide");
         assert_eq!(lvl.cell(16, 5), Cell::Empty);
         assert_eq!(lvl.cell(24, 7), Cell::SemiTop, "mushroom cap");
-        assert_eq!(lvl.cell(37, 7), Cell::SemiTop, "bridge deck");
+        // (the deck is the bridge's lower row, under its rails [obs: Ryujinx trace W_3006094])
+        assert_eq!(lvl.cell(37, 6), Cell::SemiTop, "bridge deck");
+        assert_eq!(lvl.cell(37, 7), Cell::Empty, "bridge rails");
         assert!(lvl.conveyors.iter().any(|c| c.0 == 40 && c.1 == 46));
         assert_eq!(lvl.cell(80, 7), Cell::Solid, "6-tile pipe");
         assert!(lvl.vines.iter().any(|v| v.2 - v.1 == 9.0 * 16.0));
