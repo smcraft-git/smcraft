@@ -2359,6 +2359,9 @@ impl World {
                     .liquid
                     .is_some_and(|l| l.water() && l.covers(a.y + 16.0));
             }
+            if a.is_para_beetle() {
+                a.ridden = self.player.ride == Some(a.id) && self.player.on_ground;
+            }
             if a.kind == Kind::EnemyFire && a.alt {
                 a.ridden = self
                     .liquid
@@ -3617,6 +3620,13 @@ impl World {
                     });
                     return;
                 }
+                i += 1;
+                continue;
+            }
+            // a Para-Beetle is stood on: on top no stomp, its sides and bottom still hurt
+            if let (true, Some((_, _, _, y1, _))) = (a.is_para_beetle(), a.solid_box())
+                && (self.player.ride == Some(a.id) || self.player.y >= y1 - 0.5)
+            {
                 i += 1;
                 continue;
             }
@@ -11838,6 +11848,46 @@ mod tests {
         assert!(w.held_by.is_none());
         assert_eq!(w.player.control, Control::Normal);
         assert!(w.player.vy > 0.0);
+    }
+
+    #[test]
+    fn a_para_beetle_carries_its_rider_dipping_then_climbing() {
+        let mut lvl = Level::flat(60);
+        let mut s = spawn(Kind::Buzzy, 200.0, 96.0);
+        s.wings = true;
+        lvl.spawns.push(s);
+        let mut w = World::with_level(lvl);
+        run(&mut w, 0, 2);
+        let (bx, by) = (w.actors[0].x, w.actors[0].y);
+        // drop the player onto its back
+        w.player.x = bx;
+        w.player.y = by + 20.0;
+        w.player.on_ground = false;
+        w.player.vy = 0.0;
+        let mut rode = false;
+        let mut dipped = false;
+        let mut climbed = false;
+        for _ in 0..60 {
+            run(&mut w, 0, 1);
+            let b = &w.actors[0];
+            rode |= w.player.ride == Some(b.id);
+            dipped |= b.hops == 1 && b.vy < 0.0;
+            climbed |= b.hops == 1 && b.vy > 0.4;
+        }
+        assert!(w.player.alive(), "standing on it doesn't hurt");
+        assert!(
+            w.actors[0].wings && w.actors[0].mode == Mode::Normal,
+            "not stomped"
+        );
+        assert!(rode && dipped && climbed, "{rode} {dipped} {climbed}");
+        // the rider is on its back
+        let b = &w.actors[0];
+        assert!(
+            (w.player.y - (b.y + b.height())).abs() < 1.5,
+            "{} {}",
+            w.player.y,
+            b.y
+        );
     }
 
     #[test]

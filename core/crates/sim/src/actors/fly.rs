@@ -205,6 +205,16 @@ const PATA_ABOVE: f32 = 4.0;
 const PATA_BOB: f32 = 0.004;
 const PATA_BOB_MAX: f32 = 0.18;
 const PATA_TURN_LOCK: i32 = 8;
+/// The Para-Beetle's states (`hops`): flying (FlyMove), ridden (PlayerOn).
+const BEETLE_FLY: u8 = 0;
+const BEETLE_RIDDEN: u8 = 1;
+/// PlayerOn: the dip, the climb and its cap, the leave test and its timer [obs v3.0.3
+/// 0x71011d73b0 / 0x71011d7480: −1.0, 0.04 (0x7102319088), 0.5, 0.1 (0x7102318b04), 0x12].
+const BEETLE_DIP: f32 = -1.0;
+const BEETLE_CLIMB: f32 = 0.04;
+const BEETLE_CLIMB_MAX: f32 = 0.5;
+const BEETLE_LEAVE_VY: f32 = 0.1;
+const BEETLE_LEAVE: i32 = 18;
 
 impl Actor {
     pub(super) fn step_pata_togezo(&mut self, level: &Level) {
@@ -214,10 +224,52 @@ impl Actor {
     /// The Para-Beetle (a winged Buzzy Beetle or Spike Top: Met's Wing, FlyMove enter
     /// 0x7100709100 / exe 0x71007091f0) flies with the same hover helper 0x7100782a80 [obs
     /// v1.0.0]: the same start, speed and bob as the winged Spiny's, but no wall turn.
-    /// Not modelled [inf]: its PlayerOn dip and climb while ridden (0x7100709230 /
-    /// 0x7100709300), as the engine doesn't let the player stand on it.
+    /// A winged Buzzy is stood on (`Actor::solid_box`; `ridden` its rider on it): landing on
+    /// it starts PlayerOn [obs v3.0.3: FlyMove exe 0x71011d7370 on the ride flags +0x530 bits
+    /// 1 / 4; PlayerOn enter 0x71011d73b0, exe 0x71011d7480; v1.0.0 0x7100709230 /
+    /// 0x7100709300]: it dips at −1.0 and climbs, +0.04 a frame up to 0.5, keeping its
+    /// speed across; once nobody is on it and it rises faster than 0.1 the enemy timer
+    /// +0x53c is set to 18, and when it reads 1 FlyMove takes over again from where it is
+    /// (enter 0x71011d7280: its bob's base 4 px over it, vertical speed 0).
+    /// [inf: the ride flags' two kinds (the dip is skipped for bit 1 with terrain 16 px over
+    /// its feet); the rider carried by the beetle's last move; a winged Spike Top (Togemet's
+    /// Wing has PlayerOn too) is not stood on; the new Against state (0x71011d7560) not
+    /// entered]
     pub(super) fn step_para_beetle(&mut self, level: &Level) {
-        self.step_pata_hover(level, false);
+        if self.hops == BEETLE_FLY && self.ridden && self.kind == Kind::Buzzy {
+            // PlayerOn's enter
+            self.hops = BEETLE_RIDDEN;
+            self.vy = BEETLE_DIP;
+            self.pause = 0;
+        }
+        if self.hops != BEETLE_RIDDEN {
+            self.step_pata_hover(level, false);
+            return;
+        }
+        if !self.ridden {
+            if self.pause == 1 {
+                // FlyMove's enter, from here
+                self.hops = BEETLE_FLY;
+                self.fly.base = (self.x, self.y + PATA_ABOVE);
+                self.vy = 0.0;
+                self.pause = 0;
+                self.step_pata_hover(level, false);
+                return;
+            }
+            if self.pause == 0 && self.vy > BEETLE_LEAVE_VY {
+                self.pause = BEETLE_LEAVE;
+            }
+        }
+        self.vy = (self.vy + BEETLE_CLIMB).min(BEETLE_CLIMB_MAX);
+        if level.style == "3W" {
+            self.collide(level);
+        } else {
+            self.x += self.vx;
+            self.y += self.vy;
+        }
+        if self.pause > 0 {
+            self.pause -= 1;
+        }
     }
 
     fn step_pata_hover(&mut self, level: &Level, turns: bool) {
@@ -421,5 +473,35 @@ mod tests {
         assert!((ease(9.0, 10.0) - 9.1).abs() < 1e-6);
         assert_eq!(ease(9.85, 10.0), 10.0);
         assert!((ease(11.0, 10.0) - 10.9).abs() < 1e-6);
+    }
+
+    #[test]
+    fn a_ridden_para_beetle_dips_climbs_and_flies_on_18_frames_after_its_rider_leaves() {
+        let lvl = level("M1");
+        let mut b = Actor::new(Kind::Buzzy, 200.0, 96.0);
+        b.wings = true;
+        b.step_para_beetle(&lvl);
+        b.ridden = true;
+        b.step_para_beetle(&lvl);
+        assert_eq!(b.hops, BEETLE_RIDDEN);
+        assert!(
+            (b.vy - (BEETLE_DIP + BEETLE_CLIMB)).abs() < 1e-6,
+            "{}",
+            b.vy
+        );
+        for _ in 0..60 {
+            b.step_para_beetle(&lvl);
+        }
+        assert_eq!(b.vy, BEETLE_CLIMB_MAX);
+        // the rider leaves: 18 on the timer, FlyMove when it reads 1
+        b.ridden = false;
+        let mut n = 0;
+        while b.hops == BEETLE_RIDDEN {
+            b.step_para_beetle(&lvl);
+            n += 1;
+            assert!(n < 40);
+        }
+        assert_eq!(n, BEETLE_LEAVE as usize);
+        assert!((b.fly.base.1 - (b.y + PATA_ABOVE)).abs() < 1.0);
     }
 }

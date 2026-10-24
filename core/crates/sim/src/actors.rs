@@ -951,6 +951,18 @@ impl Actor {
     }
 
     /// The solid surface this actor offers (for platforms): (x0, y0, x1, y1, top_only).
+    /// A flying winged Buzzy Beetle, the one players stand on.
+    pub fn is_para_beetle(&self) -> bool {
+        self.kind == Kind::Buzzy
+            && self.wings
+            && self.mode == Mode::Normal
+            && !self.ceiling
+            && !self.thrown
+            && !self.held
+            && self.rail.is_none()
+            && self.pipe.is_none()
+    }
+
     pub fn solid_box(&self) -> Option<(f32, f32, f32, f32, bool)> {
         match self.kind {
             // the P Switch is stood on (16 px; 4.8 once pressed) [obs: Ryujinx trace M1_pswitch];
@@ -965,6 +977,11 @@ impl Actor {
                     self.y + h,
                     self.phase > 0,
                 ))
+            }
+            // a Para-Beetle is stood on (its body box, from above) (actors/fly.rs)
+            Kind::Buzzy if self.is_para_beetle() => {
+                let (hw, h) = (self.half_w(), self.height());
+                Some((self.x - hw, self.y, self.x + hw, self.y + h, true))
             }
             Kind::Thwomp { .. } if self.mode == Mode::Normal => {
                 let hw = if self.big { 32.0 } else { 16.0 };
