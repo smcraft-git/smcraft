@@ -8,6 +8,12 @@ SMCraft never needs them again.
 
 SMCraft is back in development (it was archived in October 2026).
 
+- **3D World looks like the game's**: its final pass (the game's tone map and colour correction,
+  NSMBU's correction too) and its environment palette (the lights and fogs the game really uses
+  per theme) — the snow background is no longer deep blue, the ground and sky backgrounds no
+  longer hazy; 3D World's mean pixel error 29.0 → 21.2. Re-import your game once (asset pack 16).
+- The Swift app's NSMBU / 3D World background clouds drift as in the game.
+
 - **Wings as in SMM2**: winged power-ups, coins, springs, P Switches and POW Blocks fly slowly
   the way they face with a 16-px bob and pass through walls (they meet walls only in 3D World);
   winged blocks fly the same way, and winged Hard, Ice and Donut Blocks swing 48 px from side to
