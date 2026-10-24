@@ -2227,9 +2227,17 @@ impl World {
                     .liquid
                     .is_some_and(|l| l.water() && l.covers(a.y + 16.0));
             }
+            if a.kind == Kind::EnemyFire && a.alt {
+                a.ridden = self
+                    .liquid
+                    .is_some_and(|l| l.water() && l.covers(a.y + 4.0));
+            }
             w3::sense(a, self.liquid, &self.player);
             a.pre = (a.x, a.y);
             if let Some(n) = a.step_spawning(&self.level) {
+                born.push(n);
+            }
+            if let Some(n) = a.take_clown_shot() {
                 born.push(n);
             }
             if let Some((x, y, dir)) = rider {
@@ -3972,6 +3980,15 @@ impl World {
                 a.mode = Mode::parachute(false);
             }
             a.rng ^= (idx as u32 + 1).wrapping_mul(0x85eb_ca6b);
+            // a boss carries its car: a Fire car brings its fire record (actors/clown.rs)
+            if s.kind.boss_clown()
+                && s.link >= 0
+                && self.spawns.iter().any(|r| {
+                    matches!(r.spawn.kind, Kind::ClownCar { fire: true }) && r.spawn.link == s.link
+                })
+            {
+                a.clown_fire = Some(crate::actors::ClownFire::default());
+            }
             if s.kind == Kind::RockyWrench {
                 a.home_y = s.y - 8.0;
             }
@@ -9387,6 +9404,59 @@ mod tests {
         run(&mut w, input::JUMP, 1);
         assert!(w.player.clown.is_none());
         assert!(w.player.vy > 3.0, "{}", w.player.vy);
+    }
+
+    /// A Goomba and a Bowser in Fire Koopa Clown Cars (actors/clown.rs): each car charges
+    /// and fires KoopaClownFire shots that fly level toward the player at 1.5 px/f (plus the
+    /// car's speed) and are put out by terrain.
+    #[test]
+    fn fire_clown_cars_with_enemy_riders_shoot() {
+        for boss in [false, true] {
+            let mut lvl = Level::flat(80);
+            for ty in 4..12 {
+                lvl.set(1, ty, Cell::Solid);
+            }
+            let mut car = spawn(Kind::ClownCar { fire: true }, 300.0, 120.0);
+            car.link = 4;
+            lvl.spawns.push(car);
+            let kind = if boss {
+                Kind::Bowser {
+                    key: false,
+                    clown: true,
+                }
+            } else {
+                Kind::Goomba
+            };
+            let mut rider = spawn(kind, 300.0, 144.0);
+            rider.link = 4;
+            rider.clown = true;
+            lvl.spawns.push(rider);
+            let mut w = World::with_level(lvl);
+            w.player.x = 150.0;
+            w.player.invuln = 1_000_000;
+            let mut seen = Vec::new();
+            for _ in 0..800 {
+                run(&mut w, 0, 1);
+                w.player.x = 150.0;
+                w.player.y = 16.0;
+                for a in &w.actors {
+                    if a.kind == Kind::EnemyFire && a.alt && !seen.contains(&a.id) {
+                        // the first toward the player at the left; later ones as the car faces
+                        let first = seen.is_empty();
+                        seen.push(a.id);
+                        assert!((1.0..2.1).contains(&a.vx.abs()) && a.vy == 0.0, "{}", a.vx);
+                        assert!(!first || a.vx < 0.0, "boss {boss}: {}", a.vx);
+                    }
+                }
+            }
+            assert!(seen.len() >= 3, "boss {boss}: {} shots", seen.len());
+            // the wall at x = 16..32 puts them out
+            for a in &w.actors {
+                if a.kind == Kind::EnemyFire && a.alt {
+                    assert!(a.x > 32.0, "{}", a.x);
+                }
+            }
+        }
     }
 
     #[test]

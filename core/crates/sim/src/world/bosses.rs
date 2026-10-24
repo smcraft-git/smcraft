@@ -85,7 +85,8 @@ impl World {
     /// 2 frames each). The car places its rider (0x71006d6ca0) at the car's origin plus the
     /// rider's ride height (`Actor::clown_ride_height`), so the car is drawn that far below
     /// the boss; the engine merges car and rider (the game links two actors) and takes the car
-    /// as big when the rider is [inf: the car's own size comes from its placement].
+    /// as big when the rider is [inf: the car's own size comes from its placement]; a Fire car
+    /// (the boss carries its fire record) is drawn as one.
     pub(super) fn clown_sprites(&self, out: &mut Vec<Sprite>) {
         for a in &self.actors {
             if !a.kind.is_boss() || !a.kind.boss_clown() || a.mode != Mode::Normal {
@@ -94,7 +95,11 @@ impl World {
             let s = if a.big { 2.0 } else { 1.0 };
             let tex = ["wait.0", "wait.1", "wait.2", "wait.3"][(self.tick as usize / 2) % 4];
             out.push(Self::model_sprite(
-                "M1_Enemy_koopaclown",
+                if a.clown_fire.is_some() {
+                    "M1_Enemy_koopaclownfire"
+                } else {
+                    "M1_Enemy_koopaclown"
+                },
                 tex,
                 a.x - 16.0 * s,
                 a.y - a.clown_ride_height(&self.level.style),

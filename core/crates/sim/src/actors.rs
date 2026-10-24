@@ -10,6 +10,8 @@ use crate::level::{Cell, Level, PipeDir, TILE};
 
 mod block_out;
 mod bosses;
+mod clown;
+pub use clown::ClownFire;
 mod dokan;
 pub use dokan::Dokan;
 mod koopalings;
@@ -792,6 +794,8 @@ pub struct Actor {
     pub sway: f32,
     pub sway_amp: f32,
     pub sway_phase: u32,
+    /// A Fire Koopa Clown Car's fire record: on the car, or on a boss riding one (actors/clown.rs).
+    pub clown_fire: Option<ClownFire>,
 }
 
 impl Actor {
@@ -862,6 +866,7 @@ impl Actor {
             sway: 0.0,
             sway_amp: 0.0,
             sway_phase: 0,
+            clown_fire: matches!(kind, Kind::ClownCar { fire: true }).then(ClownFire::default),
         }
     }
 
@@ -2165,7 +2170,7 @@ impl Actor {
                     self.wing_bob(16.0);
                 }
             }
-            Kind::ClownCar { .. } => self.step_clown_car(level),
+            Kind::ClownCar { .. } => return self.step_clown_car(level),
             Kind::KoopaCar => {
                 if self.phase == 0 {
                     // empty: brakes 0.05 per frame (0x71006cb050)
@@ -2306,8 +2311,15 @@ impl Actor {
                 }
             }
             Kind::EnemyFire => {
-                self.x += self.vx;
+                // `alt`: a Fire Koopa Clown Car's KoopaClownFire (EnemyShot exe 0x7100ddeb30,
+                // v3.0.3): level flight at half speed in water (`ridden`, set by the world), put
+                // out by terrain (collision flags 0xc3402001) [obs; inf: which waters halve it]
+                let k = if self.alt && self.ridden { 0.5 } else { 1.0 };
+                self.x += self.vx * k;
                 self.y += self.vy;
+                if self.alt && level.cell_at(self.x, self.y + 4.0).is_solid() {
+                    self.mode = Mode::Dead;
+                }
                 self.timer -= 1;
                 if self.timer <= 0 {
                     self.mode = Mode::Dead;
@@ -3306,12 +3318,29 @@ impl Actor {
     }
 
     /// Koopa Clown Car (42-koopa-clown-car.md). Empty: velocity × 0.95 with a ±0.2 bob in 0.01
-    /// steps. With an enemy rider: homes on the player at up to 1.0 px/f, accelerating 0.02.
-    /// Flown by the player: moved by the world (`World::fly_clown_car`). Bob speed in `heading`.
-    /// Stopped (KoopaJrStop, exe 0x710118f8b0): velocity 0 every frame [obs].
-    fn step_clown_car(&mut self, level: &Level) {
+    /// steps. With an enemy rider (Chase, 0x710118bc60): within 320 px across and 800 px up or
+    /// down of the player it homes on him at up to 1.0 px/f, accelerating 0.02 (the Fire car
+    /// at half the speed, with its charge and shots: actors/clown.rs), facing him when he is
+    /// more than 16 px away; out of that range it drifts as Free does. Flown by the player:
+    /// moved by the world (`World::fly_clown_car`). Bob speed in `heading`. Stopped
+    /// (KoopaJrStop, exe 0x710118f8b0): velocity 0 every frame [obs].
+    fn step_clown_car(&mut self, level: &Level) -> Option<Actor> {
+        let (px, py) = self.target;
+        let (dx, dy) = (px - self.x, py + 8.0 - self.y);
+        let chase = self.phase == 1 && dx.abs() <= 320.0 && dy.abs() <= 800.0;
+        if !chase {
+            self.clown_fire_idle();
+        }
         match self.phase {
-            0 => {
+            1 if chase => {
+                let scale = if self.big { 2.0 } else { 1.0 };
+                let turn = self.clown_chase((dx, dy), (1.0, 0.02), (self.x, self.y), scale);
+                if turn && dx.dhypot(dy) > 16.0 && dx != 0.0 {
+                    self.dir = if dx < 0.0 { -1 } else { 1 };
+                }
+                self.collide(level);
+            }
+            0 | 1 => {
                 self.vx *= 0.95;
                 if self.timer <= 0 {
                     self.timer = 40;
@@ -3323,26 +3352,13 @@ impl Actor {
                 self.vy = self.heading;
                 self.collide(level);
             }
-            1 => {
-                let (px, py) = self.target;
-                let (dx, dy) = (px - self.x, py + 8.0 - self.y);
-                let d = (dx * dx + dy * dy).sqrt().max(1.0);
-                self.vx += 0.02 * dx / d;
-                self.vy += 0.02 * dy / d;
-                let v = (self.vx * self.vx + self.vy * self.vy).sqrt();
-                if v > 1.0 {
-                    self.vx /= v;
-                    self.vy /= v;
-                }
-                self.dir = if dx < 0.0 { -1 } else { 1 };
-                self.collide(level);
-            }
             3 => {
                 self.vx = 0.0;
                 self.vy = 0.0;
             }
             _ => {}
         }
+        None
     }
 
     /// Goomba's Shoe enemy (45-goombas-shoe.md): on the ground it brakes to 0 by 0.5/frame and

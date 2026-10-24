@@ -41,8 +41,12 @@ sway, importer and pack 12, the dev cache already at v12).
   `kclown`, research 120-koopalings.md "In a Koopa Clown Car": KoKoopaDefault's Clown vtable
   0x71028b6120 shared by all seven — Lemmy / Roy override only the setup; Move fires the
   controller's timed volleys, a hit stops the car (KoopaJrStop) while he ducks in and comes back
-  in his shell for 300 frames, HP only in Move; tgr2 273/273; left: the Fire car's own fireballs
-  with an enemy rider, NSMBU's shell yaw spin); the Super World map's ledge cliffs (field atlas
+  in his shell for 300 frames, HP only in Move; tgr2 273/273; left: NSMBU's shell yaw spin); ✅ the
+  Fire Koopa Clown Car's own fireballs with an enemy rider (2026-10-25, branch `enemysys2`,
+  research 42-koopa-clown-car.md "Pass 5": the car's fire helper 0x71028e83f8 / record, cooldown
+  90 then [90, 180), a 90-frame charge braking the car, one KoopaClownFire EnemyShot at 1.5 px/f
+  plus the car's speed; bosses in a Fire car too; left: the player's own PlayerShot / ChargeShot,
+  the object budget); the Super World map's ledge cliffs (field atlas
   rows 6–7), map ghosts, the goal's AppearGoalPoint / cannon and Passable states, the map music
   (branch `swmap` drew the map with the game's models); ✅ the Cursed Key and Phanto (2026-10-25,
   research 95-key.md; co-op: Phanto hurts only the player in front [inf]); ✅ SMM1 UI sounds for

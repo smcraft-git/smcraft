@@ -32,6 +32,9 @@ SMCraft is back in development (it was archived in October 2026).
   then he spins in his shell for a while (stomps bounce off) before he comes out; the third stomp
   knocks him out of the car (NSMBU: after his flinch) and the empty car can be ridden.
 - Fix: a Koopa Clown Car whose rider is defeated floats empty and can be ridden.
+- **Fire Koopa Clown Cars shoot with an enemy inside**: every three to four and a half seconds the
+  car slows down, charges and fires a fireball that flies straight ahead (faster when the car is
+  moving that way) until it hits a wall; Bowser, Bowser Jr. and Boom Boom in a Fire car too.
 - Fix: Munchers hurt on a wall sensor's touch, as in SMM2 (a one-tile gap between Munchers is as
   tight as in the game).
 - **The Course Maker**: SMM2's own maker screens (part palette and part window, styles, themes,
