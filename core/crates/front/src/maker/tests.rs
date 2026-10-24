@@ -1336,3 +1336,380 @@ fn mario_s_trail_changes_area_with_mario_and_drops_what_the_game_drops() {
     t.enter();
     assert_eq!(t.shots.len(), 40);
 }
+
+// ------------------------------------------------------------ Water Level and Custom Scroll
+
+fn pointer(p: [f32; 2], down: bool) -> MakerInput {
+    MakerInput {
+        pointer: Some(p),
+        down,
+        ..Default::default()
+    }
+}
+
+/// A press at `from`, dragged to `to` over a few ticks, held there `hold` ticks, let go.
+fn drag(
+    m: &mut MakerFlow,
+    host: &mut MockHost,
+    saves: &mut Saves,
+    from: [f32; 2],
+    to: [f32; 2],
+    hold: usize,
+) {
+    run(m, host, saves, pointer(from, false));
+    run(m, host, saves, pointer(from, true));
+    for k in 1..=4 {
+        let t = k as f32 / 4.0;
+        let p = [
+            from[0] + (to[0] - from[0]) * t,
+            from[1] + (to[1] - from[1]) * t,
+        ];
+        run(m, host, saves, pointer(p, true));
+    }
+    for _ in 0..hold {
+        run(m, host, saves, pointer(to, true));
+    }
+    run(m, host, saves, pointer(to, false));
+}
+
+fn tap_at(m: &mut MakerFlow, host: &mut MockHost, saves: &mut Saves, p: [f32; 2]) {
+    drag(m, host, saves, p, p, 0);
+}
+
+/// The round button and the pill (layout units).
+fn water_handles(m: &MakerFlow) -> ([f32; 2], [f32; 2]) {
+    let l = m.editor.liquid();
+    let ax = m.liquid_anchor();
+    (
+        m.to_layout(ax - 16.0, liquid::line_y(l.end)),
+        m.to_layout(ax + 8.0, liquid::line_y(l.start)),
+    )
+}
+
+#[test]
+fn the_water_level_mode_needs_a_liquid_and_back_leaves_it() {
+    let (mut host, mut saves) = (MockHost::default(), Saves::default());
+    let mut m = maker(&mut host, &mut saves, MakerStart::New("M1".into()));
+    // ground: no liquid, the button does nothing
+    m.enter_water();
+    assert!(!m.water_mode());
+    // forest: water
+    m.editor.set_theme(9);
+    m.enter_water();
+    assert!(m.water_mode() && m.glove_shown());
+    if let Some(p) = &m.page {
+        assert!(p.rect("L_ModeGuide_00/T_Mode_00").is_some());
+    }
+    run(&mut m, &mut host, &mut saves, press(Buttons::BACK));
+    assert!(!m.water_mode());
+    // with the UI import: the left column's boat button enters it, and leaves it again
+    if m.page.is_some() {
+        for _ in 0..20 {
+            run(&mut m, &mut host, &mut saves, idle());
+        }
+        let tick = m.tick;
+        let b = m
+            .page
+            .as_mut()
+            .and_then(|p| {
+                p.apply(tick);
+                p.rect("L_LeftParts_00/L_WaterLevelBtn_00/B_Btn_00")
+            })
+            .expect("the water level button")
+            .center;
+        let click = MakerInput {
+            ui: crate::testing::click(b),
+            ..Default::default()
+        };
+        run(&mut m, &mut host, &mut saves, click);
+        assert!(m.water_mode(), "the button enters the mode");
+        run(&mut m, &mut host, &mut saves, idle());
+        run(&mut m, &mut host, &mut saves, click);
+        assert!(!m.water_mode(), "and leaves it");
+    }
+}
+
+#[test]
+fn dragging_the_button_makes_the_liquid_rise_and_a_tap_turns_it_both_ways() {
+    use mmk_editor::settings::Liquid;
+    let (mut host, mut saves) = (MockHost::default(), Saves::default());
+    let mut m = maker(&mut host, &mut saves, MakerStart::New("M1".into()));
+    m.editor.set_theme(9);
+    m.editor.set_liquid(Liquid {
+        mode: 0,
+        speed: 0,
+        start: 2,
+        end: 2,
+    });
+    m.enter_water();
+    // fixed: the button sits on the pill's left end; dragged up it makes the target line
+    let (button, _) = water_handles(&m);
+    let up = [button[0], m.to_layout(0.0, liquid::line_y(8))[1]];
+    drag(&mut m, &mut host, &mut saves, button, up, 0);
+    assert_eq!(
+        m.editor.liquid(),
+        Liquid {
+            mode: 1,
+            speed: 1,
+            start: 2,
+            end: 8
+        },
+        "rises, slowly"
+    );
+    let mut quads = Vec::new();
+    m.mode_quads(&mut quads);
+    assert!(!quads.is_empty());
+    // a tap on the button: rises and falls; again: rises
+    let (button, _) = water_handles(&m);
+    tap_at(&mut m, &mut host, &mut saves, button);
+    assert_eq!(m.editor.liquid().mode, 2);
+    assert!(
+        host.edit_sounds
+            .iter()
+            .any(|(_, k)| k == "change_direction")
+    );
+    tap_at(&mut m, &mut host, &mut saves, button);
+    assert_eq!(m.editor.liquid().mode, 1);
+    // each a step of its own: undo gives rises and falls back, then still water
+    run(&mut m, &mut host, &mut saves, keys(keys::UNDO));
+    run(&mut m, &mut host, &mut saves, idle());
+    assert_eq!(m.editor.liquid().mode, 2);
+    run(&mut m, &mut host, &mut saves, keys(keys::UNDO));
+    run(&mut m, &mut host, &mut saves, idle());
+    run(&mut m, &mut host, &mut saves, keys(keys::UNDO));
+    run(&mut m, &mut host, &mut saves, idle());
+    assert_eq!(m.editor.liquid().end, 2, "back to still water");
+    run(&mut m, &mut host, &mut saves, keys(keys::REDO));
+    run(&mut m, &mut host, &mut saves, idle());
+    assert_eq!(m.editor.liquid().end, 8);
+    // the button dragged back onto the pill: still again; parted again: its mode comes back
+    let (button, _) = water_handles(&m);
+    tap_at(&mut m, &mut host, &mut saves, button);
+    assert_eq!(m.editor.liquid().mode, 2);
+    let (button, pill) = water_handles(&m);
+    drag(
+        &mut m,
+        &mut host,
+        &mut saves,
+        button,
+        [button[0], pill[1]],
+        0,
+    );
+    assert_eq!((m.editor.liquid().mode, m.editor.liquid().end), (0, 2));
+    let (button, _) = water_handles(&m);
+    let down = [button[0], m.to_layout(0.0, liquid::line_y(0))[1]];
+    drag(&mut m, &mut host, &mut saves, button, down, 0);
+    let l = m.editor.liquid();
+    assert_eq!((l.mode, l.speed, l.end), (2, 1, 0), "falls, as it was set");
+    // the pill moves the start; reaching the end it takes the end along (still)
+    let (_, pill) = water_handles(&m);
+    let above = [pill[0], m.to_layout(0.0, liquid::line_y(5))[1]];
+    drag(&mut m, &mut host, &mut saves, pill, above, 0);
+    let l = m.editor.liquid();
+    assert_eq!((l.start, l.end, l.mode), (5, 0, 2));
+    let (_, pill) = water_handles(&m);
+    let below = [pill[0], m.to_layout(0.0, liquid::line_y(0))[1]];
+    drag(&mut m, &mut host, &mut saves, pill, below, 0);
+    let l = m.editor.liquid();
+    assert_eq!((l.start, l.end, l.mode), (0, 0, 0));
+    // (off the scroll bar along the bottom)
+    let (_, pill) = water_handles(&m);
+    let up = [pill[0], m.to_layout(0.0, liquid::line_y(4))[1]];
+    drag(&mut m, &mut host, &mut saves, pill, up, 0);
+    assert_eq!(m.editor.liquid().end, 4);
+    // the heights stay in the game's range (0 … 24)
+    let (button, _) = water_handles(&m);
+    drag(
+        &mut m,
+        &mut host,
+        &mut saves,
+        button,
+        [button[0], 360.0 * 3.0],
+        0,
+    );
+    assert_eq!(m.editor.liquid().end, 24);
+}
+
+#[test]
+fn holding_the_button_opens_the_speed_balloon() {
+    use mmk_editor::settings::Liquid;
+    let (mut host, mut saves) = (MockHost::default(), Saves::default());
+    let mut m = maker(&mut host, &mut saves, MakerStart::New("M1".into()));
+    m.editor.set_theme(2);
+    m.editor.set_liquid(Liquid {
+        mode: 1,
+        speed: 1,
+        start: 1,
+        end: 6,
+    });
+    m.enter_water();
+    let (button, _) = water_handles(&m);
+    // held still on the button
+    run(&mut m, &mut host, &mut saves, pointer(button, false));
+    for _ in 0..liquid::HOLD + 2 {
+        run(&mut m, &mut host, &mut saves, pointer(button, true));
+    }
+    assert!(m.speed_balloon_open());
+    // the release chooses nothing and turns nothing
+    run(&mut m, &mut host, &mut saves, pointer(button, false));
+    assert!(m.speed_balloon_open());
+    assert_eq!(m.editor.liquid().mode, 1);
+    // right twice: fast
+    run(&mut m, &mut host, &mut saves, press(Buttons::RIGHT));
+    run(&mut m, &mut host, &mut saves, press(Buttons::RIGHT));
+    run(&mut m, &mut host, &mut saves, press(Buttons::CONFIRM));
+    run(&mut m, &mut host, &mut saves, idle());
+    assert!(!m.speed_balloon_open());
+    assert_eq!(m.editor.liquid().speed, 3);
+    assert!(host.edit_sounds.iter().any(|(_, k)| k == "change_speed"));
+    // one undo step
+    run(&mut m, &mut host, &mut saves, keys(keys::UNDO));
+    run(&mut m, &mut host, &mut saves, idle());
+    assert_eq!(m.editor.liquid().speed, 1);
+    // back closes it without a change (and without an undo step)
+    run(&mut m, &mut host, &mut saves, pointer(button, false));
+    for _ in 0..liquid::HOLD + 2 {
+        run(&mut m, &mut host, &mut saves, pointer(button, true));
+    }
+    run(&mut m, &mut host, &mut saves, pointer(button, false));
+    run(&mut m, &mut host, &mut saves, press(Buttons::BACK));
+    assert!(!m.speed_balloon_open() && m.water_mode());
+    assert_eq!(m.editor.liquid().speed, 1);
+    // the saved course has what was set (the editor core's tests play it: lava rising slowly)
+    let back = Editor::open(&m.editor.save().unwrap()).unwrap();
+    assert_eq!(back.liquid_kind(), Some(2));
+    assert_eq!(
+        back.liquid(),
+        Liquid {
+            mode: 1,
+            speed: 1,
+            start: 1,
+            end: 6
+        }
+    );
+}
+
+#[test]
+fn custom_scroll_nodes_change_speed_and_the_path_is_the_camera_s() {
+    use mmk_editor::settings::ScrollKind;
+    let (mut host, mut saves) = (MockHost::default(), Saves::default());
+    let mut m = maker(&mut host, &mut saves, MakerStart::New("M1".into()));
+    // not without custom autoscroll
+    m.enter_scroll();
+    assert!(!m.scroll_mode());
+    m.editor.set_autoscroll(4);
+    m.enter_scroll();
+    assert!(m.scroll_mode());
+    let square = |m: &MakerFlow, k: usize| {
+        let pt = m.scroll_points()[k];
+        m.to_layout(pt.x + scroll::SQUARE_DX, pt.y)
+    };
+    // the start's square: slow → normal → fast → slow (the header's speed)
+    assert_eq!(m.editor.course.header.autoscroll_speed, 0);
+    let sq = square(&m, 0);
+    tap_at(&mut m, &mut host, &mut saves, sq);
+    assert_eq!(m.editor.course.header.autoscroll_speed, 1);
+    let sq = square(&m, 0);
+    tap_at(&mut m, &mut host, &mut saves, sq);
+    let sq = square(&m, 0);
+    tap_at(&mut m, &mut host, &mut saves, sq);
+    assert_eq!(m.editor.course.header.autoscroll_speed, 0);
+    assert!(
+        host.edit_sounds
+            .iter()
+            .any(|(u, k)| u.ends_with("EditAutoScrollCamera") && k == "change_speed")
+    );
+    // the leg dragged off its tile gets a node there, carried to where the drag ends
+    let pts = m.scroll_points();
+    let on_leg = m.to_layout(pts[0].x + 64.0, pts[0].y);
+    let to = m.tile_center((20, 10));
+    drag(&mut m, &mut host, &mut saves, on_leg, to, 0);
+    let nodes = m.editor.scroll_nodes();
+    assert_eq!(nodes.len(), 1);
+    assert_eq!(nodes[0].1, (20, 10));
+    let pts = m.scroll_points();
+    assert_eq!(pts.len(), 3);
+    assert_eq!(pts[1].kind, ScrollKind::Node(nodes[0].0));
+    // its square: normal, then fast
+    let sq = square(&m, 1);
+    tap_at(&mut m, &mut host, &mut saves, sq);
+    let sq = square(&m, 1);
+    tap_at(&mut m, &mut host, &mut saves, sq);
+    assert_eq!(m.scroll_points()[1].speed, 2);
+    // the saved course has the same path: the start, the node at fast, the end (the editor
+    // core's tests check it is the one the camera follows in play)
+    let back = Editor::open(&m.editor.save().unwrap()).unwrap();
+    assert_eq!(back.scroll_path(), m.scroll_points());
+    assert_eq!(back.area().header.autoscroll_type, 4);
+    assert_eq!(back.scroll_nodes()[0].2, 2);
+    // the node's bird carries it; the eraser takes it away
+    let pt = m.scroll_points()[1];
+    let bird = m.to_layout(pt.x, pt.y);
+    let to = m.tile_center((26, 9));
+    drag(&mut m, &mut host, &mut saves, bird, to, 0);
+    assert_eq!(m.editor.scroll_nodes()[0].1, (26, 9));
+    let pt = m.scroll_points()[1];
+    let bird = m.to_layout(pt.x, pt.y);
+    run(&mut m, &mut host, &mut saves, pointer(bird, false));
+    run(
+        &mut m,
+        &mut host,
+        &mut saves,
+        MakerInput {
+            pointer: Some(bird),
+            alt: true,
+            ..Default::default()
+        },
+    );
+    run(&mut m, &mut host, &mut saves, pointer(bird, false));
+    assert!(m.editor.scroll_nodes().is_empty());
+    // undo brings it back
+    run(&mut m, &mut host, &mut saves, keys(keys::UNDO));
+    run(&mut m, &mut host, &mut saves, idle());
+    assert_eq!(m.editor.scroll_nodes().len(), 1);
+    // nodes are not parts in the parts mode
+    run(&mut m, &mut host, &mut saves, press(Buttons::BACK));
+    assert!(!m.scroll_mode());
+    assert!(m.editor.object_at(26, 9).is_none());
+}
+
+#[test]
+fn custom_autoscroll_comes_from_the_window_with_its_tip_once() {
+    let (mut host, mut saves) = (MockHost::default(), Saves::default());
+    let mut m = maker(&mut host, &mut saves, MakerStart::New("M1".into()));
+    let open_and_choose_custom = |m: &mut MakerFlow, host: &mut MockHost, saves: &mut Saves| {
+        m.open_window(3);
+        // none, slow, normal, fast, custom
+        while m.window_sel != 4 {
+            run(m, host, saves, press(Buttons::DOWN));
+        }
+        run(m, host, saves, press(Buttons::CONFIRM));
+        run(m, host, saves, idle());
+    };
+    open_and_choose_custom(&mut m, &mut host, &mut saves);
+    assert_eq!(m.editor.area().header.autoscroll_type, 4);
+    assert!(m.scroll_available());
+    assert_eq!(m.mode, Mode::Help, "the tip");
+    for _ in 0..12 {
+        run(&mut m, &mut host, &mut saves, idle());
+    }
+    run(&mut m, &mut host, &mut saves, press(Buttons::CONFIRM));
+    assert_eq!(m.mode, Mode::Edit);
+    // set again: no tip
+    m.editor.set_autoscroll(0);
+    open_and_choose_custom(&mut m, &mut host, &mut saves);
+    assert_eq!(m.mode, Mode::Edit);
+    // the forest's tip, once
+    m.open_window(1);
+    let forest = MakerFlow::window_choices(1, true)
+        .iter()
+        .position(|c| c.1 == 9)
+        .unwrap();
+    m.window_sel = forest;
+    run(&mut m, &mut host, &mut saves, press(Buttons::CONFIRM));
+    run(&mut m, &mut host, &mut saves, idle());
+    assert!(m.water_available());
+    assert_eq!(m.mode, Mode::Help);
+    // the sub-area has no custom autoscroll
+    assert!(MakerFlow::window_choices(3, false).iter().all(|c| c.1 < 4));
+}

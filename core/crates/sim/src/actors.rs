@@ -10,6 +10,10 @@ use crate::level::{Cell, Level, PipeDir, TILE};
 
 mod block_out;
 mod bosses;
+mod ceiling;
+mod chute;
+mod clown;
+pub use clown::ClownFire;
 mod dokan;
 pub use dokan::Dokan;
 mod koopalings;
@@ -591,13 +595,15 @@ pub enum Mode {
     },
     /// Coming out of a block (the Block context's Out, actors/block_out.rs): the block centre
     /// `yb`, where the motion started, this frame's gravity, whether it comes out downward
-    /// and a parachute's countdown; terrain collision is off while `timer` runs.
+    /// and a parachute's countdown (a Goomba's hold in water); terrain collision is off while
+    /// `timer` runs. `wet`: it came out in water (the presets' water variants).
     BlockOut {
         yb: f32,
         y0: f32,
         gravity: f32,
         down: bool,
         left: i32,
+        wet: bool,
     },
     /// Coming out of a pipe mouth (the Dokan context, actors/dokan.rs): the slide's target
     /// (tx, ty) and where it is in the context.
@@ -614,6 +620,8 @@ pub enum Mode {
         t: u16,
         fast: bool,
         landed: bool,
+        /// Fired in water (the Fish Bone's and Wiggler's water variants, actors/shot.rs).
+        wet: bool,
     },
     /// Drifting down under a parachute (shared enemy draft §5.2): gravity −0.01875, max fall
     /// −0.4, swinging ±24 px (sin of `phase`, `rate` ±2.5°/frame, doubled while `held` at a
@@ -802,6 +810,13 @@ pub struct Actor {
     pub sway: f32,
     pub sway_amp: f32,
     pub sway_phase: u32,
+    /// A Fire Koopa Clown Car's fire record: on the car, or on a boss riding one (actors/clown.rs).
+    pub clown_fire: Option<ClownFire>,
+    /// A Spiny or Buzzy Beetle walking upside down on the ceiling (actors/ceiling.rs).
+    pub ceiling: bool,
+    /// A shell that is a Spiny dropped off the ceiling (spiky; wakes as a Spiny). Not `alt`,
+    /// which is the placement's 0x4 flag (a red Koopa's shell has it).
+    pub spiny_shell: bool,
 }
 
 impl Actor {
@@ -876,6 +891,9 @@ impl Actor {
             sway: 0.0,
             sway_amp: 0.0,
             sway_phase: 0,
+            clown_fire: matches!(kind, Kind::ClownCar { fire: true }).then(ClownFire::default),
+            ceiling: false,
+            spiny_shell: false,
         }
     }
 
@@ -1356,12 +1374,15 @@ impl Actor {
                     };
                     self.vy = 0.0;
                 } else {
-                    self.vy = (self.vy - 0.25).max(-5.0);
+                    // a parachute it carries opens as it falls (actors/chute.rs)
+                    let (g, cap) = self.thwomp_chute();
+                    self.vy = (self.vy + g).max(cap);
                 }
                 let before = (self.x, self.y);
                 self.collide(level);
                 let stuck = (self.x - before.0).abs() < 1e-5 && (self.y - before.1).abs() < 1e-5;
                 if (!side && self.on_ground) || (side && self.wall) || stuck {
+                    self.hops = 0; // Fall's exit folds the parachute
                     self.phase = 2;
                     self.timer = 64;
                     self.vx = 0.0;
@@ -1768,7 +1789,8 @@ impl Actor {
             held = true;
             rate *= 2.0;
         }
-        self.mode = if self.on_ground {
+        // a preset's own end (actors/chute.rs), else the Default landing
+        self.mode = if self.chute_fall_ends(level.theme) || self.on_ground {
             self.vx = 0.0;
             Mode::Normal
         } else {
@@ -1894,10 +1916,14 @@ impl Actor {
                     // the Koopa (or Buzzy) walks out, facing the player
                     self.kind = if self.buzzy {
                         Kind::Buzzy
+                    } else if self.spiny_shell {
+                        // a Spiny that dropped off the ceiling in its shell (actors/ceiling.rs)
+                        Kind::Spiny
                     } else {
                         Kind::Koopa { red }
                     };
                     self.buzzy = false;
+                    self.spiny_shell = false;
                     self.mode = Mode::Normal;
                     self.dir = if player_x <= self.x { -1 } else { 1 };
                 }
@@ -2201,7 +2227,7 @@ impl Actor {
                     self.wing_bob(16.0);
                 }
             }
-            Kind::ClownCar { .. } => self.step_clown_car(level),
+            Kind::ClownCar { .. } => return self.step_clown_car(level),
             Kind::KoopaCar => {
                 if self.phase == 0 {
                     // empty: brakes 0.05 per frame (0x71006cb050)
@@ -2226,6 +2252,10 @@ impl Actor {
             | Kind::Buzzy
             | Kind::BobOmb
             | Kind::DryBones => {
+                if self.ceiling {
+                    self.step_ceiling(level);
+                    return None;
+                }
                 if self.wings
                     && matches!(
                         self.kind,
@@ -2345,6 +2375,16 @@ impl Actor {
                     self.dir = -self.dir;
                 }
             }
+            Kind::Fireball if self.alt => {
+                // a Fire Koopa Clown Car's PlayerShot (exe 0x7100ddf010, v3.0.3): straight at
+                // its launch speed, put out by terrain, at most 600 frames [obs]
+                self.timer -= 1;
+                self.x += self.vx;
+                self.y += self.vy;
+                if level.cell_at(self.x, self.y + 4.0).is_solid() || self.timer <= 0 {
+                    self.mode = Mode::Dead;
+                }
+            }
             Kind::Fireball => {
                 self.timer -= 1;
                 self.vy = (self.vy + FIREBALL_GRAVITY).max(MAX_FALL);
@@ -2380,8 +2420,15 @@ impl Actor {
                 }
             }
             Kind::EnemyFire => {
-                self.x += self.vx;
+                // `alt`: a Fire Koopa Clown Car's KoopaClownFire (EnemyShot exe 0x7100ddeb30,
+                // v3.0.3): level flight at half speed in water (`ridden`, set by the world), put
+                // out by terrain (collision flags 0xc3402001) [obs; inf: which waters halve it]
+                let k = if self.alt && self.ridden { 0.5 } else { 1.0 };
+                self.x += self.vx * k;
                 self.y += self.vy;
+                if self.alt && level.cell_at(self.x, self.y + 4.0).is_solid() {
+                    self.mode = Mode::Dead;
+                }
                 self.timer -= 1;
                 if self.timer <= 0 {
                     self.mode = Mode::Dead;
@@ -3440,12 +3487,30 @@ impl Actor {
     }
 
     /// Koopa Clown Car (42-koopa-clown-car.md). Empty: velocity × 0.95 with a ±0.2 bob in 0.01
-    /// steps. With an enemy rider: homes on the player at up to 1.0 px/f, accelerating 0.02.
-    /// Flown by the player: moved by the world (`World::fly_clown_car`). Bob speed in `heading`.
-    /// Stopped (KoopaJrStop, exe 0x710118f8b0): velocity 0 every frame [obs].
-    fn step_clown_car(&mut self, level: &Level) {
+    /// steps. With an enemy rider (Chase, 0x710118bc60): within 320 px across and 800 px up or
+    /// down of the player it homes on him at up to 1.0 px/f, accelerating 0.02 (the Fire car
+    /// at half the speed, with its charge and shots: actors/clown.rs), facing him when he is
+    /// more than 16 px away; out of that range it drifts as Free does. Flown by the player:
+    /// moved by the world (`World::fly_clown_car`). Bob speed in `heading`. Stopped
+    /// (KoopaJrStop, exe 0x710118f8b0): velocity 0 every frame [obs].
+    fn step_clown_car(&mut self, level: &Level) -> Option<Actor> {
+        let (px, py) = self.target;
+        let (dx, dy) = (px - self.x, py + 8.0 - self.y);
+        let chase = self.phase == 1 && dx.abs() <= 320.0 && dy.abs() <= 800.0;
+        // (a player flying it runs the record from the world: `clown_fire_player`)
+        if !chase && self.phase != 2 {
+            self.clown_fire_idle();
+        }
         match self.phase {
-            0 => {
+            1 if chase => {
+                let scale = if self.big { 2.0 } else { 1.0 };
+                let turn = self.clown_chase((dx, dy), (1.0, 0.02), (self.x, self.y), scale);
+                if turn && dx.dhypot(dy) > 16.0 && dx != 0.0 {
+                    self.dir = if dx < 0.0 { -1 } else { 1 };
+                }
+                self.collide(level);
+            }
+            0 | 1 => {
                 self.vx *= 0.95;
                 if self.timer <= 0 {
                     self.timer = 40;
@@ -3457,26 +3522,13 @@ impl Actor {
                 self.vy = self.heading;
                 self.collide(level);
             }
-            1 => {
-                let (px, py) = self.target;
-                let (dx, dy) = (px - self.x, py + 8.0 - self.y);
-                let d = (dx * dx + dy * dy).sqrt().max(1.0);
-                self.vx += 0.02 * dx / d;
-                self.vy += 0.02 * dy / d;
-                let v = (self.vx * self.vx + self.vy * self.vy).sqrt();
-                if v > 1.0 {
-                    self.vx /= v;
-                    self.vy /= v;
-                }
-                self.dir = if dx < 0.0 { -1 } else { 1 };
-                self.collide(level);
-            }
             3 => {
                 self.vx = 0.0;
                 self.vy = 0.0;
             }
             _ => {}
         }
+        None
     }
 
     /// Goomba's Shoe enemy (45-goombas-shoe.md): on the ground it brakes to 0 by 0.5/frame and

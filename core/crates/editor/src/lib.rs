@@ -240,7 +240,7 @@ impl Editor {
             objs.iter()
                 .enumerate()
                 .rev()
-                .filter(|(_, o)| !rules::is_rider(o))
+                .filter(|(_, o)| !rules::is_rider(o) && !rules::own_layer(o.id))
                 .filter(|(_, o)| rules::is_background(o.id) != want_solid)
                 .find(|(_, o)| parts::covers(o, tx, ty))
                 .map(|(i, _)| i)
@@ -255,7 +255,9 @@ impl Editor {
             .objects
             .iter()
             .enumerate()
-            .filter(|(_, o)| !rules::is_rider(o) && parts::footprint(o).intersects(&r))
+            .filter(|(_, o)| {
+                !rules::is_rider(o) && !rules::own_layer(o.id) && parts::footprint(o).intersects(&r)
+            })
             .map(|(i, _)| i)
             .collect()
     }

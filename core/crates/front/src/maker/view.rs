@@ -58,7 +58,19 @@ pub fn overlay(f: &MakerFlow) -> DrawItem {
         t.flags &= !mmk_ui::FLAG_LINEAR;
         q.push(t);
     }
-    if f.glove_shown() || f.carrying() {
+    if f.water_mode() || f.scroll_mode() {
+        // a mode over the course: the course dims under the mode's lines and handles
+        // (research/specs/maker.md C13)
+        if f.water_mode() {
+            q.push(quad(
+                [-640.0, -360.0, 640.0, 360.0],
+                TEXTURE_NONE,
+                FULL,
+                [0, 0, 0, 80],
+            ));
+        }
+        f.mode_quads(&mut q);
+    } else if f.glove_shown() || f.carrying() {
         grid(f, &mut q);
         frame(f, &mut q);
         selection(f, &mut q);

@@ -37,16 +37,39 @@ sway, importer and pack 12, the dev cache already at v12).
   offset to ours (the same courses whose backdrops are off) [inf]; captures of the track tiles in play and of NSMBU / 3D World wings (the mesh
   planner maps `M1_Enemy_wingcommon` to `<style>_Enemy_wingcommon`), a look at Water Level mode
   and custom scroll in the recomp (`research/tools/maker-look`: touch taps / drags by script).
-- **Agent queue** (when a helper slot frees; running 2026-10-25: the EnemySys leftovers — the
-  Fire Clown Car's fireballs with an enemy rider, water-only entry variants, untraced Block Outs,
-  pipe / parachute leftovers): ✅ a Koopaling in a Clown Car (2026-10-25, branch
+- **Agent queue** (when a helper slot frees; running 2026-10-25: the maker's Water Level and
+  Custom Scroll modes, physics): ✅ a Koopaling in a Clown Car (2026-10-25, branch
   `kclown`, research 120-koopalings.md "In a Koopa Clown Car": KoKoopaDefault's Clown vtable
   0x71028b6120 shared by all seven — Lemmy / Roy override only the setup; Move fires the
   controller's timed volleys, a hit stops the car (KoopaJrStop) while he ducks in and comes back
-  in his shell for 300 frames, HP only in Move; tgr2 273/273; left: NSMBU's shell yaw spin);
-  ✅ the Super World map's music, sounds, point / goal / road states and ledge cliffs
-  (2026-10-25, branch `swmap2`, game pack 14; left: `passPoint`, the camera, ghosts are online);
-  ✅ the Cursed Key and Phanto (2026-10-25,
+  in his shell for 300 frames, HP only in Move; tgr2 273/273; left: NSMBU's shell yaw spin); ✅ the
+  Fire Koopa Clown Car's own fireballs with an enemy rider (2026-10-25, branch `enemysys2`,
+  research 42-koopa-clown-car.md "Pass 5": the car's fire helper 0x71028e83f8 / record, cooldown
+  90 then [90, 180), a 90-frame charge braking the car, one KoopaClownFire EnemyShot at 1.5 px/f
+  plus the car's speed; bosses in a Fire car too; a player flying it fires PlayerShots on each
+  change of Run (cooldown 12 / 50, ≤ 8 out, three spread as Fire Mario [inf]); left: the
+  ChargeShot's own flight, the object budget); ✅ own Parachute falls (2026-10-25, branch `enemysys2`, actors/chute.rs,
+  shared enemy draft §5.2 "Traced"): the Thwomp's Dossun action folds its parachute and opens it
+  on each drop (vy ≤ −4: −0.1 / −1.0), the Lava Bubble's ends in lava or at its hiding level, the
+  Cheep Cheep's and Porcupuffer's in water or below the area, the Wiggler's is the Default (its
+  segments' rotation is drawn only); left: the Side Thwomp's (SideDossun Fall 0x7101265210); ✅
+  ceiling Spinies and Buzzy Beetles (2026-10-25, branch `enemysys2`, actors/ceiling.rs, 25-spiny.md
+  "v3.0.3 check": placed upside down — 58 in the sample — or out of a down pipe at normal size,
+  they walk the ceiling and drop as their shells on a player below; Togezo Basic 0x7102913c70);
+  ✅ Boo Buddies out of a block (TeresaSpread Block Out 0x71029106e0: the circle spreads round the
+  block; 41-boo.md); a block's part keeps its 0x4 form (lit Bob-omb, Sledge Bro …); ✅ note blocks'
+  contents rule checked (v3.0.3 0x710138f990, 23-note-block.md: given at bump start on a side hit
+  or when the block is in a camera view, else kept for a later bump); ✅ FishBone's Block Out
+  (Pukupuku's, 103-fish-bone.md) and the Chain Chomp's pipe exit ending on landing (Wanwan Dokan
+  0x7102915ff0, 61-chain-chomp.md); ✅ water variants (shared enemy draft §5.9): a Goomba out of
+  a block in water holds still, then swims; a Lava Bubble leaps 3.5 (5.0); Fish Bones fired in
+  water glide level and slow to a stop, Wigglers swim off at once; the winged red Koopa's climb
+  eases by 0.06 out of water (the speed bands were its water variant); ✅ Gesso3W's Block Out
+  (collides from the start); left: Hanachan's and Togezo's water Block Outs, the ItemBalloon /
+  ItemHeaddress eased Block Out (partial, shared enemy draft §5.9), the Coin Block Out and the
+  winged coin's own side-pipe state (none in either sample; 8-coin.md: Coin Dokan enter
+  0x7101367620 sends it to the Coin actor's own state 8, not traced); ✅ the Super World map's music, sounds, point / goal / road states and ledge cliffs
+  (2026-10-25, branch `swmap2`, game pack 14; left: `passPoint`, the camera, ghosts are online); ✅ the Cursed Key and Phanto (2026-10-25,
   research 95-key.md; co-op: Phanto hurts only the player in front [inf]); ✅ SMM1 UI sounds for
   the SMM1-look 100 Mario (2026-10-25, branch `smm1snd`, research smm1-sound.md: SMM1's SLink2DB
   v0x15 decoded; the import's `ui/sound/`, SMM1 importer 4; the screens fire the data's keys and
@@ -75,9 +98,20 @@ sway, importer and pack 12, the dev cache already at v12).
      (`nn::hid::ShowControllerSupport`, states `cRunControllerApplet` → `cPlayTogether`); SMCraft's
      controller step stands in for it.
   3b. Research queue (binary → spec → code), each an agent's task: stacking's tower rules and
-     `Tower_stack` (maker C11); the maker's Water Level mode (`L_WaterLevelBtn_00`, mode banner
-     "Water / Poison / Lava Level"; fixed / rising and the speed — not in the text, likely
-     markers in the course), custom scroll nodes, ✅ Mario's Trail (`L_ZanzoBtn_00`, 2026-10-24:
+     `Tower_stack` (maker C11); ✅ the maker's Water Level mode (2026-10-25, branch
+     `makermodes`, maker C13: the v3.0.3 edit actor 0x7100eff460 — handles at 31/48 of the view,
+     the end's round button ±8 px at the anchor − 16, the start's pill ±24 × ±8; dragging sets
+     the heights 0 … 24 (from 1 in 3D World, 167 vertical); lines together = still (mode / speed
+     saved, 1 / 1 at first); a tap on the button 1 ↔ 2, held > 15 frames the speed balloon;
+     built: banner, button states, lines / pill / path / button drawn, the balloon, the first-time
+     tip) · ⬜ the water-level actor's sound user, the right column's greyed buttons in the mode;
+     ✅ custom scroll nodes (2026-10-25, maker C13: the start / end units, a tap on a point's
+     speed square at + 16 px steps 0 → 1 → 2 → 0 (0x7100eb3300), the start's speed is header
+     0x0E; built: Custom in the autoscroll window, its tip, the mode with the band, birds, speed
+     squares and arrows; nodes on their own layer, numbered left to right) · ⬜ how the game adds
+     nodes (ours: drag a leg), the band's exact extent (the reference frames show it ~2.5 tiles
+     wider than the camera-centre range), the `Edit_camera` / `Edit_autoscroll` /
+     `Edit_WaterLevelLine` models' textures (not imported: flat shapes stand in), ✅ Mario's Trail (`L_ZanzoBtn_00`, 2026-10-24:
      maker C12 — 40 snapshots of player 1, one per 22 px of travel; built), the trash can
      (`L_TrashCan_00`: UIEditMainPage part 8 at +0x800, set up in 0x71018cee20; `part(i)`
      0x71018fc060 is virtual; placed from code, the pane sits at 0,0; Act 45 plays
@@ -97,11 +131,12 @@ sway, importer and pack 12, the dev cache already at v12).
      PataTogezo, DokanOutBig → JamBig → JumpOutBig, Bubble launch, item facing, coin pipes as
      TenCoin bursts; init 0x710105e400), Killer leftovers (Togezo / Met / Karon, empty shells,
      Bubble, MapObj = Item, Hacchin = CloudShot; the red blaster's 320-frame lock-out; Bullet
-     Bill at the muzzle's height), Parachute swing direction and wall hold. Left: liquid
-     variants (Kuribo / Pukupuku / Bubble / FishBone / Hanachan / RedPataPata in water), Block
-     sideways (multiplayer) spreads and note blocks' contents, Gesso3W / Hanachan / FishBone /
-     TeresaSpread Block Outs, KutsuKuribo, Togezo's ceiling flip, the winged coin's own pipe
-     state 8, Bubble / Thwomp / Porcupuffer / Wiggler / Cheep Cheep own Parachute Falls, the
+     Bill at the muzzle's height), Parachute swing direction and wall hold. Left: ✅ liquid
+     variants (Kuribo / Pukupuku / Bubble / FishBone / Hanachan shots / RedPataPata in water), Block
+     sideways (multiplayer) spreads and ✅ note blocks' contents, Gesso3W / Hanachan / FishBone /
+     ✅ TeresaSpread / FishBone Block Outs (Hanachan's on land is the Default's; its water mode and
+     Gesso3W's not done), KutsuKuribo, ✅ Togezo's ceiling mode, the winged coin's own pipe
+     state 8, ✅ Bubble / Thwomp / Porcupuffer / Wiggler / Cheep Cheep own Parachute Falls, the
      parachute body sway (drawn), DokanOutBig's 0.5 → 0.7 scale and other draw-only scales;
      Super World enemy-icon courses, point icons by model, map ghosts; ✅ CJK course
      names (branch `cjk`, 2026-10-24: the
@@ -297,7 +332,8 @@ sway, importer and pack 12, the dev cache already at v12).
     column's `L_ZanzoBtn_00` (Check = on, `se_ui_edit_open_ringmenu`, `yr_Delay_01` switched
     on) toggles it, kept as `maker.trail`. ⬜ 3D World's model player (no 2D art: no pictures),
     what Mario holds / rides in the picture, the maker following Mario to the area he ended in
-  - ⬜ custom autoscroll and its nodes, water level, the part variants balloon (Fast Conveyor …), tracks / doors' partners placed
+  - ✅ water level and custom autoscroll with its nodes (2026-10-25, see the research queue) ·
+    ⬜ the part variants balloon (Fast Conveyor …), tracks / doors' partners placed
     by hand, the trash can, co-op making
   - ✅ the vertical scroll bar for vertical sub-areas (`N_SlideBarV_00`: its handle by the view's
     height, pressed / dragged to scroll; captures `maker-vertical`, `maker-subarea`)

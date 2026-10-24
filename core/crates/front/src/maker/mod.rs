@@ -34,7 +34,12 @@
 
 pub mod attr;
 pub mod catalog;
+pub mod help;
+pub mod liquid;
 pub mod mission;
+pub mod modes;
+pub mod scroll;
+pub mod shapes;
 pub mod subarea;
 pub mod trail;
 pub mod view;
@@ -166,6 +171,12 @@ enum Mode {
     Mission,
     /// The sub-area's orientation window.
     SubArea,
+    /// The Water Level mode (`liquid`).
+    Water,
+    /// The Custom Scroll mode (`scroll`).
+    Scroll,
+    /// A one-time tip (`help`).
+    Help,
     Test,
 }
 
@@ -312,6 +323,12 @@ pub struct MakerFlow {
     pub trail_on: bool,
     /// The tick the button's "Mario's Trail" label goes (its Cancel).
     trail_label: Option<i32>,
+    /// The Water Level and Custom Scroll modes' presses.
+    water: liquid::LiquidEdit,
+    scroll: scroll::ScrollEdit,
+    /// The one-time tip while it is up, and one to show once the window closes.
+    help: Option<help::HelpTip>,
+    pending_tip: Option<help::Tip>,
 }
 
 impl MakerFlow {
@@ -401,6 +418,10 @@ impl MakerFlow {
             trail: Default::default(),
             trail_on: cx.host.load_value(TRAIL_KEY).as_deref() != Some("0"),
             trail_label: None,
+            water: Default::default(),
+            scroll: Default::default(),
+            help: None,
+            pending_tip: None,
         };
         f.reset_palette();
         f.setup_page();
@@ -452,8 +473,6 @@ impl MakerFlow {
             "N_View_00",
             "L_LeftParts_00/N_Content_00",
             "L_LeftParts_00/L_MultiEditBtn_00",
-            "L_LeftParts_00/L_WaterLevelBtn_00",
-            "L_LeftParts_00/L_ScrollEditBtn_00",
         ] {
             p.show(pane, false);
         }
@@ -482,6 +501,14 @@ impl MakerFlow {
             (
                 "L_LeftParts_00/L_ZanzoBtn_00/T_Btn_00",
                 "L_LeftParts_00-L_ZanzoBtn_00-T_Btn_00",
+            ),
+            (
+                "L_LeftParts_00/L_WaterLevelBtn_00/T_Btn_00",
+                "L_LeftParts_00-L_WaterLevelBtn_00-T_Btn_00",
+            ),
+            (
+                "L_LeftParts_00/L_ScrollEditBtn_00/T_Btn_00",
+                "L_LeftParts_00-L_ScrollEditBtn_00-T_Btn_00",
             ),
             (
                 "L_RightParts_00/L_SaveBtn_00/T_Btn_00",
@@ -524,6 +551,10 @@ impl MakerFlow {
         }
         // the clapperboard's "Play from start" text only while it is held [inf]
         p.show("L_Play_00/L_PlayBtn_00/T_Text_00", false);
+        // the buttons' name labels come with Select / Decide only
+        for b in ["L_WaterLevelBtn_00", "L_ScrollEditBtn_00"] {
+            p.show(&format!("L_LeftParts_00/{b}/N_Text_00"), false);
+        }
         self.update_page();
         self.update_timer();
         self.update_mission_button();
@@ -718,6 +749,26 @@ impl MakerFlow {
                 }
                 None
             }
+            Mode::Water | Mode::Scroll => {
+                self.mode_tick(input, pressed, keys_pressed, start_pressed, cx);
+                None
+            }
+            Mode::Help => {
+                let click = input.ui.click.or(if input.down && !self.down_was {
+                    input.pointer
+                } else {
+                    None
+                });
+                if self.help.as_mut().is_none_or(|h| h.step(pressed, click)) {
+                    self.help = None;
+                    self.mode = Mode::Edit;
+                    // a press that closed the tip doesn't go on into the course
+                    self.down_was = true;
+                    self.held = input.ui.held;
+                    return None;
+                }
+                None
+            }
             Mode::Mission => {
                 let tabs = match keys_pressed {
                     k if k & keys::NEXT != 0 => 1,
@@ -762,6 +813,12 @@ impl MakerFlow {
                 }
             }
         };
+        // a tip waiting for its window to close
+        if self.mode == Mode::Edit
+            && let Some(t) = self.pending_tip.take()
+        {
+            self.show_tip(cx.host, t);
+        }
         if self.mode != Mode::Test {
             self.trail.tick(self.trail_on);
             if self.trail_label.is_some_and(|t| self.tick >= t)
@@ -1706,6 +1763,7 @@ impl MakerFlow {
 
     /// A click on the page's buttons (true: it hit one).
     fn page_click(&mut self, p: [f32; 2], cx: &mut crate::Cx) -> bool {
+        let (water_ok, scroll_ok) = (self.water_available(), self.scroll_available());
         let Some(page) = &mut self.page else {
             return false;
         };
@@ -1716,7 +1774,7 @@ impl MakerFlow {
             self.select_slot(i);
             return true;
         }
-        let buttons: [(&str, u8); 12] = [
+        let buttons: [(&str, u8); 14] = [
             ("L_PaletteSet_00/L_SearchBtn_00/B_Btn_00", 0),
             ("L_Play_00/L_PlayBtn_00/B_Btn_00", 1),
             ("L_RightParts_00/L_UndoBtn_00/B_Btn_00", 2),
@@ -1729,6 +1787,8 @@ impl MakerFlow {
             ("L_LeftParts_00/L_ScrollBtn_00/B_Btn_00", 9),
             ("L_LeftParts_00/L_MissionBtn_00/B_Btn_00", 10),
             ("L_LeftParts_00/L_ZanzoBtn_00/B_Btn_00", 11),
+            ("L_LeftParts_00/L_WaterLevelBtn_00/B_Btn_00", 12),
+            ("L_LeftParts_00/L_ScrollEditBtn_00/B_Btn_00", 13),
         ];
         let panes: Vec<String> = buttons.iter().map(|b| b.0.to_string()).collect();
         let Some(i) = hit(page, self.tick, &panes, p) else {
@@ -1781,9 +1841,21 @@ impl MakerFlow {
             return false;
         };
         let pane = buttons[i].0.trim_end_matches("/B_Btn_00").to_string();
+        // the mode buttons do nothing while greyed (no liquid / no custom autoscroll)
+        let greyed = match buttons[i].1 {
+            12 => !water_ok,
+            13 => !scroll_ok,
+            _ => false,
+        };
+        if greyed {
+            self.sound(7, "invalid");
+            return true;
+        }
         self.ui.sound_button(PAGE, &pane, Event::Decide);
         page.play(&format!("{pane}/Decide"), self.tick);
         match buttons[i].1 {
+            12 => self.enter_water(),
+            13 => self.enter_scroll(),
             0 => self.open_ring(),
             1 => self.start_test(cx, None),
             2 => self.undo(),
@@ -1889,6 +1961,8 @@ impl MakerFlow {
                 }
             }
         }
+        self.update_mode_buttons();
+        let Some(p) = &mut self.page else { return };
         // the Undodog comes in once there is something to undo [inf]
         if can_undo {
             if !p.is_playing("L_RightParts_00/InUndoBtn") {
@@ -2677,7 +2751,7 @@ impl MakerFlow {
 
     /// The window's choices: (button part, value). Window 0 game style, 1 course theme, 3
     /// autoscroll; the timer window (2) has a selector instead.
-    fn window_choices(w: u8) -> Vec<(String, u8)> {
+    fn window_choices(w: u8, main: bool) -> Vec<(String, u8)> {
         match w {
             0 => (0..5)
                 .map(|i| (format!("L_SkinListBtn_{i:02}"), i as u8))
@@ -2689,14 +2763,17 @@ impl MakerFlow {
                 .enumerate()
                 .map(|(i, &t)| (format!("L_SceneListBtn_{i:02}"), t))
                 .collect(),
-            // none, slow, normal, fast (custom needs its nodes: not here yet)
+            // none, slow, normal, fast, custom (the main area's buttons)
             3 => [
                 ("N_AutoScroll_00/L_NoAutoScrollBtn_00", 0u8),
                 ("N_AutoScroll_00/N_MainBtn_00/L_AutoScrollBtn_00", 1),
                 ("N_AutoScroll_00/N_MainBtn_00/L_AutoScrollBtn_01", 2),
                 ("N_AutoScroll_00/N_MainBtn_00/L_AutoScrollBtn_02", 3),
+                ("N_AutoScroll_00/N_MainBtn_00/L_AutoScrollBtn_06", 4),
             ]
             .iter()
+            // custom autoscroll only in the main area
+            .filter(|(_, v)| main || *v < 4)
             .map(|(b, v)| (b.rsplit('/').next().unwrap_or(b).to_string(), *v))
             .collect(),
             _ => vec![("L_TimerDecideBtn_00".to_string(), 0)],
@@ -2710,7 +2787,7 @@ impl MakerFlow {
                 STYLES.iter().position(|s| *s == style).unwrap_or(0) as u8
             }
             1 => self.editor.theme().0,
-            3 => self.editor.area().header.autoscroll_type.min(3),
+            3 => self.editor.area().header.autoscroll_type.min(4),
             _ => 0,
         }
     }
@@ -2718,7 +2795,7 @@ impl MakerFlow {
     fn open_window(&mut self, w: u8) {
         self.mode = Mode::Window(w);
         let current = self.window_value(w);
-        let choices = Self::window_choices(w);
+        let choices = Self::window_choices(w, self.editor.area == 0);
         self.window_sel = choices.iter().position(|c| c.1 == current).unwrap_or(0);
         self.window_timer = self.editor.course.header.timer;
         let tick = self.tick;
@@ -2808,11 +2885,14 @@ impl MakerFlow {
                         "L_ScrollDecideBtn_00/T_Btn_00",
                         "L_ScrollDecideBtn_00-T_Btn_00",
                     ),
+                    (
+                        "L_AutoScrollBtn_06/T_AutoEdit_00",
+                        "L_AutoScrollBtn_06-T_AutoEdit_00",
+                    ),
                 ] {
                     p.text_from(&format!("{left}/{pane}"), &format!("{left}-{label}"));
                 }
-                // custom autoscroll needs its nodes drawn: not offered here yet
-                p.show(&format!("{left}/L_AutoScrollBtn_06"), false);
+                p.show(&format!("{left}/L_AutoScrollBtn_06"), self.editor.area == 0);
             }
             _ => {}
         }
@@ -2852,6 +2932,7 @@ impl MakerFlow {
             p.show("L_LeftParts_00/N_Content_00", false);
         }
         self.update_timer();
+        self.update_mode_buttons();
     }
 
     fn window_tick(
@@ -2863,7 +2944,7 @@ impl MakerFlow {
     ) {
         let _ = cx;
         let left = "L_LeftParts_00";
-        let choices = Self::window_choices(w);
+        let choices = Self::window_choices(w, self.editor.area == 0);
         let mut decide = false;
         let mut timer_step = 0i16;
         if pressed.has(Buttons::BACK) {
@@ -2965,6 +3046,16 @@ impl MakerFlow {
                 }
                 1 => self.editor.set_theme(v),
                 _ => self.editor.set_autoscroll(v),
+            }
+            // the first liquid theme / the first custom autoscroll: its tip [obs: the
+            // reference frames]
+            let tip = match w {
+                1 if self.water_available() => Some(help::Tip::WaterLevel),
+                3 if self.scroll_available() => Some(help::Tip::CustomScroll),
+                _ => None,
+            };
+            if let Some(t) = tip {
+                self.pending_tip = Some(t);
             }
             // the scene's style / theme set-up empties the trail [obs 0x7100e3e470]
             if w < 2 {
@@ -3135,6 +3226,27 @@ impl MakerFlow {
         if let Some(p) = &mut self.page {
             push_layout(out, p, tick);
         }
+        if let Some(l) = self.speed_balloon_layout() {
+            push_layout(out, l, tick);
+        }
+        if self.mode == Mode::Help
+            && let Some(h) = &mut self.help
+        {
+            // the button where the page has it now (it may still be coming in)
+            let target = self
+                .page
+                .as_ref()
+                .and_then(|p| p.rect(h.button()))
+                .map(|r| (r.center, r.size));
+            out.push(DrawItem::Layout {
+                ui: crate::layout::UiKind::Smm2,
+                size: [1280.0, 720.0],
+                quads: h.quads(target),
+            });
+            if let Some(l) = &mut h.layout {
+                push_layout(out, l, h.tick);
+            }
+        }
         if self.mode == Mode::Attr
             && let Some(b) = &mut self.attr
             && let Some(l) = &mut b.layout
@@ -3265,6 +3377,15 @@ impl MakerFlow {
         self.load_icons(cx.host);
     }
 
+    /// The Water Level / Custom Scroll mode's lines and handles (view overlay).
+    pub fn mode_quads(&self, q: &mut Vec<mmk_ui::Quad>) {
+        match self.mode {
+            Mode::Water => self.liquid_quads(q),
+            Mode::Scroll => self.scroll_quads(q),
+            _ => {}
+        }
+    }
+
     /// An `EditModel` texture's id, if the import has it.
     pub fn ui_texture(&self, name: &str) -> Option<u32> {
         self.textures.get(name).copied()
@@ -3272,7 +3393,7 @@ impl MakerFlow {
 
     /// The glove: hidden while a menu is up.
     pub fn glove_shown(&self) -> bool {
-        matches!(self.mode, Mode::Edit)
+        matches!(self.mode, Mode::Edit | Mode::Water | Mode::Scroll)
     }
 
     pub fn glove_at(&self) -> [f32; 2] {
@@ -3293,7 +3414,9 @@ impl MakerFlow {
     }
 
     /// Captures: open a window ("parts", "menu", "save", "style", "theme", "play", "subarea";
-    /// "vertical": a vertical sub-area).
+    /// "vertical": a vertical sub-area; "water", "water-rising", "water-both", "water-speed",
+    /// "water-tip": the Water Level mode in the forest; "scroll", "scroll-nodes", "scroll-tip":
+    /// Custom Scroll).
     pub fn debug_open(&mut self, cx: &mut crate::Cx, what: &str) -> bool {
         match what {
             "parts" => self.open_ring(),
@@ -3312,6 +3435,51 @@ impl MakerFlow {
                 let _ = self.editor.set_vertical(true);
                 self.cam = [0.0, 0.0];
                 self.dirty = true;
+            }
+            // the Water Level mode in the forest: still water, rising (the button, its path),
+            // rising and falling, the speed balloon; its tip
+            "water" | "water-rising" | "water-both" | "water-speed" | "water-tip" => {
+                self.editor.set_theme(9);
+                let moving = what != "water" && what != "water-tip";
+                self.editor.set_liquid(mmk_editor::settings::Liquid {
+                    mode: if what == "water-both" { 2 } else { 1 },
+                    speed: 1,
+                    start: 1,
+                    end: if moving { 8 } else { 1 },
+                });
+                self.dirty = true;
+                self.update_page();
+                if what == "water-tip" {
+                    cx.host.store_value(help::Tip::WaterLevel.key(), "0");
+                    self.show_tip(cx.host, help::Tip::WaterLevel);
+                    return true;
+                }
+                self.enter_water();
+                if what == "water-speed" {
+                    self.editor.checkpoint();
+                    self.water.drag = Some(liquid::Handle::Target);
+                    self.water.held = liquid::HOLD;
+                    let at = self.to_layout(self.liquid_anchor() - 16.0, liquid::line_y(8));
+                    self.water_hold(at);
+                }
+            }
+            // the Custom Scroll mode: the start alone, then with nodes at the three speeds;
+            // its tip
+            "scroll" | "scroll-nodes" | "scroll-tip" => {
+                self.editor.set_autoscroll(4);
+                if what == "scroll-nodes" {
+                    self.editor.set_custom_scroll_speed(1);
+                    let _ = self.editor.add_scroll_node(30, 12, 2);
+                    let _ = self.editor.add_scroll_node(48, 6, 0);
+                }
+                self.dirty = true;
+                self.update_page();
+                if what == "scroll-tip" {
+                    cx.host.store_value(help::Tip::CustomScroll.key(), "0");
+                    self.show_tip(cx.host, help::Tip::CustomScroll);
+                    return true;
+                }
+                self.enter_scroll();
             }
             _ => return false,
         }
