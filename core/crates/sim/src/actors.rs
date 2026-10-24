@@ -774,6 +774,9 @@ pub struct Actor {
     pub heading: f32,
     /// The player's facing (+1 right), set by the world.
     pub target_facing: i32,
+    /// The player's height as the shared player-in-box query sees it (`Player::query_height`),
+    /// set by the world.
+    pub target_h: f32,
     /// Riding a track, and the offset from the track point to (x, y).
     pub rail: Option<crate::track::Rail>,
     pub rail_off: (f32, f32),
@@ -881,6 +884,7 @@ impl Actor {
             speed: 0.0,
             heading: 0.0,
             target_facing: 1,
+            target_h: 16.0,
             rail: None,
             rail_off: (0.0, 0.0),
             derailed: false,
@@ -1313,16 +1317,9 @@ impl Actor {
         }
     }
 
-    /// Thwomp (12-thwomp.md): Wait (notices a player below within |dx| < W + 32) → Fall
-    /// (g −0.25, cap −5) → FallWait 64 → Return (≤ 0.875, +0.2/frame) to the home height.
-    /// Side Thwomp (SideDossun): looks one way only; a player in the attack box on that side —
-    /// 136 px long from 6·S px behind its centre (8·S in 3D World), centred 16·S above its feet
-    /// with half-height 16·S + 16 (S = 1, big 2) — sets it charging that way (0.075/frame² to
-    /// 3.0, no gravity) until it hits a wall; FallWait 64, then back to its start at up to
-    /// 0.875 px/f (±0.2/frame) [obs Wait 0x7100768800, box 0x710076ab10, Fall 0x7100769210,
-    /// Return 0x710076a140].
-    /// A player in the Side Thwomp's attack box (see `step_thwomp`); the player's box is taken
-    /// as 16 px tall from its feet [inf].
+    /// A player in the Side Thwomp's attack box (see `step_thwomp`): the shared player-in-box
+    /// query in its feet-span mode, the player's x inside the box and its feet-to-height span
+    /// (`target_h`) overlapping it [obs v3.0.3 0x7100d7fed0].
     fn side_thwomp_sees(&self, level: &Level, right: bool) -> bool {
         let (px, py) = self.target;
         let s = if self.big { 2.0 } else { 1.0 };
@@ -1333,7 +1330,7 @@ impl Actor {
             (self.x - 136.0, self.x + back)
         };
         let (cy, hh) = (self.y + 16.0 * s, 16.0 * s + 16.0);
-        px >= x0 && px <= x1 && py < cy + hh && py + 16.0 > cy - hh
+        px >= x0 && px <= x1 && py < cy + hh && py + self.target_h > cy - hh
     }
 
     /// A Side Thwomp's charge starts: it faces its side and returns here afterwards.
@@ -1344,6 +1341,14 @@ impl Actor {
         }
     }
 
+    /// Thwomp (12-thwomp.md): Wait (notices a player below within |dx| < W + 32) → Fall
+    /// (g −0.25, cap −5) → FallWait 64 → Return (≤ 0.875, +0.2/frame) to the home height.
+    /// Side Thwomp (SideDossun): looks one way only; a player in the attack box on that side —
+    /// 136 px long from 6·S px behind its centre (8·S in 3D World), centred 16·S above its feet
+    /// with half-height 16·S + 16 (S = 1, big 2) — sets it charging that way (0.075/frame² to
+    /// 3.0, no gravity) until it hits a wall; FallWait 64, then back to its start at up to
+    /// 0.875 px/f (±0.2/frame) [obs Wait 0x7100768800, box 0x710076ab10, Fall 0x7100769210,
+    /// Return 0x710076a140].
     fn step_thwomp(&mut self, level: &Level, side: bool, right: bool) {
         let (px, py) = self.target;
         let w = if self.big { 32.0 } else { 16.0 };
@@ -4733,6 +4738,26 @@ mod tests {
         a.on_ground = true;
         a.dir = 1;
         (level, a)
+    }
+
+    #[test]
+    fn a_side_thwomp_sees_a_big_players_head_in_its_box() {
+        let level = Level::flat(40);
+        let mut a = Actor::new(
+            Kind::Thwomp {
+                side: true,
+                right: true,
+            },
+            100.0,
+            100.0,
+        );
+        // the box spans y 84…148; feet at 60: a small player (16 tall) is under it, a big one's
+        // 32 px reach into it
+        a.target = (150.0, 60.0);
+        a.target_h = 16.0;
+        assert!(!a.side_thwomp_sees(&level, true));
+        a.target_h = 32.0;
+        assert!(a.side_thwomp_sees(&level, true));
     }
 
     #[test]

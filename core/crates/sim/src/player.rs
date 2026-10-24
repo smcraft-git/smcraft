@@ -767,6 +767,18 @@ impl Player {
         self.style == Style::W3 && self.dash >= need
     }
 
+    /// The height the shared player-in-box query (Side Thwomp attack box, …) gives the player
+    /// above its feet: by size class 16 (small) or 32, halved while crouching in any form but
+    /// small [obs v3.0.3 0x7100d7fed0, tables 0x71023d5e0c / 0x7102320930].
+    pub fn query_height(&self) -> f32 {
+        let h = if self.big() { 32.0 } else { 16.0 };
+        if self.crouch && self.form != Form::Small {
+            h * 0.5
+        } else {
+            h
+        }
+    }
+
     pub fn big(&self) -> bool {
         // Link and the Power Balloon have the small body (size class 1) [obs 0x71023d5e0c]
         !matches!(

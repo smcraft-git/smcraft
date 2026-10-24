@@ -2324,6 +2324,7 @@ impl World {
                 (px, py)
             };
             a.target_facing = self.player.facing;
+            a.target_h = self.player.query_height();
             powerups::mask_target(a, masked);
             a.camera = (self.camera_x, self.camera_y);
             a.floor_ref = self.liquid.map(|l| l.y).unwrap_or(self.level.bottom - 12.0);
