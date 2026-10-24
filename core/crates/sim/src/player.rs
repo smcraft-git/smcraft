@@ -2641,13 +2641,17 @@ impl Player {
         // the slope under the feet centre: its own body never blocks sideways (only its outer
         // faces do, approached from beside it) [obs: Ryujinx trace, running up a slope]
         let own_slope = level.slope_at(self.x).map(|(_, sl)| *sl);
+        // the game moves both axes before its terrain check, so the wall probes sit at the
+        // moved height: rising past a wall's top corner frees the feet a frame earlier
+        // [obs: Ryujinx trace, jumping from against a 1-high wall; §1.2 integrate → collide]
+        let wall_base = self.y + self.vy;
         for dir in [-1.0f32, 1.0] {
             let wx = self.x + dir * s.wall_x;
             let prev_wx = wx - self.vx * cos;
             let cell_x = (wx / TILE).floor() * TILE;
             let inside_own = own_slope.is_some_and(|sl| sl.covers(wx));
             let hit = [s.wall_y0, s.wall_y1].iter().any(|&wy| {
-                let c = level.cell_at(wx, self.y + wy);
+                let c = level.cell_at(wx, wall_base + wy);
                 (c.is_solid() && !inside_own)
                     // one-way walls block only motion into them from their blocking side
                     || (dir < 0.0 && c == Cell::PassRight && prev_wx >= cell_x + TILE - 0.01)
@@ -2674,20 +2678,22 @@ impl Player {
                 }
             }
         }
-        // moving solids: sides (full solids only)
+        // moving solids: sides (full solids only), probed at the moved height as for terrain
         for b in level.solids.iter().filter(|b| !b.top_only) {
-            let (y0, y1) = (self.y + s.wall_y0, self.y + s.wall_y1);
+            let (y0, y1) = (wall_base + s.wall_y0, wall_base + s.wall_y1);
             if y1 <= b.y0 || y0 >= b.y1 {
                 continue;
             }
             let (l, r) = (self.x - s.wall_x, self.x + s.wall_x);
             if r > b.x0 && l < b.x1 {
                 self.wall_solid = Some(b.owner);
+                // flush with the side, as for terrain [obs: Ryujinx trace, a Muncher's side
+                // leaves x at its edge − 7.9 exactly]
                 if self.x < (b.x0 + b.x1) / 2.0 {
-                    self.x = b.x0 - s.wall_x - 0.001;
+                    self.x = b.x0 - s.wall_x;
                     self.vx = self.vx.min(0.0);
                 } else {
-                    self.x = b.x1 + s.wall_x + 0.001;
+                    self.x = b.x1 + s.wall_x;
                     self.vx = self.vx.max(0.0);
                 }
             }
@@ -3001,6 +3007,40 @@ mod tests {
             "should end up on the plateau, y = {max_y}"
         );
         assert!(p.on_ground);
+    }
+
+    #[test]
+    fn rising_past_a_wall_top_frees_the_feet_on_the_moved_height() {
+        // a 1-high wall on the floor at tile 10 (top y 48): pushed against it, then a jump
+        // with right held. The game integrates both axes before its terrain check, so the
+        // first frame that moves right is the one whose moved feet + 4 clear the top.
+        let mut level = Level::flat(60);
+        level.set(10, 2, Cell::Solid);
+        let mut p = Player::new(120.0, 32.0);
+        let right = Input {
+            buttons: input::RIGHT,
+        };
+        for _ in 0..60 {
+            p.step(right, &level);
+        }
+        let pinned = p.x;
+        assert!((pinned - (160.0 - 7.9)).abs() < 1e-3, "pinned at {pinned}");
+        let jump = Input {
+            buttons: input::RIGHT | input::JUMP,
+        };
+        for _ in 0..40 {
+            let y_before = p.y;
+            p.step(jump, &level);
+            if p.x > pinned + 1e-4 {
+                assert!(
+                    y_before + 4.0 < 48.0 && p.y + 4.0 >= 48.0,
+                    "{y_before} → {}",
+                    p.y
+                );
+                return;
+            }
+        }
+        panic!("never cleared the wall");
     }
 
     #[test]
