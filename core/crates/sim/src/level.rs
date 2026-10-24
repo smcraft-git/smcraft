@@ -718,7 +718,7 @@ pub fn unsupported_features(course: &Course) -> Vec<String> {
         for o in area.objects.iter() {
             // what a block, tree, checkpoint flag or Bill Blaster holds comes out as its actor
             if o.child_id >= 0
-                && (block_kind(o.id).is_some() || matches!(o.id, 13 | 90 | 106))
+                && (block_kind(o.id).is_some() || matches!(o.id, 13 | 90 | 106 | 112))
                 && block_contents(o, &probe).is_none()
             {
                 out.insert(format!("part {} in part {}", o.child_id, o.id));
@@ -1474,7 +1474,8 @@ impl Level {
                 lvl.checkpoints.push(Checkpoint {
                     x: o.x as f32 / 10.0,
                     y: o.y as f32 / 10.0 - 8.0,
-                    contents: block_contents(o, &lvl),
+                    // the flag hands its power-up straight to the player: no actor, no dress
+                    contents: Contents::from_part(o.child_id, o.child_flags),
                 });
                 continue;
             }
