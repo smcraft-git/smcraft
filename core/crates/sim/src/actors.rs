@@ -52,6 +52,11 @@ pub const ITEM_SPEED: f32 = 1.0;
 /// A Yoshi's Egg: its box's half size round its position (profile YoshiEgg {0, 8, 22, 22}) and
 /// the hatch helper's count from Land (+0x8 reset to 0x28) [obs v3.0.3 0x71013f7990].
 const EGG_BOX: f32 = 22.0;
+/// The Sledge Bro's hover count, and its winged bob: amplitude and step a frame [obs v3.0.3
+/// Hovering enter 0x71011d2b20 / exe 0x71011d2b50: 0.4 at 0x7102319274, 0x5b05b04 = 8°].
+const SLEDGE_HOVER: f32 = 10.0;
+const SLEDGE_BOB: f32 = 0.4;
+const SLEDGE_BOB_STEP: u32 = 0x05b0_5b04;
 const EGG_HATCH: i32 = 40;
 pub const FIREBALL_SPEED: f32 = 3.625;
 pub const FIREBALL_GRAVITY: f32 = -0.4375;
@@ -3526,10 +3531,21 @@ impl Actor {
     }
 
     /// Sledge Bro (the Hammer Bro's 0x4 form, MegaBros; 3-hammer-bro.md): paces like a Hammer
-    /// Bro; every 360 + U[0,180) frames jumps (vy 5.1, 6.5 winged), hovers 10 frames at the top,
-    /// hip-drops (gravity −0.75, cap −8) and quakes on landing (the world stuns grounded
-    /// players), then pauses 50 frames; throws single hammers every 40 + U[0,40) frames.
-    /// Jump state in `heading`: 0 normal, > 0 hover frames left, −1 dropping; landing pause in
+    /// Bro; every 360 + U[0,180) frames jumps (vy 5.1, 6.5 winged), hovers 9 frames at the top
+    /// (Hovering enter 0x71011d2b20 sets 10, its exe 0x71011d2b50 holds while the count is
+    /// still above 1 and hip-drops on the 10th), hip-drops (gravity −0.75, cap −8) and quakes on
+    /// landing (the world stuns grounded players), then pauses 50 frames; throws single
+    /// hammers every 40 + U[0,40) frames.
+    ///
+    /// Winged, it keeps this action: MegaBros overrides the slots that send a winged Bro into
+    /// WingWalk (0x128 → 0x71011d2710 returns 0, 0x130 → 0x71011d2720 always Walk; its Quake
+    /// exe 0x71011d3120 ends in Walk too), and its throw helpers' Wing-context gate (helper
+    /// slot 0x88: 0x71011d3680 / 0x71011d32e0 return 0, the Bros' 0x7101091f30 returns 1)
+    /// leaves the timed throws on [obs v3.0.3, action vtable 0x71028f6b30, helpers
+    /// 0x71028f7340 / 0x71028f7498 / 0x71028f7bc8]. Its wings change only the jump (6.5, slot
+    /// 0x190) and the hover, which bobs: vy = 0.4 · cos θ, θ from 90° by 8° (0x5b05b04) a frame
+    /// (a dip of about 1.8 px) [obs 0x71011d2b50]. [?] the 50-frame hover (+0x520 bit 25).
+    /// Jump state in `heading`: 0 normal, > 0 the hover count, −1 dropping; landing pause in
     /// `kick_lock` (50 on the landing frame).
     fn step_sledge_bro(&mut self, level: &Level) -> Option<Actor> {
         let (px, _) = self.target;
@@ -3559,13 +3575,19 @@ impl Actor {
             self.on_ground = false;
             self.home_x = self.x;
         }
+        if self.heading > 0.0 && self.heading <= 1.0 {
+            self.heading = -1.0; // the count's last frame: HipDrop (enter 0x71011d2cf0)
+        }
         let g = if self.heading > 0.0 {
+            let k = (SLEDGE_HOVER - self.heading) as u32;
             self.heading -= 1.0;
-            self.vy = 0.0;
             self.vx = 0.0;
-            if self.heading <= 0.0 {
-                self.heading = -1.0;
-            }
+            self.vy = if self.wings {
+                let angle = 0x4000_0000u32.wrapping_add(k.wrapping_mul(SLEDGE_BOB_STEP));
+                SLEDGE_BOB * crate::fmath::table_sin_cos(angle).1
+            } else {
+                0.0
+            };
             0.0
         } else if self.heading < 0.0 {
             self.vy = (self.vy - 0.75).max(-8.0);
@@ -3574,15 +3596,17 @@ impl Actor {
             let before = self.vy;
             self.vy = (self.vy + ENEMY_GRAVITY).max(MAX_FALL);
             if before > 0.0 && self.vy <= 0.0 && !self.on_ground {
-                self.heading = 10.0; // the hover at the top
+                self.heading = SLEDGE_HOVER; // the hover at the top
             }
             ENEMY_GRAVITY
         };
         // (`kick_lock` counts down in `step`)
         if self.hops == 0 {
             self.collide(level);
-        } else if self.heading <= 0.0 {
-            // (hovering it holds still; it can land only once it drops)
+        } else if self.heading > 0.0 {
+            // (hovering it moves only by the winged bob; it can land only once it drops)
+            self.y += self.vy;
+        } else {
             self.bro_ghost_move(level, g);
         }
         if self.heading < 0.0 && self.on_ground {
@@ -5291,6 +5315,64 @@ mod tests {
         }
         assert_eq!(b.y, 32.0);
         assert!(b.on_ground);
+    }
+
+    /// A Sledge Bro on flat ground about to jump, with the throw timer out of the way.
+    fn sledge(wings: bool) -> (Level, Actor) {
+        let level = Level::flat(60);
+        let mut b = Actor::new(Kind::HammerBro, 20.0 * TILE + 8.0, 32.0);
+        b.alt = true;
+        b.wings = wings;
+        b.on_ground = true;
+        b.home_x = b.x;
+        b.pause = 1;
+        b.timer = 10_000;
+        (level, b)
+    }
+
+    /// Frames spent hovering, and how far it sank in the hover.
+    fn sledge_hover(level: &Level, b: &mut Actor) -> (usize, f32) {
+        let (mut frames, mut top, mut low) = (0, None, f32::MAX);
+        for _ in 0..200 {
+            b.step_spawning(level);
+            if b.heading > 0.0 {
+                frames += 1;
+                top.get_or_insert(b.y);
+                low = low.min(b.y);
+            }
+            if b.kick_lock > 0 {
+                break;
+            }
+        }
+        (frames, top.unwrap_or(0.0) - low)
+    }
+
+    #[test]
+    fn a_sledge_bro_hovers_nine_frames_then_hip_drops() {
+        let (level, mut b) = sledge(false);
+        let (frames, sank) = sledge_hover(&level, &mut b);
+        // the setting frame and 9 held ones
+        assert_eq!(frames, 10);
+        assert_eq!(sank, 0.0);
+        assert_eq!(b.y, 32.0);
+        assert_eq!(b.kick_lock, 50, "quakes on landing");
+    }
+
+    #[test]
+    fn a_winged_sledge_bro_keeps_its_action_and_bobs_in_the_hover() {
+        let (level, mut b) = sledge(true);
+        b.step_spawning(&level);
+        assert!(!b.bro_wing.on, "no WingWalk");
+        assert_eq!(b.hops, 2);
+        assert!(b.vy > 6.0, "the winged jump 6.5");
+        let (frames, sank) = sledge_hover(&level, &mut b);
+        assert_eq!(frames, 10);
+        // 0.4 · cos(90° + 8°k) for k = 0..8: about 1.8 px down
+        assert!((1.7..1.9).contains(&sank), "{sank}");
+        // and its helper throws on its timer as a wingless one does
+        let (level, mut b) = sledge(true);
+        b.timer = 0;
+        assert!(b.step_spawning(&level).is_some());
     }
 
     #[test]

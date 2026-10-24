@@ -36,9 +36,10 @@
 //! [inf] home x stays where it last landed from a jump (the exe re-latches it on BG bit 8, not
 //! decoded); the side-contact flags (+0x658 bits 2 / 3) and the wall-hit flag (bit 14) are both
 //! the engine's wall hit of the last frame; the ledge probe is cell-based, 0.1 px past the body;
-//! the Sledge Bro (MegaBros, the same exe over its own slots and helpers) keeps its wingless
-//! action; the multiplayer off-screen wait (helper +0x49 bit 0: the `Wait2` 30 frames) is left
-//! out.
+//! the multiplayer off-screen wait (helper +0x49 bit 0: the `Wait2` 30 frames) is left
+//! out. The Sledge Bro (MegaBros) never enters WingWalk: its slots 0x128 / 0x130 send Fall's
+//! landing to Walk whatever the wings (0x71011d2710 / 0x71011d2720) [obs v3.0.3]; see
+//! `step_sledge_bro`.
 
 use super::{Actor, ENEMY_GRAVITY, MAX_FALL};
 use crate::level::{Cell, Level};
