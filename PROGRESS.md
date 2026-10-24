@@ -472,7 +472,7 @@ Nextendo; `docs/nextendo-network-play.md`, spec `research/specs/network-play.md`
   out to belong to the parts' 0xC0000 bits, not stacks) · ⬜ the editor's height limit (play
   takes 128 members at most), pulling a member off a column
 - 🔄 Physics: re-recording every trace (2026-10-24; the old 428 / 454 was not a true count — the
-  old items / form traces were all small Mario). Re-recorded, current engine: **572 / 579 exact**
+  old items / form traces were all small Mario). Re-recorded, current engine: **573 / 579 exact**
   over 113 courses + 10 whole courses (2026-10-24 physics7: the shell courses now compare the shell too, which showed
   3 carried-shell throws off; and object traces: the player plus every simulated actor matched to
   a recorded game object, found by scans while the game is paused in the trace hook): M1/M3/MW/WU/3W flat 34 each, M1/M3/MW/WU/3W items 34 each, M1/M3/MW/WU/3W
@@ -535,8 +535,8 @@ Nextendo; `docs/nextendo-network-play.md`, spec `research/specs/network-play.md`
   taken in the next update after a normal move, the enemies stop, the pole's x from the frame
   after, 12 frames of hold, the slide at −1.9, 93 frames in all, then x + 6 facing right);
   W_3049200 (cloud blocks, Dry Bones, Cheep Cheeps, Koopas) exact to frame 182; W_3065813 exact
-  to 53, W_3051046 to its death at 103 (then the title course's death sequence), W_3006094 to
-  481, W_3051605 to 233, W_3145588 to 384, W_3010660 to 69. Object courses in all styles exact
+  (a wall of dotted-line blocks: their 0x4 variant is the red one, solid at ON), W_3051046 to its death at 103 (then the title course's death sequence), W_3006094 to
+  481, W_3051605 to 233, W_3145588 to 384, W_3010660 to 137 (a Seesaw's tilt starts 2 frames later in the game). Object courses in all styles exact
   (3D World's Trampoline eases 3 px, its falling Donut is gone after 21 frames, a lift pushes up
   feet at most 6 px under its top, a foot on a column boundary rides both donuts; SMW turn
   blocks spin 240 frames, passable; small Mario's head at 15.9 in SMW / NSMBU / 3D World; walkers

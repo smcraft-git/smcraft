@@ -801,8 +801,7 @@ fn block_kind(id: i16) -> Option<BlockKind> {
         63 => BlockKind::Ice,
         99 => BlockKind::OnOff,
         // dotted-line block: the 0x4 flag is its tile variant (0x71003d2600) [obs]; variant 1
-        // is drawn blue, as the blinking block's [inf: the TensenBlock tile entries' colour bit
-        // was not tied to the variant]
+        // is the red block (see below)
         100 => BlockKind::Dotted { blue: false },
         _ => return None,
     })
@@ -1534,7 +1533,10 @@ impl Level {
                 92 => lvl.pink_coins.push(CoinTile { x: tx, y: ty }),
                 id if !actorish && block_kind(id).is_some() => {
                     let mut kind = block_kind(id).unwrap();
-                    if id == 100 && o.flags & 0x4 != 0 {
+                    // the 0x4 variant is the red one, solid at the start (ON) [obs: Ryujinx
+                    // trace W_3065813, a wall of 0x4 dotted-line blocks stopping the player]; the
+                    // plain one is blue
+                    if id == 100 && o.flags & 0x4 == 0 {
                         kind = BlockKind::Dotted { blue: true };
                     }
                     let contents = block_contents(o, &lvl);
