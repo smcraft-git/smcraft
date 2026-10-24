@@ -32,7 +32,9 @@ sway, importer and pack 12, the dev cache already at v12).
   ✅ pixel table re-rendered 2026-10-24 (2D means: SMB1 2.4 / night 1.8, SMB3 5.0 / 2.5, SMW 6.1 /
   3.0; NSMBU 17.8 / 14.6; 3D World 29.5; SMW small Mario now drawn 16 × 32 as its quads); left in 2D:
   the day sky (SMW 19, SMB3 10: the backdrop's placement, not a plain shift; the nights use a
-  static backdrop and match) and the day airship (SMW 17, SMB3 11), the coins' animation phase; captures of the track tiles in play and of NSMBU / 3D World wings (the mesh
+  static backdrop and match) and the day airship (SMW 17, SMB3 11), the coins' animation phase — the coins match in
+  castle courses but not in the day sky / airship ones, so those courses' clock may run at an
+  offset to ours (the same courses whose backdrops are off) [inf]; captures of the track tiles in play and of NSMBU / 3D World wings (the mesh
   planner maps `M1_Enemy_wingcommon` to `<style>_Enemy_wingcommon`), a look at Water Level mode
   and custom scroll in the recomp (`research/tools/maker-look`: touch taps / drags by script).
 - **Agent queue** (when a helper slot frees): ~~the Super Worlds 3D map~~ (agent running); the
