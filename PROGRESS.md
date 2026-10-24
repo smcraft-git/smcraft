@@ -108,8 +108,8 @@ sway, importer and pack 12, the dev cache already at v12).
 - ⏳ Popular across difficulties / more than 20 New courses: TGRCode can't — `search_new` caps
   at 20 with no paging, `search_popular` takes one difficulty and the client is held to one
   request per 2 s (four lists ≈ 8 s); Popular stays TGRCode's Normal ranking
-- ⬜ Leaderboards / Ninji where TGRCode has data; Super Worlds screens (G5; the client has
-  `super_world`)
+- ⏳ Leaderboards / Ninji: TGRCode serves no rankings or Ninji ghosts (only our own server has
+  leaderboards); Super Worlds screens ✅ (G5)
 
 **G3 — Challenges** 🔄
 - ✅ 100 Mario Challenge (SMM2 and SMM1 presentation, rules from SMM1)
