@@ -432,8 +432,12 @@ sway, importer and pack 12, the dev cache already at v12).
     `p_RemovePara` / `scaleChange` / `p_AttributeChange` + the balloon's UI keys. Wings drawn
     on winged actors in the maker's view, its icons and play (`Enemy_wingcommon`, flapping
     while they move); parachutes were drawn already. One undo step per choice.
-    ✅ multigrab selections (2026-10-24), contents keep their flags · ⬜ the "what is
-    inside" balloon with its dummy wings / parachute, wings on the NSMBU / 3D World models
+    ✅ multigrab selections (2026-10-24), contents keep their flags · ✅ the "what is
+    inside" balloon (2026-10-25, branch `maker2`; maker spec C16): the same 16-tick hold on a
+    part holding something shows `Edit_BalloonPartsIn_00` (`InBig_00` for a big content) with
+    the content's picture and its dummy wings / parachute instead of the attribute balloon
+    (0x7100e9e400 first; player 1 only, not on a track), carrying it on closes it (0x7100f9fe00),
+    both balloons on the game's side (0x71018bb490, 0x71018c4450) [inf: letting go closes it] · ⬜ wings on the NSMBU / 3D World models
     (their own textures; SMB1 art stands in), parts that drop wings / parachute with their
     other form (vtables not resolved), winged Bill Blasters in play
   - ✅ Mario's Trail (2026-10-24; `research/specs/maker.md` C12, from the v3.0.3 binary: the
@@ -453,8 +457,12 @@ sway, importer and pack 12, the dev cache already at v12).
     colour, semisolid / mushroom looks, (slope) conveyor speed, door kind, big coin value, spike
     block mode, Mechakoopa kind (0x71003d2600, 0x7100d80df0) — a tap steps to the next form, a
     door / warp box pair changes together, SMB1-only and 3D-World-only alternates by style ·
-    ✅ a door / warp box brings its partner a tile to the right (0x7100ec9c00) · ⬜ the trash
-    can, co-op making, the palette's variant chooser `Edit_PartsMenu_00`
+    ✅ a door / warp box brings its partner a tile to the right (0x7100ec9c00); with that tile
+    taken the pair is refused, nothing moves it (0x7100eca770; 0x7100e9b840 is the grid snap;
+    2026-10-25) · ⬜ the trash can (`Edit_TrashCan_00`: a one-time-anim part, `Act` = the 45-frame
+    eat with `se_ui_edit_trash` + `SE_DropErase`; its trigger not found statically — maker spec
+    C16, a capture to take), co-op making (rules in C16; `Edit_PartsMenu_00` is player 2's part
+    menu, `UIEditShare2PMenuCtrl`, not a variant chooser)
   - ✅ the vertical scroll bar for vertical sub-areas (`N_SlideBarV_00`: its handle by the view's
     height, pressed / dragged to scroll; captures `maker-vertical`, `maker-subarea`)
   - ✅ the sub-area's orientation window (`Edit_SubAreaWindow_00`: Horizontal / Vertical) when
@@ -480,7 +488,10 @@ sway, importer and pack 12, the dev cache already at v12).
     keeping its open state, back over the end's piece takes it away; 0x7100fafe40,
     0x7100fb0200), ✅ the track art in play (2026-10-24: a cell's
     template code is its field-atlas tile, `Tracks::art`; left: junction cells (0x2xx codes) keep a
-    line, 3D World's tracks are models, and the maker's own track drawing)
+    line, 3D World's tracks are models, and the maker's own track drawing) · ✅ joint codes as
+    the game writes them (2026-10-25, maker spec C16: the caps' join table 0x71023c74f0 /
+    0x7100da2060, the joint on the left / lower piece, 0x7101016610; all 3823 joints of the
+    sample; type 2's k0 is its lower-right end)
   - ✅ pipes turned and stretched by their mouth (the cursor round the base: the longer axis
     turns it, the distance is its length [inf]; `Editor::turn_pipe` keeps the base tile)
   - ✅ maker music and part sounds (2026-10-24; `research/specs/maker.md` C9): the style's
@@ -496,8 +507,9 @@ sway, importer and pack 12, the dev cache already at v12).
     (`voice_getWing`, `lose_wing`, `p_EquipPara`, `p_RemovePara`), the multigrab frame's
     `cursor` per tile [inf: when] · ✅ `Tower_stack` and stacking (a part dropped on a
     stackable one; 2026-10-25: only parts that ride nothing and face the default way, the
-    drop handler's 0xE038601 test, 0x7100f5ad90) · ⬜ what a column does when a member is
-    erased (not read), a listen on hardware against SMM2
+    drop handler's 0xE038601 test, 0x7100f5ad90) · ✅ a member erased: nothing moves, the
+    columns are rebuilt from what still touches (0x7100f5c8a0, 0x7100f5ce60; 2026-10-25) · ⬜ a
+    listen on hardware against SMM2
 - 🔄 Edit any course: the open row of the Course World / Coursebot lists has "Make" (the co-op
   button's slot, the Coursebot's word, the glove icon) → the maker; someone else's course (a
   code whose maker isn't the signed-in player) saves as a new Coursebot course with "based on
