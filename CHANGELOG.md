@@ -34,7 +34,8 @@ SMCraft is back in development (it was archived in October 2026).
 - **SMM2's own Endless Challenge**, and **Challenge Modes**: Course World's Endless button
   switches between it and the 100 Mario Challenge with ZL / ZR.
 - **Play Together (local co-op)** for up to four players with SMM2's rules: bubbles, shared
-  lives (a life goes when everyone is down), anyone at the goal clears; also for 100 Mario and
+  lives (a life goes when everyone is down), anyone at the goal clears, the first into a pipe
+  waits for the others; also for 100 Mario and
   Endless runs.
 - **Network Play screens** (co-op and versus) over Nextendo matchmaking, tested against a local
   server.

@@ -12,8 +12,9 @@
 //!   players along, and one squeezed past an edge or left below the view dies.
 //! - Players bounce off each other's heads (the springboard) and push each other aside.
 //! - The goal waits up to 240 frames for the others once one player has it; one player at the
-//!   goal clears the course. A warp takes everyone along: the others come out after the leader,
-//!   15 frames apart.
+//!   goal clears the course. The first player into a pipe or door waits inside up to 180 frames
+//!   while the others play on and may follow; then the warp takes everyone along, and the
+//!   others come out after the leader, 15 frames apart.
 //!
 //! Slots: slot k is input k and character k (Mario, Luigi, Toad, Toadette). Outside a tick,
 //! slot 0 is `World::player` and slot k is `World::others[k − 1]`.
@@ -66,7 +67,9 @@ const GOAL_WAIT: i32 = 240;
 const GOAL_GRACE: i32 = 30;
 const GOAL_NEAR: f32 = 16.0;
 const POLE_DELAY: i32 = 20;
-/// Warps (§7): the followers come out 15 frames apart.
+/// Warps (§7): the first player in waits this long for the others (while any is free), then the
+/// followers come out 15 frames apart.
+const WARP_WAIT: i32 = 180;
 const WARP_GAP: i32 = 15;
 /// Carrying a player (§5.3, not SMB1): the hold before Jump / Spin frees them, the window after
 /// which 12 presses do, the escape jumps, the throw and its no-contact time; how far in front and
@@ -106,6 +109,9 @@ pub enum State {
     },
     /// On the goal pole: frames before sliding once the demo runs (−1: not yet counted).
     Pole { slide: i32 },
+    /// Going into a pipe or door while the warp waits for the others: the travel's timeline,
+    /// held once inside.
+    Enter(Transit),
     /// Taken along through a warp: hidden until the frames run out.
     Follow { t: i32 },
     /// Held over slot `by`'s head: frames of the hold left, presses counted in the struggle.
@@ -197,6 +203,8 @@ pub struct Coop {
     last_down: usize,
     /// The slot travelling through a warp.
     warp_lead: Option<usize>,
+    /// The warp waiting for the others: the slot that went in first, frames left (§7).
+    warp_wait: Option<(usize, i32)>,
     pub goal: Option<GoalWait>,
     rng: u32,
 }
@@ -276,6 +284,7 @@ impl World {
         }
         self.coop.goal = None;
         self.coop.warp_lead = None;
+        self.coop.warp_wait = None;
         self.coop.last_down = 0;
         self.coop_reset_camera();
     }
@@ -514,6 +523,7 @@ impl World {
         }
         if self.transit.is_some() && !warping {
             self.coop.warp_lead = Some(lead);
+            self.hold_warp(lead);
         }
         if !waits && self.transit.is_none() && !self.coop.reset {
             for k in 0..self.players() {
@@ -525,14 +535,18 @@ impl World {
                 }
             }
         }
-        let area_changed = self.area != area;
+        // the lead's travel reached the destination this tick (an area change, or a warp within
+        // the area)
+        let arrived = self.area != area
+            || (warping
+                && matches!(self.transit, Some(t) if t.phase == warp::Phase::HoldIn(warp::HOLD_FRAMES)));
         let warp_done = warping && self.transit.is_none();
         self.restore_order();
         if let Some((x, y)) = restart_at {
             self.player = Player::new(x, y);
             self.place_players();
         } else {
-            if area_changed {
+            if arrived {
                 self.take_along();
             }
             if warp_done {
@@ -575,7 +589,85 @@ impl World {
         }
         if self.transit.is_some() {
             self.coop.warp_lead = Some(k);
+            self.hold_warp(k);
         }
+    }
+
+    /// Slot `k` (in front) has just gone into a pipe or door: with another player free it waits
+    /// inside for them (the first in starts the 180 frames; later ones join), else it travels on
+    /// as in single player (§7).
+    fn hold_warp(&mut self, k: usize) {
+        let others_free = (0..self.players()).any(|j| j != k && self.free(j));
+        if !others_free && self.coop.warp_wait.is_none() {
+            return;
+        }
+        let Some(t) = self.transit.take() else {
+            return;
+        };
+        self.coop.warp_lead = None;
+        self.coop.slots[k].state = State::Enter(t);
+        if self.coop.warp_wait.is_none() {
+            self.coop.warp_wait = Some((k, WARP_WAIT));
+        }
+    }
+
+    /// A player going in while the warp waits: the way in plays out, then they stay hidden inside.
+    fn step_enter(&mut self, k: usize, mut t: Transit) {
+        if matches!(
+            t.phase,
+            warp::Phase::Align | warp::Phase::In | warp::Phase::DoorIn(_)
+        ) {
+            warp::step(&mut t, self.slot_mut(k));
+        }
+        self.slot_mut(k).hidden = warp::hidden(&t);
+        self.coop.slots[k].state = State::Enter(t);
+    }
+
+    /// `p` is a co-op player going into a pipe while the warp waits (drawn behind the terrain,
+    /// as [`World::in_pipe`]).
+    pub(super) fn sinking(&self, p: &Player) -> bool {
+        (0..self.players()).any(|k| {
+            matches!(self.coop.slots.get(k).map(|s| s.state),
+                Some(State::Enter(t)) if t.phase == warp::Phase::In)
+                && std::ptr::eq(self.slot(k), p)
+        })
+    }
+
+    /// The warp's wait ends when its frames run out or nobody is left free: the first player's
+    /// travel goes on, and the area change takes everyone along. Someone reaching the goal calls
+    /// it off (§7).
+    fn step_warp_wait(&mut self) {
+        let Some((lead, timer)) = self.coop.warp_wait else {
+            return;
+        };
+        let n = self.players();
+        if self.goal_phase != GoalPhase::None || self.coop.goal.is_some() {
+            self.coop.warp_wait = None;
+            for k in 0..n {
+                if matches!(self.coop.slots[k].state, State::Enter(_)) {
+                    self.coop.slots[k].state = State::Play;
+                    let p = self.slot_mut(k);
+                    p.hidden = false;
+                    p.control = Control::Normal;
+                }
+            }
+            return;
+        }
+        if timer > 1 && (0..n).any(|k| self.free(k)) {
+            self.coop.warp_wait = Some((lead, timer - 1));
+            return;
+        }
+        self.coop.warp_wait = None;
+        let State::Enter(t) = self.coop.slots[lead].state else {
+            return;
+        };
+        for k in 0..n {
+            if matches!(self.coop.slots[k].state, State::Enter(_)) {
+                self.coop.slots[k].state = State::Play;
+            }
+        }
+        self.transit = Some(t);
+        self.coop.warp_lead = Some(lead);
     }
 
     /// The rest of an extra player's pass: the player-side calls of [`World::step`] after the
@@ -684,6 +776,7 @@ impl World {
                     State::Rescue { to } => self.step_rescue(k, to),
                     State::Spring { .. } => self.step_spring(k, jump(k)),
                     State::Follow { t } => self.step_follow(k, t),
+                    State::Enter(t) => self.step_enter(k, t),
                     State::Carried { by, timer, presses } => {
                         self.step_carried(k, by, timer, presses, inputs)
                     }
@@ -698,6 +791,7 @@ impl World {
             self.view_edges();
             self.time_up();
         }
+        self.step_warp_wait();
         for k in 0..n {
             self.coop.slots[k].prev_jump = jump(k);
             self.coop.slots[k].prev_spin = inputs.get(k).is_some_and(|i| i.held(input::SPIN));
@@ -1773,6 +1867,82 @@ mod tests {
         assert!(touched_at.is_some());
         run(&mut w, &[NONE, NONE], 1500);
         assert!(w.cleared, "one player at the goal clears the course");
+    }
+
+    /// A pipe at tiles 10–11 (its top at y 64) to a sub-area's pipe.
+    fn pipe_world() -> World {
+        use crate::level::{PipeDir, Warp, WarpKind};
+        let mut main = Level::flat(60);
+        main.add_pipe(10, 2, 2, PipeDir::Up);
+        main.warps.push(Warp {
+            kind: WarpKind::Pipe(PipeDir::Up),
+            id: 1,
+            x: 10.0 * TILE + TILE,
+            y: 3.0 * TILE + 8.0,
+            len: 2,
+        });
+        let mut sub = Level::flat(40);
+        sub.add_pipe(20, 2, 3, PipeDir::Up);
+        sub.warps.push(Warp {
+            kind: WarpKind::Pipe(PipeDir::Up),
+            id: 1,
+            x: 20.0 * TILE + TILE,
+            y: 4.0 * TILE + 8.0,
+            len: 3,
+        });
+        let mut w = World::with_areas(vec![main, sub]);
+        w.set_players(2);
+        w.player.x = 10.0 * TILE + TILE;
+        w.player.y = 4.0 * TILE;
+        w.others[0].x = 4.0 * TILE;
+        run(&mut w, &[NONE, NONE], 5);
+        assert!(w.player.on_ground && w.others[0].on_ground);
+        w
+    }
+
+    const DOWN: Input = Input {
+        buttons: input::DOWN,
+    };
+
+    #[test]
+    fn the_first_into_a_pipe_waits_while_the_others_play_on_then_takes_them_along() {
+        let mut w = pipe_world();
+        run(&mut w, &[DOWN, NONE], 1);
+        assert!(w.transit.is_none(), "the world goes on");
+        assert!(matches!(w.coop.slots[0].state, State::Enter(_)));
+        let x = w.others[0].x;
+        run(&mut w, &[NONE, R], 60);
+        assert!(w.others[0].x > x + 30.0, "Luigi walks on");
+        assert!(w.player.hidden, "Mario waits inside");
+        assert_eq!(w.area, 0);
+        run(&mut w, &[NONE, NONE], 170 - 61);
+        assert!(w.transit.is_none(), "still waiting at 170 frames");
+        run(&mut w, &[NONE, NONE], 15);
+        assert!(w.transit.is_some(), "the wait is over");
+        run(&mut w, &[NONE, NONE], 200);
+        assert_eq!(w.area, 1);
+        assert!(w.in_play(0) && w.in_play(1), "both came out");
+        assert!((w.slot(1).x - w.slot(0).x).abs() < 32.0);
+    }
+
+    #[test]
+    fn nobody_else_free_means_no_wait_at_a_pipe() {
+        let mut w = pipe_world();
+        w.enter_bubble(1);
+        run(&mut w, &[DOWN, NONE], 1);
+        assert!(w.transit.is_some(), "straight through as in single player");
+        run(&mut w, &[NONE, NONE], 200);
+        assert_eq!(w.area, 1);
+    }
+
+    #[test]
+    fn the_last_free_player_going_in_ends_the_wait() {
+        let mut w = pipe_world();
+        run(&mut w, &[DOWN, NONE], 1);
+        // Luigi dies: nobody is left free, so the warp goes at once
+        w.others[0].kill();
+        run(&mut w, &[NONE, NONE], 1);
+        assert!(w.transit.is_some());
     }
 
     #[test]

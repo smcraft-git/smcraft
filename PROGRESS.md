@@ -143,8 +143,11 @@ Everything is on `main` and pushed, except `maker-audio` (pushed as a branch; se
     until landing), and takes their keys
   - ✅ Action conditions per player (no damage / landing / claw / water): one player breaking
     the rule leaves the others able to clear; each pass checks only its own events
-  - ⬜ Not yet: the 180-frame warp wait (the world waits instead), a players screen in SMM2's
-    layouts (the question is a toast)
+  - ✅ Warps (§7): the first into a pipe / door waits inside up to 180 frames while the others
+    play on (and may follow); with nobody else free it goes at once; then everyone is taken
+    along, also through a warp within the area; a player sinking into a pipe is drawn behind it
+  - ⬜ Not yet: a players screen in SMM2's layouts (the question is a toast); the P-door hold
+    for followers (§7.5)
 
 **G4 — Course Maker for any course** 🔄
 - ✅ Editor core (`mmk-editor`): parts, areas, links, tracks, selection, settings, the game's limits

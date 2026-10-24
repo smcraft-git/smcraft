@@ -7064,7 +7064,7 @@ impl World {
                 .pu_player_look(p, form, who, frame)
                 .unwrap_or((model, frame)),
         };
-        let layer = if self.in_pipe() {
+        let layer = if self.in_pipe() || self.sinking(p) {
             5
         } else if self.options.smm1_layering {
             smm1::player_layer(p)
