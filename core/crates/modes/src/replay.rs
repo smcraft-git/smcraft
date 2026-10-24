@@ -15,7 +15,7 @@ use mmk_sim::{Input, World};
 const MAGIC: &[u8; 4] = b"MMKR";
 const FORMAT: u8 = 1;
 /// Bumped whenever a sim change can alter a recorded run's outcome.
-pub const SIM_VERSION: u32 = 1;
+pub const SIM_VERSION: u32 = 2;
 /// Longest replay accepted (10 minutes at 60 frames per second; course timers stop at 500 s).
 pub const MAX_FRAMES: usize = 60 * 600;
 

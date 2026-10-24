@@ -313,8 +313,15 @@ Nextendo; `docs/nextendo-network-play.md`, spec `research/specs/network-play.md`
 - ⬜ Mid-air shell jumps checked against the recomp's test course; SMM1 course card choice
 
 **G8 — Fidelity: pixel, physics, sound** 🔄
-- 🔄 Physics: 428 / 454 player traces frame-exact → all; enemy and object traces; whole courses
-  start to goal
+- 🔄 Physics: re-recording every trace (2026-10-24; the old 428 / 454 was not a true count — the
+  old items / form traces were all small Mario). Re-recorded so far, current engine: **286 / 286
+  exact** over 13 courses (M1/M3/MW/WU flat, M1/M3/MW/WU slope, M1/M3/MW items, M3/MW form; was
+  274 with the engine at 39fdb6e). Fixed: pit death at view bottom − 56 with no hop, slip end on
+  flat, raccoon tail wag, SMW cape take-off / climb end / slide end, jump bonus from the pre-move
+  speed. ⬜ still to record: WU items, all walls and water (10 courses), the 5 3D World courses
+  (headless Ryujinx aborts in MoltenVK on 3D World), WU form (the Propeller Mushroom never
+  reaches the player at the title screen; it flies up — next: a box with a roof and a jump from
+  the block). Then enemy and object traces; whole courses start to goal
 - 🔄 Pixels, SMB1 against the game (smm2recomp reference frames, update 900; MAE / % pixels off by
   > 24): ground 0.85 / 0.48 %, underground 0.64 / 0.44 % (night 0.90), snow 0.98 / 0.58 %, water
   1.77 / 0.82 %, castle 3.99 / 2.93 % (night 4.24), ghost house 12.8 / 47 % (night 28.4), airship
