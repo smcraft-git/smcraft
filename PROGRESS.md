@@ -15,31 +15,27 @@ sound-perfect as possible, that **never needs the ROM or key files to run**.
   Super Worlds. **Not** Story Mode (its core stays in the tree, its screens aren't built).
 - **Platforms:** the same as smm2recomp: macOS, iOS / iPadOS, Windows, Linux, Android, plus the web.
 
-### Paused 2026-10-22 (owner: the machine's focus is on SMM2 v0.4.0) — where this stands / next
-Everything is on `main` and pushed, except `maker-audio` (pushed as a branch; see below).
-- **Merged since the revival:** import once from the NSPs + `prod.keys` (desktop drop folder,
-  macOS / web / iOS setup screens), Course World over TGRCode, the Course Maker and the Coursebot
-  (edit any course, "based on …"), Super Worlds (2D map), SMM2's own Endless Challenge and the
-  Challenge Modes switch, the Mods page, Network Play screens over Nextendo (local test server
-  only), local co-op in the sim, Android (APK, touch controls), recomp mods, sound (keys, pink
-  coins, Burners), pixels (start sign, 2D shadow, animated blocks / coins; SMB1 ground MAE
-  2.54 → 0.85), the release workflow.
-- **Nextendo sign-in now uses the fixed redirect `http://127.0.0.1:47614/callback`.** Waiting on
-  the owner: the SMCraft app on Nextendo's portal (public client / PKCE, scopes `identity
-  game.matchmaking`, that redirect) and its client ID; the game-server access key — (a) read from
-  the player's own dump at import (recommended) or (b) one Nextendo issues. Nextendo has agreed
-  to SMCraft going online.
+### Resumed 2026-10-24 (turns of ~50 minutes with SMM2) — where this stands / next
+Everything is on `main` and pushed. Branches in flight: `pixels5` (night darkness, importer /
+pack 12 → re-import the dev cache when merged; SceneDB backdrops) and `physics3` (re-recording
+the 29 trace courses in a background Ryujinx).
+- **Since the resume:** `maker-audio` / `maker-hooks` merged (pack 11); 100 Mario's costume reward;
+  Lanky Mario's sounds; co-op per-player keys, carrying, the ground-pound knock, per-player action
+  conditions and the 180-frame warp wait; enemies' defeat sounds by cause and many update
+  power-up / 3D World sounds; Network Play on a TGRCode course the session's opener picks; the
+  Endless map's "New High Score!" panel.
+- **Waiting on the owner:** the SMCraft app on Nextendo's portal (public client / PKCE, scopes
+  `identity game.matchmaking`, redirect `http://127.0.0.1:47614/callback`) and its client ID; the
+  game-server access key — (a) read from the player's own dump at import (recommended) or (b) one
+  Nextendo issues. Nextendo has agreed to SMCraft going online. Releases need the owner's OK.
 - **Next, in order:**
-  1. ✅ `maker-audio` merged (importer / pack 11, dev cache re-imported); `maker-hooks`: the
-     maker's music and part sounds (2026-10-24, below).
-  2. Co-op in the front end: Play Together buttons, controller set-up, co-op 100 Mario / Endless
-     (sim side done: `world/coop.rs`).
-  3. Physics: re-record all 29 trace courses (the old power-up recordings were small Mario; the
-     428 / 454 count is only sound for flat / wall / slope / water), then fix the real divergences.
-  4. Pixels: finish the 90 reference frames (`research/tools/pixel-ref/pixref.py`), the colour
-     correction table, the Swift app's shadow pass, NSMBU / 3D World.
-  5. Live Network Play once the client ID and the key choice arrive; the release (CHANGELOG
-     "Unreleased" → a version; the release workflow builds every package on a `v*` tag).
+  1. Merge `pixels5` (gate, pack 12, re-import) and `physics3` when their agents report; fix the
+     real physics divergences the new traces show.
+  2. Maker: wings / parachutes (the "put into" gesture: `Edit_BalloonPartsIn_00` has the wing and
+     parachute panes; read the drop handler in the binary), tracks and links.
+  3. Co-op: a players screen in SMM2's layouts; the P-door hold for followers.
+  4. Super Worlds' 3D map and Toad Houses; airship sway; the colour table; NSMBU / 3D World pixels.
+  5. iPad / Android device runs; the macOS package; live Network Play once the ID and key arrive.
 
 ### Plan
 ✅ done · 🔄 in progress · ⬜ not started · ⏳ waiting on owner
