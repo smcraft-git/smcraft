@@ -66,7 +66,8 @@ sway, importer and pack 12, the dev cache already at v12).
   eases by 0.06 out of water (the speed bands were its water variant); ✅ Gesso3W's Block Out
   (collides from the start); left: Hanachan's and Togezo's water Block Outs, the ItemBalloon /
   ItemHeaddress eased Block Out (partial, shared enemy draft §5.9), the Coin Block Out and the
-  winged coin's own side-pipe state (none in either sample); the Super World map's ledge cliffs (field atlas
+  winged coin's own side-pipe state (none in either sample; 8-coin.md: Coin Dokan enter
+  0x7101367620 sends it to the Coin actor's own state 8, not traced); the Super World map's ledge cliffs (field atlas
   rows 6–7), map ghosts, the goal's AppearGoalPoint / cannon and Passable states, the map music
   (branch `swmap` drew the map with the game's models); ✅ the Cursed Key and Phanto (2026-10-25,
   research 95-key.md; co-op: Phanto hurts only the player in front [inf]); ✅ SMM1 UI sounds for
