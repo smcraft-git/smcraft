@@ -760,8 +760,9 @@ pub async fn open_front(opening: bool) -> Result<JsValue, JsValue> {
             "no SMM2 UI import in this browser's storage",
         ));
     }
-    // layouts, fonts' metrics and message tables, and (once) the sounds (the opening's start at
-    // once) now; textures on request
+    // layouts, fonts' metrics and message tables, the scalable fonts (CJK glyphs are rasterised
+    // from them on first use, and a font read later would count as missing) and (once) the
+    // sounds (the opening's start at once) now; textures on request
     let mut files = MemFiles::new("browser storage (SMM2 UI import)");
     let (mut now, mut wavs, mut courses) = (Vec::new(), Vec::new(), Vec::new());
     for p in paths {
@@ -769,7 +770,7 @@ pub async fn open_front(opening: bool) -> Result<JsValue, JsValue> {
             files.insert_later(p);
         } else if p.ends_with(".wav") {
             wavs.push(p);
-        } else if p.ends_with(".json") {
+        } else if p.ends_with(".json") || p.starts_with("ui/scalable/") {
             now.push(p);
         } else if p.starts_with("courses/") {
             courses.push(p);
