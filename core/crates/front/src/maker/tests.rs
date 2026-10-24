@@ -1059,3 +1059,42 @@ fn a_pipe_dragged_by_its_mouth_turns_round_its_base() {
     assert_eq!(Dir::from_flags(o.flags), Dir::Right);
     assert_eq!(o.height, 6, "base to cursor, both ends counted");
 }
+
+#[test]
+fn a_track_is_drawn_by_dragging_and_a_lift_put_on_it_rides_it() {
+    let (mut host, mut saves) = (MockHost::default(), Saves::default());
+    let mut m = maker(&mut host, &mut saves, MakerStart::New("M1".into()));
+    m.palette[0] = Tool::Track;
+    m.slot = 0;
+    m.cur = (20, 6);
+    run(&mut m, &mut host, &mut saves, press(Buttons::CONFIRM));
+    m.cur = (24, 6);
+    run(&mut m, &mut host, &mut saves, held(Buttons::CONFIRM));
+    m.cur = (28, 6);
+    run(&mut m, &mut host, &mut saves, held(Buttons::CONFIRM));
+    run(&mut m, &mut host, &mut saves, idle());
+    assert_eq!(
+        m.editor.area().tracks.len(),
+        3,
+        "a piece, then one per 2 tiles dragged"
+    );
+    // one undo step for the whole drag
+    m.editor.undo();
+    assert_eq!(m.editor.area().tracks.len(), 0);
+    m.editor.redo();
+    // a lift put down on the track rides it
+    m.palette[1] = Tool::Part(11);
+    m.slot = 1;
+    m.cur = (22, 6);
+    run(&mut m, &mut host, &mut saves, press(Buttons::CONFIRM));
+    run(&mut m, &mut host, &mut saves, idle());
+    let lift = m
+        .editor
+        .area()
+        .objects
+        .items
+        .iter()
+        .find(|o| o.id == 11)
+        .expect("a lift");
+    assert_ne!(lift.flags & 0x400, 0, "on the track");
+}

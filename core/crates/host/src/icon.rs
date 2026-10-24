@@ -32,6 +32,8 @@ pub fn part_icon(cache: &Cache, style: &str, part: i16, flags: u32) -> Option<Ic
             .place_doors((tx, ty), (tx + 6, ty), mmk_editor::links::DoorKind::Normal)
             .is_ok(),
         97 => e.place_warp_boxes((tx, ty), (tx + 6, ty), false).is_ok(),
+        // a track: one horizontal piece
+        59 => e.place_track(tx, ty, 0).is_ok(),
         p => e.place(p, tx, ty).is_ok(),
     };
     if !placed {

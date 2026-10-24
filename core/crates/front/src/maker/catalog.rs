@@ -51,6 +51,9 @@ pub enum Tool {
     /// A pair of doors / warp boxes: the second one goes a few tiles to the right [inf].
     Doors,
     WarpBoxes,
+    /// Tracks: a press lays a piece, dragging draws on from its end, 2 tiles a piece, straight
+    /// or at 45° [inf: the game's gesture].
+    Track,
 }
 
 impl Tool {
@@ -62,6 +65,7 @@ impl Tool {
             Tool::Pipe => 9,
             Tool::Doors => 55,
             Tool::WarpBoxes => 97,
+            Tool::Track => 59,
         }
     }
 
@@ -69,7 +73,9 @@ impl Tool {
     pub fn paints(self) -> bool {
         matches!(
             self,
-            Tool::Ground | Tool::Part(4 | 5 | 6 | 8 | 21 | 22 | 23 | 29 | 63 | 92 | 100 | 108)
+            Tool::Ground
+                | Tool::Track
+                | Tool::Part(4 | 5 | 6 | 8 | 21 | 22 | 23 | 29 | 63 | 92 | 100 | 108)
         )
     }
 }
@@ -92,7 +98,7 @@ const fn e(tool: Tool, label: &'static str, category: Category) -> Entry {
 }
 
 use Category::*;
-use Tool::{Doors, Ground as G, Part as P, Pipe, WarpBoxes};
+use Tool::{Doors, Ground as G, Part as P, Pipe, Track, WarpBoxes};
 
 pub const ENTRIES: &[Entry] = &[
     // Terrain
@@ -179,6 +185,7 @@ pub const ENTRIES: &[Entry] = &[
     e(P(105), "BurankoCrane", Gizmos),
     e(P(53), "BeltConveyor_00", Gizmos),
     e(P(84), "SnakeBlock_00", Gizmos),
+    e(Track, "Rail", Gizmos),
     e(P(119), "BikkuriBlock", Gizmos),
     e(P(85), "OrbitBlock", Gizmos),
     e(P(99), "OnOffSwitch", Gizmos),

@@ -1283,6 +1283,9 @@ impl MakerFlow {
     fn put(&mut self, cx: &mut crate::Cx, first: bool) {
         let (tx, ty) = self.cur;
         let tool = self.tool();
+        if tool == Tool::Track {
+            return self.put_track(cx, first);
+        }
         let r = match tool {
             Tool::Ground => self.editor.paint_ground(tx, ty).map(|_| ()),
             Tool::Part(p) => self.editor.place(p, tx, ty).map(|_| ()),
@@ -1295,7 +1298,16 @@ impl MakerFlow {
                 .editor
                 .place_warp_boxes((tx, ty), (tx + 4, ty), false)
                 .map(|_| ()),
+            Tool::Track => Ok(()),
         };
+        // a part put down on a track rides it (flag 0x400, the piece's link)
+        if let (Ok(()), Tool::Part(p)) = (&r, tool)
+            && mmk_editor::parts::caps(p).track
+            && self.editor.track_at(tx, ty).is_some()
+            && let Some(i) = self.editor.object_at(tx, ty)
+        {
+            let _ = self.editor.attach_to_track(i);
+        }
         let ok = r.is_ok();
         if let Some(Drag::Place { last, changed }) = &mut self.drag {
             *last = (tx, ty);
@@ -1311,6 +1323,39 @@ impl MakerFlow {
                 }
             }
             Err(e) if first => self.refuse(cx, tool.part(), &e),
+            Err(_) => {}
+        }
+    }
+
+    /// Tracks: a press lays a horizontal piece at the cursor; dragging draws on from the last
+    /// end, 2 tiles a piece, in the cursor's direction (8 ways).
+    fn put_track(&mut self, cx: &mut crate::Cx, first: bool) {
+        let (tx, ty) = self.cur;
+        let (r, end) = if first {
+            (self.editor.place_track(tx, ty, 0).map(|_| ()), (tx + 1, ty))
+        } else {
+            let Some(Drag::Place { last, .. }) = self.drag else {
+                return;
+            };
+            let (dx, dy) = (tx - last.0, ty - last.1);
+            let m = dx.abs().max(dy.abs());
+            if m < 2 {
+                return;
+            }
+            let step = |d: i32| if d.abs() * 2 >= m { d.signum() } else { 0 };
+            let end = (last.0 + 2 * step(dx), last.1 + 2 * step(dy));
+            (self.editor.draw_track(last, end).map(|_| ()), end)
+        };
+        match r {
+            Ok(()) => {
+                if let Some(Drag::Place { last, changed }) = &mut self.drag {
+                    *last = end;
+                    *changed = true;
+                }
+                self.changed();
+                self.sound(59, "set");
+            }
+            Err(e) if first => self.refuse(cx, 59, &e),
             Err(_) => {}
         }
     }
