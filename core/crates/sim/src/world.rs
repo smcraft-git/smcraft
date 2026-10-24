@@ -23,6 +23,13 @@ const EXCL_OWNER: u32 = 0x9000_0000;
 const TREE_OWNER: u32 = 0x9800_0000;
 /// Solid ids of Piranha Creeper stalk boxes (actor index × 128 + box).
 const CREEPER_OWNER: u32 = 0x9C00_0000;
+/// The Twister's column box: half width 16 (descriptor, 76-twister.md), half height
+/// max(10, h / 128 · 54) for its column h (12 … 128, +0.7 a frame) [obs v3.0.3 column update
+/// 0x71013ed4a0], and the player's twister receiver's margin (vfunc 0x7100de9950 = 4.0) [obs
+/// v3.0.3].
+const TWISTER_HALF_W: f32 = 16.0;
+const TWISTER_BOX_H: f32 = 54.0;
+const TWISTER_MARGIN: f32 = 4.0;
 /// A held player's feet hang this far under the claw's end (the catch's hold point) [inf].
 const CLAW_HANG: f32 = 24.0;
 use crate::fmath::DetMath;
@@ -2021,6 +2028,7 @@ impl World {
             self.drive_koopa_car(input);
         } else {
             self.pu_sense();
+            self.player.twister = self.twister_receiver();
             self.player.step(input, &self.level);
         }
         if let (Some((tx, ty)), Some(c)) = (note_hole, note_cell) {
@@ -2386,7 +2394,6 @@ impl World {
         self.step_blasters();
         self.fire_hazards();
         self.step_cannons();
-        self.twister_lift();
         self.magikoopas();
         self.claws(input);
         self.pow_quake();
@@ -4844,23 +4851,35 @@ impl World {
         Some(Darkness { level, lights })
     }
 
-    /// Twister wind column: x within ±16 of the twister, from its feet to the column top. The
-    /// player is lifted (vy toward 4.5 at +0.6/frame) [inf: the twister's contact 0x71008c0630
-    /// fills the player's tornado receiver (actor +0x398: the twister's centre x, top y and x
-    /// speed, flag bit 0); the player state list has no Tornado state, and the code reading
-    /// the receiver for the player wasn't found].
-    fn twister_lift(&mut self) {
+    /// The Twister's contact with the player (0x71013ec330 [obs v3.0.3]): a column's box (the
+    /// Twister's feet up to twice its half height max(10, h · 54 / 128), h its column) touching
+    /// the player's body, horizontally deep enough — half the overlap of the two half widths
+    /// (16 and the player's) at least (their mean − the receiver's 4.0 margin) × (1 − rise /
+    /// 128), so the column widens upward — hands the player its top, its last movement and its
+    /// centre for this frame (player/twister.rs). The player's box is taken as body box B [inf].
+    fn twister_receiver(&self) -> Option<crate::player::TwisterPull> {
         let p = &self.player;
-        let inside = self.actors.iter().any(|a| {
-            a.kind == Kind::Twister
-                && (p.x - a.x).abs() < 16.0
-                && p.y >= a.y - 4.0
-                && p.y <= a.y + a.heading
-        });
-        if inside && self.player.control == Control::Normal {
-            self.player.vy = (self.player.vy + 0.6).min(4.5);
-            self.player.on_ground = false;
-        }
+        let (x0, y0, x1, y1) = p.contact_box();
+        let phw = (x1 - x0) * 0.5;
+        self.actors.iter().find_map(|a| {
+            if a.kind != Kind::Twister || a.mode != Mode::Normal {
+                return None;
+            }
+            let hh = (a.heading * (1.0 / 128.0) * TWISTER_BOX_H).max(10.0);
+            let top = a.y + hh + hh;
+            let dx = (a.x - p.x).abs();
+            let sum = TWISTER_HALF_W + phw;
+            if y1 <= a.y || y0 >= top || dx >= sum {
+                return None;
+            }
+            let need = sum * 0.5 - TWISTER_MARGIN;
+            let rise = (p.y - a.y) * -(1.0 / 128.0);
+            (need + rise * need <= (sum - dx).abs() * 0.5).then_some(crate::player::TwisterPull {
+                top,
+                vx: a.moved.0,
+                cx: a.x,
+            })
+        })
     }
 
     /// Blinking and spike blocks share one area timer (240 frames), which also turns the Fire
@@ -11735,11 +11754,13 @@ mod tests {
         lvl.spawns.push(spawn(Kind::Twister, 120.0, 32.0));
         let mut w = World::with_level(lvl);
         let mut top: f32 = 0.0;
-        for _ in 0..200 {
+        for _ in 0..400 {
             w.step(Input::default());
             top = top.max(w.player.y);
         }
-        assert!(top > 80.0, "lifted to {top}");
+        // carried up to about its column's box top (32 + 108 once grown to 128 px)
+        assert!(top > 120.0 && top < 190.0, "lifted to {top}");
+        assert!(w.player.alive());
     }
 
     #[test]

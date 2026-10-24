@@ -23,6 +23,10 @@ SMCraft is back in development (it was archived in October 2026).
   empty one starts at rest, swaying by itself in a slowly growing swing (it was a wide 60°
   pendulum); a caught player's speed carries into the swing and left / right nudge it. Claws are
   set up as the course starts, like the game's.
+- **Twisters carry Mario as in SMM2**: a Twister's column lifts Mario off the ground and up at a
+  steady speed (it was a guess), first pulling him toward its middle for half a second; near the
+  top he bobs; a jump inside it sends him up faster; at night in the Sky theme it lifts more
+  gently. The column widens toward its top.
 
 - **Import once, then no dump or keys.** SMCraft reads your NSPs and `prod.keys` itself (no
   hactool, nothing extracted) and writes its own asset pack; the game runs from the pack alone.

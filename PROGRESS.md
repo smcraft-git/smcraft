@@ -52,8 +52,15 @@ sway, importer and pack 12, the dev cache already at v12).
   empty claw from rest), × 0.95; the game's binary atan2 table (fmath `table_atan2`); spawn box
   128, cull box 256 × 1024; the catch window / player speed / ±0.05 nudge / hold spacing from
   0x71013e87c0 / 0x71013e8bf0 / 0x71013e7f30 [inf: the held player's hang point]. Both claws of
-  W_3010660 exact to frame 235 (where the engine's player, off since 141, dies early). Next: the
-  Twister's player handling, the stack [inf]s, the other winged enemies, Bowser's chase jumps.
+  W_3010660 exact to frame 235 (where the engine's player, off since 141, dies early). ✅ the
+  Twister's player handling from v3.0.3 (player/twister.rs: the player update's twister block
+  0x710158a590, contact 0x71013ec330, column 0x71013ed4a0): the released band gravity turned
+  upward while rising (not when falling within 16 px of the top), a grounded player lifted off,
+  a 30-frame steer toward the Twister's movement (0.075) and centre, a jump in the column +1.0 a
+  frame, rise caps 3.0 / 5.0 (Sky night 2.5 / 3.5); the column box widening upward (margin 4)
+  [inf: the player's box and shape; the +0x230c bit 0 / +0x494 bit 1 paths]. No twister in the
+  traces: 578 / 580 unchanged. Next: the stack [inf]s, the other winged enemies, Bowser's chase
+  jumps.
 - **Agent queue** (when a helper slot frees; running 2026-10-25: the maker's Water Level and
   Custom Scroll modes, physics): ✅ a Koopaling in a Clown Car (2026-10-25, branch
   `kclown`, research 120-koopalings.md "In a Koopa Clown Car": KoKoopaDefault's Clown vtable

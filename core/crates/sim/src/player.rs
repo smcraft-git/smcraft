@@ -10,6 +10,8 @@ use crate::level::{Cell, Level, Slope, TILE};
 // the 2.0 / 3.0 update power-ups (player/powerups.rs)
 mod powerups;
 pub use powerups::*;
+mod twister;
+pub use twister::{TwisterPull, TwisterState};
 
 /// Speed thresholds T0..T3 (§2.1); row 1 while the star runs.
 const T: [f32; 4] = [0.5, 1.5, 2.25, 3.0];
@@ -403,6 +405,11 @@ pub struct Player {
     pub in_water: bool,
     /// Sky theme at night: gravity × 0.2, max fall × 0.5, jumps × 0.7 (≤ 2.7) (§1.3, §3.1).
     pub low_gravity: bool,
+    /// A Twister's column the player is in this frame (set by the world from the Twister's
+    /// contact; player/twister.rs).
+    pub twister: Option<TwisterPull>,
+    /// The player's own twister record (in a column, jumped in it, the steer timer).
+    pub tw: TwisterState,
     /// Desert-night wind level w (−1…1): the position moves w px per frame (themes.md §2).
     pub wind: f32,
     /// Feet below this y is a pit death: the view's bottom − 56 (set by the world each frame;
@@ -613,6 +620,8 @@ impl Player {
             spiked: false,
             in_water: false,
             low_gravity: false,
+            twister: None,
+            tw: TwisterState::default(),
             wind: 0.0,
             pit_y: -PIT_BELOW,
             pit_death: false,
@@ -1510,6 +1519,8 @@ impl Player {
         if self.exit_window > 0 {
             self.exit_window -= 1;
         }
+        // a Twister's column (player/twister.rs) [obs v3.0.3 0x710158a590]
+        let tw = self.twister_block(pressed);
         let vy_before = self.vy;
         let (vx_before, face_before) = (self.vx, self.facing);
         let grounded_before = self.on_ground;
@@ -1686,7 +1697,7 @@ impl Player {
                         self.vx
                     };
                     self.vx = approach(self.vx, target, 0.07);
-                } else {
+                } else if !tw.as_ref().is_some_and(|t| t.steered) {
                     self.air(inp);
                 }
             }
@@ -1700,6 +1711,9 @@ impl Player {
             }
             let g = if self.on_ground {
                 GRAVITY_GROUND
+            } else if let Some(t) = &tw {
+                self.fell_off = false;
+                t.gravity
             } else if std::mem::take(&mut self.fell_off) {
                 // Walk's last frame (it hands over to Fall): no gravity [obs: Ryujinx trace]
                 0.0
