@@ -689,7 +689,7 @@ Specs are private (`research/specs/`, gitignored): behaviour in prose/tables, no
   banked extra lives paid on clear (+1 refund in 100 Mario), death retries from the course-start
   state, free skip (100 Mario only), Save & Quit, game over, completion; course pools by
   difficulty band with SMM1's shuffle and castle search; Continue records, unlock rules, stats ·
-  costume reward selection ⬜ (category table not read)
+  costume reward selection ✅ (2026-10-24: the manifest's `rare` categories, `hundred::costume_reward`)
 - ✅ Run session (`modes::challenge`) + FFI (`mmk_challenge_*`, `mmk_engine_set_run_counters`):
   New Game / Continue, life pre-charge autosave, deaths retry with the course-start counters,
   1-Ups and coin rollovers banked through the sim's `lives_gained` (HUD lives stay put), skip,
