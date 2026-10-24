@@ -83,7 +83,10 @@ const FIRE_LANE: f32 = 17.0;
 /// The Turn animation (anim 13, non-SMB1) before he turns round: the model's animation length
 /// and its EnemyModelParams play rate — SMB3 `turn` 30 and SMW `turn` 45 at 2.0, NSMBU
 /// `lkp_walk` 160 at 3.0; a big Bowser plays it at 1.0 in every style. Frames = length / rate,
-/// rounded up [inf: the anim player's exact end test].
+/// rounded up. The Turn exe waits for the anim controller's end test (slot 0xc8; Turn exe
+/// 0x7101157320 / 0x710115a230, the latter not in SMB1) [obs v3.0.3], so `lkp_walk` is played to
+/// its end like a one-shot although its FSKA loop bit is clear like every clip of the model's
+/// (walks included, which loop): the bit does not decide [inf: the end test's rounding].
 const BOWSER_TURN: [(f32, f32); 4] = [(0.0, 1.0), (30.0, 2.0), (45.0, 2.0), (160.0, 3.0)];
 /// The flame's carried speed is the mean of Bowser's own x steps over the last 16 frames
 /// (actor ring +0x560, capacity 16 set by the enemy base 0x7100786710, filled by 0x710078adb0).
@@ -478,9 +481,10 @@ impl Actor {
 
     /// A hit from `attack` (coming from `from_x`), through the boss HP rules.
     ///
-    /// Bowser (helper 0x71006b4c20): fire 1, shell 3, Bob-omb blast 3 [?: the explosion's
-    /// collider attack kind was not found; the kind → attack map 0x7100730510 would make kind 5
-    /// attack 33 (Bowser −2, the others killed)]; a block hit only
+    /// Bowser (helper 0x71006b4c20): fire 1, shell 3, Bob-omb blast 3 (the blast is the shell
+    /// attack: while the Explode flag is up the collider update swaps the bomb's body box for a
+    /// cc 6 box [obs v1.0.0 0x7100732640, world.rs `explosions`]; the v3.0.3 Mechakoopa missile's
+    /// blast profile 0x7102a62d28 is attack type 6 too [obs]); a block hit only
     /// bumps him (HitBlock); stomps are Invalid. Boom Boom / Bowser Jr. (boss helper
     /// 0x71006116d0): a fireball drains the counter (5, big 10) and costs 1 HP when it empties
     /// (then refills); every other hit costs 1 HP; none while guarded. Star, POW quake and lava
