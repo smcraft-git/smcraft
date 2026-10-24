@@ -1358,19 +1358,20 @@ impl Actor {
     /// [obs v3.0.3 0x7101154260: its vtable slots 0x18 further on]); true when a jump
     /// started. The obstacle kind (vtable slot 0x310 → 0x71006abfe0; SMB1 never takes the big
     /// jump); whether that jump is allowed (slot 0x428, 0x71006aa9d0 = v3.0.3 0x7101153860:
-    /// not for kind 0; its overhead and jump-height queries test collider kinds the engine has
-    /// no source of, so they pass [inf]); a wall on his right (BG bit 12: v1.0.0's +0x649 bit
-    /// 4, v3.0.3's +0x659 bit 5) with a way over → kind 2 the big jump (slot 0x308, state
+    /// not for kind 0, nor with solid terrain overhead (`bowser_blocked_overhead`); its
+    /// jump-height search (0x7101153f00) looks for BG units of type 0x25 without collision,
+    /// which the engine has no source of, so it passes [inf]); a wall on his right (BG bit 12:
+    /// v1.0.0's +0x649 bit 4, v3.0.3's +0x659 bit 5) with a way over → kind 2 the big jump (slot 0x308, state
     /// BigJump), kind 1 the middle jump (slot 0x300); then the gap scan (0x71006ab810): a gap
     /// with the jump allowed and no wall in the way → the middle jump across (slot 0x2f8, the
     /// counters reset by slots 0x358 / 0x360, the gap flag set for MiddleJump's enter
     /// 0x71006b0370), otherwise he turns round.
     fn bowser_chase_jumps(&mut self, level: &Level, st: usize) -> bool {
-        let mut kind = self.bowser_obstacle_kind(level);
+        let (mut kind, rows) = self.bowser_obstacle_kind(level);
         if st == 0 && kind > 1 {
             kind = 1;
         }
-        let can = kind != 0;
+        let can = kind != 0 && !self.bowser_blocked_overhead(level, rows);
         let wall = self.touching_wall(level, 1);
         if wall && can {
             self.bowser_enter(
@@ -1402,8 +1403,8 @@ impl Actor {
     /// 0x71023190a0): at 24 px ahead (big 36) the points 8,
     /// 24, 40, … px over his feet are tested for terrain until a free run as tall as he is (3
     /// tiles, big 5) is found; the run starting 0–2 tiles up is kind 1, 3–5 tiles up kind 2,
-    /// higher or none kind 0.
-    fn bowser_obstacle_kind(&self, level: &Level) -> u8 {
+    /// higher or none kind 0; with the run's start row over the first.
+    fn bowser_obstacle_kind(&self, level: &Level) -> (u8, i32) {
         let px = self.x + if self.big { 36.0 } else { 24.0 };
         let need = if self.big { 5 } else { 3 };
         let solid = |k: i32| level.cell_at(px, self.y + 8.0 + 16.0 * k as f32).is_solid();
@@ -1416,14 +1417,52 @@ impl Actor {
             run += 1;
             if run == need {
                 let up = k + 1 - need;
-                return match up {
+                let kind = match up {
                     0..=2 => 1,
                     3..=5 => 2,
                     _ => 0,
                 };
+                return (kind, up);
             }
         }
-        0
+        (0, -1)
+    }
+
+    /// The jump's overhead check (0x7101153d40, run by the allowed test 0x7101153860 [obs
+    /// v3.0.3]): upward lines in 3 columns (big 6) from 16 px left of him (big 40) and 16 px
+    /// apart, each first held within his BG half width less 1 px, from 24 px over his feet up
+    /// to 16 px a row of the obstacle's free run (`rows`) over his BG sensor's top, find terrain
+    /// of a solid class (bits 20–22 of the unit not 0 or 2, the query filter 0x71028e3b88:
+    /// semisolid tops don't count) → no jump. His BG sensor is his box id's record in
+    /// 0x71023cb8b0 (0x34 + style, set by his build 0x7101147960; 3D World 0x38, 0x710115ebe8):
+    /// top 26 / 31.8 / 34 / 36 / 46, half width 13 / 12 / 14 / 15.9 / 30, both ×2 big [obs].
+    fn bowser_blocked_overhead(&self, level: &Level, rows: i32) -> bool {
+        let (top, half) = if level.style == "3W" {
+            (46.0, 30.0)
+        } else {
+            let st = style_index(level);
+            ([26.0, 31.8, 34.0, 36.0][st], BOWSER_BG_HALF[st])
+        };
+        let k = if self.big { 2.0 } else { 1.0 };
+        let (cols, half) = if self.big { (6, half * k) } else { (3, half) };
+        let (lo, hi) = (self.x - half + 1.0, self.x + half - 1.0);
+        let (y0, y1) = (self.y + 24.0, self.y + 16.0 * rows as f32 + top * k);
+        let mut x = self.x - if self.big { 40.0 } else { 16.0 };
+        for _ in 0..cols {
+            x = x.clamp(lo, hi);
+            let mut y = y0;
+            loop {
+                if level.cell_at(x, y.min(y1)).is_solid() {
+                    return true;
+                }
+                if y >= y1 {
+                    break;
+                }
+                y += TILE;
+            }
+            x += 16.0;
+        }
+        false
     }
 
     /// The gap scan (0x71006ab810 with no third argument [obs v1.0.0] = [obs v3.0.3
@@ -3091,21 +3130,21 @@ mod tests {
         let (mut level, mut a) = boss(BOWSER, 30.0 * TILE);
         a.dir = 1;
         // flat ground ahead: nothing in the way, no gap
-        assert_eq!(a.bowser_obstacle_kind(&level), 1);
+        assert_eq!(a.bowser_obstacle_kind(&level).0, 1);
         assert!(!a.bowser_gap_ahead(&level).0);
         // a 2-tile wall right ahead: free from 2 tiles up, the middle jump
         let tx = ((a.x + 24.0) / TILE).floor() as i32;
         level.set_solid(tx, 2);
         level.set_solid(tx, 3);
-        assert_eq!(a.bowser_obstacle_kind(&level), 1);
+        assert_eq!(a.bowser_obstacle_kind(&level).0, 1);
         // a 4-tile one: the big jump; a 7-tile one: no way over
         level.set_solid(tx, 4);
         level.set_solid(tx, 5);
-        assert_eq!(a.bowser_obstacle_kind(&level), 2);
+        assert_eq!(a.bowser_obstacle_kind(&level), (2, 4));
         for y in 6..9 {
             level.set_solid(tx, y);
         }
-        assert_eq!(a.bowser_obstacle_kind(&level), 0);
+        assert_eq!(a.bowser_obstacle_kind(&level).0, 0);
         // a gap: no ground under 26 px ahead nor nearer, ground again 4 tiles on
         let mut level = Level::flat(80);
         let gx = (a.x / TILE).floor() as i32 + 1;
@@ -3123,6 +3162,31 @@ mod tests {
         assert!(a.bowser_chase_jumps(&level, 2));
         assert_eq!(a.phase, bw::MIDDLE_JUMP);
         assert!(a.gap_jump && a.vx > 0.0);
+    }
+
+    #[test]
+    fn solid_terrain_overhead_stops_the_chase_jump() {
+        let (mut level, mut a) = boss(BOWSER, 30.0 * TILE);
+        level.style = "WU".to_string();
+        a.dir = 1;
+        let tx = ((a.x + 24.0) / TILE).floor() as i32;
+        level.set_solid(tx, 2);
+        level.set_solid(tx, 3);
+        let (kind, rows) = a.bowser_obstacle_kind(&level);
+        assert_eq!((kind, rows), (1, 2));
+        // NSMBU: the lines reach 16 · 2 + 36 = 68 px over his feet: a ceiling 4 tiles up blocks
+        // it, a semisolid there doesn't, one 6 tiles up is out of reach
+        assert!(!a.bowser_blocked_overhead(&level, rows));
+        let (mx, row) = ((a.x / TILE).floor() as i32, ((a.y + 64.0) / TILE) as i32);
+        level.set(mx, row, Cell::SemiTop);
+        assert!(!a.bowser_blocked_overhead(&level, rows));
+        level.set_solid(mx, row);
+        assert!(a.bowser_blocked_overhead(&level, rows));
+        assert!(!a.bowser_chase_jumps(&level, 2), "no jump over the wall");
+        level.set(mx, row, Cell::Empty);
+        level.set_solid(mx, row + 2);
+        assert!(!a.bowser_blocked_overhead(&level, rows));
+        assert!(a.bowser_chase_jumps(&level, 2));
     }
 
     #[test]

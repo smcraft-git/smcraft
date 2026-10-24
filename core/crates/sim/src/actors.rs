@@ -11,6 +11,8 @@ use crate::level::{Cell, Level, PipeDir, TILE};
 pub mod block_out;
 mod boo;
 mod bosses;
+mod bros;
+pub use bros::BroWing;
 mod ceiling;
 mod chute;
 mod claw;
@@ -851,6 +853,8 @@ pub struct Actor {
     /// A winged enemy's wing helper: its flap rate (+0x20), eased toward the rate its body's
     /// animation asks for (actors/boo.rs).
     pub wing_rate: f32,
+    /// A winged Hammer Bro's WingWalk (actors/bros.rs).
+    pub bro_wing: BroWing,
 }
 
 impl Actor {
@@ -933,6 +937,7 @@ impl Actor {
             claw: None,
             gap_jump: false,
             wing_rate: 1.0,
+            bro_wing: BroWing::default(),
         }
     }
 
@@ -954,9 +959,9 @@ impl Actor {
     }
 
     /// The solid surface this actor offers (for platforms): (x0, y0, x1, y1, top_only).
-    /// A flying winged Buzzy Beetle, the one players stand on.
+    /// A flying winged Buzzy Beetle or Spike Top, the ones players stand on (actors/fly.rs).
     pub fn is_para_beetle(&self) -> bool {
-        self.kind == Kind::Buzzy
+        matches!(self.kind, Kind::Buzzy | Kind::SpikeTop { .. })
             && self.wings
             && self.mode == Mode::Normal
             && !self.ceiling
@@ -982,7 +987,7 @@ impl Actor {
                 ))
             }
             // a Para-Beetle is stood on (its body box, from above) (actors/fly.rs)
-            Kind::Buzzy if self.is_para_beetle() => {
+            Kind::Buzzy | Kind::SpikeTop { .. } if self.is_para_beetle() => {
                 let (hw, h) = (self.half_w(), self.height());
                 Some((self.x - hw, self.y, self.x + hw, self.y + h, true))
             }
@@ -2216,8 +2221,8 @@ impl Actor {
                 // their Wing action is their Basic one (the same action class: Teresa,
                 // Pukupuku, FishBone, Hanachan, Kameck, Bros1st / BrosU / FireBros / MegaBros,
                 // Choropoo, Gesso, Wanwan) [obs v1.0.0 actionmap]: they act as unwinged, but
-                // for the wing-only states inside it: the Boo's PataCharge (actors/boo.rs)
-                // [inf: the Bros' WingWalk is not ported]
+                // for the wing-only states inside it: the Boo's PataCharge (actors/boo.rs),
+                // the Bros' WingWalk (actors/bros.rs)
                 Kind::Boo
                 | Kind::CheepCheep { .. }
                 | Kind::FishBone
@@ -3353,6 +3358,9 @@ impl Actor {
     fn step_hammer_bro(&mut self, level: &Level) -> Option<Actor> {
         if self.alt {
             return self.step_sledge_bro(level);
+        }
+        if self.wings && !self.stacked {
+            return self.step_bro_wing(level);
         }
         let (px, _) = self.target;
         self.dir = if px < self.x { -1 } else { 1 };

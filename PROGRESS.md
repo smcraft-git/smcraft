@@ -132,6 +132,24 @@ sway, importer and pack 12, the dev cache already at v12).
   are the same defaults for Basic as for Tower, so pass 2's evidence doesn't decide it), the
   item touch boxes (not in EnemyDB or the item init 0x710134fe30; set by the shared enemy init
   0x7101286ee0) [inf]. 578 / 580 traces exact; coverage 550/550 + 273/273; simulate 0 crashes.
+- 🔄 **Inferred-behaviour pass 4** (2026-10-25, branch `infres4`, research specs/inf-inventory.md
+  "Pass 4"): ✅ the Bros' WingWalk (actors/bros.rs; v3.0.3 enter 0x71010961c0 / exe 0x7101096310,
+  hop 0x7101096ef0, walk turns 0x71010979f0, the Bros1st / BrosU action slots 0x120–0x1a8 and
+  helper slots): hops (vy 2.0, 1.0 by the water-speed rule; 0.5 px/f, turned by terrain 12 px
+  ahead), one hammer a landing (Bros1st held, on screen, frame 14, 20-frame wait; BrosU after
+  JumpSt 12 (3W frame 6) and JumpEd 14, at Throw frame 33 / 26, Throw's end 68 / 60), a jump try
+  every third throw (countdown 3). ✅ Bowser's overhead query (0x7101153d40 via 0x7101153860):
+  solid terrain (unit class not 0 / 2) over him up to 16 px a free-run row + his BG sensor top
+  (box id 0x34 + style: 26 / 31.8 / 34 / 36, 3W 46) stops the chase jumps. ✅ the winged Spike Top
+  (Togemet Wing 0x7102911e68: PlayerOn without the rider's contact timer): stood on, dips, hurts its
+  rider. 🔄 item touch boxes: the collider table 0x71023cb8b0 by box id +0x6a0 (items 0x5f =
+  {0, 7, 7, 7}; overlap 0x7100e28e20): 3D World's box [obs], top 14; the 2D styles' extra pixel and
+  the Fire Flower's id (0x12) not found. 🔄 walker contact: push = half the overlap [obs
+  0x7100e28e20]; the bump component (+0x3a0) is off in the Tower context, its partner raises the
+  turn flag +0x528 bit 19 (0x710128a2d0); its pairing not found. ⬜ the Sledge Bro's WingWalk (its
+  own helpers), the red Koopa's ledge reach (the table's ±4 breaks 9 traces; 3.9 stays), Bowser's
+  jump-height search (BG type 0x25) [inf]. 578 / 580 traces exact; coverage 550/550 + 273/273;
+  simulate 0 crashes.
 - **Agent queue** (when a helper slot frees; running 2026-10-25: the maker's Water Level and
   Custom Scroll modes, physics): ✅ a Koopaling in a Clown Car (2026-10-25, branch
   `kclown`, research 120-koopalings.md "In a Koopa Clown Car": KoKoopaDefault's Clown vtable
