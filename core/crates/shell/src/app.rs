@@ -333,23 +333,31 @@ impl App {
         }
         let dt = self.last.map_or(0.0, |l| now - l);
         self.last = Some(now);
-        // local multiplayer: keyboard + the first pad are player 1, further pads players 2–4
+        // local multiplayer: pads by player (input::assign_pads); in the menus every pad works
         let each = self.pads.poll_each();
-        let pads = if self.game.session.world.others.is_empty() {
-            each.iter().fold(0, |a, b| a | b)
+        let in_play = self.front.as_mut().is_none_or(|f| f.front.in_play());
+        let players = self
+            .game
+            .session
+            .players()
+            .max(self.game.session.world.players());
+        let (p1, extra) = crate::input::assign_pads(&each, players);
+        let pads = if in_play {
+            p1
         } else {
-            each.first().copied().unwrap_or(0)
+            each.iter().fold(0, |a, b| a | b)
         };
-        if pads != 0 {
+        if each.iter().any(|&b| b != 0) {
             self.touch.hide();
         }
+        if let Some(f) = self.front.as_mut() {
+            f.data.controllers = 1 + each.len() as u32;
+        }
         // the on-screen controls only count in play (in menus a touch is a tap)
-        let in_play = self.front.as_mut().is_none_or(|f| f.front.in_play());
         let pads = pads | if in_play { self.touch.buttons() } else { 0 };
-        self.game.session.extra_inputs = each
-            .iter()
-            .skip(1)
-            .map(|&b| mmk_sim::Input { buttons: b })
+        self.game.session.extra_inputs = extra
+            .into_iter()
+            .map(|b| mmk_sim::Input { buttons: b })
             .collect();
         let input = combine(&self.keys, pads);
         let actions = self.keys.take_actions();

@@ -61,6 +61,8 @@ pub enum BotEvent {
     /// A new course in the maker.
     New,
     Play(Box<CourseEntry>),
+    /// Play Together (local co-op): the controller step, then the course.
+    Together(Box<CourseEntry>),
     /// Save the maker's course into this slot.
     SaveTo(usize),
 }
@@ -70,6 +72,8 @@ pub enum BotEvent {
 enum Btn {
     Make,
     Play,
+    /// Play Together (`L_CoopModeBtn_00`, My Courses).
+    Together,
     Upload,
     Name,
     Description,
@@ -78,13 +82,14 @@ enum Btn {
     Mode,
 }
 
-const MY_BUTTONS: [(&str, Btn); 6] = [
+const MY_BUTTONS: [(&str, Btn); 7] = [
     ("L_Edit_00", Btn::Make),
     ("L_Upload_00", Btn::Upload),
     ("L_CoursName_00", Btn::Name),
     ("L_CourseInfo_00", Btn::Description),
     ("L_Del_00", Btn::Delete),
     ("L_Play_00", Btn::Play),
+    ("L_CoopModeBtn_00", Btn::Together),
 ];
 /// Downloaded: Play, and Make on the co-op button's place (see the module notes).
 const DL_BUTTONS: [(&str, Btn); 2] = [
@@ -150,17 +155,13 @@ impl CoursebotScene {
             ("L_CourseInfo_00/T_Btn_00", "L_CourseInfo_00-T_Btn_00"),
             ("L_DLPlayBtn_00/T_Btn_00", "L_DLPlayBtn_00-T_Btn_00"),
             ("L_CoopModeBtn_01/T_Btn_00", "L_Edit_00-T_Btn_00"),
+            ("L_CoopModeBtn_00/T_Btn_00", "L_CoopModeBtn_00-T_Btn_00"),
         ] {
             info.text_from(pane, label);
         }
         info.text_from("L_Del_00/T_Btn_00", "0008");
         info.text_from("L_DLDel_00/T_Btn_00", "0008");
-        for p in [
-            "L_CoopModeBtn_00",
-            "L_DLDel_00",
-            "L_IDBtn_00",
-            "N_Player_00",
-        ] {
+        for p in ["L_DLDel_00", "L_IDBtn_00", "N_Player_00"] {
             info.show(p, false);
         }
         let mut s = Self {
@@ -599,6 +600,7 @@ impl CoursebotScene {
             },
             (Btn::Make, Some(e)) => Some(edit(&e, self.tab == 0)),
             (Btn::Play, Some(e)) => Some(BotEvent::Play(Box::new(e))),
+            (Btn::Together, Some(e)) => Some(BotEvent::Together(Box::new(e))),
             (Btn::Upload, Some(e)) => {
                 self.start_upload(cx, &e);
                 None

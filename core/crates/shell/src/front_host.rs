@@ -39,6 +39,8 @@ pub struct HostData {
     pub data_dir: Option<PathBuf>,
     /// The player's buttons this tick (engine bits).
     pub input: u32,
+    /// Players' controls connected: the keyboard (or touch) and each pad (set by the app).
+    pub controllers: u32,
     /// Sound output for courses.
     pub audio: Option<Arc<AudioOut>>,
     title: Option<Vec<PathBuf>>,
@@ -111,6 +113,7 @@ impl HostData {
             tgr_cache: None,
             data_dir: None,
             input: 0,
+            controllers: 1,
             audio: None,
             title: None,
             library: None,
@@ -618,6 +621,8 @@ impl Host for ShellHost<'_> {
         }
         self.game.session.set_audio(None);
         self.game.set_course(None);
+        // back to one player: a co-op start sets its players again before loading
+        self.game.session.set_players(1);
     }
 
     fn step_course(&mut self, scripted: Option<u32>) {
@@ -634,7 +639,17 @@ impl Host for ShellHost<'_> {
     }
 
     fn set_character(&mut self, character: u32) {
-        self.game.session.world.main_char = (character as usize).min(3);
+        if self.game.session.players() == 1 {
+            self.game.session.world.main_char = (character as usize).min(3);
+        }
+    }
+
+    fn set_players(&mut self, players: u32) {
+        self.game.session.set_players(players as usize);
+    }
+
+    fn controllers(&mut self) -> u32 {
+        self.data.controllers
     }
 
     fn set_run_counters(&mut self, score: u32, coins: u32, lives: u32) {

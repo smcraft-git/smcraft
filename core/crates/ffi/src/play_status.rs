@@ -2,7 +2,6 @@
 //! (keys, pink coins, game style, character, checkpoint, why the player died, where the player
 //! is on screen and when a death restarts the course — for the death iris).
 
-use mmk_sim::player::{Control, DOWN_FALL_FRAMES};
 use mmk_sim::world::GoalPhase;
 
 use crate::{MmkEngine, guard};
@@ -43,12 +42,8 @@ pub unsafe extern "C" fn mmk_engine_play_status(engine: *const MmkEngine, out: *
             return;
         };
         let w = &e.world;
-        let dying = !w.player.alive();
-        let restart_in = match w.player.control {
-            Control::DownPose { timer } => timer + DOWN_FALL_FRAMES,
-            Control::DownFall { timer } => timer,
-            _ => -1,
-        };
+        let dying = w.all_down();
+        let restart_in = w.restart_in();
         *out = MmkPlayStatus {
             keys: w.keys,
             pink_coins: w.pink.len() as u32,

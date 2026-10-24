@@ -269,13 +269,16 @@ pub const LIST_LAYOUT: &str = "Nwk_CourseListGeneral_00";
 const VISIBLE: i64 = 3;
 /// An open row's buttons: Play, then (server courses) View comments, More info and Download,
 /// and Make (the co-op button's slot, labelled as the Coursebot's "Make": open the course in the
-/// Course Maker) [departure: SMM2's Course World has no way to edit a course].
-pub const OPEN_BUTTONS: [&str; 5] = [
+/// Course Maker) [departure: SMM2's Course World has no way to edit a course], and Play
+/// Together on the report button's slot (with the co-op button's label and icon)
+/// [departure: the game's co-op button holds Make here].
+pub const OPEN_BUTTONS: [&str; 6] = [
     "L_PlayBtn_00",
     "L_CommentBtn_00",
     "L_DetailBtn_00",
     "L_DownloadPlayBtn_00",
     "L_CoopModeBtn_00",
+    "L_ReportBtn_00",
 ];
 
 /// Which screen a course list is drawn on.
@@ -298,6 +301,8 @@ pub enum ListEvent {
     Download(Box<WorldCourse>),
     /// "Make": open it in the Course Maker.
     Edit(Box<WorldCourse>),
+    /// Play Together (local co-op).
+    Together(Box<WorldCourse>),
     Back,
 }
 
@@ -588,9 +593,9 @@ impl CourseListScene {
             .get(i as usize)
             .is_some_and(WorldCourse::is_server);
         if server {
-            vec![0, 1, 2, 3, 4]
+            vec![0, 1, 2, 3, 4, 5]
         } else {
-            vec![0, 4]
+            vec![0, 4, 5]
         }
     }
 
@@ -665,7 +670,6 @@ impl CourseListScene {
                 "L_BadgeList_00",
                 "L_NationalFlag_00",
                 "L_MiiIcon_00",
-                "L_ReportBtn_00",
                 "L_DeleteBtn_00",
                 "L_DpointBtn_00",
                 "L_Rank_00",
@@ -681,6 +685,17 @@ impl CourseListScene {
                 l.text(&format!("{row}/L_CoopModeBtn_00/T_Btn_00"), &t);
             }
             l.visible(&format!("{row}/L_CoopModeBtn_00"), Some(true));
+            // Play Together on the report button's slot: the co-op button's label and icon
+            if let Some(t) = l.message("L_CourseList_00-L_CourseData_00-L_CoopModeBtn_00-T_Btn_00")
+            {
+                l.text(&format!("{row}/L_ReportBtn_00/T_Btn_00"), &t);
+            }
+            l.visible(&format!("{row}/L_ReportBtn_00"), Some(true));
+            l.image(
+                &format!("{row}/L_ReportBtn_00/P_Icon_00"),
+                "Nwk_CourseList_00",
+                "CoopModeIcon^u",
+            );
             // the maker's glove for its icon, when the import has it
             l.image(
                 &format!("{row}/L_CoopModeBtn_00/P_Icon_00"),
@@ -951,6 +966,7 @@ impl CourseListScene {
                     2 => ListEvent::Detail(c),
                     3 => ListEvent::Download(c),
                     4 => ListEvent::Edit(c),
+                    5 => ListEvent::Together(c),
                     _ => ListEvent::Play(c),
                 };
                 self.pending = Some((e, tick + wait));
@@ -1308,6 +1324,8 @@ pub struct WorldFlow {
     pub script: Script,
     /// The Endless Challenge button's own label instead of the layout's (Challenge Modes).
     endless_label: Option<String>,
+    /// Players of the next course start (Play Together: 2–4).
+    players: u32,
 }
 
 impl WorldFlow {
@@ -1345,6 +1363,7 @@ impl WorldFlow {
             downloads: Vec::new(),
             script: Script::default(),
             endless_label: None,
+            players: 1,
         };
         if kind != ListKind::World {
             f.show_list(cx);
@@ -1522,6 +1541,7 @@ impl WorldFlow {
     }
 
     fn start(&mut self, cx: &mut Cx, c: WorldCourse) {
+        cx.host.set_players(self.players.max(1));
         let loaded = match cx.host.load_course(&c.source) {
             Ok(l) => l,
             Err(e) => {
@@ -1667,17 +1687,24 @@ impl WorldFlow {
                             return Some(WorldEvent::Exit);
                         }
                     }
+                    ListEvent::Play(c) | ListEvent::Together(c) if !c.playable => {
+                        cx.toast(&format!(
+                            "{} uses parts the engine doesn't support yet.",
+                            c.name
+                        ));
+                        s.resume();
+                    }
                     ListEvent::Play(c) => {
-                        if !c.playable {
-                            cx.toast(&format!(
-                                "{} uses parts the engine doesn't support yet.",
-                                c.name
-                            ));
-                            s.resume();
-                        } else {
+                        self.players = 1;
+                        cx.fade_to(FadeKind::Black, Go::World(WorldGo::Start(c)));
+                    }
+                    ListEvent::Together(c) => match cx.together() {
+                        Some(n) => {
+                            self.players = n;
                             cx.fade_to(FadeKind::Black, Go::World(WorldGo::Start(c)));
                         }
-                    }
+                        None => s.resume(),
+                    },
                     ListEvent::Edit(c) => {
                         let mine = c.maker_id.is_some()
                             && c.maker_id.as_deref()
@@ -1759,6 +1786,7 @@ impl WorldFlow {
                 }
                 PageEvent::Maker(id, name) => self.show_maker(cx, &id, &name),
                 PageEvent::Ghost(c) => {
+                    self.players = 1;
                     cx.fade_to(FadeKind::Black, Go::World(WorldGo::Start(c)));
                 }
             },

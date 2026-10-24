@@ -846,7 +846,7 @@ mod native {
         }
         game.session.set_options(options);
         if args.players > 1 {
-            game.session.world.set_players(args.players);
+            game.session.set_players(args.players);
         }
         // kept until the window closes: the secure connection stays open, then leaves the
         // gathering

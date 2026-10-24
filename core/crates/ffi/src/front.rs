@@ -21,7 +21,6 @@ use mmk_front::{
     UiKind, WorldCourse,
 };
 use mmk_online::world::Backend;
-use mmk_sim::player::{Control, DOWN_FALL_FRAMES};
 use mmk_sim::world::Event;
 use mmk_sim::{Input, World};
 use serde_json::{Value, json};
@@ -610,12 +609,8 @@ impl Host for FfiHost {
         let e = self.engine_ref();
         let w = &e.world;
         let h = w.hud();
-        let dying = !w.player.alive();
-        let restart_in = match w.player.control {
-            Control::DownPose { timer } => timer + DOWN_FALL_FRAMES,
-            Control::DownFall { timer } => timer,
-            _ => -1,
-        };
+        let dying = w.all_down();
+        let restart_in = w.restart_in();
         let condition = crate::condition::goal_code(w.clear.goal).map(|(kind, target)| Condition {
             kind,
             target,
@@ -645,6 +640,7 @@ impl Host for FfiHost {
             restart_in,
             clear_color: mmk_host::clear_color(w, &self.assets().cache),
             condition,
+            players: w.players() as u32,
         }
     }
 
