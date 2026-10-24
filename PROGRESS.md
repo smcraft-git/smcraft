@@ -1166,19 +1166,19 @@ a portable Rust shell runs the game everywhere, the Swift app stays as the Apple
   - ✅ (2026-10-25) the engine's data that it read from disk: tables (backdrops were black on every
     course), 3D environments, particle effects, NSMBU / 3D World models (read as asked for; 3D
     World was drawn with 2D sprites); the page now copies `meshes/` and `anims/` too
-  - 🔄 (2026-10-25, branch `webparity`; built and unit-tested, browser check pending) the own
+  - ✅ (2026-10-25, branch `webparity`; checked in headless Edge: smoke.mjs --server --coop --lost all PASS) the own
     course server from the page (`web_server`: `mmk_online::Client` over a `Transport` the page
     fetches for; server CORS for Private Network Access): Course World's list, thumbnails, Play,
     Download, account register / token sign-in (token in `localStorage`, paste into the field),
     likes / comments / leaderboards, replays and ghosts, the Coursebot's upload (any maker name:
     `?maker=`); page "Course server…" / `?server=`
-  - 🔄 (2026-10-25, `webparity`) 100 Mario / Endless from Course World's pool (`web_pool`):
+  - ✅ (2026-10-25, `webparity`; the --pool smoke step not run yet) 100 Mario / Endless from Course World's pool (`web_pool`):
     TGRCode's Endless draws in the background (behind the player's own requests), kept in OPFS
     `mmk-save/pool/` (100 at most), or the own server's `/api/pool`
-  - 🔄 (2026-10-25, `webparity`) local co-op: one player per Gamepad API pad as natively
+  - ✅ (2026-10-25, `webparity`, browser-checked) local co-op: one player per Gamepad API pad as natively
     (`Host::controllers` / `set_players`), or the keyboard split in two (page "Keyboard: 2
     players" / `?split=1`; natively `MMK_KEYBOARD_SPLIT=1`)
-  - 🔄 (2026-10-25, `webparity`) a lost graphics device: made again on the same canvas up to 3
+  - ✅ (2026-10-25, `webparity`, browser-checked) a lost graphics device: made again on the same canvas up to 3
     times (UI layers and renderer rebuilt from the caches), else a message in the status line;
     WebGPU errors are logged instead of panicking
   - 🔄 (2026-10-25, `webparity`) memory: the models' file bytes are dropped once parsed past
