@@ -77,6 +77,30 @@ const H_FIRST_FREE: u32 = 16;
 /// The maker's music fades out over this many frames (60 fps) [inf].
 const EDIT_MUSIC_FADE: f32 = 10.0;
 
+/// The Super World map's scene themes as its music keys spell them, in theme order [obs: the
+/// table main+0x294bb50 read by 0x710148e900, which plays `<name>_Play` (`_Edit` in the maker);
+/// research/specs/super-worlds.md §7.6].
+pub const MAP_THEMES: [&str; 8] = [
+    "BGM_WorldMap_Plain",
+    "BGM_WorldMap_UnderGround",
+    "BGM_WorldMap_Desert",
+    "BGM_WorldMap_Woods",
+    "BGM_WorldMap_Snow",
+    "BGM_WorldMap_Athletic",
+    "BGM_WorldMap_Magma",
+    "BGM_WorldMap_Night",
+];
+/// The Super World map's sound users are not per style; the director's set for the map goes by
+/// this name.
+const MAP_STYLE: &str = "MyWorld";
+/// The map scene's user (its music and the roads' reveal).
+pub const MAP_SCENE_USER: &str = "MyWorldScene";
+
+/// The Super World map's music key of a theme (0 plain … 7 night).
+pub fn map_bgm_key(theme: u8) -> String {
+    format!("{}_Play", MAP_THEMES[(theme as usize).min(7)])
+}
+
 /// The Course Maker's music key of a theme: `BGM_<Theme>_Edit`.
 pub fn edit_bgm_key(theme: u8) -> String {
     format!("BGM_{}_Edit", map::THEME_KEYS[(theme as usize).min(9)])
@@ -738,6 +762,12 @@ impl Sounds {
     /// Start music key `key` (from `start` frames), chaining `then` after a non-looping one.
     fn play_music(&mut self, key: &str, start: u32, then: Option<&str>) -> bool {
         let user = self.music_user();
+        self.play_music_of(&user, key, start, then)
+    }
+
+    /// Start `user`'s music key `key` (from `start` frames), chaining `then` after it.
+    fn play_music_of(&mut self, user: &str, key: &str, start: u32, then: Option<&str>) -> bool {
+        let user = user.to_string();
         let Some(plays) = self.resolve(&user, key, &PropList::default()) else {
             return false;
         };
@@ -1048,6 +1078,103 @@ impl Sounds {
         }
         let Some(plays) = self.resolve(user, key, &local) else {
             return false;
+        };
+        for a in plays {
+            let Some(sound) = self.wave_id(&a.wave) else {
+                continue;
+            };
+            self.send(Command::Play(Play {
+                sound,
+                bus: Bus::Sfx,
+                volume: a.volume,
+                pitch: a.pitch,
+                pan: 0.0,
+                delay: self.frames(a.delay),
+                duration: self.frames(a.duration),
+                fade_in: (a.fade_in.max(0.0) * self.rate as f32) as u32,
+                stop_fade: self.frames(a.stop),
+                group: a.group.unwrap_or(NO_GROUP),
+                priority: a.priority,
+                lpf: a.lpf,
+                send: 0.0,
+                handle: 0,
+                start: 0,
+                then: None,
+            }));
+        }
+        true
+    }
+
+    // ---- the Super World map --------------------------------------------------------------
+
+    /// The Super World map's music: theme `theme`'s track (`MyWorldScene`'s
+    /// `BGM_WorldMap_<Theme>_Play`), from the top unless it is already playing; false if the
+    /// cache has no such track.
+    pub fn map_music(&mut self, theme: u8) -> bool {
+        self.log.clear();
+        let key = map_bgm_key(theme);
+        let same = self.style == MAP_STYLE && self.track.as_deref() == Some(key.as_str());
+        self.edit_style(MAP_STYLE);
+        if same && self.music_playing() {
+            return true;
+        }
+        self.send(Command::SetEffects {
+            delay: None,
+            reverb: None,
+        });
+        self.send(Command::StopHandle {
+            handle: H_AMBIENT,
+            fade: 0,
+        });
+        self.send(Command::SetMusicLayer {
+            gain: 0.0,
+            frames: 0,
+        });
+        let ok = self.play_music_of(MAP_SCENE_USER, &key, 0, None);
+        self.track = ok.then_some(key);
+        self.over = Over::None;
+        ok
+    }
+
+    /// A Super World map sound of SLink user `user` (`MyWorldPlayer`, `MyWorldCoursePoint`,
+    /// `MyWorldGoalPoint`, `MyWorldKinokoHouse`, `MyWorldScene`): its key `key`, or with `anim`
+    /// what the user's action triggers start with animation `key` (the skeletal animation's own
+    /// name, the texture pattern's `<key>_ftp`: the goal's `tocleared`, a point's
+    /// `tocleared_ftp`); `point`: the course point's kind (`@point`, its switch).
+    /// False if nothing in the data answers.
+    pub fn map_sound(&mut self, user: &str, key: &str, anim: bool, point: Option<&str>) -> bool {
+        self.log.clear();
+        self.edit_style(MAP_STYLE);
+        let mut local = PropList::default().with("@scene", "MyWorld");
+        if let Some(p) = point {
+            local.set("@point", p);
+        }
+        let plays = if anim {
+            // the trigger names the skeletal animation itself, a texture pattern with `_ftp`
+            let course = self.course_props();
+            let props = Layered(&local, &course);
+            let mut out = Vec::new();
+            let mut any = false;
+            for action in [key.to_string(), format!("{key}_ftp")] {
+                any |= self.lib.db.resolve_action(
+                    user,
+                    &action,
+                    &props,
+                    &mut self.rng,
+                    &mut self.turns,
+                    &mut out,
+                );
+            }
+            if !any {
+                return false;
+            }
+            self.log.push((user.to_string(), format!("@{key}")));
+            out
+        } else {
+            match self.resolve(user, key, &local) {
+                Some(p) => p,
+                None => return false,
+            }
         };
         for a in plays {
             let Some(sound) = self.wave_id(&a.wave) else {

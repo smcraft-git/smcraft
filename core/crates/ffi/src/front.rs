@@ -886,6 +886,24 @@ impl Host for FfiHost {
         }
     }
 
+    fn map_music(&mut self, theme: Option<u8>) {
+        let Some(d) = self.maker_director() else {
+            return;
+        };
+        match theme {
+            Some(t) => {
+                d.map_music(t);
+            }
+            None => d.stop_music(),
+        }
+    }
+
+    fn map_sound(&mut self, user: &str, key: &str, anim: bool, point: Option<&str>) {
+        if let Some(d) = self.maker_director() {
+            d.map_sound(user, key, anim, point);
+        }
+    }
+
     fn test_play(
         &mut self,
         course: &[u8],

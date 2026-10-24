@@ -113,7 +113,20 @@ fn db() -> serde_json::Value {
                 {"key": "fire_Water", "parent": 0, "if": ["==", "Water"], "wave": "SpitWater"}
             ]},
             "M1_EnmyFire": {"calls": [asset("r_appear_title", "Magic")]},
-            "M1_EditKuribo": {"calls": [asset("set", "EditSet"), asset("drag", "EditDrag")]}
+            "M1_EditKuribo": {"calls": [asset("set", "EditSet"), asset("drag", "EditDrag")]},
+            "MyWorldScene": {"calls": [
+                asset("BGM_WorldMap_Plain_Play", "MapPlain"),
+                asset("BGM_WorldMap_Night_Play", "MapNight"),
+                asset("wayAppear", "WayAppear")
+            ]},
+            "MyWorldCoursePoint": {
+                "calls": [
+                    {"key": "tocleared", "kind": "switch", "watch": "@point", "children": [1, 2]},
+                    {"key": "t_normal", "parent": 0, "if": ["==", "Normal"], "wave": "Magic"},
+                    {"key": "t_tower", "parent": 0, "if": ["==", "Tower"], "wave": "Crumble", "delay": 30.0}
+                ],
+                "actions": [{"action": "tocleared_ftp", "call": 0, "start": 1}]
+            }
         }
     })
 }
@@ -134,7 +147,8 @@ fn rig() -> Rig {
                 let music = w.contains("Day")
                     || w.contains("Night")
                     || w.contains("Edit") && !w.starts_with("Edit")
-                    || w == "Star";
+                    || w == "Star"
+                    || w.starts_with("Map");
                 let dir = if music { "music" } else { "se" };
                 waves.insert(w.into(), json!(format!("{dir}/{w}.bwav")));
             }
@@ -624,6 +638,36 @@ fn course_maker_music_and_part_sounds() {
     assert!(!r.s.edit_music("M1", 4));
 }
 
+#[test]
+fn super_world_map_music_and_sounds() {
+    let mut r = rig();
+    assert!(r.s.map_music(0));
+    assert_eq!(r.played(), ["layer:0", "music:MapPlain"]);
+    // already playing: not restarted; another theme's track replaces it
+    r.music_at("MapPlain", 500);
+    assert!(r.s.map_music(0));
+    assert!(r.played().is_empty());
+    assert!(r.s.map_music(7));
+    assert_eq!(r.played(), ["layer:0", "music:MapNight"]);
+    // a theme without a track in the data
+    assert!(!r.s.map_music(3));
+    r.played();
+    // keys, and what an animation starts (switching on the point's kind, from its frame)
+    assert!(r.s.map_sound("MyWorldScene", "wayAppear", false, None));
+    assert_eq!(r.played(), ["sfx:WayAppear"]);
+    assert!(r.s.map_sound("MyWorldCoursePoint", "tocleared", true, Some("Tower")));
+    let delays: Vec<u32> =
+        r.rx.try_iter()
+            .filter_map(|c| match c {
+                Command::Play(p) => Some(p.delay),
+                _ => None,
+            })
+            .collect();
+    assert_eq!(delays, [48000 * 31 / 60]);
+    assert!(!r.s.map_sound("MyWorldCoursePoint", "wait", true, None));
+    assert!(!r.s.map_sound("MyWorldCoursePoint", "nope", false, None));
+}
+
 /// With the owner's import (skipped without one): the maker's track of every style and theme
 /// and the parts' edit sounds resolve and load.
 #[test]
@@ -687,4 +731,61 @@ fn the_imported_maker_music_and_edit_sounds_play() {
     let (low, mid) = (pitch(0.0), pitch(12.0));
     eprintln!("Tower_stack pitch: row 0 {low}, row 12 {mid}");
     assert!(mid > low * 1.5, "{low} → {mid}");
+}
+
+/// With the owner's import (skipped without one, or one from before the map's sounds): every
+/// theme's map track is on disk, and the map's animations start their sounds.
+#[test]
+fn the_imported_super_world_map_sounds_play() {
+    let Some(dir) = crate::paths::game_cache() else {
+        return;
+    };
+    let audio = dir.join("audio");
+    let read: FileReader = Box::new(move |rel| std::fs::read(audio.join(rel)).ok());
+    let Some(lib) = Library::load(read) else {
+        return;
+    };
+    if lib.db.user(crate::sound::MAP_SCENE_USER).is_none() {
+        return;
+    }
+    for theme in 0..8 {
+        let mut w = Vec::new();
+        lib.db.waves_of(
+            crate::sound::MAP_SCENE_USER,
+            &crate::sound::map_bgm_key(theme),
+            &mut w,
+        );
+        let file = w.first().and_then(|w| lib.db.waves.get(w));
+        assert!(
+            file.is_some_and(|f| dir.join("audio").join(f).is_file()),
+            "theme {theme}"
+        );
+    }
+    let (tx, rx) = command_channel(4096);
+    let clock: MusicClock = Arc::new(AtomicU64::new(u64::MAX));
+    let mut s = Sounds::new(tx, Arc::new(lib), shared_set(), clock, 48000);
+    let plays = |rx: &Receiver<Command>| {
+        rx.try_iter()
+            .filter(|c| matches!(c, Command::Play(_)))
+            .count()
+    };
+    assert!(s.map_music(7));
+    assert_eq!(plays(&rx), 1);
+    for (user, key, anim, point) in [
+        ("MyWorldCoursePoint", "tocleared", true, Some("Tower")),
+        ("MyWorldCoursePoint", "swim_tocleared", true, Some("Normal")),
+        ("MyWorldGoalPoint", "tocleared", true, None),
+        ("MyWorldGoalPoint", "swim_appear", true, None),
+        ("MyWorldGoalPoint", "fire", true, None),
+        ("MyWorldKinokoHouse", "tocleared", true, None),
+        ("MyWorldPlayer", "tocleared", true, None),
+        ("MyWorldPlayer", "landing", true, None),
+        ("MyWorldPlayer", "dokan_in", true, None),
+        ("MyWorldPlayer", "courseIn", false, None),
+        ("MyWorldScene", "wayAppear", false, None),
+        ("MyWorldScene", "courseAppearEffect", false, None),
+    ] {
+        assert!(s.map_sound(user, key, anim, point), "{user} {key}");
+        assert!(plays(&rx) >= 1, "{user} {key}");
+    }
 }

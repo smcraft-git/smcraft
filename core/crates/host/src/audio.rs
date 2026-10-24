@@ -242,6 +242,24 @@ impl Director {
         }
     }
 
+    /// The Super World map's music for `theme` (data-driven director only): from the top unless
+    /// already playing.
+    pub fn map_music(&mut self, theme: u8) -> bool {
+        match &mut self.imp {
+            Imp::Data(s) => s.map_music(theme),
+            Imp::Legacy(_) => false,
+        }
+    }
+
+    /// A Super World map sound: `user`'s `key`, or what its animation `key` starts (`anim`);
+    /// `point`: the course point's kind (data-driven director only).
+    pub fn map_sound(&mut self, user: &str, key: &str, anim: bool, point: Option<&str>) -> bool {
+        match &mut self.imp {
+            Imp::Data(s) => s.map_sound(user, key, anim, point),
+            Imp::Legacy(_) => false,
+        }
+    }
+
     /// The (user, key) pairs the last tick played (data-driven director only).
     pub fn played(&self) -> &[(String, String)] {
         match &self.imp {

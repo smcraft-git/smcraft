@@ -1165,6 +1165,10 @@ pub(crate) mod tests {
         pub edit_sounds: Vec<(String, String)>,
         /// The `MusicalScale` of each edit sound that had one: (key, scale).
         pub edit_scales: Vec<(String, f32)>,
+        /// Super World map music asked for (None: stop) and map sounds (user, key; `@` before
+        /// an animation's).
+        pub map_music: Vec<Option<u8>>,
+        pub map_sounds: Vec<(String, String)>,
         /// Player 1 in test play (area, feet), and the trail pictures taken of it.
         pub player: Option<(usize, [f32; 2])>,
         pub snapshots: u32,
@@ -1269,6 +1273,13 @@ pub(crate) mod tests {
             if let Some(s) = scale {
                 self.edit_scales.push((key.to_string(), s));
             }
+        }
+        fn map_music(&mut self, theme: Option<u8>) {
+            self.map_music.push(theme);
+        }
+        fn map_sound(&mut self, user: &str, key: &str, anim: bool, _point: Option<&str>) {
+            let key = if anim { format!("@{key}") } else { key.into() };
+            self.map_sounds.push((user.to_string(), key));
         }
         fn test_play(
             &mut self,

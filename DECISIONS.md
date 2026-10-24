@@ -1584,9 +1584,24 @@ under `recomp/private|generated|build/`, and text that looks like disassembly or
   vertices, triangles, material, bone; per animation the texture patterns, the bones' 2D
   skinning matrices where they change, bone visibility. The Mush tables come along with their
   columns named in English.
-- Draw order: backdrop, field, roads, then points / objects higher on the map first, then the
-  player; inside a model its own depth. The view frames the whole map's height (192 units on
-  720 px) [inf].
+- Draw order: backdrop, field, the ledges' cliffs, roads, then points / objects higher on the map
+  first, then the player; inside a model its own depth. The view frames the whole map's height
+  (192 units on 720 px) [inf: a view of the field grid's six rows would show the ring of ponds
+  the builder makes beyond the map].
+
+## 2026-10-25 — Super World map sound: the game pack's users, the maker's director
+- The map's music and sounds are SLink users like the course's (`MyWorldScene`, `MyWorldPlayer`,
+  `MyWorldCoursePoint`, `MyWorldGoalPoint`, `MyWorldKinokoHouse`), so they go into the game
+  pack's `audio/sound.json` with the course users (importer / pack 14), music as streams, and
+  play through the data-driven director the Course Maker already uses outside a course
+  (`Host::map_music` / `Host::map_sound`): one mixer path on every host, the groups and volumes
+  of the data, looping music. Not the UI pack: its sounds are one-shot WAV cues.
+- What plays when is the data's where it says so: the users' action triggers (an animation
+  starting → a call at a frame) are kept and resolved by animation name (`<anim>` for skeletal,
+  `<anim>_ftp` for texture patterns); the course point's switch property becomes `@point`
+  (values in icon order). The front end only says which animation starts when (spec §7.5–7.6).
+- The map's moments (a clear's reveal, a house closing, a world's cannon) are a timeline in the
+  map scene that the models' animation lengths pace; input waits meanwhile.
 
 ## 2026-10-25 — SMM1 screens' sounds: SMM1's own SLink data, matched to our animations
 - SMM1's `.bars` banks are SARCs of AMTA + BFWAV that only name sounds; what plays when is SMM1's
