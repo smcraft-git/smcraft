@@ -6,6 +6,13 @@
 //! (0x400), parachute (0x8000), Lakitu's Cloud (0x30000) or claw (0x8000000), both facing bits
 //! 25–26 at their default — and sets 0x1000 only on such parts [obs; corp: all 1819 stacked
 //! parts of the sample pass that test].
+//!
+//! Erasing a member moves nothing: after an erase the game rebuilds the area's columns
+//! (0x7100fb57f0 → 0x7100f5ad90, 0x7100f5c8a0): each column's bottom part is found by walking
+//! down from part to part one tile (16 px) apart at the same x (0x7100f5ce60), the members are
+//! gathered upward from it and lined up on its x (0x7100f5da00, x only), and 0x1000 is set on
+//! a column of more than one part — so the parts above the gap stay where they are as a column
+//! of their own, and nothing there clears the flag of a part left alone [obs v3.0.3].
 
 use crate::parts::{self, default_size, footprint};
 use crate::{EditError, Editor};
@@ -107,6 +114,35 @@ mod tests {
         // a pipe doesn't stack
         let p = e.place(9, 30, 2).unwrap();
         assert!(e.stack_onto(p, 0, crate::DEFAULT_FLAGS).is_err());
+    }
+
+    #[test]
+    fn erasing_a_member_leaves_the_parts_above_where_they_are() {
+        let mut e = flat("M1");
+        let g = e.place(0, 10, 2).unwrap();
+        e.stack_onto(g, 0, crate::DEFAULT_FLAGS).unwrap();
+        e.stack_onto(g, 0, crate::DEFAULT_FLAGS).unwrap();
+        e.stack_onto(g, 1, crate::DEFAULT_FLAGS).unwrap();
+        assert_eq!(e.column_from(g).len(), 4);
+        // erase the second one: the two above don't fall
+        assert!(e.erase(10, 3));
+        let at = |e: &Editor, y| e.object_at(10, y);
+        assert!(at(&e, 3).is_none(), "the gap stays");
+        let (bottom, upper) = (at(&e, 2).unwrap(), at(&e, 4).unwrap());
+        assert_eq!(e.column_from(bottom), [bottom], "the bottom one is alone");
+        assert_eq!(
+            e.column_from(upper).len(),
+            2,
+            "the two above are a column of their own"
+        );
+        for i in [bottom, upper] {
+            assert_ne!(e.object(i).unwrap().flags & STACKED, 0, "flags stay");
+        }
+        assert_eq!(
+            e.object(at(&e, 5).unwrap()).unwrap().id,
+            1,
+            "the Koopa on top"
+        );
     }
 
     #[test]
