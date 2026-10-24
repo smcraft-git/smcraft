@@ -8790,7 +8790,8 @@ mod tests {
         run(&mut w, 0, 2);
         run(&mut w, input::SPIN, 1);
         run(&mut w, 0, 10);
-        assert!((w.player.vy - 2.5).abs() < 1e-3, "rising: {}", w.player.vy);
+        // 0.5 + 0.7 per frame up to 3.0 [obs: Ryujinx trace WU_form form_spin]
+        assert!((w.player.vy - 3.0).abs() < 1e-3, "rising: {}", w.player.vy);
         run(&mut w, 0, 60);
         assert!(w.player.prop_fall);
         assert!(w.player.vy >= -1.25 - 1e-3, "slow fall: {}", w.player.vy);

@@ -131,8 +131,8 @@ pub fn run(course: &[u8], script: &[Input], start: &Start) -> Result<String, Str
 // Physics test courses
 
 pub const STYLES: [&str; 5] = ["M1", "M3", "MW", "WU", "3W"];
-pub const KINDS: [&str; 8] = [
-    "flat", "wall", "slope", "water", "items", "form", "enemy", "koopa",
+pub const KINDS: [&str; 9] = [
+    "flat", "wall", "slope", "water", "items", "form", "enemy", "koopa", "shell",
 ];
 
 /// Where the items / form courses keep their power-up: the ? block's tile column and its row
@@ -244,6 +244,19 @@ pub fn build_course(name: &str) -> Result<Vec<u8>, String> {
             e.place_sized(1, 20, up(3), kw, kh, mmk_editor::DEFAULT_FLAGS | 0x4)
                 .map_err(err)?;
         }
+        "shell" => {
+            // an empty Buzzy Beetle shell (part 28 with 0x4: a still shell from the start) at
+            // x 20 on the floor, for side kicks, and the 3-high wall at x 34 it bounces off
+            floor(&mut e, 0, len - 1)?;
+            for y in 1..=3 {
+                e.paint_ground(34, up(y)).map_err(err)?;
+            }
+            // (3D World has no Buzzy Beetle: an empty Spiny shell, part 25 with 0x4)
+            let part = if style == "3W" { 25 } else { 28 };
+            let (sw, sh) = mmk_editor::default_size(part);
+            e.place_sized(part, 20, up(1), sw, sh, mmk_editor::DEFAULT_FLAGS | 0x4)
+                .map_err(err)?;
+        }
         "items" | "form" => {
             // the power-up in a ? block 4 tiles up, far enough right that no test reaches it:
             // a Super Mushroom (items) or the style's own power-up (form; part 44: leaf,
@@ -252,12 +265,18 @@ pub fn build_course(name: &str) -> Result<Vec<u8>, String> {
             // come to the player. Walls 3 tiles either side keep a moving item close.
             floor(&mut e, 0, len - 1)?;
             let (bx, by) = (POWER_BLOCK.0, up(POWER_BLOCK.1));
-            let item = if kind == "items" { 20 } else { 44 };
-            if item == 44 && matches!(style, "WU" | "3W") {
-                // out of a block the Propeller Mushroom and the Super Bell fly out of the pen;
-                // on the floor they stay in it [obs: emulator] (a roofed box with a doorway,
-                // the propeller in a block or on its floor, didn't work either: the Propeller
-                // Mushroom is never collected at the title screen)
+            // NSMBU: the Propeller Mushroom is never collected at the title screen (on the
+            // floor it stays put and the player's touch does nothing [obs: emulator, its actor
+            // found in memory]), so WU_form has the Super Mushroom and the capture makes the
+            // Super player a Propeller one (player form +0x4a8 = 3)
+            let item = if kind == "items" || style == "WU" {
+                20
+            } else {
+                44
+            };
+            if item == 44 && style == "3W" {
+                // out of a block the Super Bell flies out of the pen; on the floor it stays in
+                // it [obs: emulator]
                 e.place(item, bx, up(1)).map_err(err)?;
             } else {
                 let i = e.place(5, bx, by).map_err(err)?;

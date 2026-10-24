@@ -1988,10 +1988,14 @@ impl Player {
         self.pose = Pose::Slide;
     }
 
-    /// Propeller (player-physics.md §5.4, NSMBU): Spin (once per airtime) → rise toward vy 2.5
-    /// at +1.0/frame for 50 frames with no gravity; then PropellerFall: gravity −0.1, max fall
-    /// −1.25; Down while falling drills down at up to −6.0. Air control: target ±2.5 rising /
-    /// ±1.5 falling, accel 0.08 / 0.07, 0.11 reversing, 0.05 without input.
+    /// Propeller (player-physics.md §5.4, NSMBU): Spin (once per airtime) → vy 0.5, then a rise
+    /// at +0.7/frame up to 3.0 with no gravity, 38 frames counted down from the launch frame (the
+    /// frame the count runs out is the first PropellerFall frame) [obs: v3 begin 0x71015d5160,
+    /// the 38-frame branch (+0x2488 set, as in every traced course); Ryujinx traces WU_form
+    /// form_spin / form_spin_walk]; then PropellerFall: gravity −0.1, max fall −1.25; Down while
+    /// falling drills down at up to −6.0. Air control: target ±2.5 while rising (in the fall too
+    /// while the frame starts with vy ≥ 0) / ±1.5 falling, accel 0.08 / 0.07, 0.11 reversing,
+    /// 0.05 without input.
     fn step_propeller(&mut self, inp: Input, spin_pressed: bool, vy_before: f32) {
         if self.form != Form::Propeller || self.in_water {
             self.prop_rise = 0;
@@ -2003,20 +2007,26 @@ impl Player {
             self.prop_fall = false;
             self.prop_rise = 0;
         }
+        let mut vy_before = vy_before;
         if spin_pressed && !self.prop_used && self.held.is_none() {
             self.prop_used = true;
-            self.prop_rise = 50;
+            self.prop_rise = 38;
             self.prop_fall = false;
             self.on_ground = false;
             self.spinning = false;
+            vy_before = 0.5;
         }
-        let rising = self.prop_rise > 0;
-        if rising {
+        if self.prop_rise > 0 {
             self.prop_rise -= 1;
-            self.vy = (vy_before + 1.0).min(2.5);
             if self.prop_rise == 0 {
                 self.prop_fall = true;
             }
+        }
+        let rising = self.prop_rise > 0;
+        // (the fall keeps the rising air control while the frame starts going up)
+        let up = rising || vy_before >= 0.0;
+        if rising {
+            self.vy = (vy_before + 0.7).min(3.0);
         } else if self.prop_fall && !self.on_ground {
             self.vy = if inp.held(input::DOWN) {
                 (vy_before - 0.34).max(-6.0)
@@ -2027,12 +2037,12 @@ impl Player {
             return;
         }
         let dir = inp.dir_x() as f32;
-        let target = dir * if rising { 2.5 } else { 1.5 };
+        let target = dir * if up { 2.5 } else { 1.5 };
         let acc = if dir == 0.0 {
             0.05
         } else if self.vx * dir < 0.0 {
             0.11
-        } else if rising {
+        } else if up {
             0.08
         } else {
             0.07
