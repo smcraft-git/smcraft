@@ -4241,7 +4241,14 @@ impl Actor {
                 (side < 0.0 && c == Cell::PassRight && prev_wx >= cell_x + TILE - 0.01)
                     || (side > 0.0 && c == Cell::PassLeft && prev_wx <= cell_x + 0.01)
             });
-            if (ys.iter().any(|&wy| solid(wx, wy)) || oneway) && level.slope_at(wx).is_none() {
+            // a slope is walked onto, except where its body stands higher than a step over the
+            // feet of an actor not yet on it (a slope set a row above the ground: its low cap is
+            // a wall) [obs: Ryujinx trace W_3051605, Goombas turning at a steep slope's low cap
+            // 16 px above the floor]
+            let slope_wall = level.slope_at(wx).is_none_or(|(surf, _)| {
+                surf > self.y + 4.0 && level.slope_at(self.x - self.vx * cos).is_none()
+            });
+            if (ys.iter().any(|&wy| solid(wx, wy)) || oneway) && slope_wall {
                 let edge = if side > 0.0 {
                     (wx / TILE).floor() * TILE
                 } else {
