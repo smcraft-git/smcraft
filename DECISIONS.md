@@ -1571,3 +1571,19 @@ under `recomp/private|generated|build/`, and text that looks like disassembly or
   upload a texture again when its `version` moves (shell `UiLayer::sync`; the Swift app through
   `mmk_*_texture_revision` / `_version`). One empty sheet is always registered ahead, so a new
   glyph never waits for a texture id; at four sheets the one drawn longest ago is emptied.
+
+## 2026-10-25 — Super World map: flat quads in the UI pack
+- The game's Super World map models (`Pack/MyWorld_Model.pack`) are flat textured quads at small
+  depths seen from straight above (every shape lies in one z plane; textures at one texel per
+  world unit), and its field is a 2D atlas laid out by code. So the map is drawn as layout
+  quads, which every front end (shell, Swift app, web) already draws, instead of through the
+  3D mesh renderers: no new renderer code on any platform, and the map sits in the UI pack
+  next to the layouts it is shown with (`ui/myworld/map.json` + textures, UI pack 7), read once
+  per Super Worlds visit (`mmk_front::swmap`).
+- The import bakes what the front end needs and nothing more: per model the rest-pose
+  vertices, triangles, material, bone; per animation the texture patterns, the bones' 2D
+  skinning matrices where they change, bone visibility. The Mush tables come along with their
+  columns named in English.
+- Draw order: backdrop, field, roads, then points / objects higher on the map first, then the
+  player; inside a model its own depth. The view frames the whole map's height (192 units on
+  720 px) [inf].

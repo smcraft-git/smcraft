@@ -568,6 +568,12 @@ impl UiCache {
         self.texture_at(name, &rel, (0, 0)).ok()
     }
 
+    /// A JSON file of the import (`rel` from the import root, e.g. `ui/myworld/map.json`), if it
+    /// is there and readable now (hosts that read files later hand every `.json` over first).
+    pub fn json_file(&self, rel: &str) -> Option<Value> {
+        read_json(self.files.as_deref()?, rel).ok()
+    }
+
     /// Register a texture from memory under `<group>/<stem>` (tests, tools).
     pub fn add_texture_file(&mut self, group: &str, stem: &str, texture: Mtex) -> TexRef {
         self.add_texture(format!("{group}/{stem}"), texture)

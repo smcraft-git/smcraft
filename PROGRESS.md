@@ -33,8 +33,10 @@ sway, importer and pack 12, the dev cache already at v12).
   desert night as day), captures of the track tiles in play and of NSMBU / 3D World wings (the mesh
   planner maps `M1_Enemy_wingcommon` to `<style>_Enemy_wingcommon`), a look at Water Level mode
   and custom scroll in the recomp (`research/tools/maker-look`: touch taps / drags by script).
-- **Agent queue** (when a helper slot frees): the Super Worlds 3D map (MyWorld models, point
-  icons, ghosts); SMM1 UI sounds (Wii U BFSAR / BFWAV import) for the SMM1-look 100 Mario.
+- **Agent queue** (when a helper slot frees): the Super World map's ledge cliffs (field atlas
+  rows 6–7), map ghosts, the goal's AppearGoalPoint / cannon and Passable states, the map music
+  (branch `swmap` drew the map with the game's models); SMM1 UI sounds (Wii U BFSAR / BFWAV
+  import) for the SMM1-look 100 Mario.
 - **Waiting on the owner:** the SMCraft app on Nextendo's portal (public client / PKCE, scopes
   `identity game.matchmaking`, redirect `http://127.0.0.1:47614/callback`) and its client ID; the
   game-server access key — (a) read from the player's own dump at import (recommended) or (b) one
@@ -85,7 +87,9 @@ sway, importer and pack 12, the dev cache already at v12).
      `_KRko` combinations add them; UI importer and pack 6 — **re-import the UI pack**). Left:
      the region combinations' range modes 3 / 4 / 9 (not parsed; their fonts are tried after the
      combination's own), the web build reads all 31 MB of fonts up front.
-  4. Super Worlds' 3D map; airship sway; the colour table; NSMBU / 3D World pixels.
+  4. Super Worlds' map ✅ drawn with the game's models (branch `swmap`, UI pack 7 — **re-import
+     the UI pack**): left the ledges' cliff faces, map ghosts, the goal's appear / cannon and
+     Passable states, the map music; airship sway; the colour table; NSMBU / 3D World pixels.
   5. iPad / Android device runs; the macOS package; live Network Play once the ID and key arrive.
 
 ### Plan
@@ -338,8 +342,17 @@ sway, importer and pack 12, the dev cache already at v12).
   `AnimMyWorld` with "W1") → `MyW_Ending_00`. Progress saved per world (`superworld.<id>`).
   TGRCode: `super_worlds` / `super_world` calls (`mmk_online::world::Backend::super_world`
   decrypts the map); captures `superworld`, `-title`, `-map`, `-walk`, `-play`, `-ending`
-- ⬜ The map in 3D with the game's models (`MyWorld_Model.pack`: fields, roads, points, Mario's
-  walk / swim / climb animations from `WM_*Anime`), the map music and sounds
+- ✅ The map with the game's models (`mmk_front::swmap`, UI import stage `myworld map` →
+  `ui/myworld/map.json` + the models' textures, UI pack 7): the theme's backdrop (`MyWorld_DV_*`),
+  the field built as the game's builder does (11 × 6 positions, the 47-piece water set by land
+  neighbours, the "nothing area" set of the Main themes), road pieces by cell type (`_s` on water,
+  curves, bridges, ledges turned with their ladder up, decorations A / B / C), point models by
+  icon and theme with Wait / ToCleared / Cleared from `WM_PointPartsAnime`, pipes, Toad Houses
+  (used ones cleared), the castle / last castle / airship goal, the player walking / swimming /
+  flying / climbing by `WM_PlayerAnime` with N / S / side views. Row 0 is the map's bottom row
+  (the field builder's art; up walks to row + 1). Captures `superworld-theme<n>`,
+  `superworld-json:<file>`. ⬜ the ledges' cliff faces, ghosts, AppearGoalPoint / cannon /
+  Passable, the map music and sounds
 - ✅ Toad House minigames (`super-worlds.md` §6, read from the three sequences): each house runs
   its kind from the world data over the map — MATCH & WIN (`MyWEdit_Minigame_00`: three strips
   at 45 / 30 / 50 a frame, top and bottom left, centre right; A stops them in turn, four slots on;

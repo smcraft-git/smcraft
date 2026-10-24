@@ -33,6 +33,11 @@ SMCraft is back in development (it was archived in October 2026).
   as a new course, "based on <code> by <maker>".
 - **Super Worlds**: play a Super World (its map, lives, progress), made from your library or
   downloaded from TGRCode.
+- **Super World maps drawn like the game's**: each world's theme backdrop and land (water,
+  clouds, lava, forest, desert…), the roads with bridges, water routes and ladders, the course
+  points by their icon (ghost houses, towers, airships, enemies…) turning blue when cleared,
+  castles, pipes, Toad Houses and the player walking, swimming or climbing the map. Needs the
+  UI pack imported again.
 - **Toad House minigames** in Super Worlds: Match & Win, Pop & Win and Catch & Win, with the
   game's own rules and prizes.
 - **SMM2's own Endless Challenge**, and **Challenge Modes**: Course World's Endless button
