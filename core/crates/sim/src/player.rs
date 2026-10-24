@@ -1955,10 +1955,12 @@ impl Player {
                     } else if self.style == Style::MW {
                         self.sliding = false; // SMW crouches at once
                     } else {
-                        // the animation's length: SMB3 1, NSMBU 10 [obs: traces]; 3D World's
-                        // SquatStart taken as NSMBU's until traced [inf]
+                        // the animation's length: SMB3 1, NSMBU 10 [obs: traces] (NSMBU's
+                        // slip_to_stoop is 9 frames long, its last frame included); 3D World
+                        // plays SquatStart, 2 frames long → 3 [inf: anim length, not traced]
                         self.slide_stoop = match self.style {
                             Style::M3 => 1,
+                            Style::W3 => 3,
                             _ => 10,
                         };
                     }

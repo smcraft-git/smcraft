@@ -110,7 +110,7 @@ pub fn run(course: &[u8], script: &[Input], start: &Start) -> Result<String, Str
 // Physics test courses
 
 pub const STYLES: [&str; 5] = ["M1", "M3", "MW", "WU", "3W"];
-pub const KINDS: [&str; 6] = ["flat", "wall", "slope", "water", "items", "form"];
+pub const KINDS: [&str; 7] = ["flat", "wall", "slope", "water", "items", "form", "enemy"];
 
 /// Where the items / form courses keep their power-up: the ? block's tile column and its row
 /// above the floor (the capture walks there first; no test script gets that far).
@@ -192,6 +192,19 @@ pub fn build_course(name: &str) -> Result<Vec<u8>, String> {
             floor(&mut e, 93, len - 1)?;
         }
         "water" => floor(&mut e, 0, len - 1)?,
+        "enemy" => {
+            // a Goomba shut in a one-tile pen (1-high walls at x 19 and 21: it turns in place
+            // and waits for a stomp), then a row of Munchers at x 23..26 to land on for a death
+            // (3D World has no Munchers: Piranha Plants)
+            floor(&mut e, 0, len - 1)?;
+            e.paint_ground(19, up(1)).map_err(err)?;
+            e.paint_ground(21, up(1)).map_err(err)?;
+            e.place(0, 20, up(1)).map_err(err)?;
+            let hazard = if style == "3W" { 2 } else { 57 };
+            for x in 23..=26 {
+                e.place(hazard, x, up(1)).map_err(err)?;
+            }
+        }
         "items" | "form" => {
             // the power-up in a ? block 4 tiles up, far enough right that no test reaches it:
             // a Super Mushroom (items) or the style's own power-up (form; part 44: leaf,
@@ -203,7 +216,9 @@ pub fn build_course(name: &str) -> Result<Vec<u8>, String> {
             let item = if kind == "items" { 20 } else { 44 };
             if item == 44 && matches!(style, "WU" | "3W") {
                 // out of a block the Propeller Mushroom and the Super Bell fly out of the pen;
-                // on the floor they stay in it [obs: emulator]
+                // on the floor they stay in it [obs: emulator] (a roofed box with a doorway,
+                // the propeller in a block or on its floor, didn't work either: the Propeller
+                // Mushroom is never collected at the title screen)
                 e.place(item, bx, up(1)).map_err(err)?;
             } else {
                 let i = e.place(5, bx, by).map_err(err)?;

@@ -346,14 +346,18 @@ Nextendo; `docs/nextendo-network-play.md`, spec `research/specs/network-play.md`
 
 **G8 — Fidelity: pixel, physics, sound** 🔄
 - 🔄 Physics: re-recording every trace (2026-10-24; the old 428 / 454 was not a true count — the
-  old items / form traces were all small Mario). Re-recorded so far, current engine: **286 / 286
-  exact** over 13 courses (M1/M3/MW/WU flat, M1/M3/MW/WU slope, M1/M3/MW items, M3/MW form; was
-  274 with the engine at 39fdb6e). Fixed: pit death at view bottom − 56 with no hop, slip end on
-  flat, raccoon tail wag, SMW cape take-off / climb end / slide end, jump bonus from the pre-move
-  speed. ⬜ still to record: WU items, all walls and water (10 courses), the 5 3D World courses
-  (headless Ryujinx aborts in MoltenVK on 3D World), WU form (the Propeller Mushroom never
-  reaches the player at the title screen; it flies up — next: a box with a roof and a jump from
-  the block). Then enemy and object traces; whole courses start to goal
+  old items / form traces were all small Mario). Re-recorded so far, current engine: **344 / 344
+  exact** over 22 courses: M1/M3/MW/WU flat 34 each, M1/M3/MW/WU items 34 each, M1/M3/MW/WU
+  slope 4 each, M1/M3/MW/WU wall 4 each, M1/M3/MW/WU water 2 each, M3/MW form 16 each (was 274
+  of the first 286 with the engine at 39fdb6e). Fixed: pit death at view bottom − 56 with no hop,
+  slip end on flat, raccoon tail wag, SMW cape take-off / climb end / slide end, jump bonus from
+  the pre-move speed; 3D World slide-end stoop 3 frames (SquatStart's length + 1, as NSMBU's
+  9 → 10; not traced). ⬜ still to record: the 5 3D World courses (headless Ryujinx aborts in
+  MoltenVK: a Metal texture-descriptor validation failure in vkCmdBlitImage), WU form (the
+  Propeller Mushroom is never collected at the title screen: floor, block, open pen and a roofed
+  box with a doorway all tried), the new enemy courses (`<style>_enemy`: a penned Goomba to
+  stomp, Munchers to die on — WIP, not recorded yet; scripts enemy_stomp / enemy_die in the
+  private trace tools). Then enemy and object traces; whole courses start to goal
 - 🔄 Pixels against the game (smm2recomp reference frames of `mmk ref-courses`, all 90, update
   900; MAE / % pixels off by > 24; `research/tools/pixel-ref/pixref.py`, 2026-10-24):
 
