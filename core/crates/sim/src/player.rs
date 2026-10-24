@@ -510,6 +510,8 @@ pub struct Player {
     prop_used: bool,
     prev_down: bool,
     prev_spin: bool,
+    /// Spin held last frame (the Cat dive's press).
+    prev_spin_dive: bool,
     /// Touched down in the last frame's collision: this frame still runs the air routine (the
     /// Jump/Fall state's execute sees the ground and only switches to Walk at its end), so the
     /// landing frame keeps the air speed [obs: Ryujinx trace, state +0x3f8 changes with its
@@ -675,6 +677,7 @@ impl Player {
             prop_used: false,
             prev_down: false,
             prev_spin: false,
+            prev_spin_dive: false,
             landed: false,
             land_hold: 0,
             air_move: (0.0, 0.0),
@@ -2148,6 +2151,9 @@ impl Player {
         let down = inp.held(input::DOWN);
         let down_pressed = down && !self.prev_down;
         self.prev_down = down;
+        let spin = inp.held(input::SPIN);
+        let spin_pressed = spin && !self.prev_spin_dive;
+        self.prev_spin_dive = spin;
         self.pound_landed = false;
         if self.on_ground || self.in_water {
             if self.pound == -1 && self.on_ground {
@@ -2175,11 +2181,17 @@ impl Player {
         }
         // the Cat's ground pound command (Down held, no direction) is the normal ground pound
         // [obs: Ryujinx trace 3W_form pound_hold, states 19 / 20 as for Super Mario]; its dive
-        // (ClimbBodyAttack) is taken here on Down pressed with a direction held [inf]
+        // (ClimbBodyAttack, state 0x23) is the air action on the Spin button's press: the Jump
+        // and Fall states put delegate 0x20 (0x7100a0ce30: 3D World, Cat, nothing held → state
+        // 0x23) in the slot the dispatcher (0x7100a0ebc0) runs on input +0x2A, the ZL/ZR press
+        // [obs v1.0.0: Fall begin 0x71009f20f0's table {0x33, 0x36, 0, 0, 0x3b, 0x3c, 6, 0x12,
+        // 0x1a, 0x20, 10, 0}; +0x2A set by ZR in the 3W_form traces]
+        let _ = down_pressed;
         if self.form == Form::Cat
             && self.pu.headdress.is_none()
-            && down_pressed
-            && inp.dir_x() != 0
+            && spin_pressed
+            // (on the ground the press is the long jump, BroadJump [obs: 3W_form form_spin_walk])
+            && !self.broad
             && self.pound == 0
             && !self.dive
             && self.cat_climb == 0
@@ -3434,7 +3446,7 @@ mod tests {
             "WallClimbFall caps at −2.0: {fell}"
         );
 
-        // dive: Down in the air → 4.0 forward, −3.0 down
+        // dive: Spin (ZL / ZR) pressed in the air → 4.0 forward, −3.0 down
         let level = Level::flat(80);
         let mut p = cat(&level);
         p.step(
@@ -3451,10 +3463,10 @@ mod tests {
                 &level,
             );
         }
-        // Down with a direction dives [inf]; Down alone is the ground pound (below)
+        // the Spin press dives (the air action table, 0x7100a0ce30); Down is the ground pound
         p.step(
             Input {
-                buttons: input::DOWN | input::RIGHT,
+                buttons: input::SPIN | input::RIGHT,
             },
             &level,
         );

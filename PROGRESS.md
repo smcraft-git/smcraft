@@ -472,8 +472,8 @@ Nextendo; `docs/nextendo-network-play.md`, spec `research/specs/network-play.md`
   out to belong to the parts' 0xC0000 bits, not stacks) · ⬜ the editor's height limit (play
   takes 128 members at most), pulling a member off a column
 - 🔄 Physics: re-recording every trace (2026-10-24; the old 428 / 454 was not a true count — the
-  old items / form traces were all small Mario). Re-recorded, current engine: **515 / 516 exact**
-  over 64 courses + 3 whole courses (2026-10-24 physics7: the shell courses now compare the shell too, which showed
+  old items / form traces were all small Mario). Re-recorded, current engine: **572 / 579 exact**
+  over 113 courses + 10 whole courses (2026-10-24 physics7: the shell courses now compare the shell too, which showed
   3 carried-shell throws off; and object traces: the player plus every simulated actor matched to
   a recorded game object, found by scans while the game is paused in the trace hook): M1/M3/MW/WU/3W flat 34 each, M1/M3/MW/WU/3W items 34 each, M1/M3/MW/WU/3W
   slope 4 each, M1/M3/MW/WU/3W wall 4 each, M1/M3/MW/WU/3W water 2 each, M3/MW/WU/3W form 16 each
@@ -498,7 +498,7 @@ Nextendo; `docs/nextendo-network-play.md`, spec `research/specs/network-play.md`
   (vy 0.5, +0.7 to 3.0, 38 frames; the fall keeps the rising air control while going up); a side
   kick slides the shell that frame, and a shell slides on past the course's left edge (its
   leftmost column continues); the Cat's air scratch keeps normal gravity and its Down-held pound
-  is the normal ground pound (the dive taken on Down with a direction [inf]); a carried shell
+  is the normal ground pound (the dive is the Spin press in the air, below); a carried shell
   (SMB3 / SMW / NSMBU) sits 11 px ahead and 1 up (NSMBU 8.909 and 4), stays in the hands 5 frames
   of the Throw state after Run is let go (NSMBU 6), then flies at 2.5 + 0.35·|vx| (≤ 4) with vy
   0.2, moving twice that frame from 3 px ahead; M1 hit (a running kick through two Goombas that
@@ -534,11 +534,20 @@ Nextendo; `docs/nextendo-network-play.md`, spec `research/specs/network-play.md`
   SMB1 courses exact start to goal (W_3064188, W_3046973: player + Goombas; the pole touch is
   taken in the next update after a normal move, the enemies stop, the pole's x from the frame
   after, 12 frames of hold, the slide at −1.9, 93 frames in all, then x + 6 facing right);
-  W_3049200 (cloud blocks, Dry Bones, Cheep Cheeps, Koopas) exact to frame 95. 3D World
+  W_3049200 (cloud blocks, Dry Bones, Cheep Cheeps, Koopas) exact to frame 182; W_3065813 exact
+  to 53, W_3051046 to its death at 103 (then the title course's death sequence), W_3006094 to
+  481, W_3051605 to 233, W_3145588 to 384, W_3010660 to 69. Object courses in all styles exact
+  (3D World's Trampoline eases 3 px, its falling Donut is gone after 21 frames, a lift pushes up
+  feet at most 6 px under its top, a foot on a column boundary rides both donuts; SMW turn
+  blocks spin 240 frames, passable; small Mario's head at 15.9 in SMW / NSMBU / 3D World; walkers
+  hurt in the frame the player's move runs into them; 3D World items touch 13 px apart). The
+  **Cat dive** (ClimbBodyAttack) is the Spin (ZL / ZR) press in the air, from the binary: the
+  Jump / Fall states' action table puts delegate 0x20 (0x7100a0ce30) in the slot the dispatcher
+  runs on input +0x2A (the ZR press) [obs v1.0.0; a trace of it is still to record]. 3D World
   slide-end stoop
   3 frames confirmed. 3D World recording works with a local Ryujinx fix (a zero-sized guest
-  texture with 2 levels made Metal abort under MoltenVK). ⬜ still to record: the Cat dive's real
-  trigger, the object courses in the other styles, W_3049200 past frame 95, more whole courses
+  texture with 2 levels made Metal abort under MoltenVK). ⬜ still to record: the Cat dive itself
+  (form_dive), the whole courses past their first divergences
 - 🔄 Pixels against the game (smm2recomp reference frames of `mmk ref-courses`, all 90, update
   900; MAE / % pixels off by > 24; `research/tools/pixel-ref/pixref.py`, 2026-10-24):
 
