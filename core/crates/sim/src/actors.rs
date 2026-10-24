@@ -4469,10 +4469,12 @@ impl Actor {
             for dx in [-fx, fx] {
                 let px = self.x + dx;
                 let top = ((py / TILE).floor() + 1.0) * TILE;
-                // a slope's columns are probed at the centre only (below), unless a block
+                // a slope's columns are probed at the centre only (below), unless a block (or a
+                // one-way top: a cloud row high over a slope [obs: Ryujinx trace W_3049200])
                 // stands above its surface (as the player's feet)
                 if let Some((surf, _)) = level.slope_at(px)
-                    && !(top > surf + 0.01 && level.cell_at(px, py).is_solid())
+                    && !(top > surf + 0.01
+                        && matches!(level.cell_at(px, py), c if c.is_solid() || c == Cell::SemiTop))
                 {
                     continue;
                 }
