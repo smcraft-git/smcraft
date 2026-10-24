@@ -153,7 +153,7 @@ pub fn run_all(course: &[u8], script: &[Input], start: &Start) -> Result<(String
 // Physics test courses
 
 pub const STYLES: [&str; 5] = ["M1", "M3", "MW", "WU", "3W"];
-pub const KINDS: [&str; 21] = [
+pub const KINDS: [&str; 23] = [
     "flat",
     "wall",
     "slope",
@@ -175,10 +175,14 @@ pub const KINDS: [&str; 21] = [
     "pswitch",
     "bobomb",
     "slopejoin",
+    "cpipe",
+    "cpipeg",
 ];
 
 /// Kinds made in SMB1 only (the terrain they test is the same in every style).
 const M1_ONLY: [&str; 1] = ["slopejoin"];
+/// Kinds made in 3D World only (clear pipes are a 3D World part).
+const W3_ONLY: [&str; 2] = ["cpipe", "cpipeg"];
 
 /// Where the items / form courses keep their power-up: the ? block's tile column and its row
 /// above the floor (the capture walks there first; no test script gets that far).
@@ -190,7 +194,10 @@ pub fn course_names() -> Vec<String> {
     for s in STYLES {
         for k in KINDS {
             // (3D World has no Note Blocks)
-            if s == "3W" && k == "note" || s != "M1" && M1_ONLY.contains(&k) {
+            if s == "3W" && k == "note"
+                || s != "M1" && M1_ONLY.contains(&k)
+                || s != "3W" && W3_ONLY.contains(&k)
+            {
                 continue;
             }
             v.push(format!("{s}_{k}"));
@@ -470,6 +477,39 @@ pub fn build_course(name: &str) -> Result<Vec<u8>, String> {
             e.place_sized(87, 60, row, 8, 4, fall).map_err(err)?;
             floor(&mut e, 68, len - 1)?;
         }
+        "cpipe" => {
+            // clear pipes ridden left to right by a walking player, on the floor (top row 1) and
+            // a platform 6 high (top row 5) from x 36:
+            // - x 12..21: a straight pipe, 10 tiles, rows 2–3, out onto the floor;
+            // - x 28..35: right 3, a bend up, up 2, a bend right, right 3, out onto the platform;
+            // - x 40..47: two pipes of 4 joined end to end (one ride);
+            // - x 50..53: a pipe of 4 with a wall at its exit (the ride turns back)
+            floor(&mut e, 0, len - 1)?;
+            for x in 36..=63 {
+                for y in base..=5 {
+                    e.paint_ground(x, y).map_err(err)?;
+                }
+            }
+            for y in 6..=7 {
+                e.paint_ground(54, y).map_err(err)?;
+            }
+            clear_pipe(&mut e, (12, 3), &[(21, 2)])?;
+            clear_pipe(
+                &mut e,
+                (28, 3),
+                &[(30, 2), (31, 4), (31, 5), (33, 6), (35, 6)],
+            )?;
+            clear_pipe(&mut e, (40, 7), &[(43, 6)])?;
+            clear_pipe(&mut e, (44, 7), &[(47, 6)])?;
+            clear_pipe(&mut e, (50, 7), &[(53, 6)])?;
+        }
+        "cpipeg" => {
+            // a Goomba at x 22 walking left into the right mouth of a straight 8-tile pipe at
+            // x 10..17 (rows 2–3), out of its left mouth
+            floor(&mut e, 0, len - 1)?;
+            clear_pipe(&mut e, (10, 3), &[(17, 2)])?;
+            e.place(0, 22, up(1)).map_err(err)?;
+        }
         "slopejoin" => {
             // gentle slopes (4×2 unless noted) beside ground, an open pit under each, walked over
             // left to right on a 5-high floor (top row 4, up a steep slope from the start
@@ -593,6 +633,19 @@ pub fn build_course(name: &str) -> Result<Vec<u8>, String> {
         }
     }
     e.save().map_err(err)
+}
+
+/// A clear pipe drawn from grid corner `corner` to the right, then on toward each tile of
+/// `path` in turn (the editor's gesture: on, or round a bend to the side).
+fn clear_pipe(e: &mut Editor, corner: (i32, i32), path: &[(i32, i32)]) -> Result<(), String> {
+    use mmk_editor::clearpipe::PipeEnd;
+    use mmk_formats::smm2::clear_pipe::Dir;
+    let err = |x: mmk_editor::EditError| format!("{x:?}");
+    let slot = e.place_clear_pipe(corner, Dir::Right).map_err(err)?;
+    for &t in path {
+        e.draw_clear_pipe(slot, PipeEnd::End, t).map_err(err)?;
+    }
+    Ok(())
 }
 
 /// Encrypt a course and wrap it like the game's built-in courses (Yaz0 → SARC → `<stem>.bcd`).

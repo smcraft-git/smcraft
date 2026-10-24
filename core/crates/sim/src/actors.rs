@@ -1086,6 +1086,58 @@ impl Actor {
         }
     }
 
+    /// The 3D World Goomba's sight (0-goomba.md "Kuribo3W extra states", Basic vtable
+    /// 0x7102170c58, v1.0.0): walking on the ground (`phase` 0) it spots a player in front within
+    /// 80 px, from 16 px under its feet to 32 over (0x71006f91c0), and stops for its notice
+    /// animation (Find, 7), 53 frames counting the one it sees [obs: Ryujinx trace X_cpipeg, a
+    /// Goomba landing out of a clear pipe 62 px from the player: still frames 268..320, running
+    /// from 321]; then runs at 0.7 (Run, 8) for at least 10 frames, until the player is out of
+    /// 128 px sideways, 80 up or 32 down, or behind it for 16 frames (0x71006f97a0); then slows
+    /// to a stop by 0.05 a frame (Lost, 9) and walks on [inf: the Lost animation's end taken as
+    /// the stop]. The speed to walk at this frame (0 while it stands).
+    fn kuribo3w(&mut self) -> f32 {
+        const WALK: f32 = 0.3;
+        if self.wings || self.big {
+            return WALK;
+        }
+        let (dx, dy) = (self.target.0 - self.x, self.target.1 - self.y);
+        let ahead = dx * self.dir as f32 > 0.0;
+        match self.phase {
+            7 => {
+                self.timer -= 1;
+                if self.timer > 0 {
+                    return 0.0;
+                }
+                (self.phase, self.timer, self.pause) = (8, 0, 0);
+                0.7
+            }
+            8 => {
+                self.timer += 1;
+                self.pause = if ahead { 0 } else { self.pause + 1 };
+                let lost = dx.abs() > 128.0 || dy > 80.0 || dy < -32.0 || self.pause >= 16;
+                if self.timer > 10 && lost {
+                    self.phase = 9;
+                }
+                0.7
+            }
+            9 => {
+                // (Lost eases its speed, not set by the walk below)
+                self.vx -= self.vx.clamp(-0.05, 0.05);
+                if self.vx == 0.0 {
+                    self.phase = 0;
+                }
+                self.vx.abs()
+            }
+            _ => {
+                if self.on_ground && ahead && dx.abs() <= 80.0 && (-16.0..=32.0).contains(&dy) {
+                    (self.phase, self.timer) = (7, 53);
+                    return 0.0;
+                }
+                WALK
+            }
+        }
+    }
+
     /// Seesaw (91-seesaw.md, actors/seesaw.rs): the riders' torque turns the plank. The player
     /// weighs 2, from the third frame its centre is over the plank (±8·W) (its riders' list lags
     /// as the P Switch's does), then as long as it stands on it, a foot past the end too [obs:
@@ -2397,9 +2449,10 @@ impl Actor {
                     return None;
                 }
                 // 3D World's Goomba (Kuribo3W) walks at 0.3 (0-goomba.md, Basic slot 54 →
-                // DAT_7101c8aeb0) [obs: Ryujinx trace 3W_hit, −0.3 a frame]
+                // DAT_7101c8aeb0) [obs: Ryujinx trace 3W_hit, −0.3 a frame], and runs at a player
+                // it spots (`kuribo3w`)
                 let speed = if self.kind == Kind::Goomba && level.style == "3W" {
-                    0.3
+                    self.kuribo3w()
                 } else {
                     WALK_SPEED
                 };

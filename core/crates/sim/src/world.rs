@@ -2058,7 +2058,12 @@ impl World {
             self.pu_sense();
             self.player.twister = self.twister_receiver();
             let lifted = self.clear_pipe_lift();
-            self.player.step(input, &self.level);
+            let inp = if std::mem::take(&mut self.cpipe.out_step) {
+                Input::default()
+            } else {
+                input
+            };
+            self.player.step(inp, &self.level);
             self.clear_pipe_unlift(lifted);
         }
         if let (Some((tx, ty)), Some(c)) = (note_hole, note_cell) {
