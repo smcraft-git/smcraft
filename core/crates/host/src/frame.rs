@@ -394,6 +394,7 @@ mod tests {
             flip_x: false,
             flip_y: false,
             layer: 0,
+            roll: 0.0,
         }
     }
 

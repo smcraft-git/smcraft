@@ -460,6 +460,7 @@ pub unsafe extern "C" fn mmk_mesh_sprite_draws(
             },
             flip_y: false,
             layer: 0,
+            roll: 0.0,
         };
         let mut draws = std::mem::take(&mut s.preview);
         draws.clear();
@@ -649,6 +650,7 @@ mod tests {
             flip_x: false,
             flip_y: false,
             layer: 50,
+            roll: 0.0,
         };
         s.emit(&cache, &mario, &sprite, false, 30.0, 3, &mut out);
         assert_eq!(out.len(), 5);

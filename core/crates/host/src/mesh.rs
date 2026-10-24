@@ -1751,11 +1751,22 @@ impl MeshStore {
                 *v = -*v;
             }
         }
-        let place: Affine = [
-            [scale, 0.0, 0.0, ox],
-            [0.0, scale, 0.0, oy],
-            [0.0, 0.0, scale, 0.0],
-        ];
+        let place: Affine = if s.roll != 0.0 {
+            // a clear pipe's rider: turned about the sprite's middle (up by h/2, turn, back)
+            let (sn, c) = s.roll.to_radians().sin_cos();
+            let hc = s.h * 0.5;
+            [
+                [scale * c, -scale * sn, 0.0, ox + sn * hc],
+                [scale * sn, scale * c, 0.0, oy + hc - c * hc],
+                [0.0, 0.0, scale, 0.0],
+            ]
+        } else {
+            [
+                [scale, 0.0, 0.0, ox],
+                [0.0, scale, 0.0, oy],
+                [0.0, 0.0, scale, 0.0],
+            ]
+        };
         let root = mul(&place, &base);
         let mut transforms: Vec<Affine> = Vec::with_capacity(plan.parts.len());
         for p in &plan.parts {

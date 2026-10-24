@@ -1205,6 +1205,7 @@ impl World {
             flip_x: p.facing < 0,
             flip_y: false,
             layer: 51,
+            roll: 0.0,
         });
     }
 }

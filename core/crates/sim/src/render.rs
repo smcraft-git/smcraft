@@ -29,4 +29,7 @@ pub struct Sprite {
     pub flip_y: bool,
     /// Draw order: lower first.
     pub layer: u32,
+    /// A turn about the sprite's middle (x + w/2, y + h/2), degrees counter-clockwise: a rider
+    /// in a clear pipe (world/clear_pipe.rs); 0 for everything else.
+    pub roll: f32,
 }
