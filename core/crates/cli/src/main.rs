@@ -237,6 +237,9 @@ enum Cmd {
         /// Start speed (px/frame, signed).
         #[arg(long, allow_hyphen_values = true)]
         vx: Option<f32>,
+        /// Start state of the course's first actor "x,y,vx,vy,dir" (e.g. from a recorded trace).
+        #[arg(long, allow_hyphen_values = true)]
+        actor: Option<String>,
     },
     /// Write the physics test courses (`<style>_<kind>.course`) used with `mmk trace`; with
     /// --title and --table, also the selected one as replacement title courses (encrypted .szs).
@@ -1032,6 +1035,7 @@ fn main() -> ExitCode {
             facing,
             form,
             vx,
+            actor,
         } => {
             let table = read_key_table(keys);
             let Some(data) = load(&course)
@@ -1064,11 +1068,20 @@ fn main() -> ExitCode {
                 Some(Err(e)) => return fail("form", e),
                 None => None,
             };
+            let actor = match actor.as_deref().map(|s| {
+                let v: Vec<f32> = s.split(',').filter_map(|t| t.trim().parse().ok()).collect();
+                <[f32; 5]>::try_from(v).map_err(|_| "--actor x,y,vx,vy,dir")
+            }) {
+                Some(Ok(a)) => Some(a),
+                Some(Err(e)) => return fail("actor", e),
+                None => None,
+            };
             let start = trace::Start {
                 pos,
                 facing,
                 form,
                 vx,
+                actor,
             };
             match trace::run(&data, &script, &start)
                 .and_then(|csv| std::fs::write(&out, csv).map_err(|e| e.to_string()))

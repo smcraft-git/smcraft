@@ -2759,6 +2759,14 @@ impl Player {
                 }
                 let top = ((py / TILE).floor() + 1.0) * TILE;
                 let cell = level.cell_at(px, py);
+                // a probe exactly on a column boundary also touches the column to its left (tile
+                // edges are inclusive) [obs: Ryujinx trace 3W_flat ledge_run, left foot at x 1440.0
+                // over the pit's left edge still stands]
+                let cell = if cell == Cell::Empty && (px / TILE).fract() == 0.0 {
+                    level.cell_at(px - TILE * 0.5, py)
+                } else {
+                    cell
+                };
                 let ok = cell.is_solid() || (cell == Cell::SemiTop && prev_y >= top - 0.01);
                 if ok {
                     landed = Some(landed.map_or(top, |t: f32| t.max(top)));

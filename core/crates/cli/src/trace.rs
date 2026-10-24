@@ -74,6 +74,8 @@ pub struct Start {
     pub form: Option<Form>,
     /// Start speed (px/frame, signed), e.g. when the recorded run starts in motion.
     pub vx: Option<f32>,
+    /// Start state of the course's first actor: x, y, vx, vy, direction (±1).
+    pub actor: Option<[f32; 5]>,
 }
 
 /// Run the script; one CSV row per frame (the state after that frame's step).
@@ -93,15 +95,34 @@ pub fn run(course: &[u8], script: &[Input], start: &Start) -> Result<String, Str
     if let Some(v) = start.vx {
         w.player.vx = v;
     }
+    if let (Some([x, y, vx, vy, dir]), Some(a)) = (start.actor, w.actors.first_mut()) {
+        (a.x, a.y, a.vx, a.vy) = (x, y, vx, vy);
+        a.dir = if dir < 0.0 { -1 } else { 1 };
+    }
+    let first_id = w.actors.first().map_or(u32::MAX, |a| a.id);
     w.reset_camera();
-    let mut csv = String::from("frame,x,y,vx,vy,facing,ground,pose,form,input\n");
+    let mut csv =
+        String::from("frame,x,y,vx,vy,facing,ground,pose,form,input,ax,ay,avx,avy,adir,akind\n");
     for (i, inp) in script.iter().enumerate() {
         w.step(*inp);
         let p = &w.player;
         csv.push_str(&format!(
-            "{i},{},{},{},{},{},{},{:?},{:?},{}\n",
+            "{i},{},{},{},{},{},{},{:?},{:?},{}",
             p.x, p.y, p.vx, p.vy, p.facing, p.on_ground as u8, p.pose, p.form, inp.buttons
         ));
+        // the course's first actor (a test course's enemy), by its spawn id
+        match w.actors.iter().find(|a| a.id == first_id) {
+            Some(a) => csv.push_str(&format!(
+                ",{},{},{},{},{},{}\n",
+                a.x,
+                a.y,
+                a.vx,
+                a.vy,
+                a.dir,
+                format!("{:?}/{:?}", a.kind, a.mode).replace([',', ' '], "")
+            )),
+            None => csv.push_str(",,,,,,\n"),
+        }
     }
     Ok(csv)
 }
@@ -110,7 +131,9 @@ pub fn run(course: &[u8], script: &[Input], start: &Start) -> Result<String, Str
 // Physics test courses
 
 pub const STYLES: [&str; 5] = ["M1", "M3", "MW", "WU", "3W"];
-pub const KINDS: [&str; 7] = ["flat", "wall", "slope", "water", "items", "form", "enemy"];
+pub const KINDS: [&str; 8] = [
+    "flat", "wall", "slope", "water", "items", "form", "enemy", "koopa",
+];
 
 /// Where the items / form courses keep their power-up: the ? block's tile column and its row
 /// above the floor (the capture walks there first; no test script gets that far).
@@ -204,6 +227,22 @@ pub fn build_course(name: &str) -> Result<Vec<u8>, String> {
             for x in 23..=26 {
                 e.place(hazard, x, up(1)).map_err(err)?;
             }
+        }
+        "koopa" => {
+            // a red Koopa on a 1-wide, 2-high pillar at x 20 (it turns at both ledges, so it
+            // paces in place: a stomp from the floor always finds it), and a 3-high wall at x 34
+            // for a kicked shell to bounce off (it slides back and forth between the wall and the
+            // pillar; the player is safe on the pillar's top)
+            floor(&mut e, 0, len - 1)?;
+            for y in 1..=2 {
+                e.paint_ground(20, up(y)).map_err(err)?;
+            }
+            for y in 1..=3 {
+                e.paint_ground(34, up(y)).map_err(err)?;
+            }
+            let (kw, kh) = mmk_editor::default_size(1);
+            e.place_sized(1, 20, up(3), kw, kh, mmk_editor::DEFAULT_FLAGS | 0x4)
+                .map_err(err)?;
         }
         "items" | "form" => {
             // the power-up in a ? block 4 tiles up, far enough right that no test reaches it:
@@ -381,6 +420,7 @@ mod tests {
                     facing: None,
                     form: None,
                     vx: None,
+                    actor: None,
                 },
             )
             .unwrap();
@@ -400,6 +440,7 @@ mod tests {
                 facing: None,
                 form: None,
                 vx: None,
+                actor: None,
             },
         )
         .unwrap();
