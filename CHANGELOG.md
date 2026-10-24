@@ -74,6 +74,13 @@ SMCraft is back in development (it was archived in October 2026).
   its member level with it. A red Koopa turns at a ledge exactly where the game's foot sensor
   leaves the floor.
 
+- **The Propeller Mushroom moves as in SMM2**: out of a block it shoots straight up through the
+  terrain, stops, then bobs slowly down and up (drifting sideways the way it faces) before
+  flying away upward; out of a downward block it slides out and rises. A Super Leaf or Cape
+  Feather from a block now sways on down through the floor instead of landing. A Fire Koopa
+  Clown Car's charged shot breaks the bricks and hard blocks around where it bursts. Bowser
+  doesn't jump into a Trampoline above him, and his ground pound then starts lower.
+
 - **Import once, then no dump or keys.** SMCraft reads your NSPs and `prod.keys` itself (no
   hactool, nothing extracted) and writes its own asset pack; the game runs from the pack alone.
   On macOS the setup screen picks the files; on Windows, Linux and Android you put them in the

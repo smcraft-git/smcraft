@@ -167,6 +167,32 @@ sway, importer and pack 12, the dev cache already at v12).
   meeting a boss (#15), the 2D items' extra touch pixel and the Fire Flower's box id (no writer in
   the item code 0x7101330000–0x7101420000). 578 / 580 traces exact; coverage 550/550 + 273/273;
   simulate 0 crashes.
+- 🔄 **Inferred-behaviour pass 6** (2026-10-25, branch `infres6`, research specs/inf-inventory.md
+  "Pass 6"): ✅ the Propeller Mushroom's own Move (#38, ItemPropeller 0x710134ca70 / 0x710134c3c0 /
+  limits 0x710134c880; the Block context's enter 0x710134d550 skips the slow rise): out of a
+  block 8 px up then 3.5 up (g −0.09375) through terrain, a frame's stop, the six (cap, gravity)
+  pairs with the gravity's sense flipping at each cap, drifting 0.7 px/f the way it faces (the push
+  always + in game-version-0 courses), climbing away at 4; the downward exit slides 2.5 held at
+  1.8 (`actors/propeller.rs`; a placed one meets terrain [inf]). ✅ the other style power-ups'
+  Move: the Leaf / Feather Move sets the terrain-off bit and has no ground case (0x7101347170 /
+  0x7101346980) — out of a block they sway on through the floor (placed ones still land [inf]);
+  in water the push flips at 3; the landing choice (actor slot 0x5e0): Super Bell / Super Hammer /
+  Boomerang Flower 0x7101353970 → Wait, Big / SMB2 Mushroom, Frog, Balloon, Acorn, Leaf,
+  Propeller 0x710134ef60 → Move (unchanged). ✅ the Fire car's ChargeExplode (0x7100ddf950): the
+  burst's tiles (its tile moved toward what it hit, row and column ±16 / big ±32 + 3 × 3, the
+  column behind) break as a blast's (the shared block hit 0x7100e22210). 🔄 the projectile
+  budget: one 100-unit area manager (area +0x108: request 0x7100de9960, release 0x7100de9a60,
+  queue promotion in the area update 0x7100e443c0) of throw reservations (1 unit for most
+  throwers, 2 / 3 / 4 for a few), held from the throw's request to the state's exit — not live
+  projectiles; its +0x8 term's writer not found; not ported (only reachable with dozens of
+  throwers at once). ✅ Bowser's jump-height search hooked up: the type-0x25 class-0 units are
+  the Trampoline's body (JumpStep 0x71013b9260, _INIT_369 "Jumpdai"); one over his columns
+  within the jump's reach (apexes 0x71011530f0) stops the chase and big jumps and starts the hip
+  drop at 1.0. ✅ #16: the Turn exe waits for the anim controller's end test, so the loop bit
+  doesn't decide (the existing length / rate rule stands). 🔄 #15: the shell's own callback
+  sends kind 10 / 5 to its reaction component on its +0x534 bits 19 / 20 (not followed). ✅ #17:
+  the Bob-omb blast is the shell attack. 578 / 580 traces exact; coverage 550/550 + 273/273;
+  simulate 0 crashes.
 - **Agent queue** (when a helper slot frees; running 2026-10-25: the maker's Water Level and
   Custom Scroll modes, physics): ✅ a Koopaling in a Clown Car (2026-10-25, branch
   `kclown`, research 120-koopalings.md "In a Koopa Clown Car": KoKoopaDefault's Clown vtable
