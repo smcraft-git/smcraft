@@ -16,9 +16,9 @@ sound-perfect as possible, that **never needs the ROM or key files to run**.
 - **Platforms:** the same as smm2recomp: macOS, iOS / iPadOS, Windows, Linux, Android, plus the web.
 
 ### Resumed 2026-10-24 (turns of ~50 minutes with SMM2) — where this stands / next
-Everything is on `main` and pushed. Branches in flight: `pixels5` (night darkness, importer /
-pack 12 → re-import the dev cache when merged; SceneDB backdrops) and `physics3` (re-recording
-the 29 trace courses in a background Ryujinx).
+Everything is on `main` and pushed (`physics3` and `pixels5` merged 2026-10-24: 286 / 286 traces
+exact over 13 re-recorded courses, SIM_VERSION 2; night darkness / SceneDB backdrops / airship
+sway, importer and pack 12, the dev cache already at v12).
 - **Since the resume:** `maker-audio` / `maker-hooks` merged (pack 11); 100 Mario's costume reward;
   Lanky Mario's sounds; co-op per-player keys, carrying, the ground-pound knock, per-player action
   conditions and the 180-frame warp wait; enemies' defeat sounds by cause and many update
@@ -29,8 +29,9 @@ the 29 trace courses in a background Ryujinx).
   game-server access key — (a) read from the player's own dump at import (recommended) or (b) one
   Nextendo issues. Nextendo has agreed to SMCraft going online. Releases need the owner's OK.
 - **Next, in order:**
-  1. Merge `pixels5` (gate, pack 12, re-import) and `physics3` when their agents report; fix the
-     real physics divergences the new traces show.
+  1. Physics: record the 16 courses left (WU items, walls, water, 3D World — headless Ryujinx
+     aborts in MoltenVK there —, WU form); then enemy traces. Pixels: diff the new 3D World
+     references, the colour table (ramps ready), NSMBU's background lighting.
   2. Maker: wings / parachutes (the "put into" gesture: `Edit_BalloonPartsIn_00` has the wing and
      parachute panes; read the drop handler in the binary), tracks and links.
   3. Co-op: a players screen in SMM2's layouts; the P-door hold for followers.
@@ -337,17 +338,30 @@ Nextendo; `docs/nextendo-network-play.md`, spec `research/specs/network-play.md`
   (headless Ryujinx aborts in MoltenVK on 3D World), WU form (the Propeller Mushroom never
   reaches the player at the title screen; it flies up — next: a box with a roof and a jump from
   the block). Then enemy and object traces; whole courses start to goal
-- 🔄 Pixels, SMB1 against the game (smm2recomp reference frames, update 900; MAE / % pixels off by
-  > 24): ground 0.85 / 0.48 %, underground 0.64 / 0.44 % (night 0.90), snow 0.98 / 0.58 %, water
-  1.77 / 0.82 %, castle 3.99 / 2.93 % (night 4.24), ghost house 12.8 / 47 % (night 28.4), airship
-  35.5 / 32 % (night 30.1), water night 49.3 / 86 %. Found, not fixed: the airship theme's camera
-  sway; the night spotlight (darkness outside a circle round Mario, water / ghost house nights:
-  `LightMaskTable`); SMB1's daytime ghost house backdrop is plain black ✅ (fixed);
-  the final colour table (every pixel 1–2 levels off; ramp captures ready). 72 of 90 reference
-  frames captured (all SMB1, SMB3 but sky / forest); tooling `research/tools/pixel-ref/`. Night
-  darkness: lit circles per light from `LightMaskTable` (the player's and, e.g., the start sign's),
-  shapes from `M0_Object_mask` (BC4, not imported yet); the scale → radius rule still open
-  (player 6.0 → ≈ 57 px, sign 3.5 → ≈ 52 px)
+- 🔄 Pixels against the game (smm2recomp reference frames of `mmk ref-courses`, all 90, update
+  900; MAE / % pixels off by > 24; `research/tools/pixel-ref/pixref.py`, 2026-10-24):
+
+  | style | ground | underground | castle | airship | water | ghost | snow | desert | sky | forest | mean |
+  |---|---|---|---|---|---|---|---|---|---|---|---|
+  | SMB1 | 0.8 / 0.5% | 0.6 / 0.4% | 4.0 / 2.9% | 4.7 / 3.8% | 1.8 / 0.8% | 0.6 / 0.4% | 1.0 / 0.6% | 0.9 / 0.5% | 4.2 / 5.7% | 4.4 / 5.6% | 2.3 |
+  | SMB1 night | 1.3 / 1.0% | 0.8 / 0.6% | 4.2 / 3.1% | 4.6 / 3.7% | 0.2 / 0.1% | 0.2 / 0.1% | 0.6 / 0.5% | 1.0 / 0.8% | 1.2 / 0.9% | 3.3 / 3.2% | 1.7 |
+  | SMB3 | 2.7 / 1.3% | 2.6 / 2.9% | 5.0 / 4.9% | 10.6 / 17.5% | 2.5 / 1.7% | 1.4 / 1.3% | 2.0 / 1.4% | 2.2 / 1.2% | 9.7 / 27.1% | 11.2 / 14.1% | 5.0 |
+  | SMB3 night | 1.8 / 1.6% | 2.1 / 4.3% | 4.5 / 5.0% | 5.0 / 5.4% | 0.6 / 0.8% | 0.7 / 0.9% | 1.3 / 1.1% | 1.8 / 1.7% | 1.7 / 1.5% | 5.5 / 5.1% | 2.5 |
+  | SMW | 2.5 / 1.9% | 2.4 / 2.3% | 4.7 / 5.7% | 17.0 / 19.9% | 3.1 / 3.5% | 1.4 / 1.1% | 2.6 / 2.0% | 2.6 / 1.9% | 19.2 / 21.4% | 5.3 / 4.7% | 6.1 |
+  | SMW night | 2.4 / 2.5% | 2.9 / 5.2% | 5.0 / 6.2% | 5.6 / 5.8% | 1.1 / 1.6% | 0.6 / 0.9% | 2.2 / 2.5% | 2.6 / 2.6% | 2.3 / 2.1% | 4.9 / 6.0% | 3.0 |
+  | NSMBU | 50.1 / 71% | 15.9 / 46% | 26.5 / 49% | 62.6 / 77% | 47.9 / 73% | 24.8 / 60% | 38.0 / 66% | 22.2 / 51% | 60.8 / 73% | 36.2 / 63% | 38.5 |
+  | NSMBU night | 41.7 / 78% | 41.6 / 76% | 46.4 / 88% | 79.9 / 87% | 5.8 / 12% | 4.5 / 11% | 40.8 / 76% | 41.6 / 74% | 40.7 / 75% | 56.0 / 91% | 39.9 |
+
+  3D World: the references were the game's blank fallback course (the Koopa made it reject them);
+  recaptured with the fixed courses, not yet diffed. Done since the revival: start sign, 2D drop
+  shadow (wgpu + Swift), animated blocks / coins (importer 10), night darkness (importer 12, wgpu
+  + Swift), SceneDB backdrops for every style and night, night field art, airship sway and sky
+  drift. Open: the final colour table (every pixel 1–2 levels off: ramp backdrops ready in
+  `/private/tmp/claude-501/pixels/ramp_*`, `research/tools/pixel-ref/ramp.py`), the airship's
+  cloud start ground and night lightning / rain phase, SMB3 / SMW sky and airship backdrop
+  heights, the castle lava surface (3 px low, wrong frame rate), backdrop actors (UFOs …),
+  animation phases, the Swift app's shadow / darkness not checked on frames, NSMBU's background
+  lighting (sky too dark), 3D World
 - 🔄 Pixels: per style × theme frames against Ryujinx (2D styles exact; NSMBU / 3D World lighting,
   terrain variants, effects)
 - 🔄 Sound: every object's sounds, mixer behaviour checked against the game's output · keys

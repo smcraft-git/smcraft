@@ -41,7 +41,8 @@ pub mod sprites;
 /// 10: the field animation models (`Pack/<style>_FieldAnime_<set>.pack`: ? blocks, bricks, coins,
 ///     note blocks, conveyors… with their frames, one set per theme's SceneDB `FieldAnime`).
 /// 11: the Course Maker's sound: the edit music (`BGM_<Theme>_Edit`) and the `<S>_Edit*` users.
-pub const IMPORTER_VERSION: u32 = 11;
+/// 12: the night darkness's light shapes (`M0_Object_mask` from `Pack/StaticModel.pack`).
+pub const IMPORTER_VERSION: u32 = 12;
 pub mod smm1;
 pub mod smm1_costumes;
 pub use smm1::{Smm1Config, Smm1Report, run_smm1};
@@ -220,6 +221,10 @@ fn to_mtex(t: &bntx::Texture) -> Option<Mtex> {
     })
 }
 
+/// The textures of the night darkness's lights (underwater and ghost house at night): one-channel
+/// dots, cones and the goal's shape per style, in `Pack/StaticModel.pack`.
+pub const LIGHT_MASK_MODEL: &str = "M0_Object_mask";
+
 /// Model name from a RomFS path like `Model/M1_Enemy_kuribo.Nin_NX_NVN.zs`.
 fn model_name(path: &str) -> String {
     let file = path.rsplit('/').next().unwrap_or(path);
@@ -268,7 +273,7 @@ fn collect_models(romfs: &Path) -> Result<Vec<(String, Vec<u8>)>> {
     if is_file(&static_pack) {
         for (name, data) in open_sarc(&static_pack)?.files() {
             let model = model_name(name);
-            if name.ends_with(".zs") && meshes::wants_mesh(&model) {
+            if name.ends_with(".zs") && (meshes::wants_mesh(&model) || model == LIGHT_MASK_MODEL) {
                 models.push((model, data.to_vec()));
             }
         }

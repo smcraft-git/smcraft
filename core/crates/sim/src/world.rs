@@ -392,7 +392,7 @@ fn character_model(model: &'static str, who: usize) -> &'static str {
         .map_or(model, |row| row[who.min(3)])
 }
 
-fn field_model(style: &str, theme: u8) -> String {
+fn field_model(style: &str, theme: u8, night: bool) -> String {
     let name = [
         "plain",
         "underground",
@@ -408,7 +408,10 @@ fn field_model(style: &str, theme: u8) -> String {
     .get(theme as usize)
     .copied()
     .unwrap_or("plain");
-    format!("{style}_Field_{name}")
+    // night themes have their own field art (`<style>_Field_<theme>_D`, the SceneDB rows 10–19);
+    // 3D World has no night
+    let night = if night && style != "3W" { "_D" } else { "" };
+    format!("{style}_Field_{name}{night}")
 }
 
 /// The play field's animated parts in the 2D styles are models of their own (the game's
@@ -432,6 +435,41 @@ fn field_anime(style: crate::player::Style, kind: BlockKind, on: bool) -> Option
         _ => return None,
     })
 }
+
+/// A player's light in the night darkness: the half size its shape is drawn at, world px [obs:
+/// v1.0.0 0x710036bc90 aims at 67.5 (45.0 when the player's +0x2968 is unset, 200.0 in some states
+/// [?]); the game's frames show the 67.5 one].
+pub const PLAYER_LIGHT: f32 = 67.5;
+
+/// The night darkness this frame: `level` 0 (none) … 1 (dark outside the lights).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Darkness {
+    pub level: f32,
+    pub lights: Vec<Light>,
+}
+
+/// One light: centred at (x, y), world px.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Light {
+    pub source: LightSource,
+    pub x: f32,
+    pub y: f32,
+    /// Half the size of the light's shape, world px (`LightSource::Player`); a table light's
+    /// size, shape and y offset come from `LightMaskTable` / `LightMaskWipeTypeTable`.
+    pub half: f32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LightSource {
+    /// A player (shape `PlayerMove`).
+    Player,
+    /// An actor by its `LightMaskTable` name.
+    Table(&'static str),
+}
+
+/// The backdrop's place in the sprite list: one sprite naming the model's origin (x, y); the host
+/// draws the theme's backdrop pictures from it (`mmk_host::backdrop`).
+pub const BACKDROP_MODEL: &str = "*backdrop";
 
 /// The start sign's layer: in front of the backdrop (0), behind everything else.
 pub const START_SIGN_LAYER: u32 = 1;
@@ -591,7 +629,8 @@ impl World {
             wind_n: 0,
             options: Default::default(),
         };
-        w.field_model = Box::leak(field_model(&w.level.style, w.level.theme).into_boxed_str());
+        w.field_model =
+            Box::leak(field_model(&w.level.style, w.level.theme, w.level.night).into_boxed_str());
         w.reset_course();
         w
     }
@@ -680,8 +719,9 @@ impl World {
     /// Build the current area's live state from its loaded level.
     fn load_area_fresh(&mut self) {
         self.level = self.initial.clone();
-        self.field_model =
-            Box::leak(field_model(&self.level.style, self.level.theme).into_boxed_str());
+        self.field_model = Box::leak(
+            field_model(&self.level.style, self.level.theme, self.level.night).into_boxed_str(),
+        );
         self.blocks = Blocks::default();
         for b in &self.level.blocks {
             self.blocks
@@ -761,8 +801,10 @@ impl World {
                 self.level = st.level;
                 self.blocks = st.blocks;
                 self.spawns = st.spawns;
-                self.field_model =
-                    Box::leak(field_model(&self.level.style, self.level.theme).into_boxed_str());
+                self.field_model = Box::leak(
+                    field_model(&self.level.style, self.level.theme, self.level.night)
+                        .into_boxed_str(),
+                );
                 self.actors.clear();
                 self.escort_down.clear();
                 self.effects.clear();
@@ -4026,6 +4068,67 @@ impl World {
         self.level.theme == 1 && self.level.night
     }
 
+    /// The airship theme rocks: the view rises and falls by up to 24.75 px, one swing every
+    /// 655.36 frames (an angle stepping 100 of 65536 a frame) [meas: smm2recomp frames of an SMB1
+    /// airship course every 15 frames, 300–1200: 12.375 · (1 − cos θ), θ = 2π (t − 593) / 655.36
+    /// with t the course clock; fits to under a pixel]. Drawing only: the sim's camera is
+    /// unchanged. Other themes: 0.
+    pub fn view_sway(&self) -> f32 {
+        if self.level.theme != 3 || self.map_view {
+            return 0.0;
+        }
+        let t = (self.tick as f64 - 593.0) / 655.36;
+        (12.375 * (1.0 - (t * std::f64::consts::TAU).dcos())) as f32
+    }
+
+    /// The view's bottom-left as drawn (the camera, plus the airship's sway).
+    pub fn view_camera(&self) -> (f32, f32) {
+        (self.camera_x, self.camera_y + self.view_sway())
+    }
+
+    /// The night darkness (underwater and ghost house at night, not in 3D World): how dark the
+    /// view is and the lights that show through [themes.md §1.6; v1.0.0 0x710081aeb0 enables it
+    /// for `night && (theme & ~1) == 4`, 0x710036bc90 places the players' lights]. None in other
+    /// themes.
+    pub fn darkness(&self) -> Option<Darkness> {
+        if !(self.level.night && matches!(self.level.theme, 4 | 5))
+            || self.style == crate::player::Style::W3
+        {
+            return None;
+        }
+        // both fade in from the area's start, frame by frame [obs]: the darkness d toward 1 by
+        // max(|1 − d| · 0.1, 0.01); a player's light size s toward its target by
+        // clamp(|T − s| · 0.25, 0.1, 100) [inf: from the course's first frame, the clock here]
+        let frames = self.tick.min(240) as u32;
+        let mut level = 0.0f32;
+        let mut size = 0.0f32;
+        for _ in 0..frames {
+            level = (level + ((1.0 - level) * 0.1).max(0.01)).min(1.0);
+            size = (size + ((PLAYER_LIGHT - size) * 0.25).clamp(0.1, 100.0)).min(PLAYER_LIGHT);
+        }
+        let mut lights = Vec::new();
+        for p in std::iter::once(&self.player).chain(&self.others) {
+            if !p.hidden {
+                lights.push(Light {
+                    source: LightSource::Player,
+                    x: p.x,
+                    y: p.y + 16.0,
+                    half: size,
+                });
+            }
+        }
+        if self.area == 0 {
+            // the start sign lights its surroundings (LightMaskTable `StartSignBoard`)
+            lights.push(Light {
+                source: LightSource::Table("StartSignBoard"),
+                x: 40.0,
+                y: self.level.start.1,
+                half: 0.0,
+            });
+        }
+        Some(Darkness { level, lights })
+    }
+
     /// Twister wind column: x within ±16 of the twister, from its feet to the column top. The
     /// player is lifted (vy toward 4.5 at +0.6/frame) [inf: the twister's contact 0x71008c0630
     /// fills the player's tornado receiver (actor +0x398: the twister's centre x, top y and x
@@ -6179,51 +6282,32 @@ impl World {
         out
     }
 
-    /// Theme background model and texture (M1_DV_<theme>[_D]), if the theme has one.
-    /// Underground and castle have none (black). Ghost house only has the night art, which
-    /// SMB1 shows at night only: its daytime ghost house is plain black like the game's frame
-    /// [obs: smm2recomp reference frame, SMB1 ghost house day]; the other styles have a day
-    /// picture of their own.
-    pub fn background(&self) -> Option<(&'static str, &'static str)> {
-        let night = self.level.night;
-        if self.level.theme == 5 && !night && self.level.style == "M1" {
-            return None;
-        }
-        Some(match (self.level.theme, night) {
-            (0, false) => ("M1_DV_plain", "M1_DV_plain_00"),
-            (0, true) => ("M1_DV_plain_D", "M1_DV_plain_D_00.0"),
-            (3, false) => ("M1_DV_airship", "M1_DV_airship_00"),
-            (3, true) => ("M1_DV_airship_D", "M1_DV_airship_D.00.0"),
-            (4, false) => ("M1_DV_water", "M1_DV_water"),
-            (4, true) => ("M1_DV_water_D", "M1_DV_water_D_00.0"),
-            (5, _) => ("M1_DV_hauntedhouse_D", "M1_DV_hauntedhouse_D.00"),
-            (6, false) => ("M1_DV_snow", "M1_DV_snow_00"),
-            (6, true) => ("M1_DV_snow_D", "M1_DV_snow_D_00.0"),
-            (7, _) => ("M1_DV_desert", "M1_DV_desert_00"),
-            (8, _) => ("M1_DV_athletic", "M1_DV_athletic_00"),
-            (9, _) => ("M1_DV_woods", "M1_DV_woods_00"),
-            _ => return None,
-        })
-    }
-
-    /// The background: a 512×512 picture repeated sideways, anchored 32 px below the area bottom,
-    /// scrolling at half the camera speed [inf parallax 0.5: drawing only; the background
-    /// layer's scroll factor is set by the BG draw code, not traced this pass].
+    /// The backdrop: the theme's backdrop model (chosen and drawn by the host,
+    /// `mmk_host::backdrop`) with its origin at the area bottom, scrolling at half the camera
+    /// speed [inf parallax 0.5: drawing only; the background layer's scroll factor is set by the
+    /// BG draw code, not traced this pass]; its pictures start 32 px below the origin.
     fn background_sprites(&self, out: &mut Vec<Sprite>) {
-        let Some((model, tex)) = self.background() else {
-            return;
-        };
         // (a whole-course render pins the backdrop to the world so the views join up)
         let p = if self.map_view { 1.0 } else { 0.5 };
-        let ox = -128.0 + self.camera_x * (1.0 - p);
-        let oy = (self.level.bottom - 32.0 + self.camera_y * (1.0 - p)).min(self.camera_y);
-        let mut k = ((self.camera_x - ox) / 512.0).floor();
-        while ox + k * 512.0 < self.camera_x + VIEW_W {
-            let mut s = Self::model_sprite(model, tex, ox + k * 512.0, oy, 512.0, 512.0, false, 0);
-            s.image.rect = Some((0.0, 0.0, 512.0, 512.0));
-            out.push(s);
-            k += 1.0;
+        let (cx, cy) = (self.camera_x, self.camera_y);
+        let mut ox = cx * (1.0 - p);
+        // anchored to the sim's camera and drawn through the swaying one, the backdrop moves
+        // with the airship's sway like the field [meas]; the airship's sky drifts left a pixel a
+        // frame [meas: SMB1 airship clouds 30 px every 30 frames, at the course clock + 61 px]
+        let oy = (self.level.bottom + cy * (1.0 - p)).min(cy + 32.0);
+        if self.level.theme == 3 && !self.map_view {
+            ox -= self.tick as f32 + 61.0;
         }
+        out.push(Self::model_sprite(
+            BACKDROP_MODEL,
+            "",
+            ox,
+            oy,
+            0.0,
+            0.0,
+            false,
+            0,
+        ));
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -6274,7 +6358,8 @@ impl World {
                 9 => "M1_Object_yajirushi_woods",
                 _ => "M1_Object_yajirushi_plain",
             },
-            (_, 6) => "M1_Object_yajirushi_S",
+            // (snow at night stands on ice: the plain sign [obs])
+            (_, 6) if !self.level.night => "M1_Object_yajirushi_S",
             _ => "M1_Object_yajirushi",
         };
         out.push(Self::model_sprite(
@@ -7175,6 +7260,45 @@ mod tests {
         for _ in 0..frames {
             w.step(Input { buttons });
         }
+    }
+
+    /// Night underwater and ghost house are dark outside the lights: the player's (fading in
+    /// to 67.5 px) and the start sign's; other themes and 3D World have none.
+    #[test]
+    fn night_darkness_and_its_lights() {
+        let mut w = World::with_level(Level::flat(100));
+        assert!(w.darkness().is_none());
+        w.level.night = true;
+        w.level.theme = 4;
+        let d = w.darkness().unwrap();
+        assert_eq!(d.level, 0.0);
+        w.tick = 600;
+        let d = w.darkness().unwrap();
+        assert_eq!(d.level, 1.0);
+        assert_eq!(d.lights[0].source, LightSource::Player);
+        assert_eq!(
+            (d.lights[0].half, d.lights[0].y),
+            (PLAYER_LIGHT, w.player.y + 16.0)
+        );
+        assert_eq!(d.lights[1].source, LightSource::Table("StartSignBoard"));
+        w.level.theme = 5;
+        assert!(w.darkness().is_some());
+        w.style = crate::player::Style::W3;
+        assert!(w.darkness().is_none());
+    }
+
+    /// The airship rocks the view (0 at frame 593, 24.75 px at its top); other themes don't.
+    #[test]
+    fn airship_sway() {
+        let mut w = World::with_level(Level::flat(100));
+        w.tick = 900;
+        assert_eq!(w.view_sway(), 0.0);
+        w.level.theme = 3;
+        w.tick = 593;
+        assert!(w.view_sway().abs() < 1e-3);
+        w.tick = 593 + 328;
+        assert!((w.view_sway() - 24.75).abs() < 0.01);
+        assert_eq!(w.view_camera().1, w.camera_y + w.view_sway());
     }
 
     /// The start sign stands at x = 40 on the start ground, behind the field; snow has its own.

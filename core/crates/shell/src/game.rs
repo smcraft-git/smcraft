@@ -47,6 +47,9 @@ pub struct Game {
     fx_frame: crate::effects::EffectFrame,
     /// The drop shadow of the last theme drawn: ((style, theme, night), shadow).
     shadow: ShadowMemo,
+    /// The night darkness's tables and this frame's lights.
+    dark_tables: mmk_host::darkness::DarknessTables,
+    dark: Option<mmk_host::darkness::DarkFrame>,
 }
 
 impl Game {
@@ -106,6 +109,8 @@ impl Game {
             notice: None,
             edit_view: false,
             shadow: None,
+            dark_tables: Default::default(),
+            dark: None,
         }
     }
 
@@ -269,6 +274,7 @@ impl Game {
             self.build_meshes(cam, false, true);
             let w = self.maker.as_mut().expect("editing").world();
             let shadow = field_shadow(&mut self.shadow, &self.cache, w);
+            self.dark = mmk_host::darkness::frame(w, &self.cache, &mut self.dark_tables);
             self.hud = HudText {
                 strip: status,
                 banner: None,
@@ -287,6 +293,7 @@ impl Game {
                 ghost: &[],
                 effects: &self.fx_frame,
                 shadow,
+                darkness: self.dark.as_ref(),
             };
         }
         let w = &self.session.world;
@@ -298,9 +305,11 @@ impl Game {
             &mut self.sprites,
             &mut self.mesh_draws,
         );
-        let (cam, upside_down) = ((w.camera_x, w.camera_y), w.upside_down());
+        let (cam, upside_down) = (w.view_camera(), w.upside_down());
         self.build_meshes(cam, upside_down, self.edit_view);
         let shadow = field_shadow(&mut self.shadow, &self.cache, &self.session.world);
+        self.dark =
+            mmk_host::darkness::frame(&self.session.world, &self.cache, &mut self.dark_tables);
         let w = &self.session.world;
         self.ghost_sprites.clear();
         if let Some(g) = &self.session.ghost
@@ -332,7 +341,7 @@ impl Game {
         Scene {
             effects: &self.fx_frame,
             sprites: &self.sprites,
-            camera: (w.camera_x, w.camera_y),
+            camera: w.view_camera(),
             upside_down: w.upside_down(),
             clear: mmk_host::clear_color(w, &self.cache),
             hud: &self.hud,
@@ -342,6 +351,7 @@ impl Game {
             lights: &self.lights,
             ghost: &self.ghost_sprites,
             shadow,
+            darkness: self.dark.as_ref(),
         }
     }
 }

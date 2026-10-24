@@ -260,6 +260,9 @@ pub struct MmkEngine {
     options: mmk_sim::Options,
     /// The 2D drop shadow of the last theme asked for: ((style, theme, night), shadow).
     shadow: ShadowMemo,
+    /// The night darkness's tables and this frame's lights (`mmk_engine_darkness`).
+    dark_tables: mmk_host::darkness::DarknessTables,
+    dark: Vec<MmkDarkLight>,
 }
 
 /// A theme's drop shadow, looked up once: ((style, theme, night), shadow).
@@ -330,6 +333,8 @@ pub unsafe extern "C" fn mmk_engine_new(assets: *const MmkAssets) -> *mut MmkEng
             draw: Vec::new(),
             mesh_mode: true,
             shadow: None,
+            dark_tables: Default::default(),
+            dark: Vec::new(),
             options: {
                 // random Mystery Mushroom costumes come from those the assets have art for
                 let mut o = mmk_sim::Options::default();
@@ -542,7 +547,7 @@ pub unsafe extern "C" fn mmk_engine_snapshot(engine: *mut MmkEngine, out: *mut M
             sprites: e.sprites.as_ptr(),
             sprite_count: e.sprites.len(),
             camera_x: e.world.camera_x,
-            camera_y: e.world.camera_y,
+            camera_y: e.world.view_camera().1,
             view_w: mmk_sim::world::VIEW_W,
             view_h: mmk_sim::world::VIEW_H,
             tick: e.world.tick,
@@ -638,6 +643,54 @@ pub unsafe extern "C" fn mmk_engine_field_shadow(
             color: s.color,
         };
         true
+    })
+}
+
+/// One light of the night darkness: shape texture (mmk_assets_texture index) over the square of
+/// `half` world px each side of (x, y).
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct MmkDarkLight {
+    pub texture: u32,
+    pub x: f32,
+    pub y: f32,
+    pub half: f32,
+}
+
+/// The night darkness this frame (`mmk_host::darkness`): returns its level (0 … 1, 0 = none) and
+/// points `lights` at `count` lights (valid until the next call).
+///
+/// # Safety
+/// `engine` must be a live handle; `lights` and `count` writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mmk_engine_darkness(
+    engine: *mut MmkEngine,
+    lights: *mut *const MmkDarkLight,
+    count: *mut usize,
+) -> f32 {
+    guard(0.0, || {
+        let Some(e) = (unsafe { engine.as_mut() }) else {
+            return 0.0;
+        };
+        let cache = &unsafe { &*e.assets }.cache;
+        let frame = mmk_host::darkness::frame(&e.world, cache, &mut e.dark_tables);
+        e.dark.clear();
+        let level = frame.as_ref().map_or(0.0, |f| f.level);
+        for l in frame.iter().flat_map(|f| &f.lights) {
+            e.dark.push(MmkDarkLight {
+                texture: l.texture,
+                x: l.x,
+                y: l.y,
+                half: l.half,
+            });
+        }
+        if let Some(p) = unsafe { lights.as_mut() } {
+            *p = e.dark.as_ptr();
+        }
+        if let Some(c) = unsafe { count.as_mut() } {
+            *c = e.dark.len();
+        }
+        level
     })
 }
 
@@ -871,6 +924,8 @@ mod tests {
             draw: Vec::new(),
             mesh_mode: true,
             shadow: None,
+            dark_tables: Default::default(),
+            dark: Vec::new(),
             options: Default::default(),
         };
         unsafe {

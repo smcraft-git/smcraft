@@ -117,6 +117,8 @@ pub struct SpriteResolver {
     /// (style, theme, night), and the frame its animations are at.
     anime_set: Option<((String, u8, bool), Option<char>)>,
     anime_clock: u32,
+    backdrops: crate::backdrop::Backdrops,
+    backdrop_tiles: Vec<(u32, f32, f32, f32, f32)>,
 }
 
 /// The initial of a theme's field animation set (SceneDB `FieldAnime`: Normal, Dark, Ice, Snow,
@@ -143,7 +145,39 @@ impl SpriteResolver {
         let style = world.level.style.as_str();
         self.begin_frame(world, cache);
         for s in sprites {
+            if s.image.model == mmk_sim::world::BACKDROP_MODEL {
+                self.backdrop(world, &s, cache, out);
+                continue;
+            }
             out.push(self.resolve_one(style, &s, cache));
+        }
+    }
+
+    /// The backdrop sprite (`mmk_sim::world::BACKDROP_MODEL`) as the theme's backdrop pictures.
+    pub fn backdrop(
+        &mut self,
+        world: &World,
+        s: &Sprite,
+        cache: &Cache,
+        out: &mut Vec<DrawSprite>,
+    ) {
+        self.backdrop_tiles.clear();
+        self.backdrops
+            .tiles(cache, world, (s.x, s.y), &mut self.backdrop_tiles);
+        for &(texture, x, y, w, h) in &self.backdrop_tiles {
+            out.push(DrawSprite {
+                texture: Some(texture),
+                x,
+                y,
+                w,
+                h,
+                u0: 0.0,
+                v0: 0.0,
+                u1: 1.0,
+                v1: 1.0,
+                layer: s.layer,
+                flip_x: false,
+            });
         }
     }
 
@@ -280,13 +314,27 @@ impl SpriteResolver {
 /// it as RGBA8, black otherwise (underground, castle, placeholder art).
 pub fn clear_color(world: &World, cache: &Cache) -> u32 {
     const BLACK: u32 = 0x0000_00ff;
-    let Some((model, tex)) = world.background() else {
+    // (once per cache and theme: the backdrop's model is looked up in the SceneDB)
+    type Memo = HashMap<(std::path::PathBuf, String, u8, bool), Option<u32>>;
+    static MEMO: std::sync::Mutex<Option<Memo>> = std::sync::Mutex::new(None);
+    let key = (
+        cache.root.clone(),
+        world.level.style.clone(),
+        world.level.theme,
+        world.level.night,
+    );
+    let first = {
+        let mut memo = MEMO.lock().unwrap_or_else(|e| e.into_inner());
+        let memo = memo.get_or_insert_with(HashMap::new);
+        *memo.entry(key).or_insert_with(|| {
+            let mut b = crate::backdrop::Backdrops::default();
+            b.get(cache, world).and_then(|m| m.first_texture())
+        })
+    };
+    let Some(i) = first else {
         return BLACK;
     };
-    let Some(i) = cache.texture_index(model, tex) else {
-        return BLACK;
-    };
-    let Some(t) = cache.texture(i) else {
+    let Some(t) = cache.texture(i as usize) else {
         return BLACK;
     };
     if t.format != MtexFormat::Rgba8 || t.data.len() < 4 {

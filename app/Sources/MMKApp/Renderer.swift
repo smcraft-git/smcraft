@@ -56,6 +56,7 @@ final class Renderer: NSObject, MTKViewDelegate {
     private var maskPipeline: MTLRenderPipelineState?
     private var shadePipeline: MTLRenderPipelineState?
     private var shadowMask: MTLTexture?
+    private var darkMask: MTLTexture?
     private var sampler: MTLSamplerState?
     static let depthFormat: MTLPixelFormat = .depth32Float
     private lazy var spriteDepth = MeshRenderer.spriteDepthState(device)
@@ -128,8 +129,11 @@ final class Renderer: NSObject, MTKViewDelegate {
     vertex P vfull(uint i [[vertex_id]]) {
         P p; p.pos = float4(float((i << 1) & 2) * 2 - 1, float(i & 2) * 2 - 1, 0, 1); return p;
     }
-    fragment float4 fshade(P in [[stage_in]], texture2d<float> mask [[texture(0)]], constant float4& color [[buffer(0)]]) {
+    // mode.x 1: cover outside the mask (the night darkness) instead of inside (the shadow)
+    fragment float4 fshade(P in [[stage_in]], texture2d<float> mask [[texture(0)]], constant float4& color [[buffer(0)]],
+                           constant float4& mode [[buffer(1)]]) {
         float m = mask.read(uint2(in.pos.xy)).r;
+        if (mode.x > 0.5) m = 1 - m;
         if (m <= 0) discard_fragment();
         return float4(color.rgb, color.a * m);
     }
@@ -280,6 +284,28 @@ final class Renderer: NSObject, MTKViewDelegate {
                              size: (Int(dw), Int(dh)), viewport: viewport)
         }
 
+        // the night darkness's lights (their shapes into a mask of their own)
+        var darkPtr: UnsafePointer<MmkDarkLight>?
+        var darkCount = 0
+        let darkLevel = showCourse ? mmk_engine_darkness(engine, &darkPtr, &darkCount) : 0
+        if darkLevel > 0 {
+            let lights = UnsafeBufferPointer(start: darkPtr, count: darkCount)
+            func ndc(_ x: Float, _ y: Float) -> SIMD2<Float> {
+                if let vp = fieldVP {
+                    let c = vp * SIMD4<Float>(x, y, 0, 1)
+                    return SIMD2(c.x / c.w, (flipY ? -1 : 1) * c.y / c.w)
+                }
+                return SIMD2(x * xform.x + xform.z, y * xform.y + xform.w)
+            }
+            var quads: [(UInt32, [SIMD4<Float>])] = []
+            for l in lights {
+                let a = ndc(l.x - l.half, l.y - l.half), b = ndc(l.x + l.half, l.y + l.half)
+                quads.append((l.texture, [SIMD4(a.x, a.y, 0, 1), SIMD4(b.x, a.y, 1, 1), SIMD4(b.x, b.y, 1, 0),
+                                          SIMD4(a.x, a.y, 0, 1), SIMD4(b.x, b.y, 1, 0), SIMD4(a.x, b.y, 0, 0)]))
+            }
+            darkMask = encodeMask(cmd, mask: darkMask, quads: quads, size: (Int(dw), Int(dh)), viewport: viewport)
+        }
+
         pass.colorAttachments[0].loadAction = .load
         pass.depthAttachment.loadAction = .clear
         guard let enc = cmd.makeRenderCommandEncoder(descriptor: pass) else { return }
@@ -341,6 +367,8 @@ final class Renderer: NSObject, MTKViewDelegate {
                 enc.setFragmentTexture(mask, index: 0)
                 var color = SIMD4<Float>(shadow.color.0, shadow.color.1, shadow.color.2, shadow.color.3)
                 enc.setFragmentBytes(&color, length: 16, index: 0)
+                var mode = SIMD4<Float>(0, 0, 0, 0)
+                enc.setFragmentBytes(&mode, length: 16, index: 1)
                 enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
                 enc.setRenderPipelineState(pipeline)
                 enc.setVertexBytes(&xform, length: MemoryLayout<SIMD4<Float>>.size, index: 1)
@@ -365,6 +393,17 @@ final class Renderer: NSObject, MTKViewDelegate {
         }
         flush()
         drawMeshes(before: Int.max)
+        // the night darkness over the field
+        if darkLevel > 0, let shadePipeline, let mask = darkMask {
+            enc.setRenderPipelineState(shadePipeline)
+            enc.setFragmentTexture(mask, index: 0)
+            var color = SIMD4<Float>(0, 0, 0, darkLevel)
+            enc.setFragmentBytes(&color, length: 16, index: 0)
+            var mode = SIMD4<Float>(1, 0, 0, 0)
+            enc.setFragmentBytes(&mode, length: 16, index: 1)
+            enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
+            enc.setRenderPipelineState(pipeline)
+        }
 
         // HUD strip across the top of the view, drawn at drawable resolution
         var hud = MmkHud()
@@ -480,6 +519,40 @@ final class Renderer: NSObject, MTKViewDelegate {
         }
         flush()
         enc.endEncoding()
+    }
+
+    /// Textured quads (already in NDC) into a coverage mask (made or remade at `size`), the most
+    /// opaque texel winning: the night darkness's lights.
+    private func encodeMask(_ cmd: MTLCommandBuffer, mask: MTLTexture?, quads: [(UInt32, [SIMD4<Float>])],
+                            size: (Int, Int), viewport: MTLViewport) -> MTLTexture? {
+        guard let maskPipeline, size.0 > 0, size.1 > 0 else { return mask }
+        var mask = mask
+        if mask?.width != size.0 || mask?.height != size.1 {
+            let d = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .r8Unorm, width: size.0, height: size.1, mipmapped: false)
+            d.usage = [.renderTarget, .shaderRead]
+            d.storageMode = .private
+            mask = device.makeTexture(descriptor: d)
+        }
+        guard let target = mask else { return nil }
+        let pass = MTLRenderPassDescriptor()
+        pass.colorAttachments[0].texture = target
+        pass.colorAttachments[0].loadAction = .clear
+        pass.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0)
+        pass.colorAttachments[0].storeAction = .store
+        guard let enc = cmd.makeRenderCommandEncoder(descriptor: pass) else { return target }
+        enc.setViewport(viewport)
+        enc.setRenderPipelineState(maskPipeline)
+        enc.setFragmentSamplerState(sampler, index: 0)
+        var ident = SIMD4<Float>(1, 1, 0, 0)
+        enc.setVertexBytes(&ident, length: 16, index: 1)
+        for (texture, verts) in quads {
+            guard let tex = self.texture(forBatch: texture) else { continue }
+            enc.setFragmentTexture(tex, index: 0)
+            verts.withUnsafeBytes { enc.setVertexBytes($0.baseAddress!, length: $0.count, index: 0) }
+            enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6)
+        }
+        enc.endEncoding()
+        return target
     }
 
     private func makeTextTexture(_ text: String, width: Int, height: Int) -> MTLTexture? {
