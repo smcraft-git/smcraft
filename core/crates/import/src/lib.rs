@@ -45,7 +45,10 @@ pub mod sprites;
 /// 13: each environment's light map (`env/<name>.json` `lightmap`: the lights its `Diffuse` map
 ///     is made of, their `effect` and `pow`, and its rim); the mesh materials' other samplers'
 ///     wrap modes (`wraps`).
-pub const IMPORTER_VERSION: u32 = 13;
+/// 14: the Super World map's sound: the `MyWorld*` users (the map music `BGM_WorldMap_<Theme>`,
+///     the player's, the points', the goal's, the Toad Houses'), with their action triggers and
+///     the course point kind switch as `@point`.
+pub const IMPORTER_VERSION: u32 = 14;
 pub mod smm1;
 pub mod smm1_costumes;
 pub mod smm1_ui_sound;

@@ -48,6 +48,13 @@ SMCraft is back in development (it was archived in October 2026).
   points by their icon (ghost houses, towers, airships, enemies…) turning blue when cleared,
   castles, pipes, Toad Houses and the player walking, swimming or climbing the map. Needs the
   UI pack imported again.
+- **Super World maps with their music and their moments**: each theme's map music; a cleared
+  course's point turns cleared with its sound, the player jumps, and the roads it opened appear
+  (roads and the goal stay hidden until reached; points become reachable with a pop); the
+  castle rises when its road opens; a used Toad House closes; a cleared world's castle crumbles
+  and a cannon shoots the player to the next world, where he lands. Ledges stand on cliffs. The
+  goal is the airship castle when it stands on water. Needs the game pack imported again
+  (pack 14).
 - **Toad House minigames** in Super Worlds: Match & Win, Pop & Win and Catch & Win, with the
   game's own rules and prizes.
 - **SMM2's own Endless Challenge**, and **Challenge Modes**: Course World's Endless button

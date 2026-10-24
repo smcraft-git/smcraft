@@ -264,6 +264,9 @@ pub struct User {
     nodes: Vec<Node>,
     /// Top-level keys → node index.
     keys: HashMap<String, usize>,
+    /// Action triggers: entering an action (an animation, `tocleared_ftp`, or a state) starts
+    /// a call (node index) that many frames in.
+    actions: Vec<(String, usize, f32)>,
     pub distance: Option<String>,
     pub priority: f32,
 }
@@ -509,6 +512,13 @@ impl SoundDb {
                 kind,
             });
         }
+        for a in u["actions"].as_array().into_iter().flatten() {
+            if let (Some(action), Some(call)) = (a["action"].as_str(), a["call"].as_u64()) {
+                let start = a["start"].as_f64().unwrap_or(0.0) as f32;
+                user.actions
+                    .push((action.to_string(), call as usize, start));
+            }
+        }
         user
     }
 
@@ -553,6 +563,41 @@ impl SoundDb {
             }
         }
         true
+    }
+
+    /// What entering action `action` (an animation by its name, `tocleared_ftp`, or a state)
+    /// plays for `user`, as the data's action triggers say: each triggered call resolved with
+    /// `props`, delayed by the frame it starts at (appended to `out`). False if no trigger
+    /// names the action.
+    #[allow(clippy::too_many_arguments)]
+    pub fn resolve_action(
+        &self,
+        user: &str,
+        action: &str,
+        props: &dyn Props,
+        rng: &mut Rng,
+        turns: &mut Turns,
+        out: &mut Vec<Play>,
+    ) -> bool {
+        let Some(u) = self.users.get(user) else {
+            return false;
+        };
+        let mut any = false;
+        for (_, call, start) in u.actions.iter().filter(|(a, _, _)| a == action) {
+            if *call >= u.nodes.len() {
+                continue;
+            }
+            let from = out.len();
+            self.walk(user, u, *call, props, rng, turns, out, 0);
+            for p in &mut out[from..] {
+                p.delay += start;
+                if p.distance.is_none() {
+                    p.distance = u.distance.clone();
+                }
+            }
+            any = true;
+        }
+        any
     }
 
     /// Every wave `user`'s `key` can play under any properties.
@@ -872,5 +917,42 @@ mod tests {
             &mut Turns::new(),
             &mut out
         ));
+    }
+
+    #[test]
+    fn action_triggers_play_their_calls_from_their_frame() {
+        let doc = serde_json::json!({
+            "version": 1, "groups": [], "attenuation": {}, "effects": {}, "waves": {},
+            "users": {"MyWorldCoursePoint": {
+                "calls": [
+                    {"key": "tocleared", "kind": "switch", "watch": "@point", "children": [1, 2]},
+                    {"key": "a", "parent": 0, "if": ["==", "Normal"], "wave": "Magic"},
+                    {"key": "b", "parent": 0, "if": ["==", "Tower"], "wave": "Castle", "delay": 30.0}
+                ],
+                "actions": [{"action": "tocleared_ftp", "call": 0, "start": 1}]
+            }}
+        });
+        let db = SoundDb::parse(&serde_json::to_vec(&doc).unwrap()).unwrap();
+        let (mut rng, mut t) = (Rng(1), Turns::new());
+        let mut out = Vec::new();
+        let p = PropList::default().with("@point", "Tower");
+        assert!(db.resolve_action(
+            "MyWorldCoursePoint",
+            "tocleared_ftp",
+            &p,
+            &mut rng,
+            &mut t,
+            &mut out
+        ));
+        assert_eq!((out[0].wave.as_str(), out[0].delay), ("Castle", 31.0));
+        assert!(!db.resolve_action(
+            "MyWorldCoursePoint",
+            "wait_ftp",
+            &p,
+            &mut rng,
+            &mut t,
+            &mut out
+        ));
+        assert_eq!(out.len(), 1);
     }
 }

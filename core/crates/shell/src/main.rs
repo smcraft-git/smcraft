@@ -223,7 +223,8 @@ mod native {
         /// challenge-walk, challenge-gameover, challenge-ending, challenge-pause,
         /// challenge-clear, challenge-skip, challenge-card; superworld (the planets),
         /// superworld-title, superworld-map, superworld-walk (--cleared courses of world 1
-        /// cleared), superworld-play, superworld-minigame0 / -minigame1 / -minigame2 (a Toad
+        /// cleared), superworld-clear (the last of them just cleared), superworld-worldclear
+        /// (world 1's goal just cleared), superworld-theme<n>, superworld-play, superworld-minigame0 / -minigame1 / -minigame2 (a Toad
         /// House's Match / Pop / Catch & Win; --front-script presses A), superworld-ending (the
         /// library's test world); the Course
         /// Maker on a new course: maker, maker-parts, maker-menu, maker-save, maker-style,

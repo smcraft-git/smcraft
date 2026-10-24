@@ -197,8 +197,9 @@ struct SwRun {
     course: Option<(usize, usize)>,
     /// Set by a clear; applied when the course screen closes.
     cleared: Option<usize>,
-    /// The course order index cleared last, until the map has shown its point turn cleared.
-    fresh_clear: Option<usize>,
+    /// What the map shows when it opens next: a course's point turning cleared, or the world
+    /// just finished (its goal, its cannon).
+    fresh: Option<Fresh>,
     mode_line: String,
 }
 
@@ -640,9 +641,45 @@ struct MapScene {
     /// The game's map models (None: the flat map).
     art: Option<Rc<MapArt>>,
     character: usize,
-    /// A course cleared just before: its point plays ToCleared from the map's start.
-    fresh_clear: Option<usize>,
+    /// What the map opens on (taken by the first step, which knows the world).
+    fresh: Option<Fresh>,
+    /// The moments playing (a clear, a Toad House, the world's end) for the models.
+    demo: MapView,
+    /// The world just finished, shown until its cannon has fired.
+    outro: Option<Progress>,
+    /// Input waits until this tick (a moment is playing).
+    busy_until: i32,
+    /// The Toad House entered, until its minigame ends.
+    house: Option<usize>,
+    /// Map sounds due at a tick, for the host.
+    cues: Vec<(i32, MapCue)>,
 }
+
+/// What the map shows as it opens.
+#[derive(Clone, Debug)]
+enum Fresh {
+    /// A course cleared (its order index): its point turns cleared and the roads it opened
+    /// appear.
+    Course(usize),
+    /// The world's goal cleared: the world as it was (its goal cleared), shown until the cannon
+    /// shoots the player to the next one.
+    World(Progress),
+}
+
+/// A map sound for the host ([`crate::Host::map_sound`]).
+#[derive(Clone, Debug, PartialEq)]
+struct MapCue {
+    user: &'static str,
+    key: String,
+    anim: bool,
+    point: Option<&'static str>,
+}
+
+/// Frames between the player's clear jump and the roads' reveal [obs 0x7101471160: state 3
+/// sets 0x14, state 4 counts it down].
+const REVEAL_WAIT: i32 = 20;
+/// Frames the player flies from the cannon before the next world shows [inf].
+const CANNON_FLIGHT: i32 = 40;
 
 enum MapEvent {
     Play,
@@ -652,7 +689,7 @@ enum MapEvent {
 }
 
 impl MapScene {
-    fn new(ui: &Ui, art: Option<Rc<MapArt>>, character: usize, fresh_clear: Option<usize>) -> Self {
+    fn new(ui: &Ui, art: Option<Rc<MapArt>>, character: usize, fresh: Option<Fresh>) -> Self {
         let mut hud = ui.layout(HUD);
         if let Some(h) = &mut hud {
             h.play("In", 0);
@@ -690,12 +727,173 @@ impl MapScene {
             mario_tex,
             art,
             character,
-            fresh_clear,
+            fresh,
+            demo: MapView::default(),
+            outro: None,
+            busy_until: 0,
+            house: None,
+            cues: Vec::new(),
         }
     }
 
     fn walking(&self) -> bool {
         !self.walk.is_empty()
+    }
+
+    /// The progress the map shows (the finished world during its outro).
+    fn shown<'a>(&'a self, p: &'a Progress) -> &'a Progress {
+        self.outro.as_ref().unwrap_or(p)
+    }
+
+    /// The scene theme of the world shown (its music).
+    fn theme(&self, world: &SuperWorld, p: &Progress) -> Option<u8> {
+        self.shown(p).world_map(world).map(|w| w.theme.min(7))
+    }
+
+    /// A map sound at tick `at`: `user`'s `key`, or what its animation `key` starts (`anim`).
+    fn cue_at(
+        &mut self,
+        at: i32,
+        user: &'static str,
+        key: &str,
+        anim: bool,
+        point: Option<&'static str>,
+    ) {
+        self.cues.push((
+            at,
+            MapCue {
+                user,
+                key: key.to_string(),
+                anim,
+                point,
+            },
+        ));
+    }
+
+    /// The map sounds due by now.
+    fn due_cues(&mut self) -> Vec<MapCue> {
+        let now = self.tick;
+        let (due, later) = std::mem::take(&mut self.cues)
+            .into_iter()
+            .partition::<Vec<_>, _>(|(t, _)| *t <= now);
+        self.cues = later;
+        due.into_iter().map(|(_, c)| c).collect()
+    }
+
+    /// The point at (x, y) turns cleared from `at`: its ToCleared and the sound its animation
+    /// starts (the course point's switch on its kind, the goal's castle crumbling), then the
+    /// player's clear jump [obs 0x7101471160 states 1–3]. Returns the tick the jump ends.
+    fn clear_point(&mut self, world: &SuperWorld, p: &Progress, order: usize, at: i32) -> i32 {
+        let Some(art) = self.art.clone() else {
+            return at;
+        };
+        let Some(w) = p.world_map(world) else {
+            return at;
+        };
+        let theme = w.theme.min(7);
+        let Some(pt) = w.course_order().get(order).and_then(|&i| w.points[i]) else {
+            return at;
+        };
+        let (x, y) = (pt.x as i32, pt.y as i32);
+        let goal = pt.kind == mmk_formats::smm2::world::PointKind::Goal;
+        let mut end = at;
+        if let Some(model) = art.spot_model(world, p, x, y) {
+            let sub = swmap::point_sub(w, x, y);
+            if let Some(anim) = art.state_anim(&model, swmap::PointState::ToCleared, theme, sub) {
+                let (user, kind) = if goal {
+                    (swmap::USER_GOAL, None)
+                } else {
+                    (swmap::USER_POINT, Some(swmap::point_kind(pt.icon)))
+                };
+                self.cue_at(at, user, &anim, true, kind);
+                end = at + art.anim_frames(&model, &anim);
+            }
+        }
+        self.demo.just_cleared.push((order, at));
+        // the player's jump where he stands
+        let here = w.cell(p.x as i32, p.y as i32);
+        let jump = art.player_anim(self.character, theme, here, "tocleared");
+        self.demo.player_anim = Some(("tocleared", end));
+        self.cue_at(end, swmap::USER_PLAYER, &jump, true, None);
+        end + art.anim_frames(swmap::player_model(self.character), &jump)
+    }
+
+    /// Start what the map opens on, now that the world is known.
+    fn open(&mut self, world: &SuperWorld, p: &Progress) {
+        let Some(fresh) = self.fresh.take() else {
+            return;
+        };
+        if self.art.is_none() {
+            return;
+        }
+        let t = self.tick + 1;
+        match fresh {
+            Fresh::Course(order) => {
+                let Some(w) = p.world_map(world) else { return };
+                let cleared = p.clears.get(p.world).copied().unwrap_or(0);
+                let before = sw::reachable(w, cleared & !(1 << order));
+                let jumped = self.clear_point(world, p, order, t);
+                let at = jumped + REVEAL_WAIT;
+                self.demo.reveal = Some((before, at));
+                self.busy_until = self.reveal(world, p, before, at);
+            }
+            Fresh::World(old) => {
+                let order = world
+                    .courses
+                    .get(old.world)
+                    .map_or(0, |c| c.len().saturating_sub(1));
+                let jumped = self.clear_point(world, &old, order, t);
+                let fire = jumped + REVEAL_WAIT;
+                self.demo.cannon = Some(fire);
+                self.outro = Some(old);
+                self.busy_until = fire;
+            }
+        }
+    }
+
+    /// The roads and points a clear opened appear at `at` (the cells reached before it:
+    /// `before`): the roads' sound, a sound if a point appears, the goal rising [obs
+    /// 0x7101471160 states 5–7: `wayAppear` when cells opened, `courseAppearEffect` once for a
+    /// point among them, the goal's `AppearGoalPoint` waited for]. Returns the tick it ends.
+    fn reveal(&mut self, world: &SuperWorld, p: &Progress, before: u32, at: i32) -> i32 {
+        let (Some(art), Some(w)) = (self.art.clone(), p.world_map(world)) else {
+            return at;
+        };
+        let cleared = p.clears.get(p.world).copied().unwrap_or(0);
+        let new = sw::reachable(w, cleared) & !before;
+        if new == 0 {
+            return at;
+        }
+        self.cue_at(at, swmap::USER_SCENE, "wayAppear", false, None);
+        let theme = w.theme.min(7);
+        let mut end = at + swmap::REVEAL_FRAMES;
+        let mut point = false;
+        for y in 0..mmk_formats::smm2::world::GRID_H as i32 {
+            for x in 0..mmk_formats::smm2::world::GRID_W as i32 {
+                if !swmap::in_mask(new, x, y) {
+                    continue;
+                }
+                match sw::spot(w, x, y) {
+                    Spot::Course { goal: true, .. } => {
+                        let Some(model) = art.spot_model(world, p, x, y) else {
+                            continue;
+                        };
+                        let sub = swmap::point_sub(w, x, y);
+                        let state = swmap::PointState::AppearGoalPoint;
+                        if let Some(anim) = art.state_anim(&model, state, theme, sub) {
+                            self.cue_at(at, swmap::USER_GOAL, &anim, true, None);
+                            end = end.max(at + art.anim_frames(&model, &anim));
+                        }
+                    }
+                    Spot::Course { .. } | Spot::Pipe(_) | Spot::ToadHouse(_) => point = true,
+                    _ => {}
+                }
+            }
+        }
+        if point {
+            self.cue_at(at, swmap::USER_SCENE, "courseAppearEffect", false, None);
+        }
+        end
     }
 
     /// Mario's drawn position (cells).
@@ -716,10 +914,15 @@ impl MapScene {
         p: &mut Progress,
     ) -> Option<MapEvent> {
         self.tick += 1;
+        self.open(world, p);
+        self.step_outro(world, p);
         let pressed = input.pressed | script.step();
         let Some(w) = p.world_map(world) else {
             return Some(MapEvent::Quit);
         };
+        if self.tick < self.busy_until {
+            return None;
+        }
         if let Some(&(nx, ny)) = self.walk.first() {
             self.facing = (nx - p.x as i32, ny - p.y as i32);
             if self.tick - self.walk_start >= WALK_TICKS {
@@ -757,13 +960,22 @@ impl MapScene {
             return None;
         }
         if pressed.has(Buttons::CONFIRM) {
+            let t = self.tick;
             return match sw::spot(w, p.x as i32, p.y as i32) {
                 Spot::Course { .. } => {
-                    self.ui.sound_button(HUD, "L_EndBtn_00", Event::Decide);
+                    // [obs 0x7101474c70: the player's `courseIn` as the course is entered]
+                    self.cue_at(t, swmap::USER_PLAYER, "courseIn", false, None);
                     Some(MapEvent::Play)
                 }
-                Spot::Pipe(_) => Some(MapEvent::Pipe),
-                Spot::ToadHouse(k) => Some(MapEvent::ToadHouse(k)),
+                Spot::Pipe(_) => {
+                    // into the pipe: what the player's `dokan_in` starts (`mw_DokanIn`)
+                    self.cue_at(t, swmap::USER_PLAYER, "dokan_in", true, None);
+                    Some(MapEvent::Pipe)
+                }
+                Spot::ToadHouse(k) => {
+                    self.house = Some(k);
+                    Some(MapEvent::ToadHouse(k))
+                }
                 _ => None,
             };
         }
@@ -774,9 +986,85 @@ impl MapScene {
         None
     }
 
+    /// The finished world's cannon: its prepare, its launch (the player shot off), then the
+    /// next world with the player landing [obs: the goal's `fire` starts `nextWorld`, its
+    /// `CannonPrepareLaunch` / `CannonLaunch` rows; inf: the order and the flight's length].
+    fn step_outro(&mut self, world: &SuperWorld, p: &Progress) {
+        let (Some(art), Some(old), Some(fire)) =
+            (self.art.clone(), self.outro.clone(), self.demo.cannon)
+        else {
+            return;
+        };
+        let Some(w) = old.world_map(world) else {
+            return;
+        };
+        let theme = w.theme.min(7);
+        let sub = swmap::point_sub(w, old.x as i32, old.y as i32);
+        let frames = |state| {
+            art.state_anim(swmap::CANNON, state, theme, sub)
+                .map(|a| (art.anim_frames(swmap::CANNON, &a), a))
+                .unwrap_or_default()
+        };
+        let (prep, _) = frames(swmap::PointState::CannonPrepareLaunch);
+        let (launch, launch_anim) = frames(swmap::PointState::CannonLaunch);
+        let t = self.tick;
+        if t == fire + prep {
+            self.demo.hide_player = true;
+            self.cue_at(t, swmap::USER_GOAL, &launch_anim, true, None);
+        }
+        if t >= fire + prep + launch + CANNON_FLIGHT {
+            // the next world: the player lands on its start
+            self.outro = None;
+            self.demo = MapView::default();
+            let landing = p.world_map(world).map_or_else(
+                || "landing".to_string(),
+                |w| {
+                    let here = w.cell(p.x as i32, p.y as i32);
+                    art.player_anim(self.character, w.theme.min(7), here, "landing")
+                },
+            );
+            self.demo.player_anim = Some(("landing", t));
+            self.cue_at(t, swmap::USER_PLAYER, &landing, true, None);
+            self.busy_until = t + art.anim_frames(swmap::player_model(self.character), &landing);
+        } else {
+            self.busy_until = self.busy_until.max(t + 1);
+        }
+    }
+
+    /// The Toad House's minigame ended: the house, used, turns cleared [obs: its `ToCleared`
+    /// row; the user's `tocleared_ftp` starts its sound at frame 10].
+    fn house_done(&mut self, world: &SuperWorld, p: &Progress) {
+        let (Some(k), Some(art)) = (self.house.take(), self.art.clone()) else {
+            return;
+        };
+        let Some(w) = p.world_map(world) else {
+            return;
+        };
+        let Some(h) = w.toad_houses.get(k).copied().flatten() else {
+            return;
+        };
+        if !p.toads.get(p.world).is_some_and(|t| t & (1 << k) != 0) {
+            return;
+        }
+        let (x, y) = (h.x as i32, h.y as i32);
+        let Some(model) = art.spot_model(world, p, x, y) else {
+            return;
+        };
+        let state = swmap::PointState::ToCleared;
+        let t = self.tick + 1;
+        if let Some(anim) = art.state_anim(&model, state, w.theme.min(7), swmap::point_sub(w, x, y))
+        {
+            self.demo.houses_used.push((k, t));
+            self.cue_at(t, swmap::USER_HOUSE, &anim, true, None);
+            self.busy_until = t + art.anim_frames(&model, &anim);
+        }
+    }
+
     /// The map; `prompts`: with the course name and the "Play" / "Enter" balloons (not under a
     /// minigame).
     fn draw(&mut self, out: &mut Vec<DrawItem>, world: &SuperWorld, p: &Progress, prompts: bool) {
+        let shown = self.outro.clone();
+        let p = shown.as_ref().unwrap_or(p);
         let Some(w) = p.world_map(world) else {
             return;
         };
@@ -789,7 +1077,7 @@ impl MapScene {
                 facing: self.facing,
                 since: self.tick - self.stopped,
                 character: self.character,
-                just_cleared: self.fresh_clear.map(|o| (o, 0)).into_iter().collect(),
+                ..self.demo.clone()
             };
             out.push(DrawItem::Layout {
                 ui: self.ui.kind(),
@@ -799,6 +1087,7 @@ impl MapScene {
         } else {
             self.draw_flat(out, w, p);
         }
+        let prompts = prompts && self.tick >= self.busy_until;
         self.draw_overlays(out, world, p, prompts);
     }
 
@@ -979,7 +1268,7 @@ impl MapScene {
             // above the point; below it on the top row (under the HUD) [inf]
             let below = p.y as usize + 1 == mmk_formats::smm2::world::GRID_H;
             b.hold("Direction", if below { 1.0 } else { 0.0 });
-            let dy = if below { -150.0 } else { 70.0 };
+            let dy = if below { -0.83 * CELL } else { 0.39 * CELL };
             b.set_translate("N_Pos_00", [c[0], c[1] + dy]);
             b.text("T_Title_00", &course.name);
             push_layout(out, b, self.tick);
@@ -997,7 +1286,7 @@ impl MapScene {
             if let Some(t) = self.ui.message("MyWEdit_PlayBalloonPos_00", label) {
                 b.text("L_Balloon_00/T_Challenge_00", &t);
             }
-            b.set_translate("N_Pos_00", [c[0] + 110.0, c[1] - 40.0]);
+            b.set_translate("N_Pos_00", [c[0] + 0.61 * CELL, c[1] - 0.22 * CELL]);
             push_layout(out, b, self.tick);
         }
         if let Some(h) = &mut self.hud {
@@ -1082,6 +1371,8 @@ pub struct SuperWorldFlow {
     leaving: bool,
     /// The game's map models (loaded once; None: the flat map).
     art: Option<Rc<MapArt>>,
+    /// The map music asked of the host (its theme), None: none.
+    music: Option<u8>,
     /// The player's character (the map's player model).
     character: usize,
     /// Captures: menu presses at global UI ticks.
@@ -1131,6 +1422,7 @@ impl SuperWorldFlow {
             run: None,
             players: 1,
             leaving: false,
+            music: None,
             art: MapArt::load(ui).map(Rc::new),
             character: cx
                 .host
@@ -1162,7 +1454,7 @@ impl SuperWorldFlow {
 
     /// The map scene of the run (the course cleared last turns cleared on it).
     fn map_scene(&mut self) -> Box<MapScene> {
-        let fresh = self.run.as_mut().and_then(|r| r.fresh_clear.take());
+        let fresh = self.run.as_mut().and_then(|r| r.fresh.take());
         Box::new(MapScene::new(
             &self.ui,
             self.art.clone(),
@@ -1193,7 +1485,7 @@ impl SuperWorldFlow {
             progress,
             course: None,
             cleared: None,
-            fresh_clear: None,
+            fresh: None,
         });
         if let Some(t) = TitleScene::new(&self.ui, maker.as_deref(), can_continue) {
             self.stage = Stage::Title(Box::new(t));
@@ -1254,8 +1546,19 @@ impl SuperWorldFlow {
         }
     }
 
+    /// The map's music: the shown world's theme on the map, else none (a course, a minigame,
+    /// another screen) [obs 0x710148e900].
+    fn set_music(&mut self, cx: &mut Cx, want: Option<u8>) {
+        if self.music != want {
+            self.music = want;
+            cx.host.map_music(want);
+        }
+    }
+
     /// Play the course under Mario.
     fn play(&mut self, cx: &mut Cx) {
+        // the map's music stops before the course's own starts
+        self.set_music(cx, None);
         let ui = self.ui.clone();
         cx.host.set_players(self.players.max(1));
         let Some(run) = &mut self.run else {
@@ -1322,9 +1625,16 @@ impl SuperWorldFlow {
         };
         let mut next = SuperWorldGo::Map;
         if let Some(order) = run.cleared.take() {
+            let before = run.progress.clone();
             match run.progress.clear(&run.world, order) {
-                ClearResult::Map => run.fresh_clear = Some(order),
+                ClearResult::Map => run.fresh = Some(Fresh::Course(order)),
                 ClearResult::WorldClear => {
+                    // the finished world, its goal cleared, until the cannon has fired
+                    let mut old = before;
+                    if let Some(c) = old.clears.get_mut(old.world) {
+                        *c |= 1 << order;
+                    }
+                    run.fresh = Some(Fresh::World(old));
                     cx.toast(&format!(
                         "{} {}!",
                         self.ui
@@ -1346,8 +1656,20 @@ impl SuperWorldFlow {
 
     pub fn step(&mut self, input: &PlayInput, cx: &mut Cx) -> Option<SuperWorldEvent> {
         if matches!(self.stage, Stage::None) {
+            self.set_music(cx, None);
             return Some(SuperWorldEvent::Exit);
         }
+        // the map's sounds and music
+        let want = match (&mut self.stage, &self.run) {
+            (Stage::Map(m), Some(run)) => {
+                for c in m.due_cues() {
+                    cx.host.map_sound(c.user, &c.key, c.anim, c.point);
+                }
+                m.theme(&run.world, &run.progress)
+            }
+            _ => None,
+        };
+        self.set_music(cx, want);
         if self.leaving && !matches!(self.stage, Stage::Playing(_)) {
             // (the fade is covering the screen; its scene change comes next)
             return None;
@@ -1422,6 +1744,9 @@ impl SuperWorldFlow {
             Stage::Map(m) => {
                 let run = self.run.as_mut()?;
                 let ev = m.step(ui, &mut self.script, &run.world, &mut run.progress);
+                for c in m.due_cues() {
+                    cx.host.map_sound(c.user, &c.key, c.anim, c.point);
+                }
                 if !m.walking() && ev.is_none() {
                     return None;
                 }
@@ -1462,8 +1787,10 @@ impl SuperWorldFlow {
                     let run = self.run.as_mut()?;
                     run.progress.add_lives(n);
                     run.persist(cx);
-                    if let Stage::Minigame(map, _) = std::mem::replace(&mut self.stage, Stage::None)
+                    if let Stage::Minigame(mut map, _) =
+                        std::mem::replace(&mut self.stage, Stage::None)
                     {
+                        map.house_done(&run.world, &run.progress);
                         self.stage = Stage::Map(map);
                     }
                 }
@@ -1589,8 +1916,10 @@ impl SuperWorldFlow {
     }
 
     /// Captures: open the library's test world at `what` ("title", "map", "walk": the map with
-    /// `cleared` courses of world 1 cleared and Mario on the next, "theme<n>": that map in theme
-    /// n, "play": its first course,
+    /// `cleared` courses of world 1 cleared and Mario on the next, "clear": the last of them just
+    /// cleared (its point turning cleared, the roads appearing), "worldclear": world 1's goal
+    /// just cleared (the cannon to world 2), "theme<n>": that map in theme n, "play": its first
+    /// course,
     /// "minigame0" / "minigame1" / "minigame2": Match / Pop / Catch & Win in its Toad House,
     /// "ending").
     pub fn debug_open(&mut self, cx: &mut Cx, what: &str, cleared: usize) -> bool {
@@ -1631,6 +1960,37 @@ impl SuperWorldFlow {
         }
         match what {
             "map" | "walk" => self.stage = Stage::Map(self.map_scene()),
+            // the last of the `cleared` courses just cleared: its point turns cleared, the
+            // player jumps, the roads it opened appear
+            "clear" if cleared > 0 => {
+                let run = self.run.as_mut().expect("opened");
+                let order = (cleared - 1).min(run.world.courses[0].len().saturating_sub(2));
+                if let Some(wm) = run.progress.world_map(&run.world)
+                    && let Some(p) = wm.course_order().get(order).and_then(|&i| wm.points[i])
+                {
+                    (run.progress.x, run.progress.y) = (p.x, p.y);
+                }
+                run.fresh = Some(Fresh::Course(order));
+                self.stage = Stage::Map(self.map_scene());
+            }
+            // world 1's goal just cleared: the castle crumbles, the cannon fires, world 2
+            "worldclear" => {
+                let run = self.run.as_mut().expect("opened");
+                let n = run.world.courses[0].len();
+                for k in 0..n.saturating_sub(1) {
+                    run.progress.clear(&run.world, k);
+                }
+                if let Some(wm) = run.progress.world_map(&run.world)
+                    && let Some(p) = wm.course_order().last().and_then(|&i| wm.points[i])
+                {
+                    (run.progress.x, run.progress.y) = (p.x, p.y);
+                }
+                let mut old = run.progress.clone();
+                old.clears[0] |= 1 << (n - 1);
+                run.progress.clear(&run.world, n - 1);
+                run.fresh = Some(Fresh::World(old));
+                self.stage = Stage::Map(self.map_scene());
+            }
             "play" => {
                 let run = self.run.as_mut().expect("opened");
                 if let Some(wm) = run.progress.world_map(&run.world)
@@ -1775,8 +2135,21 @@ mod tests {
         }
         assert_eq!(flow(&mut f).stage_name(), "map");
         assert_eq!(saved(&host)["clears"][0], 1);
-        // now the way on is open
+        // the map's music played before the course and again after it, stopped meanwhile
+        assert_eq!(host.map_music[..2], [Some(0), None]);
+        // the point turns cleared, the player jumps, the road on appears; meanwhile the
+        // player can't walk
         host.status = Default::default();
+        press(&mut f, &mut host, Buttons::RIGHT);
+        idle(&mut f, &mut host, 20);
+        assert_eq!(flow(&mut f).progress().unwrap().1.x, 1);
+        idle(&mut f, &mut host, 200);
+        assert_eq!(host.map_music.last(), Some(&Some(0)));
+        let keys: Vec<&str> = host.map_sounds.iter().map(|(_, k)| k.as_str()).collect();
+        assert!(keys.contains(&"courseIn"), "{keys:?}");
+        assert!(keys.contains(&"@tocleared"), "{keys:?}");
+        assert!(keys.contains(&"wayAppear"), "{keys:?}");
+        // now the way on is open
         press(&mut f, &mut host, Buttons::RIGHT);
         idle(&mut f, &mut host, 40);
         assert_eq!(flow(&mut f).progress().unwrap().1.x, 3);

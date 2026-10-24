@@ -37,14 +37,16 @@ sway, importer and pack 12, the dev cache already at v12).
   offset to ours (the same courses whose backdrops are off) [inf]; captures of the track tiles in play and of NSMBU / 3D World wings (the mesh
   planner maps `M1_Enemy_wingcommon` to `<style>_Enemy_wingcommon`), a look at Water Level mode
   and custom scroll in the recomp (`research/tools/maker-look`: touch taps / drags by script).
-- **Agent queue** (when a helper slot frees; running 2026-10-25: the map's leftovers): ✅ a Koopaling in a Clown Car (2026-10-25, branch
+- **Agent queue** (when a helper slot frees; running 2026-10-25: the EnemySys leftovers — the
+  Fire Clown Car's fireballs with an enemy rider, water-only entry variants, untraced Block Outs,
+  pipe / parachute leftovers): ✅ a Koopaling in a Clown Car (2026-10-25, branch
   `kclown`, research 120-koopalings.md "In a Koopa Clown Car": KoKoopaDefault's Clown vtable
   0x71028b6120 shared by all seven — Lemmy / Roy override only the setup; Move fires the
   controller's timed volleys, a hit stops the car (KoopaJrStop) while he ducks in and comes back
-  in his shell for 300 frames, HP only in Move; tgr2 273/273; left: the Fire car's own fireballs
-  with an enemy rider, NSMBU's shell yaw spin); the Super World map's ledge cliffs (field atlas
-  rows 6–7), map ghosts, the goal's AppearGoalPoint / cannon and Passable states, the map music
-  (branch `swmap` drew the map with the game's models); ✅ the Cursed Key and Phanto (2026-10-25,
+  in his shell for 300 frames, HP only in Move; tgr2 273/273; left: NSMBU's shell yaw spin);
+  ✅ the Super World map's music, sounds, point / goal / road states and ledge cliffs
+  (2026-10-25, branch `swmap2`, game pack 14; left: `passPoint`, the camera, ghosts are online);
+  ✅ the Cursed Key and Phanto (2026-10-25,
   research 95-key.md; co-op: Phanto hurts only the player in front [inf]); ✅ SMM1 UI sounds for
   the SMM1-look 100 Mario (2026-10-25, branch `smm1snd`, research smm1-sound.md: SMM1's SLink2DB
   v0x15 decoded; the import's `ui/sound/`, SMM1 importer 4; the screens fire the data's keys and
@@ -374,8 +376,20 @@ sway, importer and pack 12, the dev cache already at v12).
   (used ones cleared), the castle / last castle / airship goal, the player walking / swimming /
   flying / climbing by `WM_PlayerAnime` with N / S / side views. Row 0 is the map's bottom row
   (the field builder's art; up walks to row + 1). Captures `superworld-theme<n>`,
-  `superworld-json:<file>`. ⬜ the ledges' cliff faces, ghosts, AppearGoalPoint / cannon /
-  Passable, the map music and sounds
+  `superworld-json:<file>`.
+- ✅ The map's music, sounds and moments (2026-10-25, branch `swmap2`; spec §7.4–7.8): each
+  theme's `BGM_WorldMap_<Theme>_Play` (main+0x294bb50), the `MyWorld*` SLink users in the game
+  pack (importer / pack 14) played through `Host::map_music` / `map_sound` (the maker's director:
+  keys and the data's action triggers on the models' animations, `@point` for the course point's
+  kind); a clear plays the point's ToCleared, the player's jump, then the reveal (roads hidden
+  until reached appear, points pop `Passable`, the goal rises `AppearGoalPoint`; `wayAppear`,
+  `courseAppearEffect`, castle sounds); a used Toad House's ToCleared; a world's goal: castle
+  crumbles, the cannon's prepare / launch (`nextWorld`), the next world's landing; unreached
+  points stand still; the goal model by world / water / course (0x71014437e0); the ledges'
+  cliffs from the atlas rows 6–7 [inf placement]. Captures `superworld-clear`,
+  `superworld-worldclear`. ⬜ `passPoint` (the game walks through some points: 0x7101472450's
+  stop flag not read), the map camera (the view keeps the map's height [inf]), the cliffs' row-7
+  pieces, map ghosts (online: other players' runs with name balloons)
 - ✅ Toad House minigames (`super-worlds.md` §6, read from the three sequences): each house runs
   its kind from the world data over the map — MATCH & WIN (`MyWEdit_Minigame_00`: three strips
   at 45 / 30 / 50 a frame, top and bottom left, centre right; A stops them in turn, four slots on;

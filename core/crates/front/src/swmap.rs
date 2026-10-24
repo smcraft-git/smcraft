@@ -35,7 +35,10 @@ pub const NO_PIECE: u8 = 0xff;
 /// The "nothing area" set follows the water set in the atlas [obs: table value + 0x30].
 pub const MAIN_SET: u8 = 48;
 /// The view: the whole map's height (4 cells; its width, 7 cells, nearly fills 16:9) over its
-/// middle [inf], onto 1280 × 720.
+/// middle, onto 1280 × 720 [inf: the field builder makes every position beyond the map a pond
+/// (its neighbours out of the map count as land, 0x71014519a0), a ring the game cannot mean to
+/// show; a 16:9 view of the field grid's six rows would show it all round. The map camera
+/// itself was not found (spec §7.7)].
 pub const VIEW_H: f32 = 192.0;
 pub const SCALE: f32 = 720.0 / VIEW_H;
 /// The map's middle (world units).
@@ -208,6 +211,14 @@ pub struct Field {
     pub main: [[u8; FIELD_W]; FIELD_H],
 }
 
+/// The field counts (x, y) as land: a land cell, or the point a ledge's ladder climbs to
+/// [inf: the ledge actor reaches into it, and the builder asks its flags +0xbd4 / +0xbd5 there].
+fn is_land(w: &World, x: i32, y: i32) -> bool {
+    let ladder_top =
+        w.cell(x, y - 1).is_some_and(|c| c.kind == road::LEDGE) && w.links(x, y - 1) & SOUTH != 0;
+    w.cell(x, y).is_some_and(land_cell) || ladder_top
+}
+
 /// Build the field of world `w` (`sub`: the theme's empty area is water, SceneDB
 /// `NothingAreaAttr` "Sub"), as the game's builder [obs 0x71014519a0]:
 /// - water layer: in a "Sub" theme every position without land gets the water piece of its
@@ -220,12 +231,8 @@ pub struct Field {
 pub fn field(w: &World, sub: bool) -> Field {
     let table = piece_table();
     let cell = |x: i32, y: i32| w.cell(x, y);
-    // the cell a ledge's ladder climbs to stands on land too [inf: the ledge actor reaches
-    // into it, and the builder asks its flags +0xbd4 / +0xbd5 there]
-    let ladder_top = |x: i32, y: i32| {
-        cell(x, y - 1).is_some_and(|c| c.kind == road::LEDGE) && w.links(x, y - 1) & SOUTH != 0
-    };
-    let land = |x: i32, y: i32| cell(x, y).is_some_and(land_cell) || ladder_top(x, y);
+    // the cell a ledge's ladder climbs to stands on land too
+    let land = |x: i32, y: i32| is_land(w, x, y);
     let outside = |x: i32, y: i32| cell(x, y).is_none();
     let has_piece = |x: i32, y: i32| cell(x, y).is_some_and(|c| c.kind != road::NONE);
     let mut f = Field {
@@ -270,6 +277,62 @@ pub fn field(w: &World, sub: bool) -> Field {
     f
 }
 
+// MARK: the ledges' cliffs
+
+/// Field atlas pieces of the ledges' cliffs, rows 6–7, each set a single piece then a left,
+/// middle and right one [obs: the atlases]: the plateau's top, the cliff face over land, the
+/// face meeting water (then a water and a land tile; row 7: clouds, bushes, water blobs).
+pub const CLIFF_TOP: u8 = 96;
+pub const CLIFF_FACE: u8 = 100;
+pub const CLIFF_FACE_WATER: u8 = 104;
+
+/// One cliff piece: the atlas piece and the cell it covers (the world's x, y).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CliffPiece {
+    pub piece: u8,
+    pub x: i32,
+    pub y: i32,
+}
+
+/// The cliffs of the ledges: per ledge the face over its own cell and the plateau's top over
+/// the cell its ladder climbs to, single, or left / middle / right in a row of ledges; the face
+/// meets the water where its cell's lower neighbour is water in a "Sub" theme [obs: the atlas
+/// rows; 0x7101445230 (the ledge actor) sorts each ledge's neighbours left and right into roads
+/// and ledges joined in a row; inf: which cell each piece covers — the ledge actor's drawing
+/// was not read].
+pub fn cliffs(w: &World, sub: bool) -> Vec<CliffPiece> {
+    let ledge = |x: i32, y: i32| w.cell(x, y).is_some_and(|c| c.kind == road::LEDGE);
+    let mut out = Vec::new();
+    for y in 0..GRID_H as i32 {
+        for x in 0..GRID_W as i32 {
+            if !ledge(x, y) {
+                continue;
+            }
+            let at = match (ledge(x - 1, y), ledge(x + 1, y)) {
+                (false, false) => 0,
+                (false, true) => 1,
+                (true, true) => 2,
+                (true, false) => 3,
+            };
+            let water = sub
+                && !is_land(w, x, y - 1)
+                && w.cell(x, y - 1).is_none_or(|c| c.kind != road::LEDGE);
+            let face = if water { CLIFF_FACE_WATER } else { CLIFF_FACE };
+            out.push(CliffPiece {
+                piece: face + at,
+                x,
+                y,
+            });
+            out.push(CliffPiece {
+                piece: CLIFF_TOP + at,
+                x,
+                y: y + 1,
+            });
+        }
+    }
+    out
+}
+
 // MARK: models chosen
 
 /// The course point model of `icon` in theme `theme` [obs 0x710143d170: the models in icon
@@ -303,14 +366,49 @@ pub fn point_model(icon: u8, theme: u8) -> String {
     format!("MyWorld_Point_{base}{variant}")
 }
 
-/// The goal's model: the last world's castle, an airship (icon 1) or a castle [inf: the six
-/// goal models of 0x7101442b30, `_notset` ones for the maker].
-pub fn goal_model(icon: u8, last_world: bool) -> &'static str {
-    match (icon, last_world) {
-        (1, _) => "MyWorld_Point_airship_castle",
-        (_, true) => "MyWorld_Point_castle_end",
-        _ => "MyWorld_Point_castle",
+/// The goal's model [obs 0x71014437e0, the goal's model index; the models in the order of
+/// 0x7101442b30]: in the last world the end castle, else on a water cell the airship castle,
+/// else the castle; each its `_notset` form while no course is set (the maker).
+pub fn goal_model(last_world: bool, water: bool, has_course: bool) -> &'static str {
+    match (last_world, water, has_course) {
+        (true, _, true) => "MyWorld_Point_castle_end",
+        (true, _, false) => "MyWorld_Point_castle_end_notset",
+        (false, true, true) => "MyWorld_Point_airship_castle",
+        (false, true, false) => "MyWorld_Point_airship_castle_notset",
+        (false, false, true) => "MyWorld_Point_castle",
+        (false, false, false) => "MyWorld_Point_castle_notset",
     }
+}
+
+/// The cannon that stands at a cleared goal and shoots the player to the next world (model 6 of
+/// 0x7101442b30; its `fire_st` / `fire` are the `CannonPrepareLaunch` / `CannonLaunch` rows).
+pub const CANNON: &str = "MyWorld_Point_dokancannon";
+
+/// The course point kinds the map's sounds switch on (`@point`), in icon order [obs: SLink user
+/// `MyWorldCoursePoint`'s `tocleared` switch; inf: icon order — the enemy points' order matches
+/// G's snow form (Sambo) and E's night one (Wanwan)].
+pub const POINT_KINDS: [&str; 16] = [
+    "Normal",
+    "Water",
+    "Desert",
+    "Snow",
+    "Woods",
+    "HauntedHouse",
+    "Tower",
+    "Airship",
+    "Kuribo",
+    "Nokonoko",
+    "Pakkun",
+    "Pukupuku",
+    "Wanwan",
+    "Bros",
+    "Sambo",
+    "Kinokopoison",
+];
+
+/// The `@point` value of a course point's icon.
+pub fn point_kind(icon: u8) -> &'static str {
+    POINT_KINDS[(icon as usize).min(15)]
 }
 
 /// The model a cell's piece is drawn with in skin `skin`: roads (on water the `_s` ones),
@@ -346,16 +444,23 @@ pub fn road_arms(links: u8) -> u8 {
     out
 }
 
-/// The road state frame of a cell's centre piece (the road models' texture patterns, frames
-/// 0–4: none, the road, the road not reached, and both again small): the large pad under a
-/// point, pipe or Toad House, the small one along the road [inf].
-pub fn centre_frame(reached: bool, spot: bool) -> f32 {
-    match (spot, reached) {
-        (true, true) => 1.0,
-        (true, false) => 2.0,
-        (false, true) => 3.0,
-        (false, false) => 4.0,
+/// Frames a road a clear opened shows its appearing state, and a point it reached its
+/// `Passable` pop [inf: the pop's length, 16 frames; the game plays the arms' patterns on from
+/// the appearing frame 0x71014812b0].
+pub const REVEAL_FRAMES: i32 = 16;
+
+/// The road state frame (the road models' texture patterns) of an arm or a cell's centre
+/// piece [obs 0x710144e030: an arm between two reached cells takes 0x710144e390's frame, 1 (3
+/// capped), else 0x710144e160's: 0 while it waits for a reveal, 2 / 4 (the ground's shade) as a
+/// reveal sets it 0x71014807f0]: None while hidden; the road (1); appearing (2). A centre piece
+/// takes the large pad (1 / 2) under a point, pipe or Toad House, the small one (3 / 4) along the
+/// road [inf].
+pub fn road_frame(shown: bool, appearing: bool, centre_road: bool) -> Option<f32> {
+    if !shown {
+        return None;
     }
+    let base = if centre_road { 3.0 } else { 1.0 };
+    Some(if appearing { base + 1.0 } else { base })
 }
 
 /// The shape of a ledge model (drawn turned half round) that draws the arm of link `bit`
@@ -584,6 +689,25 @@ fn quad_flags() -> u32 {
         | (mmk_ui::COMBINE_NONE << mmk_ui::SHIFT_COMBINE_ALPHA)
 }
 
+/// One 48-unit field atlas piece (16 × 8 of them) centred on `center` (world units).
+fn atlas_quad(tex: u32, piece: u8, center: [f32; 2]) -> Quad {
+    let (u0, v0) = ((piece % 16) as f32 / 16.0, (piece / 16) as f32 / 8.0);
+    let (u1, v1) = (u0 + 1.0 / 16.0, v0 + 1.0 / 8.0);
+    let h = CELL / 2.0;
+    let p = |dx: f32, dy: f32| to_layout([center[0] + dx, center[1] + dy]);
+    Quad {
+        pos: [p(-h, h), p(h, h), p(-h, -h), p(h, -h)],
+        uv0: [[u0, v0], [u1, v0], [u0, v1], [u1, v1]],
+        color: [[255; 4]; 4],
+        black: [0, 0, 0, 0],
+        white: [255; 4],
+        tex0: tex,
+        tex1: mmk_ui::TEXTURE_NONE,
+        flags: quad_flags(),
+        ..Default::default()
+    }
+}
+
 impl MapArt {
     /// The import's map description; None for an import without it (the flat map is drawn).
     pub fn load(ui: &Ui) -> Option<Self> {
@@ -736,6 +860,25 @@ impl MapArt {
         }
     }
 
+    /// The cliff pieces of the ledges (over the field, under the roads).
+    fn emit_cliffs(&self, ui: &Ui, theme: u8, pieces: &[CliffPiece], out: &mut Vec<Drawn>) {
+        let skin = SKINS.get(theme as usize).copied().unwrap_or("plain");
+        let name = format!("MyWorld_Field_{skin}");
+        if pieces.is_empty() {
+            return;
+        }
+        let Some(t) = ui.cache_mut().texture_file(&name, &name) else {
+            return;
+        };
+        for c in pieces {
+            let center = cell_world(c.x as f32, c.y as f32);
+            out.push(Drawn {
+                key: (1, 2, -c.y, out.len()),
+                quad: atlas_quad(t.id, c.piece, center),
+            });
+        }
+    }
+
     /// The field atlas pieces of `field` for theme `theme`.
     fn emit_field(&self, ui: &Ui, theme: u8, field: &Field, out: &mut Vec<Drawn>) {
         let skin = SKINS.get(theme as usize).copied().unwrap_or("plain");
@@ -750,23 +893,9 @@ impl MapArt {
                         continue;
                     }
                     let center = [c as f32 * CELL - 72.0, r as f32 * CELL - 24.0];
-                    let (u0, v0) = ((piece % 16) as f32 / 16.0, (piece / 16) as f32 / 8.0);
-                    let (u1, v1) = (u0 + 1.0 / 16.0, v0 + 1.0 / 8.0);
-                    let h = CELL / 2.0;
-                    let p = |dx: f32, dy: f32| to_layout([center[0] + dx, center[1] + dy]);
                     out.push(Drawn {
                         key: (1, layer as i32, 0, out.len()),
-                        quad: Quad {
-                            pos: [p(-h, h), p(h, h), p(-h, -h), p(h, -h)],
-                            uv0: [[u0, v0], [u1, v0], [u0, v1], [u1, v1]],
-                            color: [[255; 4]; 4],
-                            black: [0, 0, 0, 0],
-                            white: [255; 4],
-                            tex0: t.id,
-                            tex1: mmk_ui::TEXTURE_NONE,
-                            flags: quad_flags(),
-                            ..Default::default()
-                        },
+                        quad: atlas_quad(t.id, piece, center),
                     });
                 }
             }
@@ -776,8 +905,53 @@ impl MapArt {
 
 // MARK: the scene of one frame
 
-/// What the map scene shows besides the world: the player and its walk.
-#[derive(Clone, Debug)]
+/// A point's state as the animation table names it (`WM_PointPartsAnime` kinds `<State>_Main` /
+/// `<State>_Sub` and `AppearGoalPoint`) [obs: the kinds in the game's order, Wait_Main 0 …
+/// AppearGoalPoint 10, Passable_Main 11, Passable_Sub 12, picked by index in 0x71014409b0,
+/// 0x710143ff00, 0x71014830c0].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PointState {
+    Wait,
+    ToCleared,
+    Cleared,
+    CannonPrepareLaunch,
+    CannonLaunch,
+    AppearGoalPoint,
+    Passable,
+}
+
+impl PointState {
+    /// The table's kind.
+    fn kind(self, sub: bool) -> String {
+        let s = match self {
+            PointState::Wait => "Wait",
+            PointState::ToCleared => "ToCleared",
+            PointState::Cleared => "Cleared",
+            PointState::CannonPrepareLaunch => "CannonPrepareLaunch",
+            PointState::CannonLaunch => "CannonLaunch",
+            PointState::AppearGoalPoint => return "AppearGoalPoint".into(),
+            PointState::Passable => "Passable",
+        };
+        format!("{s}_{}", if sub { "Sub" } else { "Main" })
+    }
+
+    /// The animation's own name where the table has no row for the model.
+    fn plain(self) -> &'static str {
+        match self {
+            PointState::Wait => "wait",
+            PointState::ToCleared => "tocleared",
+            PointState::Cleared => "cleared",
+            PointState::CannonPrepareLaunch => "fire_st",
+            PointState::CannonLaunch => "fire",
+            PointState::AppearGoalPoint => "swim_appear",
+            PointState::Passable => "passable",
+        }
+    }
+}
+
+/// What the map scene shows besides the world: the player and its walk, and the moments a clear,
+/// a Toad House or a world's end play.
+#[derive(Clone, Debug, Default)]
 pub struct MapView {
     /// The map's tick (frames).
     pub tick: i32,
@@ -794,6 +968,18 @@ pub struct MapView {
     /// Course order indices cleared on this visit, with the tick their point's ToCleared
     /// started.
     pub just_cleared: Vec<(usize, i32)>,
+    /// A clear's reveal: the cells reached before it and the tick its roads and points appear;
+    /// before that tick the map stays as it was [obs 0x7101471160 states 5–7].
+    pub reveal: Option<(u32, i32)>,
+    /// Toad Houses used on this visit, with the tick their ToCleared started.
+    pub houses_used: Vec<(usize, i32)>,
+    /// The cleared goal's cannon and the tick it started to fire (its prepare, then its launch).
+    pub cannon: Option<i32>,
+    /// A one-off animation of the player (`tocleared`, `coursein`, `dokan_in`, `landing`; in its
+    /// route's form, `swim_tocleared` …) and the tick it started.
+    pub player_anim: Option<(&'static str, i32)>,
+    /// The player is not drawn (inside the cannon, flying to the next world).
+    pub hide_player: bool,
 }
 
 const PLAYERS: [&str; 4] = [
@@ -802,6 +988,41 @@ const PLAYERS: [&str; 4] = [
     "MyWorld_Player_KinopioMdl",
     "MyWorld_Player_KinopicoMdl",
 ];
+
+/// The player model of character `c` (0 Mario, 1 Luigi, 2 Toad, 3 Toadette).
+pub fn player_model(c: usize) -> &'static str {
+    PLAYERS[c.min(3)]
+}
+
+/// The SLink users of the map's actors [obs: the resource lists `MyWorld*.barslist`; spec §7.6].
+pub const USER_SCENE: &str = "MyWorldScene";
+pub const USER_PLAYER: &str = "MyWorldPlayer";
+pub const USER_POINT: &str = "MyWorldCoursePoint";
+pub const USER_GOAL: &str = "MyWorldGoalPoint";
+pub const USER_HOUSE: &str = "MyWorldKinokoHouse";
+
+/// Whether cell (x, y) is set in a [`sw::reachable`] mask.
+pub fn in_mask(mask: u32, x: i32, y: i32) -> bool {
+    (0..GRID_W as i32).contains(&x)
+        && (0..GRID_H as i32).contains(&y)
+        && mask & (1 << (y as usize * GRID_W + x as usize)) != 0
+}
+
+/// A point stands on water (its `_Sub` animations) [obs 0x7101440d60: the cell's water kind].
+pub fn point_sub(w: &World, x: i32, y: i32) -> bool {
+    w.cell(x, y).is_some_and(water_route)
+}
+
+/// What the map shows of world `w` at `tick`: the cells reached (the reveal's earlier set until
+/// it starts) and those a running reveal just opened.
+fn reach_at(w: &World, cleared: u8, view: &MapView) -> (u32, u32) {
+    let now = sw::reachable(w, cleared);
+    match view.reveal {
+        Some((before, at)) if view.tick < at => (before, 0),
+        Some((before, _)) => (now, now & !before),
+        None => (now, 0),
+    }
+}
 
 impl MapArt {
     /// The route kind of a cell for the animation tables: "main", "sub" (water), "bridge"
@@ -814,7 +1035,78 @@ impl MapArt {
         }
     }
 
-    /// Every quad of the map of the current world.
+    /// The animation of `state` for `model` in theme `theme` (`sub`: the point stands on
+    /// water): the table's row (the plain skin's where the theme has none), else the state's own
+    /// name, else `wait`.
+    pub fn state_anim(
+        &self,
+        model: &str,
+        state: PointState,
+        theme: u8,
+        sub: bool,
+    ) -> Option<String> {
+        self.anim_name("WM_PointPartsAnime", "kind", theme, &state.kind(sub))
+            .filter(|a| self.has_anim(model, a))
+            .or_else(|| {
+                let plain = state.plain();
+                self.has_anim(model, plain).then(|| plain.to_string())
+            })
+            .or_else(|| self.has_anim(model, "wait").then(|| "wait".into()))
+    }
+
+    /// Frames of animation `anim` of `model` (0 without it).
+    pub fn anim_frames(&self, model: &str, anim: &str) -> i32 {
+        self.models
+            .get(model)
+            .and_then(|m| m.anims.get(anim))
+            .map_or(0, |a| a.frames as i32)
+    }
+
+    /// The model of the point at (x, y) of the progress's world (None: a road or nothing).
+    pub fn spot_model(&self, sw: &SuperWorld, p: &Progress, x: i32, y: i32) -> Option<String> {
+        let w = p.world_map(sw)?;
+        let theme = w.theme.min(7);
+        Some(match sw::spot(w, x, y) {
+            Spot::Road => return None,
+            Spot::Start => "MyWorld_Point_start".into(),
+            Spot::Course { goal: true, order } => {
+                // (a course is set: the run has one for the goal's place in the order)
+                let water = w.cell(x, y).is_some_and(|c| c.flag & 0xf == 1);
+                goal_model(
+                    p.world + 1 >= sw.world_count(),
+                    water,
+                    sw.course(p.world, order).is_some(),
+                )
+                .into()
+            }
+            Spot::Course { .. } => point_model(w.point_at(x, y).map_or(0, |p| p.icon), theme),
+            Spot::Pipe(_) => "MyWorld_Point_dokan".into(),
+            Spot::ToadHouse(_) => "MyWorld_Point_kinokohouse_ingame".into(),
+        })
+    }
+
+    /// The player's form of a one-off animation `base` on its route (`swim_tocleared` on water,
+    /// `fly_landing` in the sky…), else `base`.
+    pub fn player_anim(
+        &self,
+        character: usize,
+        theme: u8,
+        here: Option<&Cell>,
+        base: &str,
+    ) -> String {
+        let model = PLAYERS[character.min(3)];
+        let walk = self
+            .anim_name("WM_PlayerAnime", "route", theme, Self::route(here))
+            .unwrap_or_else(|| "walk".into());
+        let formed = format!("{walk}_{base}");
+        if walk != "walk" && walk != "climb" && self.has_anim(model, &formed) {
+            formed
+        } else {
+            base.to_string()
+        }
+    }
+
+    /// Every quad of the map of the progress's world.
     pub fn draw(&self, ui: &Ui, sw: &SuperWorld, p: &Progress, view: &MapView) -> Vec<Quad> {
         let Some(w) = p.world_map(sw) else {
             return Vec::new();
@@ -841,22 +1133,22 @@ impl MapArt {
             },
             &mut out,
         );
-        self.emit_field(ui, theme, &field(w, self.sub_theme(theme)), &mut out);
-        // the road pieces and decorations: arms where the cell links, the road shown where it
-        // can be reached [inf]
+        let sub = self.sub_theme(theme);
+        self.emit_field(ui, theme, &field(w, sub), &mut out);
+        self.emit_cliffs(ui, theme, &cliffs(w, sub), &mut out);
         let cleared = p.clears.get(p.world).copied().unwrap_or(0);
-        let reach = sw::reachable(w, cleared);
-        let reached = |x: i32, y: i32| {
-            (0..GRID_W as i32).contains(&x)
-                && (0..GRID_H as i32).contains(&y)
-                && reach & (1 << (y as usize * GRID_W + x as usize)) != 0
-        };
+        let (reach, fresh) = reach_at(w, cleared, view);
+        let reveal_age = view.reveal.map_or(i32::MAX, |(_, at)| view.tick - at);
+        let appearing = |x: i32, y: i32| in_mask(fresh, x, y) && reveal_age < REVEAL_FRAMES;
+        // the road pieces and decorations: an arm shows between two reached cells, a centre
+        // piece on a reached cell (spec §7.4)
         for y in 0..GRID_H as i32 {
             for x in 0..GRID_W as i32 {
                 let Some(c) = w.cell(x, y) else { continue };
                 let Some(model) = cell_model(c, skin) else {
                     continue;
                 };
+                let at = cell_world(x as f32, y as f32);
                 if c.kind == 1 {
                     self.emit(
                         ui,
@@ -864,7 +1156,7 @@ impl MapArt {
                             model: &model,
                             anim: Some("wait"),
                             time: t,
-                            at: cell_world(x as f32, y as f32),
+                            at,
                             flip: false,
                             turn: false,
                             layer: 3,
@@ -876,102 +1168,51 @@ impl MapArt {
                     continue;
                 }
                 let links = w.links(x, y);
-                let open = reached(x, y);
                 let turn = c.kind == road::LEDGE;
-                // shown and hidden arms: the road's state frame 1 where both ends are reached
+                let piece = |arms: u8, frame: f32| Instance {
+                    model: &model,
+                    anim: None,
+                    time: 0.0,
+                    at,
+                    flip: false,
+                    turn,
+                    layer: 2,
+                    arms: Some(arms),
+                    pattern_frame: Some(frame),
+                };
                 for (bit, dx, dy) in [(1u8, 1, 0), (2, -1, 0), (4, 0, 1), (8, 0, -1)] {
                     if road_arms(links) & bit == 0 {
                         continue;
                     }
-                    let lit = open && reached(x + dx, y + dy);
-                    self.emit(
-                        ui,
-                        &Instance {
-                            model: &model,
-                            anim: None,
-                            time: 0.0,
-                            at: cell_world(x as f32, y as f32),
-                            flip: false,
-                            turn,
-                            layer: 2,
-                            arms: Some(if turn { ledge_shape(bit) } else { bit }),
-                            pattern_frame: Some(if lit { 1.0 } else { 2.0 }),
-                        },
-                        &mut out,
-                    );
+                    let shown = in_mask(reach, x, y) && in_mask(reach, x + dx, y + dy);
+                    let new = appearing(x, y) || appearing(x + dx, y + dy);
+                    if let Some(f) = road_frame(shown, new, false) {
+                        let arms = if turn { ledge_shape(bit) } else { bit };
+                        self.emit(ui, &piece(arms, f), &mut out);
+                    }
                 }
-                self.emit(
-                    ui,
-                    &Instance {
-                        model: &model,
-                        anim: None,
-                        time: 0.0,
-                        at: cell_world(x as f32, y as f32),
-                        flip: false,
-                        turn,
-                        layer: 2,
-                        arms: Some(ARM_CENTRE),
-                        pattern_frame: Some(centre_frame(open, sw::spot(w, x, y) != Spot::Road)),
-                    },
-                    &mut out,
-                );
+                let road_cell = sw::spot(w, x, y) == Spot::Road;
+                if let Some(f) = road_frame(in_mask(reach, x, y), appearing(x, y), road_cell) {
+                    self.emit(ui, &piece(ARM_CENTRE, f), &mut out);
+                }
             }
         }
         // points, pipes, Toad Houses
-        let last_world = p.world + 1 >= sw.world_count();
         for y in 0..GRID_H as i32 {
             for x in 0..GRID_W as i32 {
-                let spot = sw::spot(w, x, y);
-                let kind = if w.cell(x, y).is_some_and(water_route) {
-                    "Sub"
-                } else {
-                    "Main"
+                let Some((model, state, started, frozen)) =
+                    self.point_state(sw, p, view, (reach, fresh), x, y)
+                else {
+                    continue;
                 };
-                let (model, state, started) = match spot {
-                    Spot::Road => continue,
-                    Spot::Start => ("MyWorld_Point_start".to_string(), None, 0),
-                    Spot::Course { order, goal } => {
-                        let pt = w.point_at(x, y).copied();
-                        let icon = pt.map_or(0, |p| p.icon);
-                        let model = if goal {
-                            goal_model(icon, last_world).to_string()
-                        } else {
-                            point_model(icon, theme)
-                        };
-                        let done = cleared & (1 << order) != 0;
-                        let just = view.just_cleared.iter().find(|j| j.0 == order);
-                        let state = match (done, just) {
-                            (true, Some(_)) => "ToCleared",
-                            (true, None) => "Cleared",
-                            _ => "Wait",
-                        };
-                        (model, Some(state), just.map_or(0, |j| j.1))
-                    }
-                    Spot::Pipe(_) => ("MyWorld_Point_dokan".to_string(), Some("Wait"), 0),
-                    Spot::ToadHouse(k) => {
-                        let used = p.toads.get(p.world).is_some_and(|t| t & (1 << k) != 0);
-                        (
-                            "MyWorld_Point_kinokohouse_ingame".to_string(),
-                            Some(if used { "Cleared" } else { "Wait" }),
-                            0,
-                        )
-                    }
-                };
-                let anim = state.and_then(|s| {
-                    self.anim_name("WM_PointPartsAnime", "kind", theme, &format!("{s}_{kind}"))
-                        .filter(|a| self.has_anim(&model, a))
-                        .or_else(|| {
-                            let plain = s.to_ascii_lowercase();
-                            self.has_anim(&model, &plain).then_some(plain)
-                        })
-                });
-                let anim = anim.or_else(|| self.has_anim(&model, "wait").then(|| "wait".into()));
+                let anim =
+                    state.and_then(|s| self.state_anim(&model, s, theme, point_sub(w, x, y)));
                 self.emit(
                     ui,
                     &Instance {
                         model: &model,
                         anim: anim.as_deref(),
-                        time: t - started as f32,
+                        time: if frozen { 0.0 } else { t - started as f32 },
                         at: cell_world(x as f32, y as f32),
                         flip: false,
                         turn: false,
@@ -983,7 +1224,103 @@ impl MapArt {
                 );
             }
         }
-        // the player
+        if !view.hide_player {
+            self.emit_player(ui, w, theme, view, &mut out);
+        }
+        out.sort_by_key(|d| d.key);
+        out.into_iter().map(|d| d.quad).collect()
+    }
+
+    /// The point at (x, y): its model, state, the tick its animation started and whether it
+    /// stands still; None where nothing is drawn.
+    /// - A course point, pipe or Toad House not reached yet shows its Wait without moving
+    ///   [obs 0x71014409b0: the state's animation runs at rate 0 unless the point is open,
+    ///   +0x3fa]; reached by a reveal it pops (`Passable`) [obs 0x71014812b0: kinds 11 / 12 on
+    ///   the points a reveal opens].
+    /// - The goal is not shown until reached; a reveal that reaches it plays `AppearGoalPoint`
+    ///   [obs 0x7101482e60 / 0x71014830c0 / 0x71014832d0, the reveal's last steps].
+    /// - A course cleared on this visit plays ToCleared, then Cleared; a cleared goal turns into
+    ///   the cannon when it fires (its prepare, then its launch).
+    fn point_state(
+        &self,
+        sw: &SuperWorld,
+        p: &Progress,
+        view: &MapView,
+        (reach, fresh): (u32, u32),
+        x: i32,
+        y: i32,
+    ) -> Option<(String, Option<PointState>, i32, bool)> {
+        let w = p.world_map(sw)?;
+        let theme = w.theme.min(7);
+        let sub = point_sub(w, x, y);
+        let model = self.spot_model(sw, p, x, y)?;
+        let reached = in_mask(reach, x, y);
+        let reveal_at = view.reveal.map_or(0, |r| r.1);
+        // newly reached: the pop (or the goal's appearance) while it lasts
+        let m = model.clone();
+        let fresh_state = |state: PointState| {
+            let anim = self.state_anim(&m, state, theme, sub)?;
+            (in_mask(fresh, x, y) && view.tick - reveal_at < self.anim_frames(&m, &anim))
+                .then_some(state)
+        };
+        let open = |model: String| match fresh_state(PointState::Passable) {
+            Some(s) => (model, Some(s), reveal_at, false),
+            None => (model, Some(PointState::Wait), 0, !reached),
+        };
+        Some(match sw::spot(w, x, y) {
+            Spot::Road => return None,
+            Spot::Start => (model, None, 0, false),
+            Spot::Course { order, goal } => {
+                let done = p.cleared(p.world, order);
+                let just = view.just_cleared.iter().find(|j| j.0 == order).map(|j| j.1);
+                if goal
+                    && done
+                    && let Some(c) = view.cannon
+                {
+                    let prep = self
+                        .state_anim(CANNON, PointState::CannonPrepareLaunch, theme, sub)
+                        .map_or(0, |a| self.anim_frames(CANNON, &a));
+                    return Some(if view.tick - c < prep {
+                        (
+                            CANNON.into(),
+                            Some(PointState::CannonPrepareLaunch),
+                            c,
+                            false,
+                        )
+                    } else {
+                        (
+                            CANNON.into(),
+                            Some(PointState::CannonLaunch),
+                            c + prep,
+                            false,
+                        )
+                    });
+                }
+                match (done, just) {
+                    (true, Some(j)) => (model, Some(PointState::ToCleared), j, false),
+                    (true, None) => (model, Some(PointState::Cleared), 0, false),
+                    _ if goal => match fresh_state(PointState::AppearGoalPoint) {
+                        Some(s) => (model, Some(s), reveal_at, false),
+                        None if reached => (model, Some(PointState::Wait), 0, false),
+                        None => return None,
+                    },
+                    _ => open(model),
+                }
+            }
+            Spot::Pipe(_) => open(model),
+            Spot::ToadHouse(k) => {
+                let used = p.toads.get(p.world).is_some_and(|t| t & (1 << k) != 0);
+                match (used, view.houses_used.iter().find(|h| h.0 == k)) {
+                    (true, Some(h)) => (model, Some(PointState::ToCleared), h.1, false),
+                    (true, None) => (model, Some(PointState::Cleared), 0, false),
+                    _ => open(model),
+                }
+            }
+        })
+    }
+
+    /// The player: walking, standing, or a one-off animation of [`MapView::player_anim`].
+    fn emit_player(&self, ui: &Ui, w: &World, theme: u8, view: &MapView, out: &mut Vec<Drawn>) {
         let model = PLAYERS[view.character.min(3)];
         let (px, py) = (view.player[0], view.player[1]);
         let here = w.cell(px.round() as i32, py.round() as i32);
@@ -1010,8 +1347,15 @@ impl MapArt {
             (1, 0) => ("", false),
             _ => ("_S", false),
         };
-        let (name, clock) = if view.walking.is_some() {
-            (format!("{walk}{dir}"), t)
+        let one_off = view.player_anim.and_then(|(base, at)| {
+            let name = self.player_anim(view.character, theme, here, base);
+            (self.has_anim(model, &name) && view.tick - at < self.anim_frames(model, &name))
+                .then_some((name, (view.tick - at) as f32))
+        });
+        let (name, clock) = if let Some(o) = one_off {
+            o
+        } else if view.walking.is_some() {
+            (format!("{walk}{dir}"), view.tick as f32)
         } else {
             // standing: `wait`, or the route's own (`swim_wait`, `fly_wait`, …) [inf]
             let base = if walk == "walk" || walk == "climb" {
@@ -1043,10 +1387,8 @@ impl MapArt {
                 arms: None,
                 pattern_frame: None,
             },
-            &mut out,
+            out,
         );
-        out.sort_by_key(|d| d.key);
-        out.into_iter().map(|d| d.quad).collect()
     }
 }
 
@@ -1137,9 +1479,18 @@ mod tests {
         assert_eq!(point_model(14, 4), "MyWorld_Point_enemyG_snow");
         assert_eq!(point_model(14, 3), "MyWorld_Point_enemyG");
         assert_eq!(point_model(15, 0), "MyWorld_Point_enemyH");
-        assert_eq!(goal_model(0, false), "MyWorld_Point_castle");
-        assert_eq!(goal_model(0, true), "MyWorld_Point_castle_end");
-        assert_eq!(goal_model(1, false), "MyWorld_Point_airship_castle");
+        // the goal: the last world's end castle, the airship on water, else the castle
+        assert_eq!(goal_model(false, false, true), "MyWorld_Point_castle");
+        assert_eq!(goal_model(true, true, true), "MyWorld_Point_castle_end");
+        assert_eq!(
+            goal_model(false, true, true),
+            "MyWorld_Point_airship_castle"
+        );
+        assert_eq!(
+            goal_model(false, false, false),
+            "MyWorld_Point_castle_notset"
+        );
+        assert_eq!((point_kind(6), point_kind(14)), ("Tower", "Sambo"));
     }
 
     #[test]
@@ -1203,7 +1554,69 @@ mod tests {
         let a = to_layout(cell_world(0.0, 0.0));
         let b = to_layout(cell_world(1.0, 1.0));
         assert!((b[0] - a[0] - 180.0).abs() < 1e-3 && (b[1] - a[1] - 180.0).abs() < 1e-3);
-        // row 0 is the bottom one
+        // row 0 is the bottom one; the map's height fills the screen's
         assert!(a[1] < 0.0);
+        let low = to_layout([0.0, 0.0]);
+        let high = to_layout([0.0, GRID_H as f32 * CELL]);
+        assert!((low[1] + 360.0).abs() < 1e-3 && (high[1] - 360.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn roads_show_between_reached_cells_and_appear_after_a_clear() {
+        assert_eq!(road_frame(false, false, false), None);
+        assert_eq!(road_frame(true, false, false), Some(1.0));
+        assert_eq!(road_frame(true, true, false), Some(2.0));
+        assert_eq!(road_frame(true, false, true), Some(3.0));
+        assert_eq!(road_frame(true, true, true), Some(4.0));
+        // the test world: the start (0, 0), a course at (1, 0), the road on to (3, 0)
+        let src: Vec<sw::SwCourse> = (0..7)
+            .map(|i| sw::SwCourse {
+                id: format!("c{i}"),
+                ..Default::default()
+            })
+            .collect();
+        let world = SuperWorld::test_world(&src).unwrap();
+        let w = &world.map.worlds[0];
+        let before = sw::reachable(w, 0);
+        assert!(in_mask(before, 1, 0) && !in_mask(before, 2, 0));
+        // before the reveal's tick the map stays as it was; then the new cells appear
+        let view = MapView {
+            tick: 10,
+            reveal: Some((before, 20)),
+            ..Default::default()
+        };
+        let (reach, fresh) = reach_at(w, 1, &view);
+        assert_eq!((reach, fresh), (before, 0));
+        let view = MapView { tick: 20, ..view };
+        let (reach, fresh) = reach_at(w, 1, &view);
+        assert!(in_mask(reach, 2, 0) && in_mask(fresh, 2, 0) && !in_mask(fresh, 1, 0));
+    }
+
+    #[test]
+    fn ledges_draw_their_cliffs_in_rows() {
+        let mut w = World::default();
+        for x in 2..5 {
+            *w.cell_mut(x, 1) = cell(road::LEDGE, 2, 0);
+        }
+        *w.cell_mut(6, 2) = cell(road::LEDGE, 2, 0);
+        let c = cliffs(&w, false);
+        let at = |x: i32, y: i32| c.iter().find(|p| (p.x, p.y) == (x, y)).map(|p| p.piece);
+        // a row of three: left, middle, right faces, the plateau's top above them
+        assert_eq!(
+            (at(2, 1), at(3, 1), at(4, 1)),
+            (
+                Some(CLIFF_FACE + 1),
+                Some(CLIFF_FACE + 2),
+                Some(CLIFF_FACE + 3)
+            )
+        );
+        assert_eq!(at(3, 2), Some(CLIFF_TOP + 2));
+        // alone; with water below it in a "Sub" theme the face meets the water
+        assert_eq!(at(6, 2), Some(CLIFF_FACE));
+        let s = cliffs(&w, true);
+        assert!(
+            s.iter()
+                .any(|p| (p.x, p.y, p.piece) == (6, 2, CLIFF_FACE_WATER))
+        );
     }
 }

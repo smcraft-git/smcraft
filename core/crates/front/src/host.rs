@@ -504,6 +504,15 @@ pub trait Host {
     /// (`set`, `drag`, `eraser`, `invalid`, `partsMax`, `Block_in` …) in course style `style`;
     /// `scale` sets its `MusicalScale` (`Tower_stack`'s pitch: the part's tile row mod 28).
     fn edit_sound(&mut self, _style: &str, _user: &str, _key: &str, _scale: Option<f32>) {}
+    /// Super World map music: `Some(theme)` plays the map track of scene theme `theme` (0 plain …
+    /// 7 night: `MyWorldScene`'s `BGM_WorldMap_<Theme>_Play`; kept playing if it already is),
+    /// None stops it (a course, a minigame or another screen comes).
+    fn map_music(&mut self, _theme: Option<u8>) {}
+    /// A Super World map sound: SLink user `user` (`MyWorldPlayer`, `MyWorldCoursePoint`,
+    /// `MyWorldGoalPoint`, `MyWorldKinokoHouse`, `MyWorldScene`) plays `key`, or with `anim` what
+    /// the user's action triggers start with animation `key` (`tocleared_ftp`, the goal's
+    /// skeletal `tocleared`); `point`: the course point's kind (`Normal`, `Tower`, …: its switch).
+    fn map_sound(&mut self, _user: &str, _key: &str, _anim: bool, _point: Option<&str>) {}
     /// Course Maker test play: load raw course data `course` into the engine to play, the player
     /// starting in area `area` at `start` (world px, feet; None: the course's start).
     fn test_play(

@@ -78,6 +78,42 @@ const COMMON_USERS: &[&str] = &[
     "Scene",
 ];
 
+/// The Super World map's users (private spec `research/specs/super-worlds.md` §7.6): the map
+/// scene (its music `BGM_WorldMap_<Theme>_Play` / `_Edit`, the roads' reveal), the walking
+/// player, the course points, the goal (castle, cannon), the Toad Houses, the start and the pipes
+/// [obs: the resource lists `Sound/ResourceList/MyWorld*.barslist`].
+const MAP_USERS: &[&str] = &[
+    "MyWorldScene",
+    "MyWorldPlayer",
+    "MyWorldCoursePoint",
+    "MyWorldGoalPoint",
+    "MyWorldKinokoHouse",
+    "MyWorldStartPoint",
+    "MyWorldWarpDokan",
+];
+
+/// The course point kinds the map's sounds switch on, in icon order [obs: SLink user
+/// `MyWorldCoursePoint`'s `tocleared` switch values; inf: icon order, enemy G = Sambo with its
+/// snow form, see `mmk_front::swmap::point_model`].
+pub const POINT_KINDS: [&str; 16] = [
+    "Normal",
+    "Water",
+    "Desert",
+    "Snow",
+    "Woods",
+    "HauntedHouse",
+    "Tower",
+    "Airship",
+    "Kuribo",
+    "Nokonoko",
+    "Pakkun",
+    "Pukupuku",
+    "Wanwan",
+    "Bros",
+    "Sambo",
+    "Kinokopoison",
+];
+
 /// Music keys of the course music users that are not played in a course or the Course Maker
 /// (the Dojo lessons, title, online and mode screens).
 fn menu_music_key(key: &str) -> bool {
@@ -92,7 +128,7 @@ fn menu_music_key(key: &str) -> bool {
 /// part users (`<S>_Edit<Part>`: their sounds when put down, picked up, shaken) and the common
 /// course users.
 fn gameplay_user(name: &str) -> bool {
-    if COMMON_USERS.contains(&name) {
+    if COMMON_USERS.contains(&name) || MAP_USERS.contains(&name) {
         return true;
     }
     if let Some(s) = name.strip_prefix("CourseSceneBGM_") {
@@ -240,6 +276,8 @@ fn property_role(calls: &[Call], container: &Call) -> Option<&'static str> {
         "@ground"
     } else if values.contains(&"Course") && all(&["Course", "QuestScene", "LessonMenuScene"]) {
         "@scene"
+    } else if all(&POINT_KINDS) {
+        "@point"
     } else {
         return None;
     })
@@ -691,6 +729,8 @@ mod tests {
         assert!(gameplay_user("3W_Player"));
         assert!(gameplay_user("CourseSceneBGM_WU"));
         assert!(gameplay_user("ObjectCommon"));
+        assert!(gameplay_user("MyWorldScene") && gameplay_user("MyWorldGoalPoint"));
+        assert!(!gameplay_user("MyWorldRobotScene") && !gameplay_user("MyWEditCommon"));
         assert!(!gameplay_user("UITitle"));
         assert!(!gameplay_user("Quest_Block"));
         assert!(!menu_music_key("BGM_Plain_Edit"));
