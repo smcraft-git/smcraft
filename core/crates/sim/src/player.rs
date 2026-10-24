@@ -2166,7 +2166,15 @@ impl Player {
             self.cat_climb = 0;
             self.cat_climbs = 0;
             self.cat_reattach = 0;
-            self.dive = false;
+            if std::mem::take(&mut self.dive) && self.on_ground {
+                // out of the dive on landing straight into Walk at the walk speed (no
+                // ClimbBodyAttackLand with a direction held) [obs: Ryujinx trace 3W_form
+                // form_dive: 4.0 on the landing frame, 1.5 from the next, Right held]
+                let cap = if inp.held(input::RUN) { 3.0 } else { 1.5 };
+                if self.vx.abs() > cap {
+                    self.vx = cap * self.vx.signum();
+                }
+            }
             return;
         }
         if self.form != Form::Cat {

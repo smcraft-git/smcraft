@@ -515,7 +515,7 @@ Nextendo; `docs/nextendo-network-play.md`, spec `research/specs/network-play.md`
   out to belong to the parts' 0xC0000 bits, not stacks) · ⬜ the editor's height limit (play
   takes 128 members at most), pulling a member off a column
 - 🔄 Physics: re-recording every trace (2026-10-24; the old 428 / 454 was not a true count — the
-  old items / form traces were all small Mario). Re-recorded, current engine: **573 / 579 exact**
+  old items / form traces were all small Mario). Re-recorded, current engine: **574 / 580 exact**
   over 113 courses + 10 whole courses (2026-10-24 physics7: the shell courses now compare the shell too, which showed
   3 carried-shell throws off; and object traces: the player plus every simulated actor matched to
   a recorded game object, found by scans while the game is paused in the trace hook): M1/M3/MW/WU/3W flat 34 each, M1/M3/MW/WU/3W items 34 each, M1/M3/MW/WU/3W
@@ -589,11 +589,12 @@ Nextendo; `docs/nextendo-network-play.md`, spec `research/specs/network-play.md`
   hurt in the frame the player's move runs into them; 3D World items touch 13 px apart). The
   **Cat dive** (ClimbBodyAttack) is the Spin (ZL / ZR) press in the air, from the binary: the
   Jump / Fall states' action table puts delegate 0x20 (0x7100a0ce30) in the slot the dispatcher
-  runs on input +0x2A (the ZR press) [obs v1.0.0; a trace of it is still to record]. 3D World
+  runs on input +0x2A (the ZR press) [obs v1.0.0], confirmed by a trace (3W_form form_dive: 4.0 / −3.0
+  to the landing, then straight into Walk at the walk speed). 3D World
   slide-end stoop
   3 frames confirmed. 3D World recording works with a local Ryujinx fix (a zero-sized guest
-  texture with 2 levels made Metal abort under MoltenVK). ⬜ still to record: the Cat dive itself
-  (form_dive), the whole courses past their first divergences
+  texture with 2 levels made Metal abort under MoltenVK). ⬜ still to record: the whole courses past their
+  first divergences (a Seesaw's tilt, a slope overlapping ground, W_3051605's death at 233)
 - 🔄 Pixels against the game (smm2recomp reference frames of `mmk ref-courses`, all 90, update
   900; MAE / % pixels off by > 24; `research/tools/pixel-ref/pixref.py`, 2026-10-24):
 
