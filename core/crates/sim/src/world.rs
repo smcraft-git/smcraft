@@ -594,6 +594,33 @@ fn walk_frame(frames: &[&'static str], age: u32, rate: u32) -> &'static str {
     frames[((age / rate) as usize) % frames.len()]
 }
 
+/// An item's touch box (x0, y0, x1, y1) from its bbox `ab`, against the player's box B.
+/// The item's collider (the enemy collider 0x71012079a0) takes its box each frame
+/// from the table 0x71023cb8d0 by the actor's box id (+0x6a0; 0x7101208390); the
+/// item init 0x710134fe30 sets id 0x5f = centre (0, 7), half 7 × 7 (×1.5 / ×2 big,
+/// × the actor's scale while +0x52c bit 2), and two boxes overlap when both centre
+/// distances are below the half sums (0x7100e28e20) [obs v3.0.3]. In 3D World that
+/// is the box (13.36 px between centres doesn't touch there, 13.29 does in SMW
+/// [obs: Ryujinx traces 3W_blocks / MW_blocks]).
+fn item_touch_box(
+    style: crate::player::Style,
+    kind: Kind,
+    ab: (f32, f32, f32, f32),
+) -> (f32, f32, f32, f32) {
+    if style == crate::player::Style::W3 {
+        (ab.0 + 1.0, ab.1, ab.2 - 1.0, ab.1 + 14.0)
+    } else if kind == Kind::FireFlower {
+        // a Fire Flower is touched a pixel inside its 16 px (table id 0x12's centre
+        // (0, 8), half 7 × 7) [inf: its id's writer isn't found; a small player's box B
+        // 0.06 px into its bottom took nothing, Ryujinx trace W_3051046]
+        (ab.0 + 1.0, ab.1 + 1.0, ab.2 - 1.0, ab.3 - 1.0)
+    } else {
+        // the other styles' items reach a pixel further than id 0x5f at scale 1 [inf:
+        // measured, the traces exact; the source of the extra pixel isn't found]
+        ab
+    }
+}
+
 fn overlap(a: (f32, f32, f32, f32), b: (f32, f32, f32, f32)) -> bool {
     a.0 < b.2 && b.0 < a.2 && a.1 < b.3 && b.1 < a.3
 }
@@ -3504,18 +3531,7 @@ impl World {
                 // the player changes form a frame after that (it still moves on that frame) [obs:
                 // Ryujinx trace M1_blocks blk_mush: touching 12.83 px apart at frame N, the
                 // mushroom's last move at N+1, the growth freeze from N+3]
-                // (3D World's reach is shorter: 13.36 px between centres doesn't touch there,
-                // 13.29 does in SMW [obs: Ryujinx traces 3W_blocks / MW_blocks]; the item's box
-                // taken a pixel narrower a side [inf])
-                let ib = if self.style == crate::player::Style::W3 {
-                    (ab.0 + 1.0, ab.1, ab.2 - 1.0, ab.3)
-                } else if a.kind == Kind::FireFlower {
-                    // a Fire Flower is touched a pixel inside its 16 px [inf: a small player's
-                    // box B 0.06 px into its bottom took nothing, Ryujinx trace W_3051046]
-                    (ab.0 + 1.0, ab.1 + 1.0, ab.2 - 1.0, ab.3 - 1.0)
-                } else {
-                    ab
-                };
+                let ib = item_touch_box(self.style, a.kind, ab);
                 if a.taken == 0 && overlap(contact, ib) {
                     self.actors[i].taken = 1;
                 } else if a.taken == 2 {
@@ -11777,6 +11793,30 @@ mod tests {
             "reflected: {} {}",
             ball.vx,
             ball.vy
+        );
+    }
+
+    #[test]
+    fn item_touch_boxes() {
+        use crate::player::Style;
+        let ab = (100.0 - 8.0, 32.0, 100.0 + 8.0, 48.0);
+        // 3D World: the table's id 0x5f, centre (0, 7), half 7 × 7
+        assert_eq!(
+            item_touch_box(Style::W3, Kind::Mushroom, ab),
+            (93.0, 32.0, 107.0, 46.0)
+        );
+        assert_eq!(
+            item_touch_box(Style::W3, Kind::FireFlower, ab),
+            (93.0, 32.0, 107.0, 46.0)
+        );
+        // a small player's box B (half 6, 18 tall) with its feet 15 px over the item's touches
+        // the other styles' items but not 3D World's
+        let b = (88.0, 32.0 + 15.0, 100.0, 32.0 + 33.0);
+        assert!(overlap(b, item_touch_box(Style::M1, Kind::Mushroom, ab)));
+        assert!(!overlap(b, item_touch_box(Style::W3, Kind::Mushroom, ab)));
+        assert_eq!(
+            item_touch_box(Style::MW, Kind::FireFlower, ab),
+            (93.0, 33.0, 107.0, 47.0)
         );
     }
 
