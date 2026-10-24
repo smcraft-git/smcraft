@@ -499,6 +499,8 @@ impl Sounds {
             .with("RideYoshi", if p.yoshi.is_some() { 1 } else { 0 })
             .with("BodyWaterType", if p.in_water { "Water" } else { "None" })
             .with("BgWaterType", liquid_type(world))
+            // the local player (the data's "own player", as against a remote one's)
+            .with("MachinedPlayer", "自機")
             .with("@ground", self.ground(world).as_str())
             .with(
                 "ShoeKind",
@@ -1274,6 +1276,8 @@ impl Sounds {
                     if !self.player_sfx(world, "fireball", &[]) {
                         self.player_sfx(world, "fireball_motion", &[]);
                     }
+                    // 3D World: the throw's voice
+                    self.player_sfx(world, "voice_throw_Fire", &[]);
                 }
                 Event::Death => {
                     self.stop_count(world);
@@ -1281,6 +1285,8 @@ impl Sounds {
                         handle: H_AMBIENT,
                         fade: 0,
                     });
+                    // 3D World: the character's last cry
+                    self.player_sfx(world, "voice_damagelast", &[]);
                     let down = self.chara_key("FanfareDown");
                     self.play_music(&down, 0, None);
                     self.fanfare = true;
@@ -1296,6 +1302,8 @@ impl Sounds {
                     });
                     self.fanfare = true;
                     self.player_sfx(world, "pole", &[]);
+                    // 3D World: the character's voice as they grab the pole
+                    self.player_sfx(world, "voice_grabpole", &[]);
                 }
                 Event::Hurry => {
                     self.hurry = true;
