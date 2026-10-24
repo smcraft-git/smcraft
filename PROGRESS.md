@@ -133,8 +133,8 @@ sway, importer and pack 12, the dev cache already at v12).
   item touch boxes (not in EnemyDB or the item init 0x710134fe30; set by the shared enemy init
   0x7101286ee0) [inf]. 578 / 580 traces exact; coverage 550/550 + 273/273; simulate 0 crashes.
 - ✅ **Physics pass 8** (2026-10-25, branch `physics8`, research fidelity-log.md "physics8",
-  objects/93-clear-pipe.md "Traced", 91-seesaw.md, 87-gentle-slope.md): **583 / 583 traces exact**
-  (the 580 and three new whole-course traces), every whole course exact — W_3049200 to its end,
+  objects/93-clear-pipe.md "Traced", 91-seesaw.md, 87-gentle-slope.md): **586 / 586 traces exact**
+  (the 580 and six new whole-course traces), every whole course exact — W_3049200 to its end,
   W_3010660 to its death. ✅ a gentle slope whose low end cap lies under a ground tile has its
   first step full solid (the floor collider 0x10100a11, type 0x11 sub 10; v3.0.3 cell function
   0x7100db8df0 replaces a cell whose art is a joint piece) — six arrangements traced on a test
@@ -150,10 +150,10 @@ sway, importer and pack 12, the dev cache already at v12).
   the entry frame standing, the out frame running the next state, enemies' in-pipe speeds 0 —
   frame-exact; ✅ 3D World Goombas spot the player (80 px in front), stand 53 frames, run at 0.7
   (the Kuribo3W Find / Run / Lost states); ✅ placed Super Mushrooms walk right from their first
-  frame, rest 0.1 px into walls and turn a frame late. Left [?]: the item touch distance (a
-  mushroom walking at a standing player touches at 10.1 px, not 11.1, while a chased one touched
-  at 12.83: test course M1_mushstart, its trace kept out of the regression), the clear pipe's push
-  entry (0x71015a9d00: 9 frames of pushing didn't take the player in), vertical clear-pipe mouths
+  frame, rest 0.1 px into walls and turn a frame late; ✅ a mushroom is touched where it stood
+  before its move, 12 px between centres (SMW / NSMBU 13), and a growth freezes the world from
+  the frame the form changes to the frame the change ends (test course M1_mushstart, three
+  scripts). Left [?]: the clear pipe's push entry (0x71015a9d00: 9 frames of pushing didn't take the player in), vertical clear-pipe mouths
   untraced, steep slopes joined to ground untraced, the Seesaw's slam and blocked-rider sum.
 - **Agent queue** (when a helper slot frees; running 2026-10-25: the maker's Water Level and
   Custom Scroll modes, physics): ✅ a Koopaling in a Clown Car (2026-10-25, branch
@@ -706,8 +706,8 @@ Nextendo; `docs/nextendo-network-play.md`, spec `research/specs/network-play.md`
   out to belong to the parts' 0xC0000 bits, not stacks) · ⬜ the editor's height limit (play
   takes 128 members at most), pulling a member off a column
 - 🔄 Physics: re-recording every trace (2026-10-24; the old 428 / 454 was not a true count — the
-  old items / form traces were all small Mario). Re-recorded, current engine: **583 / 583 exact**
-  over 113 courses + 12 whole-course traces (2026-10-25 physics8: all 9 whole courses exact: W_3064188, W_3046973, W_3065813, W_3006094, W_3049200, and W_3051046, W_3051605, W_3145588, W_3010660 to their deaths, the title course not restarting; and the test courses X_slopejoin, X_cpipe, X_cpipeg) (2026-10-24 physics7: the shell courses now compare the shell too, which showed
+  old items / form traces were all small Mario). Re-recorded, current engine: **586 / 586 exact**
+  over 113 courses + 15 whole-course traces (2026-10-25 physics8: all 9 whole courses exact: W_3064188, W_3046973, W_3065813, W_3006094, W_3049200, and W_3051046, W_3051605, W_3145588, W_3010660 to their deaths, the title course not restarting; and the test courses X_slopejoin, X_cpipe, X_cpipeg, X_mushstart ×3) (2026-10-24 physics7: the shell courses now compare the shell too, which showed
   3 carried-shell throws off; and object traces: the player plus every simulated actor matched to
   a recorded game object, found by scans while the game is paused in the trace hook): M1/M3/MW/WU/3W flat 34 each, M1/M3/MW/WU/3W items 34 each, M1/M3/MW/WU/3W
   slope 4 each, M1/M3/MW/WU/3W wall 4 each, M1/M3/MW/WU/3W water 2 each, M3/MW/WU/3W form 16 each

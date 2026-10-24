@@ -31,7 +31,9 @@ SMCraft is back in development (it was archived in October 2026).
 - 3D World Goombas notice Mario ahead of them, stop for a moment and run at him.
 - A gentle slope whose low end is buried under ground is walked over flat, as in SMM2.
 - Stomping a falling enemy works as in the game (a Koopa stomped in mid-air drops as its shell
-  at once); placed Super Mushrooms set off to the right from the very first frame.
+  at once); placed Super Mushrooms set off to the right from the very first frame, and Mario
+  picks power-ups up at the game's distance, with the world pausing for his growth exactly as
+  long as in SMM2.
 - **Wings as in SMM2**: winged power-ups, coins, springs, P Switches and POW Blocks fly slowly
   the way they face with a 16-px bob and pass through walls (they meet walls only in 3D World);
   winged blocks fly the same way, and winged Hard, Ice and Donut Blocks swing 48 px from side to
