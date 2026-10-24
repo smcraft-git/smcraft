@@ -39,6 +39,11 @@ SMCraft is back in development (it was archived in October 2026).
   keeps its parachute folded and opens it each time it drops (then floats down slowly); a Lava
   Bubble's parachute ends in the lava and it leaps from there; a Cheep Cheep or Porcupuffer lets go
   of its parachute as soon as it is in water.
+- **Ceiling Spinies and Buzzy Beetles**: placed upside down under a ceiling, or coming out of a
+  downward pipe, they walk along the ceiling, turn at its edges and drop in their shells when you
+  pass underneath (a Spiny's shell keeps its spikes and it walks out again later).
+- **Boo Buddies in a block** come out as a circle of Boos spreading round the block; a part in a
+  block keeps its other form (a lit Bob-omb, a Sledge Bro, a fast Spike Top …).
 - Fix: Munchers hurt on a wall sensor's touch, as in SMM2 (a one-tile gap between Munchers is as
   tight as in the game).
 - **The Course Maker**: SMM2's own maker screens (part palette and part window, styles, themes,

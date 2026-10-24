@@ -414,6 +414,18 @@ impl Actor {
         if !self.wings || pata_togezo(self.kind) {
             (self.vx, self.vy) = keep;
         }
+        // a Spiny or Buzzy Beetle out of a down pipe at normal size walks the ceiling
+        // (Togezo's Basic start 0x71012825c0: previous context Dokan, direction 3, not big; its
+        // DokanOut enter 0x71012806a0 already turns it over) [obs v3.0.3]
+        if dir == PipeDir::Down
+            && Actor::ceiling_walker(self.kind)
+            && !self.big
+            && !self.wings
+            && self.mode == Mode::Normal
+        {
+            self.vy = 0.0;
+            self.enter_ceiling();
+        }
     }
 
     fn end_dokan(&mut self) {

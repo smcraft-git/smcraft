@@ -2893,10 +2893,30 @@ impl World {
             Contents::Koopa { red } => (Kind::Koopa { red }, false, false, false),
             Contents::YoshiEgg => (Kind::YoshiEgg { red: false }, false, false, false),
         };
+        let alt = matches!(contents, Contents::Part { flags, .. } if flags & 0x4 != 0);
+        if kind == Kind::Boo && alt {
+            // Boo Buddies (TeresaSpread's Block Out 0x710126c0c0 / 0x710126c220, v3.0.3): the
+            // circle's centre stays on the block (at its centre, +8 over the origin) while the
+            // ring spreads from nothing, as a placed one does [obs; a parachute takes
+            // FloatSearch's Out instead, not modelled]
+            for slot in 0..8 {
+                let mut b = Actor::new(Kind::RingBoo { slot }, bx, by);
+                b.big = big;
+                b.alt = true;
+                b.home_x = bx;
+                b.home_y = by + 8.0;
+                b.speed = 0.0;
+                b.heading = 90.0;
+                self.add_actor(b);
+            }
+            return;
+        }
         let mut a = Actor::new(kind, bx, by + r.offset);
         a.dir = 1;
         a.wings = wings;
         a.big = big;
+        // the part's own form (a lit Bob-omb, a Sledge Bro, a fast Spike Top, …)
+        a.alt = alt;
         if kind.is_item() && !parachute {
             // rise 16 px at 0.5 (down: 1.0), no gravity
             a.vy = if r.down { -1.0 } else { 0.5 };
@@ -3640,7 +3660,8 @@ impl World {
             // Spiny's stomp row — stamp Damage, stamp_shoe DieFall, stamp_spin DieVanish [obs])
             let stomp = in_window
                 && !a.kind.unstompable()
-                && !(a.shell_of == 2 && self.player.shoe.is_none());
+                && !((a.shell_of == 2 || (a.alt && matches!(a.kind, Kind::Shell { .. })))
+                    && self.player.shoe.is_none());
             // a shoe stomp defeats most enemies, spiny or not (stamp_shoe in EnemyDB)
             let shoe_stomp = self.player.shoe.is_some()
                 && in_window
@@ -3976,6 +3997,9 @@ impl World {
                 .map(|&(_, id, flags)| (id, flags));
             a.home_y = s.y;
             a.pipe = s.pipe;
+            if self.level.ceiling.contains(&idx) && !s.wings && !s.parachute {
+                a.enter_ceiling();
+            }
             if s.parachute && Actor::folds_chute(s.kind) {
                 a.chute = true;
             } else if s.parachute {
@@ -7117,6 +7141,7 @@ impl World {
                 (
                     match (a.shell_of, a.buzzy, red) {
                         (2, _, _) => "M1_Enemy_togezo",
+                        _ if a.alt => "M1_Enemy_togezo",
                         (3, _, _) => "M1_Enemy_karon",
                         (_, true, _) => "M1_Enemy_met",
                         (_, _, true) => "M1_Enemy_nokonokoB",
@@ -7656,6 +7681,10 @@ impl World {
                 s.y = a.y - h;
             }
         }
+        if a.ceiling {
+            // walking the ceiling upside down (actors/ceiling.rs)
+            s.flip_y = true;
+        }
         if matches!(a.mode, Mode::DokanOut { .. }) || a.in_block() {
             s.layer = 5;
         }
@@ -8051,6 +8080,36 @@ mod tests {
         let b = w.actors.iter().find(|a| a.kind == Kind::BobOmb).unwrap();
         assert!(matches!(b.mode, Mode::Parachute { .. }), "{:?}", b.mode);
         assert!(b.y > 6.0 * TILE, "clear of the block: {}", b.y);
+    }
+
+    /// Boo Buddies in a block come out as a Boo circle spreading round the block's centre
+    /// (TeresaSpread's Block Out); a part's 0x4 form comes out of a block as itself.
+    #[test]
+    fn block_releases_boo_buddies_and_part_forms() {
+        let mut w = hit_block_holding(Contents::Part { id: 41, flags: 0x4 }, None);
+        let ring: Vec<_> = w
+            .actors
+            .iter()
+            .filter(|a| matches!(a.kind, Kind::RingBoo { .. }))
+            .collect();
+        assert_eq!(ring.len(), 8);
+        let (cx, cy) = (3.0 * TILE + 8.0, 5.0 * TILE + 8.0);
+        assert!(ring.iter().all(|b| (b.home_x, b.home_y) == (cx, cy)));
+        w.player.invuln = 1_000_000;
+        run(&mut w, 0, 200);
+        let b = w
+            .actors
+            .iter()
+            .find(|a| matches!(a.kind, Kind::RingBoo { .. }))
+            .unwrap();
+        assert!(
+            (b.speed - 52.0).abs() < 1e-3,
+            "spread to 52 px: {}",
+            b.speed
+        );
+        let w = hit_block_holding(Contents::Part { id: 15, flags: 0x4 }, None);
+        let b = w.actors.iter().find(|a| a.kind == Kind::BobOmb).unwrap();
+        assert!(b.alt, "a lit Bob-omb");
     }
 
     #[test]

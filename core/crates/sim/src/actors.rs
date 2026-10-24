@@ -10,6 +10,7 @@ use crate::level::{Cell, Level, PipeDir, TILE};
 
 mod block_out;
 mod bosses;
+mod ceiling;
 mod chute;
 mod clown;
 pub use clown::ClownFire;
@@ -797,6 +798,8 @@ pub struct Actor {
     pub sway_phase: u32,
     /// A Fire Koopa Clown Car's fire record: on the car, or on a boss riding one (actors/clown.rs).
     pub clown_fire: Option<ClownFire>,
+    /// A Spiny or Buzzy Beetle walking upside down on the ceiling (actors/ceiling.rs).
+    pub ceiling: bool,
 }
 
 impl Actor {
@@ -868,6 +871,7 @@ impl Actor {
             sway_amp: 0.0,
             sway_phase: 0,
             clown_fire: matches!(kind, Kind::ClownCar { fire: true }).then(ClownFire::default),
+            ceiling: false,
         }
     }
 
@@ -1872,10 +1876,14 @@ impl Actor {
                     // the Koopa (or Buzzy) walks out, facing the player
                     self.kind = if self.buzzy {
                         Kind::Buzzy
+                    } else if self.alt {
+                        // a Spiny that dropped off the ceiling in its shell (actors/ceiling.rs)
+                        Kind::Spiny
                     } else {
                         Kind::Koopa { red }
                     };
                     self.buzzy = false;
+                    self.alt = false;
                     self.mode = Mode::Normal;
                     self.dir = if player_x <= self.x { -1 } else { 1 };
                 }
@@ -2200,6 +2208,10 @@ impl Actor {
             | Kind::Buzzy
             | Kind::BobOmb
             | Kind::DryBones => {
+                if self.ceiling {
+                    self.step_ceiling(level);
+                    return None;
+                }
                 if self.wings
                     && matches!(
                         self.kind,
