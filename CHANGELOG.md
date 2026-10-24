@@ -176,8 +176,8 @@ SMCraft is back in development (it was archived in October 2026).
   down change category). A part one player holds can't be taken or erased by the other; the view
   follows whoever moves and keeps the other glove on screen; test play is for both players. As
   in SMM2 there is no Undodog while making together. Works in the app (game controllers), the
-  desktop and web builds (a second pad, or the right half of a split keyboard). Import the SMM2
-  UI again for player 2's green glove (until then it is the red one tinted).
+  desktop and web builds (a second pad, or the right half of a split keyboard). Import your game
+  once more (UI pack 9) for player 2's green glove.
 - **SMM2's colours on its screens**: buttons, banners and text now show the colours SMM2 shows
   (the yellow OK and menu buttons were orange), and windows with flipped frames are whole again
   (the tips' window lost its bottom edge). Import the SMM2 UI again for the maker's new pictures
