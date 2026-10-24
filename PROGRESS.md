@@ -394,6 +394,10 @@ Nextendo; `docs/nextendo-network-play.md`, spec `research/specs/network-play.md`
 - ⬜ Mid-air shell jumps checked against the recomp's test course; SMM1 course card choice
 
 **G8 — Fidelity: pixel, physics, sound** 🔄
+- ✅ Frozen Coins (3.0's `FreezeCoin`, the coin's 0x4 form; found blocking 4 of 38 recent TGRCode
+  courses): solid ice round a coin (`<style>_Field_anime_coin_freeze`), the player's fireballs
+  thaw it into the coin [inf: which fire thaws; `p_IceCoinThawing` isn't in the imported sound
+  users]. 37 of 38 recent TGRCode courses fully playable (left: Roy on a track)
 - 🔄 Stacked parts (2026-10-24, from the game's tower manager; research objects/stacks.md): ✅
   play — columns chained as the game does (feet in the row above the lower top, x within 0.2 px
   of the bottom's; Bill Blasters / Cannons as fixed bases; 128 members at most); the base acts
