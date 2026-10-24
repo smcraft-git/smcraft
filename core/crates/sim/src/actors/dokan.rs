@@ -369,8 +369,11 @@ impl Actor {
                     self.x += self.vx;
                     self.y += self.vy;
                 }
+                // a Chain Chomp's context ends as soon as it is on the ground, in any state
+                // (Wanwan's Dokan, vtable 0x7102915ff0: slot 6 0x71012ae720) [obs v3.0.3]
+                let chomp_down = matches!(self.kind, Kind::ChainChomp { .. }) && self.on_ground;
                 let done = if sx != 0.0 {
-                    self.vx.abs() <= JUMP_SIDE_END || self.wall
+                    self.vx.abs() <= JUMP_SIDE_END || self.wall || chomp_down
                 } else {
                     clear && self.on_ground
                 };
@@ -539,6 +542,23 @@ mod tests {
         }
         assert_eq!(jammed, 60, "60 frames stuck");
         assert_eq!((a.mode, a.y), (Mode::Normal, PY));
+    }
+
+    #[test]
+    fn a_big_chain_chomp_stops_jumping_out_on_landing() {
+        let lvl = floor();
+        let mut chomp = Actor::new(Kind::ChainChomp { chained: false }, 0.0, 0.0);
+        chomp.big = true;
+        // a side pipe whose mouth line is 16 px over the floor
+        chomp.dokan_out(PipeDir::Right, PX, PY + 32.0, false);
+        let mut n = 0;
+        while matches!(chomp.mode, Mode::DokanOut { .. }) && n < 400 {
+            chomp.step(&lvl, 0.0);
+            n += 1;
+        }
+        assert_eq!(chomp.mode, Mode::Normal);
+        assert!(chomp.on_ground);
+        assert!(chomp.vx.abs() > JUMP_SIDE_END, "still moving: {}", chomp.vx);
     }
 
     #[test]

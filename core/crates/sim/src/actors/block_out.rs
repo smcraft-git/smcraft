@@ -60,6 +60,9 @@ const FLOAT_STOP: f32 = 0.2;
 /// Pukupuku (Out 0x7101228fa0 / 0x71012290d0): the Default pop with the clear time ×4, then
 /// it hands over whether or not it has landed.
 const CHEEP_CLEAR: i32 = 4;
+/// FishBone (Out 0x71010d8850 / 0x71010d88d0, v3.0.3): Pukupuku's, a big one out of a
+/// downward block starting 16 px lower.
+const FISHBONE_BIG_DOWN: f32 = 16.0;
 /// Bubble (Out 0x710109c4c0 / 0x710109c970): vy 6.0 (6.8 out of a note block), Default
 /// gravity; hands over at the top of its leap [obs; in liquid 3.5 / 5.0, not modelled].
 const BUBBLE_VY: f32 = 6.0;
@@ -86,7 +89,8 @@ pub enum Preset {
     PataTogezo,
     /// FloatSearch (Boo, Blooper, Stingby): a slowing float, done when nearly still.
     FloatSearch,
-    /// Pukupuku (Cheep Cheep): faces the player, hands over when the clear time ends.
+    /// Pukupuku (Cheep Cheep, Fish Bone): hands over when the clear time ends (a Cheep Cheep
+    /// faces the player first).
     Pukupuku,
     /// Bubble (Lava Bubble): a high leap, handed over at its top.
     Bubble,
@@ -114,7 +118,8 @@ pub fn preset(kind: Kind, wings: bool) -> Preset {
         }
         // the 3D World Blooper has its own Out (Gesso3W 0x71011037a0) [?: not traced]
         Kind::Boo | Kind::Blooper | Kind::Stingby => Preset::FloatSearch,
-        Kind::CheepCheep { .. } => Preset::Pukupuku,
+        // FishBone's Out (0x71010d8850 / 0x71010d88d0, vtable 0x71028cab38) is Pukupuku's
+        Kind::CheepCheep { .. } | Kind::FishBone => Preset::Pukupuku,
         Kind::LavaBubble => Preset::Bubble,
         Kind::PSwitch
         | Kind::Pow
@@ -208,7 +213,13 @@ impl Actor {
                         self.vy += DOWN_BIG_VY;
                     }
                 }
-                Preset::Pukupuku => self.timer *= CHEEP_CLEAR,
+                Preset::Pukupuku => {
+                    self.timer *= CHEEP_CLEAR;
+                    // a big Fish Bone out of a downward block starts 16 px lower
+                    if self.kind == Kind::FishBone && self.big && down {
+                        self.y -= FISHBONE_BIG_DOWN;
+                    }
+                }
                 Preset::Bubble if !down => {
                     self.vy = if note { BUBBLE_NOTE_VY } else { BUBBLE_VY };
                 }
@@ -487,6 +498,22 @@ mod tests {
         assert_eq!(a.timer, 24);
         let n = run_out(&mut a, &lvl);
         assert!(n <= 24, "{n}");
+    }
+
+    #[test]
+    fn a_fish_bone_leaves_as_a_cheep_cheep_does() {
+        let lvl = course();
+        let mut a = out(Kind::FishBone, false, false);
+        assert_eq!(a.timer, 24);
+        assert!(run_out(&mut a, &lvl) <= 24);
+        // big, out of a downward block: 16 px lower
+        let mut big = Actor::new(Kind::FishBone, BX, BY);
+        big.big = true;
+        big.block_out(BY, true, false);
+        let mut plain = Actor::new(Kind::Goomba, BX, BY);
+        plain.big = true;
+        plain.block_out(BY, true, false);
+        assert_eq!(big.y, plain.y - 16.0);
     }
 
     #[test]
