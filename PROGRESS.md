@@ -59,8 +59,13 @@ sway, importer and pack 12, the dev cache already at v12).
   a 30-frame steer toward the Twister's movement (0.075) and centre, a jump in the column +1.0 a
   frame, rise caps 3.0 / 5.0 (Sky night 2.5 / 3.5); the column box widening upward (margin 4)
   [inf: the player's box and shape; the +0x230c bit 0 / +0x494 bit 1 paths]. No twister in the
-  traces: 578 / 580 unchanged. Next: the stack [inf]s, the other winged enemies, Bowser's chase
-  jumps.
+  traces: 578 / 580 unchanged. ✅ stacks (world/tower.rs, research objects/stacks.md): a column
+  spawns only through its manager record's box (bottom part, 8 px × the widest member a side,
+  16 px × the summed heights up; 0x71003fbef0 / 0x71003fc820 v1.0.0); the drop-out predicate
+  from v3.0.3 0x7101285500 (normal mode only: a stomped Koopa's shell is a new object); a rider
+  at a wall keeps the pull, not 0, and the carry (0x7101299dd0); riders have no contact reaction
+  (Tower vtable slots 12 / 13 empty) [inf left: a walker meeting a rider]. Next: the other
+  winged enemies, Bowser's chase jumps, the Yoshi's Egg hatch.
 - **Agent queue** (when a helper slot frees; running 2026-10-25: the maker's Water Level and
   Custom Scroll modes, physics): ✅ a Koopaling in a Clown Car (2026-10-25, branch
   `kclown`, research 120-koopalings.md "In a Koopa Clown Car": KoKoopaDefault's Clown vtable

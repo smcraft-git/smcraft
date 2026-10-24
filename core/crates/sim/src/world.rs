@@ -3346,7 +3346,9 @@ impl World {
                     }
                     continue;
                 }
-                // a tower's riders don't bump walkers: the tower turns them [inf]
+                // a tower's riders don't bump walkers: a rider's Tower context has empty contact
+                // slots (Default Tower vtable 0x7102147cc8 slots 12 / 13 v1.0.0) [obs], so it
+                // never turns on a touch; that a walker meeting a rider doesn't turn either [inf]
                 let walkers = a.kind.is_walker() && b.kind.is_walker() && !a.stacked && !b.stacked;
                 let a_slide = a.mode == Mode::ShellSlide;
                 let b_slide = b.mode == Mode::ShellSlide;
@@ -4184,17 +4186,16 @@ impl World {
         let touches = |b: (f32, f32, f32, f32), z: (f32, f32, f32, f32)| {
             b.0 <= z.2 && b.2 >= z.0 && b.1 <= z.3 && b.3 >= z.1
         };
-        let spawn_box = |s: &Spawn| {
-            let (cx, cy, hw, hh) = spawn_profile(s.kind, s.big);
-            (s.x + cx - hw, s.y + cy - hh, s.x + cx + hw, s.y + cy + hh)
-        };
-        // a column of stacked parts spawns together, when any of its members is due [inf: the
-        // game queues one tower record covering the whole column]
-        let due = |i: usize| {
-            let r = &self.spawns[i];
-            !r.spawned && !r.alive && !r.killed && touches(spawn_box(&r.spawn), za)
-        };
-        let together = self.tower_columns_to_spawn(&due);
+        // a column's members spawn only through its tower manager record: a member record has
+        // a tower id and no spawn of its own (0x71003fbef0), the manager's box reaching the zone
+        // spawns every member not out yet, then itself (0x71003fc820) [obs v1.0.0]
+        let column = self.tower_member_columns();
+        let col_due: Vec<(bool, bool)> = self
+            .level
+            .towers
+            .iter()
+            .map(|c| (touches(c.spawn_box, za), touches(c.spawn_box, zc)))
+            .collect();
         let mut fresh: Vec<usize> = Vec::new();
         for idx in 0..self.spawns.len() {
             let rec = &self.spawns[idx];
@@ -4203,13 +4204,17 @@ impl World {
             // the placement, which 0x71003fcb90 tests against the zone [obs profiles.txt]
             let (cx, cy, hw, hh) = spawn_profile(s.kind, s.big);
             let sb = (s.x + cx - hw, s.y + cy - hh, s.x + cx + hw, s.y + cy + hh);
+            let (due, near) = match column.get(idx).copied().flatten() {
+                Some(c) => col_due[c],
+                None => (touches(sb, za), touches(sb, zc)),
+            };
             if rec.spawned {
-                if !touches(sb, zc) {
+                if !near {
                     self.spawns[idx].spawned = false;
                 }
                 continue;
             }
-            if !(touches(sb, za) || together.contains(&idx)) || rec.alive || rec.killed {
+            if !due || rec.alive || rec.killed {
                 continue;
             }
             self.spawns[idx].spawned = true;

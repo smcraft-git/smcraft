@@ -27,6 +27,9 @@ SMCraft is back in development (it was archived in October 2026).
   steady speed (it was a guess), first pulling him toward its middle for half a second; near the
   top he bobs; a jump inside it sends him up faster; at night in the Sky theme it lifts more
   gently. The column widens toward its top.
+- Stacked parts: a column comes out together when the whole column reaches the screen (as the
+  game's tower record does); a stomped Koopa or Buzzy Beetle in a column drops out of it as its
+  shell; a rider pushed against a wall is no longer stopped dead but keeps riding along.
 
 - **Import once, then no dump or keys.** SMCraft reads your NSPs and `prod.keys` itself (no
   hactool, nothing extracted) and writes its own asset pack; the game runs from the pack alone.
