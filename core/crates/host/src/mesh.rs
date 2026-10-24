@@ -1154,7 +1154,7 @@ impl MeshPlanner {
         let tick = world.tick as f32;
         let mut has_background = false;
         if let Some(store) = store.as_deref_mut() {
-            let cam = (world.camera_x, world.camera_y);
+            let cam = world.view_camera();
             let t = self.theme_scene(world, cache, store).clone();
             let field = crate::scene3d::field_camera(style, cam);
             let background = t

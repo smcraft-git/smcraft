@@ -4050,6 +4050,24 @@ impl World {
         self.level.theme == 1 && self.level.night
     }
 
+    /// The airship theme rocks: the view rises and falls by up to 24.75 px, one swing every
+    /// 655.36 frames (an angle stepping 100 of 65536 a frame) [meas: smm2recomp frames of an SMB1
+    /// airship course every 15 frames, 300–1200: 12.375 · (1 − cos θ), θ = 2π (t − 593) / 655.36
+    /// with t the course clock; fits to under a pixel]. Drawing only: the sim's camera is
+    /// unchanged. Other themes: 0.
+    pub fn view_sway(&self) -> f32 {
+        if self.level.theme != 3 || self.map_view {
+            return 0.0;
+        }
+        let t = (self.tick as f64 - 593.0) / 655.36;
+        (12.375 * (1.0 - (t * std::f64::consts::TAU).dcos())) as f32
+    }
+
+    /// The view's bottom-left as drawn (the camera, plus the airship's sway).
+    pub fn view_camera(&self) -> (f32, f32) {
+        (self.camera_x, self.camera_y + self.view_sway())
+    }
+
     /// The night darkness (underwater and ghost house at night, not in 3D World): how dark the
     /// view is and the lights that show through [themes.md §1.6; v1.0.0 0x710081aeb0 enables it
     /// for `night && (theme & ~1) == 4`, 0x710036bc90 places the players' lights]. None in other
@@ -6253,8 +6271,15 @@ impl World {
     fn background_sprites(&self, out: &mut Vec<Sprite>) {
         // (a whole-course render pins the backdrop to the world so the views join up)
         let p = if self.map_view { 1.0 } else { 0.5 };
-        let ox = self.camera_x * (1.0 - p);
-        let oy = (self.level.bottom + self.camera_y * (1.0 - p)).min(self.camera_y + 32.0);
+        let (cx, cy) = (self.camera_x, self.camera_y);
+        let mut ox = cx * (1.0 - p);
+        // anchored to the sim's camera and drawn through the swaying one, the backdrop moves
+        // with the airship's sway like the field [meas]; the airship's sky drifts left a pixel a
+        // frame [meas: SMB1 airship clouds 30 px every 30 frames, at the course clock + 61 px]
+        let oy = (self.level.bottom + cy * (1.0 - p)).min(cy + 32.0);
+        if self.level.theme == 3 && !self.map_view {
+            ox -= self.tick as f32 + 61.0;
+        }
         out.push(Self::model_sprite(
             BACKDROP_MODEL,
             "",
@@ -7242,6 +7267,20 @@ mod tests {
         assert!(w.darkness().is_some());
         w.style = crate::player::Style::W3;
         assert!(w.darkness().is_none());
+    }
+
+    /// The airship rocks the view (0 at frame 593, 24.75 px at its top); other themes don't.
+    #[test]
+    fn airship_sway() {
+        let mut w = World::with_level(Level::flat(100));
+        w.tick = 900;
+        assert_eq!(w.view_sway(), 0.0);
+        w.level.theme = 3;
+        w.tick = 593;
+        assert!(w.view_sway().abs() < 1e-3);
+        w.tick = 593 + 328;
+        assert!((w.view_sway() - 24.75).abs() < 0.01);
+        assert_eq!(w.view_camera().1, w.camera_y + w.view_sway());
     }
 
     /// The start sign stands at x = 40 on the start ground, behind the field; snow has its own.

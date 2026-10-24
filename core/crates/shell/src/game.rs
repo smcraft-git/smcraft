@@ -305,7 +305,7 @@ impl Game {
             &mut self.sprites,
             &mut self.mesh_draws,
         );
-        let (cam, upside_down) = ((w.camera_x, w.camera_y), w.upside_down());
+        let (cam, upside_down) = (w.view_camera(), w.upside_down());
         self.build_meshes(cam, upside_down, self.edit_view);
         let shadow = field_shadow(&mut self.shadow, &self.cache, &self.session.world);
         self.dark =
@@ -341,7 +341,7 @@ impl Game {
         Scene {
             effects: &self.fx_frame,
             sprites: &self.sprites,
-            camera: (w.camera_x, w.camera_y),
+            camera: w.view_camera(),
             upside_down: w.upside_down(),
             clear: mmk_host::clear_color(w, &self.cache),
             hud: &self.hud,

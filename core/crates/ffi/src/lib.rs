@@ -547,7 +547,7 @@ pub unsafe extern "C" fn mmk_engine_snapshot(engine: *mut MmkEngine, out: *mut M
             sprites: e.sprites.as_ptr(),
             sprite_count: e.sprites.len(),
             camera_x: e.world.camera_x,
-            camera_y: e.world.camera_y,
+            camera_y: e.world.view_camera().1,
             view_w: mmk_sim::world::VIEW_W,
             view_h: mmk_sim::world::VIEW_H,
             tick: e.world.tick,
