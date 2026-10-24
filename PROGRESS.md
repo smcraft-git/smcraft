@@ -348,7 +348,8 @@ Nextendo; `docs/nextendo-network-play.md`, spec `research/specs/network-play.md`
   update power-ups' sounds (sword, shield, arrow, SMB2 pull / throw, balloon, wearables, boomerang);
   the cape's spin and climb, the cat's wall climb, slide down and dive landing; 3D World voices
   for dying, grabbing the pole and throwing fire (`MachinedPlayer` = own player); parachutes opening;
-  bosses' jumps and landings where the style has them (NSMBU Bowser; small / large by speed [inf]) ✅
+  bosses' jumps and landings where the style has them (NSMBU Bowser; small / large by speed [inf]);
+  3D World's dash footsteps ✅
 
 **G9 — Every platform** 🔄
 - 🔄 macOS (Swift app) · 🔄 iOS / iPadOS (built for the Simulator; the owner's iPad) · 🔄 Windows ·

@@ -620,7 +620,15 @@ impl Sounds {
             let step = (p.walk_phase / FOOTSTEP_PHASE) as i32;
             if step != self.footstep {
                 self.footstep = step;
-                let key = if step % 2 == 0 {
+                // 3D World's dash stage has its own steps (faster still past the run speed)
+                let dash = if p.vx.abs() > 3.2 {
+                    "footstep_Dashfast"
+                } else {
+                    "footstep_Dash"
+                };
+                let key = if p.dashing() && self.has_player_key(dash) {
+                    dash
+                } else if step % 2 == 0 {
                     "footstep_L"
                 } else {
                     "footstep_R"

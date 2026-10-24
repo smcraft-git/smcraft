@@ -74,7 +74,10 @@ fn db() -> serde_json::Value {
                 asset("swim", "Swim"),
                 asset("kabekick", "WallKick"),
                 asset("swordAttack", "Slash"),
-                asset("MantAttack", "CapeSpin")
+                asset("MantAttack", "CapeSpin"),
+                asset("footstep_L", "StepL"),
+                asset("footstep_R", "StepR"),
+                asset("footstep_Dash", "DashStep")
             ]},
             "M1_JumpStep": {"calls": [asset("jump", "Spring"), asset("high_jump", "SpringHigh")]},
             "M1_PowBlock": {"calls": [asset("pow", "Pow")]},
@@ -320,6 +323,25 @@ fn a_cape_spin_sounds_once_when_it_starts() {
     w.player.attack = 11;
     r.s.after_step(&w);
     assert!(r.played().is_empty(), "not again while it lasts");
+}
+
+#[test]
+fn the_3d_world_dash_has_its_own_footsteps() {
+    use mmk_sim::player::{Pose, Style};
+    let mut r = rig();
+    let mut w = world();
+    r.s.start_course(&w);
+    r.played();
+    w.player.on_ground = true;
+    w.player.pose = Pose::Walk;
+    w.player.walk_phase = 9.5;
+    r.s.after_step(&w);
+    assert_eq!(r.played(), ["sfx:StepR"]);
+    w.player.style = Style::W3;
+    w.player.dash = 80;
+    w.player.walk_phase = 18.5;
+    r.s.after_step(&w);
+    assert_eq!(r.played(), ["sfx:DashStep"]);
 }
 
 #[test]
