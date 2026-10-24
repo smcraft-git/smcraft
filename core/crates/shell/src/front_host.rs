@@ -889,6 +889,10 @@ impl Host for ShellHost<'_> {
             .then_some((w.area, [w.player.x, w.player.y]))
     }
 
+    fn player_snapshot(&mut self) -> Option<(mmk_front::Icon, [f32; 4])> {
+        self.game.player_snapshot()
+    }
+
     fn save_course(&mut self, id: Option<&str>, course: &[u8]) -> Result<String, String> {
         // over an entry: its slot, or the file it is; else the first free slot
         if let Some(id) = id {

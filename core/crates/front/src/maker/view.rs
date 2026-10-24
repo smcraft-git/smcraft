@@ -51,6 +51,13 @@ fn texture(f: &MakerFlow, name: &str) -> Option<u32> {
 /// The grid and the cursor frame.
 pub fn overlay(f: &MakerFlow) -> DrawItem {
     let mut q = Vec::new();
+    // Mario's Trail under the grid: each picture where it was taken, white with its alpha
+    // (research/specs/maker.md C12) [obs 0x7101333890]; nearest texels, as the course's art
+    for (r, tex, alpha) in f.trail_quads() {
+        let mut t = quad(r, tex, FULL, [255, 255, 255, (alpha * 255.0).round() as u8]);
+        t.flags &= !mmk_ui::FLAG_LINEAR;
+        q.push(t);
+    }
     if f.glove_shown() || f.carrying() {
         grid(f, &mut q);
         frame(f, &mut q);

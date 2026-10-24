@@ -1151,3 +1151,188 @@ fn an_empty_sub_area_asks_for_its_orientation() {
     assert!(m.subarea.is_none());
     assert_ne!(m.editor.area().header.orientation, 0, "vertical");
 }
+
+/// A test play in which Mario runs right `px` px a tick for `ticks` ticks from (40, 32), then
+/// the test-play key brings the maker back.
+fn test_run(m: &mut MakerFlow, host: &mut MockHost, saves: &mut Saves, px: f32, ticks: usize) {
+    run(m, host, saves, idle());
+    let mut i = idle();
+    i.play = true;
+    run(m, host, saves, i);
+    run(m, host, saves, idle());
+    assert!(m.testing());
+    for t in 0..ticks {
+        host.player = Some((0, [40.0 + px * t as f32, 32.0]));
+        run(m, host, saves, idle());
+    }
+    run(m, host, saves, i);
+    assert!(!m.testing());
+}
+
+#[test]
+fn mario_s_trail_is_recorded_in_test_play_and_shown_back_in_the_maker() {
+    let (mut host, mut saves) = (MockHost::default(), Saves::default());
+    let mut m = maker(&mut host, &mut saves, MakerStart::New("M1".into()));
+    assert!(m.trail_on, "on by default");
+    // 3 px a tick for 100 ticks: a picture every 8 ticks (24 px > 22) [obs 0x710158de40]
+    test_run(&mut m, &mut host, &mut saves, 3.0, 100);
+    let n = m.trail.shots.len();
+    assert_eq!(
+        n,
+        13,
+        "{:?}",
+        m.trail.shots.iter().map(|s| s.feet).collect::<Vec<_>>()
+    );
+    assert_eq!(host.snapshots as usize, n);
+    for w in m.trail.shots.windows(2) {
+        assert!(w[1].feet[0] - w[0].feet[0] > 22.0);
+    }
+    let first = &m.trail.shots[0];
+    assert_eq!(
+        first.rect,
+        [-40.0, 20.0, 120.0, 84.0],
+        "160 × 64 round the feet"
+    );
+    // back in the maker they come in one every 2 ticks, oldest first, 0.3 → 0.7
+    assert!(m.trail_quads().is_empty());
+    for _ in 0..4 {
+        run(&mut m, &mut host, &mut saves, idle());
+    }
+    assert_eq!(m.trail.shown, 2);
+    for _ in 0..40 {
+        run(&mut m, &mut host, &mut saves, idle());
+    }
+    let q = m.trail_quads();
+    assert_eq!(q.len(), n);
+    assert!((q[0].2 - 0.3).abs() < 1e-4 && (q[n - 1].2 - 0.7).abs() < 1e-4);
+    assert!(q.windows(2).all(|w| w[1].2 > w[0].2));
+    let [x0, _, x1, _] = q[0].0;
+    assert!((x1 - x0 - 160.0 * SCALE).abs() < 0.01, "drawn at its size");
+    // a new test play starts it again
+    test_run(&mut m, &mut host, &mut saves, 3.0, 9);
+    assert_eq!(m.trail.shots.len(), 2);
+}
+
+#[test]
+fn mario_s_trail_button_switches_it_and_remembers() {
+    let (mut host, mut saves) = (MockHost::default(), Saves::default());
+    let mut m = maker(&mut host, &mut saves, MakerStart::New("M1".into()));
+    test_run(&mut m, &mut host, &mut saves, 3.0, 100);
+    for _ in 0..40 {
+        run(&mut m, &mut host, &mut saves, idle());
+    }
+    assert!(!m.trail_quads().is_empty());
+    if m.page.is_some() {
+        // a tap on the button (the script's "trail" taps its pane)
+        m.set_script(&format!("{}:trail", m.tick + 1));
+        run(&mut m, &mut host, &mut saves, idle());
+    } else {
+        with(&mut host, &mut saves, |cx| m.toggle_trail(cx));
+    }
+    assert!(!m.trail_on);
+    assert_eq!(host.values.get(TRAIL_KEY).map(String::as_str), Some("0"));
+    run(&mut m, &mut host, &mut saves, idle());
+    assert!(m.trail_quads().is_empty() && m.trail.shown == 0, "hidden");
+    assert!(!m.trail.shots.is_empty(), "kept while hidden");
+    // the next maker opens with it off
+    let m2 = maker(&mut host, &mut saves, MakerStart::New("M1".into()));
+    assert!(!m2.trail_on);
+    // on again: from the first picture
+    with(&mut host, &mut saves, |cx| m.toggle_trail(cx));
+    for _ in 0..4 {
+        run(&mut m, &mut host, &mut saves, idle());
+    }
+    assert_eq!(m.trail.shown, 2);
+}
+
+#[test]
+fn mario_s_trail_stays_through_edits_and_goes_with_an_area_or_style_change() {
+    let (mut host, mut saves) = (MockHost::default(), Saves::default());
+    let mut m = maker(&mut host, &mut saves, MakerStart::New("M1".into()));
+    test_run(&mut m, &mut host, &mut saves, 3.0, 100);
+    let n = m.trail.shots.len();
+    // an edit leaves it [inf: no edit sets the reset bit]
+    let goomba = m.palette.iter().position(|&t| t == Tool::Part(0)).unwrap();
+    m.slot = goomba;
+    m.cur = (12, 3);
+    run(&mut m, &mut host, &mut saves, press(Buttons::CONFIRM));
+    run(&mut m, &mut host, &mut saves, idle());
+    assert!(m.editor.object_at(12, 3).is_some());
+    assert_eq!(m.trail.shots.len(), n);
+    // the other area [obs: cState_AreaChange]
+    m.switch_area();
+    assert!(m.trail.shots.is_empty());
+    // (the empty sub-area's orientation window, if it came up: closed)
+    m.subarea = None;
+    m.mode = Mode::Edit;
+    m.switch_area();
+    // a style change [obs 0x7100e3e470]
+    test_run(&mut m, &mut host, &mut saves, 3.0, 100);
+    assert!(!m.trail.shots.is_empty());
+    m.mode = Mode::Edit;
+    m.open_window(0);
+    m.window_sel = 1;
+    with(&mut host, &mut saves, |cx| {
+        m.window_tick(0, Buttons::CONFIRM, None, cx)
+    });
+    assert_ne!(m.style(), "M1");
+    assert!(m.trail.shots.is_empty());
+}
+
+#[test]
+fn mario_s_trail_changes_area_with_mario_and_drops_what_the_game_drops() {
+    let (mut host, mut saves) = (MockHost::default(), Saves::default());
+    let mut m = maker(&mut host, &mut saves, MakerStart::New("M1".into()));
+    // a pipe to the sub-area in the middle: only what came after stays
+    run(&mut m, &mut host, &mut saves, idle());
+    let mut i = idle();
+    i.play = true;
+    run(&mut m, &mut host, &mut saves, i);
+    run(&mut m, &mut host, &mut saves, idle());
+    for t in 0..60 {
+        let area = usize::from(t >= 30);
+        host.player = Some((area, [40.0 + 30.0 * t as f32, 32.0]));
+        run(&mut m, &mut host, &mut saves, idle());
+    }
+    assert!(m.trail.shots.iter().all(|s| s.area == 1));
+    assert_eq!(m.trail.shots.len(), 30);
+    run(&mut m, &mut host, &mut saves, i);
+    // 30 pictures 900 px long that don't stay round a screen: all kept
+    assert_eq!(m.trail.shots.len(), 30);
+    for _ in 0..80 {
+        run(&mut m, &mut host, &mut saves, idle());
+    }
+    assert!(m.trail_quads().is_empty(), "the maker shows the main area");
+
+    // a short trail (its ends < 128 px apart) keeps its last 12 [obs 0x71013333a0]
+    let mut t = trail::Trail::default();
+    let shot = |x: f32, y: f32| trail::Shot {
+        area: 0,
+        rect: [0.0; 4],
+        feet: [x, y],
+        texture: String::new(),
+    };
+    t.shots = (0..20)
+        .map(|k| shot(100.0 + 30.0 * (k as f32 * 0.7).sin(), 40.0))
+        .collect();
+    t.enter();
+    assert_eq!(t.shots.len(), 12);
+    assert_eq!(
+        t.shots[0].feet,
+        shot(100.0 + 30.0 * (8.0f32 * 0.7).sin(), 40.0).feet
+    );
+    // a long run, then 27 round one place: those 27 stay
+    t.shots = (0..10)
+        .map(|k| shot(1000.0 + 300.0 * k as f32, 40.0))
+        .collect();
+    t.shots
+        .extend((0..30).map(|k| shot(4000.0 + 5.0 * k as f32, 40.0 + 30.0 * (k % 3) as f32)));
+    t.enter();
+    assert_eq!(t.shots.len(), 27);
+    assert_eq!(t.shots[0].feet[0], 4000.0 + 5.0 * 3.0);
+    // more than 40 are never kept
+    let mut t = trail::Trail::default();
+    t.shots = (0..40).map(|k| shot(300.0 * k as f32, 0.0)).collect();
+    t.enter();
+    assert_eq!(t.shots.len(), 40);
+}

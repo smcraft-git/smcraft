@@ -573,6 +573,26 @@ impl UiCache {
         self.add_texture(format!("{group}/{stem}"), texture)
     }
 
+    /// Register or replace the pixels of `<group>/<stem>` (run-time pictures that change, such
+    /// as the Course Maker's trail snapshots): a replaced texture keeps its id and gets a new
+    /// [`TextureEntry::version`], so renderers upload it again.
+    pub fn set_texture_file(&mut self, group: &str, stem: &str, texture: Mtex) -> TexRef {
+        let name = format!("{group}/{stem}");
+        let Some(&id) = self.texture_ids.get(&name) else {
+            return self.add_texture(name, texture);
+        };
+        self.revision += 1;
+        let e = &mut self.textures[id as usize];
+        e.texture = texture;
+        e.ready = true;
+        e.version = self.revision;
+        TexRef {
+            id,
+            width: e.texture.width,
+            height: e.texture.height,
+        }
+    }
+
     /// Load (once) a layout with its parts, textures, fonts and messages.
     pub fn layout(&mut self, name: &str) -> Result<Arc<LayoutRes>, UiError> {
         self.layout_inner(name, &mut Vec::new())
@@ -760,5 +780,18 @@ mod tests {
         // opened once: neither the layout nor its textures are asked for again
         c.layout("Sample").unwrap();
         assert!(c.take_requests().is_empty());
+    }
+
+    #[test]
+    fn replaced_pixels_keep_the_id_and_move_the_version() {
+        let mut c = UiCache::in_memory();
+        let a = c.set_texture_file("Trail", "snap_00", tex(4, 4));
+        let rev = c.revision();
+        let b = c.set_texture_file("Trail", "snap_00", tex(8, 2));
+        assert_eq!(a.id, b.id);
+        assert_eq!((b.width, b.height), (8, 2));
+        let e = &c.textures[b.id as usize];
+        assert!(e.ready && e.version > 0 && c.revision() > rev);
+        assert_eq!(e.texture.data.len(), 8 * 2 * 4);
     }
 }

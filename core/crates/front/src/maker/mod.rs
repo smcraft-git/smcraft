@@ -23,7 +23,9 @@
 //! Test play: the clapperboard (or the test-play key) plays from the maker's Mario, who stands
 //! where the last test play ended (the course start at first); held for its HoldWait it plays
 //! from the start ("Play from start"); the play-from-cursor key starts at the cursor. A death, a
-//! clear, or the test-play key brings the maker back [inf].
+//! clear, or the test-play key brings the maker back [inf]. Back in the maker, Mario's Trail
+//! shows the pictures of Mario the test play took (`trail`; the left column's
+//! `L_ZanzoBtn_00` switches it on / off).
 //!
 //! Saving: the Coursebot through [`Host::save_course`]; an edited copy of someone else's course
 //! (`based_on`) always saves as a new course and carries "based on <code> by <maker>" in its
@@ -34,6 +36,7 @@ pub mod attr;
 pub mod catalog;
 pub mod mission;
 pub mod subarea;
+pub mod trail;
 pub mod view;
 
 use mmk_editor::parts::Dir;
@@ -90,6 +93,9 @@ const DELAY: i32 = 14;
 const REPEAT: i32 = 4;
 /// Ticks after a clear / death before test play returns to the maker.
 const CLEAR_TICKS: i32 = 200;
+/// Mario's Trail shown ("1", the default [?: a new save's]) or not ("0"): the game keeps the
+/// choice in the save data (flags word bit 0x20) [obs 0x71018c9280].
+pub const TRAIL_KEY: &str = "maker.trail";
 
 /// An edit sound: the part whose sound user plays it, the key, and its `MusicalScale`.
 type PutSound = (i16, &'static str, Option<f32>);
@@ -301,6 +307,11 @@ pub struct MakerFlow {
     textures: std::collections::HashMap<&'static str, u32>,
     /// Changes since the last save.
     pub unsaved: bool,
+    /// Mario's Trail: the last test play's pictures, and whether they are shown.
+    pub trail: trail::Trail,
+    pub trail_on: bool,
+    /// The tick the button's "Mario's Trail" label goes (its Cancel).
+    trail_label: Option<i32>,
 }
 
 impl MakerFlow {
@@ -387,6 +398,9 @@ impl MakerFlow {
                 })
                 .collect(),
             unsaved: false,
+            trail: Default::default(),
+            trail_on: cx.host.load_value(TRAIL_KEY).as_deref() != Some("0"),
+            trail_label: None,
         };
         f.reset_palette();
         f.setup_page();
@@ -437,7 +451,6 @@ impl MakerFlow {
             "L_PullBtnSlider_00",
             "N_View_00",
             "L_LeftParts_00/N_Content_00",
-            "L_LeftParts_00/L_ZanzoBtn_00",
             "L_LeftParts_00/L_MultiEditBtn_00",
             "L_LeftParts_00/L_WaterLevelBtn_00",
             "L_LeftParts_00/L_ScrollEditBtn_00",
@@ -465,6 +478,10 @@ impl MakerFlow {
             (
                 "L_LeftParts_00/L_MissionBtn_00/T_Btn_00",
                 "L_LeftParts_00-L_MissionBtn_00-T_Btn_00",
+            ),
+            (
+                "L_LeftParts_00/L_ZanzoBtn_00/T_Btn_00",
+                "L_LeftParts_00-L_ZanzoBtn_00-T_Btn_00",
             ),
             (
                 "L_RightParts_00/L_SaveBtn_00/T_Btn_00",
@@ -510,6 +527,7 @@ impl MakerFlow {
         self.update_page();
         self.update_timer();
         self.update_mission_button();
+        self.update_trail_button();
     }
 
     // ------------------------------------------------------------ coordinates
@@ -745,6 +763,13 @@ impl MakerFlow {
             }
         };
         if self.mode != Mode::Test {
+            self.trail.tick(self.trail_on);
+            if self.trail_label.is_some_and(|t| self.tick >= t)
+                && let Some(p) = &mut self.page
+            {
+                self.trail_label = None;
+                p.play("L_LeftParts_00/L_ZanzoBtn_00/Cancel", self.tick);
+            }
             self.place_slider();
             self.show(cx.host);
         }
@@ -1637,6 +1662,8 @@ impl MakerFlow {
     fn switch_area(&mut self) {
         let to = 1 - self.editor.area;
         self.editor.set_area(to);
+        // an area change empties the trail (`cState_AreaChange`) [obs 0x71012d2f10]
+        self.trail.clear();
         self.cam = [0.0, 0.0];
         self.cur = (8, 2);
         self.glove = self.tile_center(self.cur);
@@ -1689,7 +1716,7 @@ impl MakerFlow {
             self.select_slot(i);
             return true;
         }
-        let buttons: [(&str, u8); 11] = [
+        let buttons: [(&str, u8); 12] = [
             ("L_PaletteSet_00/L_SearchBtn_00/B_Btn_00", 0),
             ("L_Play_00/L_PlayBtn_00/B_Btn_00", 1),
             ("L_RightParts_00/L_UndoBtn_00/B_Btn_00", 2),
@@ -1701,6 +1728,7 @@ impl MakerFlow {
             ("L_LeftParts_00/L_TimerBtn_00/B_Btn_00", 8),
             ("L_LeftParts_00/L_ScrollBtn_00/B_Btn_00", 9),
             ("L_LeftParts_00/L_MissionBtn_00/B_Btn_00", 10),
+            ("L_LeftParts_00/L_ZanzoBtn_00/B_Btn_00", 11),
         ];
         let panes: Vec<String> = buttons.iter().map(|b| b.0.to_string()).collect();
         let Some(i) = hit(page, self.tick, &panes, p) else {
@@ -1763,6 +1791,7 @@ impl MakerFlow {
             4 => self.open_menu(),
             5 => self.open_save(),
             10 => self.open_mission(),
+            11 => self.toggle_trail(cx),
             w => self.open_window(w - 6),
         }
         true
@@ -1776,6 +1805,8 @@ impl MakerFlow {
         self.editor.set_area(0);
         self.editor.area = 0;
         self.mario = None;
+        // a new course: a new scene (its style / theme set-up empties the trail) [inf]
+        self.trail.clear();
         self.cam = [0.0, 0.0];
         self.changed();
         if let Some(p) = &mut self.page {
@@ -1910,6 +1941,9 @@ impl MakerFlow {
             cx.toast(&e);
             return;
         }
+        // the trail starts again with each test play (the snapshot manager's draw state goes
+        // to cState_ResetHistory when the game leaves the editor) [obs 0x7101333660]
+        self.trail.clear();
         self.ui
             .sound_button("Edit_Clapperboard_00", "PlayBtn", Event::Decide);
         let mut screens = CourseScreens::new(&self.ui);
@@ -1949,6 +1983,8 @@ impl MakerFlow {
             return;
         };
         cx.host.step_course(None);
+        let style = self.editor.course.header.game_style.as_str_lossy();
+        self.trail.record(cx.host, &self.ui, &style);
         let s = cx.host.course_status();
         if let Some(sc) = &mut t.screens {
             sc.update(&s);
@@ -1981,6 +2017,7 @@ impl MakerFlow {
 
     fn end_test(&mut self, cx: &mut crate::Cx) {
         self.test = None;
+        self.trail.enter();
         self.play_hold = -1;
         self.mode = Mode::Edit;
         self.dirty = true;
@@ -2929,6 +2966,10 @@ impl MakerFlow {
                 1 => self.editor.set_theme(v),
                 _ => self.editor.set_autoscroll(v),
             }
+            // the scene's style / theme set-up empties the trail [obs 0x7100e3e470]
+            if w < 2 {
+                self.trail.clear();
+            }
             self.changed();
         }
         self.ui.sound_button(
@@ -3006,6 +3047,54 @@ impl MakerFlow {
                 p.picture(&format!("{b}/P_MissionIcon_00"), "MissionIcon", None);
             }
         }
+    }
+
+    /// Mario's Trail's button: its Check frame 1 (`EditBtn_Zanzo_01`) while the trail is shown
+    /// [obs data]; always there and usable [inf: no code hides or greys button 0x3e].
+    fn update_trail_button(&mut self) {
+        let on = self.trail_on;
+        if let Some(p) = &mut self.page {
+            p.hold(
+                "L_LeftParts_00/L_ZanzoBtn_00/Check",
+                if on { 1.0 } else { 0.0 },
+            );
+        }
+    }
+
+    /// The button pressed: the trail on / off, kept for next time (the game: the save data's
+    /// flags word) [obs 0x71018c9280 case 0x3e]; switched on, it comes in again from its first
+    /// picture.
+    fn toggle_trail(&mut self, cx: &mut crate::Cx) {
+        self.trail_on = !self.trail_on;
+        cx.host
+            .store_value(TRAIL_KEY, if self.trail_on { "1" } else { "0" });
+        if self.trail_on {
+            // the Check animation forward has a sound (yr_Delay_01) [obs data]
+            self.ui.sound_key(PAGE, "Anm_Check_zanzoBtn_Forward", &[]);
+        }
+        self.update_trail_button();
+        // the label Decide shows goes with the button's Cancel (the game's, when the cursor
+        // leaves it) a second later [inf]
+        self.trail_label = Some(self.tick + 60);
+    }
+
+    /// Mario's Trail's pictures over the edit view: (layout rectangle x0, y0, x1, y1, texture,
+    /// alpha), oldest first.
+    pub fn trail_quads(&self) -> Vec<([f32; 4], u32, f32)> {
+        if self.mode == Mode::Test || !self.trail_on {
+            return Vec::new();
+        }
+        let mut cache = self.ui.cache_mut();
+        self.trail
+            .visible(self.editor.area)
+            .into_iter()
+            .filter_map(|(r, name, alpha)| {
+                let t = cache.texture_file(trail::GROUP, name)?;
+                let [x0, y0] = self.to_layout(r[0], r[1]);
+                let [x1, y1] = self.to_layout(r[2], r[3]);
+                Some(([x0, y0, x1, y1], t.id, alpha))
+            })
+            .collect()
     }
 
     /// After a style change: parts the style lacks leave the palette.
@@ -3137,6 +3226,15 @@ impl MakerFlow {
                 "here" => i.keys |= keys::PLAY_HERE,
                 "eraser" => i.keys |= keys::ERASER,
                 "area" => i.keys |= keys::AREA,
+                // a tap on Mario's Trail's button
+                "trail" => {
+                    if let Some(p) = &mut self.page {
+                        p.apply(self.tick);
+                        i.ui.click = p
+                            .rect("L_LeftParts_00/L_ZanzoBtn_00/B_Btn_00")
+                            .map(|r| r.center);
+                    }
+                }
                 _ => {}
             }
         }

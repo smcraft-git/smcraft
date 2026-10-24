@@ -186,6 +186,8 @@ struct FfiHost {
     audio: *const MmkAudio,
     /// The Course Maker's music and edit sounds (made from `audio` when first needed).
     maker_sounds: Option<mmk_host::audio::Director>,
+    /// Textures decoded for the Course Maker's trail snapshots.
+    snapshots: mmk_host::icon::Decoded,
     cb: MmkFrontHost,
     ui_dir: PathBuf,
     library: Vec<CourseEntry>,
@@ -910,6 +912,21 @@ impl Host for FfiHost {
             .then_some((w.area, [w.player.x, w.player.y]))
     }
 
+    fn player_snapshot(&mut self) -> Option<(mmk_front::Icon, [f32; 4])> {
+        // (the engine and the assets live apart from the host: both pointers stay valid)
+        let (assets, engine) = (unsafe { &*self.assets }, unsafe { &*self.engine });
+        let (i, area) =
+            mmk_host::icon::player_snapshot(&assets.cache, &engine.world, &mut self.snapshots)?;
+        Some((
+            mmk_front::Icon {
+                width: i.width,
+                height: i.height,
+                rgba: i.rgba,
+            },
+            area,
+        ))
+    }
+
     fn save_course(&mut self, id: Option<&str>, course: &[u8]) -> Result<String, String> {
         if let Some(p) = id {
             std::fs::write(p, course).map_err(|e| format!("{p}: {e}"))?;
@@ -1172,6 +1189,7 @@ pub unsafe extern "C" fn mmk_front_new(
             assets,
             audio,
             maker_sounds: None,
+            snapshots: Default::default(),
             cb: host,
             ui_dir,
             library: Vec::new(),
@@ -1901,6 +1919,7 @@ mod tests {
                 assets: a,
                 audio: std::ptr::null(),
                 maker_sounds: None,
+                snapshots: Default::default(),
                 cb: MmkFrontHost {
                     user: std::ptr::null_mut(),
                     load_value: None,

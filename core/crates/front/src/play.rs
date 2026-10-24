@@ -1157,6 +1157,9 @@ pub(crate) mod tests {
         pub edit_sounds: Vec<(String, String)>,
         /// The `MusicalScale` of each edit sound that had one: (key, scale).
         pub edit_scales: Vec<(String, f32)>,
+        /// Player 1 in test play (area, feet), and the trail pictures taken of it.
+        pub player: Option<(usize, [f32; 2])>,
+        pub snapshots: u32,
     }
 
     impl Host for MockHost {
@@ -1267,6 +1270,19 @@ pub(crate) mod tests {
         ) -> Result<LoadedCourse, String> {
             self.tests.push((area, start));
             Ok(LoadedCourse::default())
+        }
+        fn player_position(&self) -> Option<(usize, [f32; 2])> {
+            self.player
+        }
+        fn player_snapshot(&mut self) -> Option<(crate::host::Icon, [f32; 4])> {
+            let (_, [x, y]) = self.player?;
+            self.snapshots += 1;
+            let icon = crate::host::Icon {
+                width: 4,
+                height: 2,
+                rgba: vec![255; 4 * 2 * 4],
+            };
+            Some((icon, [x - 80.0, y - 12.0, x + 80.0, y + 52.0]))
         }
         fn save_course(&mut self, id: Option<&str>, course: &[u8]) -> Result<String, String> {
             match id {
