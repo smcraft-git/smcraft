@@ -99,14 +99,38 @@ impl Editor {
         dir: Dir,
         colour: u8,
     ) -> Result<(), EditError> {
+        let fp = parts::footprint(self.pipe(index)?);
+        self.reshape_pipe(index, (fp.x, fp.y), len, dir, colour)
+    }
+
+    /// Turn a placed pipe to `dir` with `len`, keeping its base tile (dragging its mouth round)
+    /// [inf: the game's gesture].
+    pub fn turn_pipe(&mut self, index: usize, dir: Dir, len: u8) -> Result<(), EditError> {
+        let o = self.pipe(index)?;
+        let fp = parts::footprint(o);
+        let old = Dir::from_flags(o.flags);
+        let colour = ((o.flags >> 18) & 3) as u8;
+        let (ax, ay) = parts::pipe_anchor(fp.x, fp.y, o.height.max(1) as i32, old);
+        let r = parts::pipe_rect(ax, ay, len as i32, dir);
+        self.reshape_pipe(index, (r.x, r.y), len, dir, colour)
+    }
+
+    /// Re-shape pipe `index` with its bounding box's bottom-left tile at `at`.
+    fn reshape_pipe(
+        &mut self,
+        index: usize,
+        at: (i32, i32),
+        len: u8,
+        dir: Dir,
+        colour: u8,
+    ) -> Result<(), EditError> {
         let o = self.pipe(index)?.clone();
         let range = parts::resize_range(9).map(|r| r.1).unwrap_or(2..=2);
         if !range.contains(&len) {
             return Err(EditError::NotAllowed("pipe length"));
         }
-        let fp = parts::footprint(&o);
         let flags = (o.flags & !(0x60 | 3 << 18)) | dir.flags() | ((colour as u32 & 3) << 18);
-        let mut n = parts::new_object(9, fp.x, fp.y, 2, len, flags);
+        let mut n = parts::new_object(9, at.0, at.1, 2, len, flags);
         n.link_id = o.link_id;
         n.sound_effect_id = o.sound_effect_id;
         n.child_id = o.child_id;
@@ -362,6 +386,24 @@ impl Editor {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_pipe_turned_by_its_mouth_keeps_its_base() {
+        let mut e = crate::test_util::flat("M1");
+        let p = e.place(9, 10, 6).unwrap();
+        let base = |e: &Editor| {
+            let o = e.object(p).unwrap();
+            let f = parts::footprint(o);
+            parts::pipe_anchor(f.x, f.y, o.height as i32, Dir::from_flags(o.flags))
+        };
+        let b0 = base(&e);
+        e.turn_pipe(p, Dir::Right, 4).unwrap();
+        assert_eq!(Dir::from_flags(e.object(p).unwrap().flags), Dir::Right);
+        assert_eq!(base(&e), b0);
+        let f = parts::footprint(e.object(p).unwrap());
+        assert_eq!((f.w, f.h), (4, 2));
+        assert!(e.turn_pipe(p, Dir::Up, 1).is_err(), "2 tiles at least");
+    }
     use crate::test_util::*;
     use mmk_sim::level::{Level, WarpKind};
 

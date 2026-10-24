@@ -218,7 +218,9 @@ sway, importer and pack 12, the dev cache already at v12).
     other form (vtables not resolved), winged Bill Blasters in play
   - ⬜ custom autoscroll and its nodes, water level, the sub-area set-up window, the vertical
     scroll bar, the part variants balloon (Fast Conveyor …), tracks / doors' partners placed
-    by hand, pipes turned by their mouth, the trash can, Mario's Trail, co-op making
+    by hand, the trash can, Mario's Trail, co-op making
+  - ✅ pipes turned and stretched by their mouth (the cursor round the base: the longer axis
+    turns it, the distance is its length [inf]; `Editor::turn_pipe` keeps the base tile)
   - ✅ maker music and part sounds (2026-10-24; `research/specs/maker.md` C9): the style's
     `BGM_<Theme>_Edit` for the area's theme while editing (a theme / style switch changes it,
     test play stops it before the course's own starts, back it plays again, leaving the maker

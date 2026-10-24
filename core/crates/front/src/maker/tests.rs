@@ -1042,3 +1042,20 @@ fn a_goomba_dropped_on_a_goomba_stacks_on_it() {
             .any(|(u, k)| u == "M1_EditKuribo" && k == "Combine")
     );
 }
+
+#[test]
+fn a_pipe_dragged_by_its_mouth_turns_round_its_base() {
+    use mmk_editor::parts::Dir;
+    let (mut host, mut saves) = (MockHost::default(), Saves::default());
+    let mut m = maker(&mut host, &mut saves, MakerStart::New("M1".into()));
+    let p = m.editor.place(9, 30, 6).unwrap();
+    // an up pipe two tall: its mouth is the top row (y 7); drag it to the right of the base
+    m.cur = (30, 7);
+    run(&mut m, &mut host, &mut saves, press(Buttons::CONFIRM));
+    m.cur = (35, 6);
+    run(&mut m, &mut host, &mut saves, held(Buttons::CONFIRM));
+    run(&mut m, &mut host, &mut saves, idle());
+    let o = m.editor.object(p).unwrap();
+    assert_eq!(Dir::from_flags(o.flags), Dir::Right);
+    assert_eq!(o.height, 6, "base to cursor, both ends counted");
+}

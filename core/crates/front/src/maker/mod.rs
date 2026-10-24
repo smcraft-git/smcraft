@@ -1006,8 +1006,16 @@ impl MakerFlow {
     fn resize_edge(&self, i: usize, t: (i32, i32)) -> Option<(bool, bool)> {
         let o = self.editor.object(i)?;
         let (wr, hr) = mmk_editor::parts::resize_range(o.id)?;
-        if o.id == 9 && Dir::from_flags(o.flags) != Dir::Up {
-            return None;
+        if o.id == 9 {
+            // a pipe by its mouth (the two tiles at its open end): stretched and turned
+            let r = mmk_editor::parts::footprint(o);
+            let mouth = match Dir::from_flags(o.flags) {
+                Dir::Up => t.1 == r.y + r.h - 1,
+                Dir::Down => t.1 == r.y,
+                Dir::Right => t.0 == r.x + r.w - 1,
+                Dir::Left => t.0 == r.x,
+            };
+            return mouth.then_some((false, true));
         }
         let r = mmk_editor::parts::footprint(o);
         let width = wr.start() != wr.end() && t.0 == r.x + r.w - 1;
@@ -1034,6 +1042,26 @@ impl MakerFlow {
         };
         let r = mmk_editor::parts::footprint(&o);
         let (tx, ty) = self.cur;
+        if o.id == 9 {
+            // the mouth follows the cursor round the pipe's base: the longer axis from the base
+            // turns it, the distance is its length [inf: the game's gesture]
+            let dir = Dir::from_flags(o.flags);
+            let (ax, ay) = mmk_editor::parts::pipe_anchor(r.x, r.y, o.height.max(1) as i32, dir);
+            let (dx, dy) = (tx - ax, ty - ay);
+            let (to, len) = if dy.abs() >= dx.abs() {
+                (if dy >= 0 { Dir::Up } else { Dir::Down }, dy.abs() + 1)
+            } else {
+                (if dx > 0 { Dir::Right } else { Dir::Left }, dx.abs() + 1)
+            };
+            let len = len.clamp(*hr.start() as i32, *hr.end() as i32) as u8;
+            if (to, len) != (dir, o.height) && self.editor.turn_pipe(index, to, len).is_ok() {
+                if let Some(Drag::Resize { changed, .. }) = &mut self.drag {
+                    *changed = true;
+                }
+                self.changed();
+            }
+            return;
+        }
         let w = if width {
             (tx - r.x + 1).clamp(*wr.start() as i32, *wr.end() as i32) as u8
         } else {
