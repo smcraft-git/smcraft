@@ -70,7 +70,24 @@ function split(path) {
   return cut < 0 ? ["", path] : [path.slice(0, cut), path.slice(cut + 1)];
 }
 
+// Development: `?pack=URL` (an asset cache) and `?ui=URL` (an SMM2 UI import) served over HTTP
+// on this machine stand in for the stored data (scripted checks of the web build; nothing is
+// copied). Directory listings are the server's HTML indexes; the UI's file list is `files.txt`.
+const SERVED = (() => {
+  const q = new URLSearchParams(location.search);
+  const base = (v) => (v ? (v.endsWith("/") ? v : `${v}/`) : null);
+  return { [ROOT]: base(q.get("pack")), [UI_ROOT]: base(q.get("ui")) };
+})();
+
+async function fetchBytes(url) {
+  const r = await fetch(url);
+  if (r.status === 404) return null;
+  if (!r.ok) throw new Error(`${url}: HTTP ${r.status}`);
+  return new Uint8Array(await r.arrayBuffer());
+}
+
 async function readFile(path, root = ROOT) {
+  if (SERVED[root]) return fetchBytes(SERVED[root] + path);
   try {
     const [dir, name] = split(path);
     const file = await (await (await dirAt(dir, false, root)).getFileHandle(name)).getFile();
@@ -82,6 +99,7 @@ async function readFile(path, root = ROOT) {
 }
 
 async function writeFile(path, data, root = ROOT) {
+  if (SERVED[root]) return;
   const [dir, name] = split(path);
   const handle = await (await dirAt(dir, true, root)).getFileHandle(name, { create: true });
   if (handle.createWritable) {
@@ -103,6 +121,12 @@ async function removeData(root = ROOT) {
 }
 
 async function listDir(path, root = ROOT) {
+  if (SERVED[root]) {
+    const html = await fetchBytes(`${SERVED[root]}${path ? `${path}/` : ""}`);
+    if (!html) return [];
+    const names = [...new TextDecoder().decode(html).matchAll(/href="([^"?/]+)"/g)].map((m) => decodeURIComponent(m[1]));
+    return names.sort();
+  }
   const out = [];
   try {
     for await (const [name, h] of (await dirAt(path, false, root)).entries()) {
