@@ -29,6 +29,26 @@ pub fn key_button(k: KeyCode) -> Option<u32> {
     })
 }
 
+/// A Bluetooth controller's button on Android (winit hands its key code over unnamed; the D-pad
+/// already comes as the arrows) as the keyboard key that does the same: A / B jump, X / Y run,
+/// L1 / R1 / L2 / R2 the menus' shoulders (Q / E / 1 / 3), Start pause, Select the skip key.
+#[cfg(target_os = "android")]
+pub fn android_pad_key(code: u32) -> Option<KeyCode> {
+    Some(match code {
+        96 => KeyCode::Space,
+        97 => KeyCode::KeyZ,
+        99 => KeyCode::KeyX,
+        100 => KeyCode::ShiftLeft,
+        102 => KeyCode::KeyQ,
+        103 => KeyCode::KeyE,
+        104 => KeyCode::Digit1,
+        105 => KeyCode::Digit3,
+        108 => KeyCode::KeyP,
+        109 => KeyCode::Tab,
+        _ => return None,
+    })
+}
+
 impl Keyboard {
     pub fn key(&mut self, k: KeyCode, pressed: bool) {
         if pressed {

@@ -659,7 +659,16 @@ impl ApplicationHandler<UserEvent> for App {
             }
             WindowEvent::Focused(false) => self.keys.clear(),
             WindowEvent::KeyboardInput { event, .. } => {
-                if let PhysicalKey::Code(code) = event.physical_key {
+                let code = match event.physical_key {
+                    PhysicalKey::Code(c) => Some(c),
+                    // a Bluetooth controller's buttons (Android: unnamed key codes)
+                    #[cfg(target_os = "android")]
+                    PhysicalKey::Unidentified(winit::keyboard::NativeKeyCode::Android(k)) => {
+                        crate::input::android_pad_key(k)
+                    }
+                    _ => None,
+                };
+                if let Some(code) = code {
                     let pressed = event.state == ElementState::Pressed;
                     if matches!(
                         code,
