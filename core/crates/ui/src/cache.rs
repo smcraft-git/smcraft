@@ -568,6 +568,12 @@ impl UiCache {
         self.texture_at(name, &rel, (0, 0)).ok()
     }
 
+    /// The pixels of texture `id` (as [`UiCache::texture_file`] gave it), once they are there.
+    pub fn texture_data(&self, id: u32) -> Option<&Mtex> {
+        let e = self.textures.get(id as usize)?;
+        e.ready.then_some(&e.texture)
+    }
+
     /// A JSON file of the import (`rel` from the import root, e.g. `ui/myworld/map.json`), if it
     /// is there and readable now (hosts that read files later hand every `.json` over first).
     pub fn json_file(&self, rel: &str) -> Option<Value> {

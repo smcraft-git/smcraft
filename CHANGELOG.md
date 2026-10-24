@@ -58,7 +58,11 @@ SMCraft is back in development (it was archived in October 2026).
   rocket) with its music and the parts' sounds, and the **Coursebot** (120 slots, Save As,
   Load, Upload). Wings and parachutes from a part's attribute balloon (hold a part still).
   **Mario's Trail**: after a test play the maker shows where Mario went, faint pictures of him
-  along the way as in SMM2; the left column's button switches it on and off. Any course can be opened in the maker: someone else's course saves and uploads
+  along the way as in SMM2; the left column's button switches it on and off. **Water Level**
+  in the castle and forest: drag the water, lava or poison line's button to make it rise or fall,
+  tap it for rising and falling, hold it for the speed. **Custom Scroll**: choose Custom in the
+  Autoscroll window, then lay the camera's path (drag the path to add a point, tap a point's
+  square for its speed). Any course can be opened in the maker: someone else's course saves and uploads
   as a new course, "based on <code> by <maker>".
 - **Super Worlds**: play a Super World (its map, lives, progress), made from your library or
   downloaded from TGRCode.

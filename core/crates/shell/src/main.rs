@@ -228,7 +228,9 @@ mod native {
         /// House's Match / Pop / Catch & Win; --front-script presses A), superworld-ending (the
         /// library's test world); the Course
         /// Maker on a new course: maker, maker-parts, maker-menu, maker-save, maker-style,
-        /// maker-theme, maker-timer, maker-autoscroll, maker-play (test play from the start,
+        /// maker-theme, maker-timer, maker-autoscroll, maker-water (-rising, -both, -speed,
+        /// -tip: the Water Level mode), maker-scroll (-nodes, -tip: Custom Scroll), maker-play
+        /// (test play from the start,
         /// --ticks of it); --style for the new course's style, --front-course to open a course
         /// instead; with
         /// --front-course: course-intro,
