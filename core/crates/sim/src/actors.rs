@@ -16,6 +16,7 @@ pub use bros::BroWing;
 mod ceiling;
 mod chute;
 mod claw;
+pub mod seesaw;
 pub use claw::{ClawRope, NUDGE as CLAW_NUDGE, REACH as CLAW_REACH};
 mod clown;
 pub use clown::ClownFire;
@@ -852,6 +853,8 @@ pub struct Actor {
     pub fly: Fly,
     /// A Swinging Claw's rope; the actor's own position is the rope's end (actors/claw.rs).
     pub claw: Option<ClawRope>,
+    /// A Seesaw's plank (actors/seesaw.rs).
+    pub plank: Option<seesaw::Plank>,
     /// Bowser's middle jump is a gap jump (its speed set to land past the gap; MiddleJump's
     /// enter 0x71006b0370 flag +0x90).
     pub gap_jump: bool,
@@ -940,6 +943,7 @@ impl Actor {
             spiny_shell: false,
             fly: Fly::default(),
             claw: None,
+            plank: None,
             gap_jump: false,
             wing_rate: 1.0,
             bro_wing: BroWing::default(),
@@ -1048,12 +1052,14 @@ impl Actor {
                 Some((self.x - 8.0, self.y, self.x + 8.0, self.y + 16.0, false))
             }
             Kind::Seesaw { width } => {
-                // the plank turns about a point 8 px under its top: the top over the pivot is
-                // 8 / cos θ above it [obs: Ryujinx trace W_3010660, the rider's height on a
-                // tilting seesaw]
-                let hw = width as f32 * 8.0;
-                let top = self.y + 8.0 + 8.0 / self.heading.to_radians().dcos();
-                Some((self.x - hw, self.y + 8.0, self.x + hw, top, true))
+                // the plank turns about a point 8 px under its top (the pivot): the top line is
+                // its ends' line 8 px up, from end to end, its height here taken at the middle
+                // (actors/seesaw.rs) [obs: Ryujinx trace W_3010660: stood on with the centre
+                // 3.6 px past the turned plank's end, on its line]
+                let p = self.plank.unwrap_or_else(|| seesaw::Plank::new(width));
+                let (e, py) = (p.ends, self.y + 8.0);
+                let mid = py + seesaw::HALF + (e[1] + e[3]) * 0.5;
+                Some((self.x + e[0], py, self.x + e[2], mid, true))
             }
             // a hidden block is no solid until it's bumped from below
             Kind::MovingBlock {
@@ -1085,54 +1091,88 @@ impl Actor {
     /// Top-surface slope of a platform (seesaw tilt: `heading` in degrees).
     pub fn solid_slope(&self) -> f32 {
         match self.kind {
-            Kind::Seesaw { .. } => self.heading.to_radians().dtan(),
+            Kind::Seesaw { .. } => self.plank.map_or(0.0, |p| p.slope()),
             _ => 0.0,
         }
     }
 
-    /// Seesaw (91-seesaw.md): riders' lever arm tilts the plank. Tip speed ω (`speed`) gains
-    /// lever / (6·64·W²) per frame (at least 0.0015), the angle advances 2·asin(ω/16); limits
-    /// ±45° with bounce e = (W + 3)/36; free damping ω × 0.95 and a slow return to level.
-    /// The player weighs 2 per px of lever arm, from the third frame its centre is over the
-    /// plank (±8·W) (its riders' list lags as the P Switch's does) [obs: Ryujinx trace
-    /// W_3010660, walking onto a 5-tile seesaw: Δω = 2·lever / (384·25) from the third frame
-    /// the centre is on it].
+    /// The 3D World Goomba's sight (0-goomba.md "Kuribo3W extra states", Basic vtable
+    /// 0x7102170c58, v1.0.0): walking on the ground (`phase` 0) it spots a player in front within
+    /// 80 px, from 16 px under its feet to 32 over (0x71006f91c0), and stops for its notice
+    /// animation (Find, 7), 53 frames counting the one it sees [obs: Ryujinx trace X_cpipeg, a
+    /// Goomba landing out of a clear pipe 62 px from the player: still frames 268..320, running
+    /// from 321]; then runs at 0.7 (Run, 8) for at least 10 frames, until the player is out of
+    /// 128 px sideways, 80 up or 32 down, or behind it for 16 frames (0x71006f97a0); then slows
+    /// to a stop by 0.05 a frame (Lost, 9) and walks on [inf: the Lost animation's end taken as
+    /// the stop]. The speed to walk at this frame (0 while it stands).
+    fn kuribo3w(&mut self) -> f32 {
+        const WALK: f32 = 0.3;
+        if self.wings || self.big {
+            return WALK;
+        }
+        let (dx, dy) = (self.target.0 - self.x, self.target.1 - self.y);
+        let ahead = dx * self.dir as f32 > 0.0;
+        match self.phase {
+            7 => {
+                self.timer -= 1;
+                if self.timer > 0 {
+                    return 0.0;
+                }
+                (self.phase, self.timer, self.pause) = (8, 0, 0);
+                0.7
+            }
+            8 => {
+                self.timer += 1;
+                self.pause = if ahead { 0 } else { self.pause + 1 };
+                let lost = dx.abs() > 128.0 || dy > 80.0 || dy < -32.0 || self.pause >= 16;
+                if self.timer > 10 && lost {
+                    self.phase = 9;
+                }
+                0.7
+            }
+            9 => {
+                // (Lost eases its speed, not set by the walk below)
+                self.vx -= self.vx.clamp(-0.05, 0.05);
+                if self.vx == 0.0 {
+                    self.phase = 0;
+                }
+                self.vx.abs()
+            }
+            _ => {
+                if self.on_ground && ahead && dx.abs() <= 80.0 && (-16.0..=32.0).contains(&dy) {
+                    (self.phase, self.timer) = (7, 53);
+                    return 0.0;
+                }
+                WALK
+            }
+        }
+    }
+
+    /// Seesaw (91-seesaw.md, actors/seesaw.rs): the riders' torque turns the plank. The player
+    /// weighs 2, from the third frame its centre is over the plank (±8·W) (its riders' list lags
+    /// as the P Switch's does), then as long as it stands on it, a foot past the end too [obs:
+    /// Ryujinx trace W_3010660: on from x 289.5 over an end at 288, still at 370.4 over one at
+    /// 366.8], where it stands after its move.
     fn step_seesaw(&mut self, width: u8) {
-        let w = width as f32;
-        let on = self.ridden && (self.target.0 - self.x).abs() <= 8.0 * w;
+        let on =
+            self.ridden && (self.hops > 0 || (self.target.0 - self.x).abs() <= 8.0 * width as f32);
         self.hops = if on { self.hops.saturating_add(1) } else { 0 };
-        let lever = if self.hops >= 3 {
-            2.0 * (self.target.0 - self.x)
+        let mut plank = self.plank.unwrap_or_else(|| seesaw::Plank::new(width));
+        // (a ground pound landing on it this frame: `chain` set by the world)
+        if std::mem::take(&mut self.chain) == 1 && on {
+            let (sin, _) = crate::fmath::table_sin_cos(plank.theta as u32);
+            plank.slam(width, self.target.0 >= self.x + sin * -8.0);
+        }
+        let tau = if self.hops >= 3 && !plank.slammed {
+            let (rx, ry) = self.target;
+            seesaw::torque(plank.theta, self.x, self.y + 8.0, rx, ry, 2.0)
         } else {
             0.0
         };
-        if lever.abs() > 0.5 {
-            // positive lever (rider on the right) pushes the right end down (negative angle)
-            let mut a = lever / (6.0 * 64.0 * w * w);
-            if a.abs() < 0.0015 {
-                a = 0.0015 * a.signum();
-            }
-            self.speed -= a;
-        } else {
-            self.speed *= 0.95;
-            let th = self.heading.abs().min(25.0);
-            let back = (0.0025 * th / 25.0).max(0.001);
-            if self.heading > 0.0 {
-                self.speed -= back;
-            } else if self.heading < 0.0 {
-                self.speed += back;
-            }
-            if self.heading.abs() < 0.125 && self.speed.abs() < 0.00075 {
-                self.heading = 0.0;
-                self.speed = 0.0;
-            }
-        }
-        self.speed = self.speed.clamp(-8.0, 8.0);
-        self.heading += (2.0 * (self.speed / 16.0).clamp(-1.0, 1.0).dasin()).to_degrees();
-        if self.heading.abs() > 45.0 {
-            self.heading = 45.0 * self.heading.signum();
-            self.speed = -self.speed * (w + 3.0) / 36.0;
-        }
+        plank.step(width, tau);
+        self.speed = plank.omega;
+        self.heading = (plank.theta as f64 * (360.0 / 4_294_967_296.0)) as f32;
+        self.plank = Some(plank);
     }
 
     /// Lakitu: anchor x (home_x) follows the player by at most max(|player vx|, 0.05) — the
@@ -2424,9 +2464,10 @@ impl Actor {
                     return None;
                 }
                 // 3D World's Goomba (Kuribo3W) walks at 0.3 (0-goomba.md, Basic slot 54 →
-                // DAT_7101c8aeb0) [obs: Ryujinx trace 3W_hit, −0.3 a frame]
+                // DAT_7101c8aeb0) [obs: Ryujinx trace 3W_hit, −0.3 a frame], and runs at a player
+                // it spots (`kuribo3w`)
                 let speed = if self.kind == Kind::Goomba && level.style == "3W" {
-                    0.3
+                    self.kuribo3w()
                 } else {
                     WALK_SPEED
                 };
@@ -2461,8 +2502,9 @@ impl Actor {
                 } else if (touch || wall_prev) && self.on_ground {
                     touch_turn = true;
                 }
-                // the frame after landing from a fall it stands (Fall hands over to Walk) [obs:
-                // Ryujinx trace W_3051605, a Goomba landing on a slope, still a frame, then on]
+                // the frame after landing from a fall onto a slope it stands (Fall hands over to
+                // Walk) [obs: Ryujinx trace W_3051605, a Goomba landing on a slope, still a
+                // frame, then on; W_3049200 frame 395, a Koopa landing on flat ground walks on]
                 if self.land_wait > 0 {
                     self.land_wait -= 1;
                     self.vx = 0.0;
@@ -2470,7 +2512,13 @@ impl Actor {
                 let was_on_ground = self.on_ground;
                 self.vy = (self.vy + ENEMY_GRAVITY).max(MAX_FALL);
                 self.collide(level);
-                if !was_on_ground && self.on_ground && self.age > 1 {
+                if !was_on_ground
+                    && self.on_ground
+                    && self.age > 1
+                    && level
+                        .slope_at(self.x)
+                        .is_some_and(|(sy, _)| (sy - self.y).abs() < 0.5)
+                {
                     self.land_wait = 1;
                 }
                 if touch_turn {
@@ -2515,14 +2563,18 @@ impl Actor {
                 }
             }
             Kind::Mushroom | Kind::OneUp => {
+                // a wall met is turned at a frame late, the next move the new way [obs: Ryujinx
+                // trace X_mushstart: against a wall on frame 0 at +1, away at −1 from frame 1]
+                if std::mem::take(&mut self.wall_prev) {
+                    self.dir = -self.dir;
+                }
                 self.vy = (self.vy + ENEMY_GRAVITY).max(MAX_FALL);
                 if self.on_ground {
                     self.vx = ITEM_SPEED * self.dir as f32;
                 }
                 self.collide(level);
                 if self.wall {
-                    self.dir = -self.dir;
-                    self.vx = ITEM_SPEED * self.dir as f32;
+                    self.wall_prev = true;
                 }
             }
             Kind::FireFlower | Kind::SuperballFlower | Kind::SuperHammer => {
@@ -4607,6 +4659,11 @@ impl Actor {
             (14.0, 0.0)
         } else if basic {
             (hw, -0.1)
+        } else if matches!(self.kind, Kind::Mushroom | Kind::OneUp) {
+            // a walking mushroom rests 0.1 px into a wall, as a Basic walker does [obs: Ryujinx
+            // traces W_3010660 / X_mushstart, mushrooms in one-tile boxes and against walls: x
+            // 296.1 against a wall at 304]
+            (hw, -0.1)
         } else {
             (hw, 0.001)
         };
@@ -4636,7 +4693,16 @@ impl Actor {
         self.x += self.vx * cos;
         if self.vx != 0.0 {
             let side = self.vx.signum();
-            let wx = self.x + side * side_hw;
+            // (a mushroom's sensor reaches only as far as it rests into a wall: flush against a
+            // wall's face doesn't meet it [obs: Ryujinx trace X_mushstart, a mushroom stepping
+            // to x 200.0 by a wall at 208 walks on into it the next frame]; a Basic walker's
+            // meets the face [obs: W_3051605])
+            let reach = if matches!(self.kind, Kind::Mushroom | Kind::OneUp) {
+                side_hw + gap
+            } else {
+                side_hw
+            };
+            let wx = self.x + side * reach;
             let ys = [self.y + 2.0, self.y + (h - 2.0).max(2.0)];
             // one-way walls block only motion into them from their blocking side
             let prev_wx = wx - self.vx * cos;

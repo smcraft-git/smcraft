@@ -249,6 +249,8 @@ pub struct Rider {
     target: f32,
     accel: f32,
     gravity: f32,
+    /// In: the last move (its heading launches it out); its speeds show 0.
+    moved: (f32, f32),
 }
 
 /// The world's clear-pipe riders.
@@ -260,8 +262,8 @@ pub struct ClearPipes {
     left_at: Option<u64>,
     /// This tick's sound cues (cleared with the events).
     pub cues: Vec<Cue>,
-    /// Out of a downward mouth (x, y): the body starts inside the pipe's last tiles.
-    drop: Option<(f32, f32)>,
+    /// The player came out this frame: its own update runs on, without input.
+    pub(super) out_step: bool,
 }
 
 impl Rider {
@@ -386,11 +388,13 @@ impl World {
     /// The player's clear-pipe entry, after the ordinary pipes found none (the pipe check
     /// 0x71015e7840 → 0x71015aa8c0). Up: Up held at a downward mouth over the head (not while
     /// falling in courses of version ≥ 3, unless swimming); down: standing on an upward mouth
-    /// with Down held; sideways: on the ground (or swimming), the direction held 10 frames, or
-    /// pushing the mouth's face while facing it. The probe — the head, the feet − 1, or the
-    /// body's side + 1 at 11.9 px up — must be within 7.89 px of the mouth's centre, the pipe
-    /// must lead on that way and the mouth be clear. Returns whether the player went in.
-    pub(super) fn clear_pipe_entry(&mut self, inp: Input, pushing: bool) -> bool {
+    /// with Down held; sideways: on the ground (or swimming), the direction held 10 frames, the
+    /// wall sensor on the mouth's face (the binary's other way in, pushing the face while facing
+    /// it, wants more than a push [?]). Down is tried `before_move` (this frame's input, last
+    /// frame's place: the ride's first step is this frame's), the others after it. The probe — the head, the feet − 1, or
+    /// the body's side + 1 at 11.9 px up — must be within 7.89 px of the mouth's centre, the
+    /// pipe must lead on that way and the mouth be clear. Returns whether the player went in.
+    pub(super) fn clear_pipe_entry(&mut self, inp: Input, before_move: bool) -> bool {
         if self.pipe_paths().pipes.is_empty()
             || self.cpipe.player.is_some()
             || self.cpipe.left_at == Some(self.tick)
@@ -409,19 +413,26 @@ impl World {
         let probe_y = p.y + if p.crouch { 8.0 } else { SIDE_PROBE_Y };
         let mut tries: Vec<(Side, (f32, f32))> = Vec::new();
         let falling_block = version >= 3 && p.vy < 0.0 && !p.in_water;
-        if inp.held(input::UP) && !falling_block {
+        if inp.held(input::UP) && !falling_block && !before_move {
             tries.push((Side::Up, (p.x, p.y + s.head_y)));
         }
-        if grounded {
+        if grounded && !before_move {
+            // (the direction held 10 frames on the ground: pushing the face while facing it
+            // isn't enough by itself [obs: Ryujinx trace X_cpipe: pushing a mouth's face for 9
+            // frames after landing, in on the 10th held frame; the push predicate 0x71015a9d00's
+            // extra condition not found [?]])
             let hold = self.side_hold;
-            if inp.held(input::RIGHT) && (hold.right >= SIDE_HOLD || (pushing && p.facing > 0)) {
+            if inp.held(input::RIGHT) && hold.right >= SIDE_HOLD {
                 tries.push((Side::Right, (p.x + s.wall_x + 1.0, probe_y)));
             }
-            if inp.held(input::LEFT) && (hold.left >= SIDE_HOLD || (pushing && p.facing < 0)) {
+            if inp.held(input::LEFT) && hold.left >= SIDE_HOLD {
                 tries.push((Side::Left, (p.x - (s.wall_x + 1.0), probe_y)));
             }
         }
-        if p.on_ground && inp.held(input::DOWN) {
+        // (down: the frame Down is held, before the move, standing where it stood last frame
+        // [obs: Ryujinx trace X_cpipev: on an upward mouth walking, Down pressed: in and 3 px
+        // down that frame])
+        if p.on_ground && inp.held(input::DOWN) && before_move {
             tries.push((Side::Down, (p.x, p.y - 1.0)));
         }
         let radius = if version > 0 && p.form == Form::Small && swimming {
@@ -439,10 +450,15 @@ impl World {
                 // the head or feet against the mouth's face (the sensor reports its kind)
                 let pts = &self.pipe_paths().pipes[k];
                 let m = if last { pts[pts.len() - 1] } else { pts[0] };
+                // (sideways: the wall sensor on the mouth's face, the player pushed flush against
+                // it [obs: Ryujinx trace X_cpipe: walking in with Right held for 90 frames, in
+                // only from the frame after the one that stops it at 184.1 by a mouth at 192,
+                // the probe 7.7 px from the mouth's centre two frames before])
                 match side {
                     Side::Up => probe.1 >= m.1 - 1.0,
                     Side::Down => (p.y - m.1).abs() < 1.0,
-                    _ => true,
+                    Side::Right => p.x + s.wall_x >= m.0 - 0.01,
+                    Side::Left => p.x - s.wall_x <= m.0 + 0.01,
                 }
             })
         });
@@ -452,10 +468,10 @@ impl World {
         let t = Traveller::enter(self.pipe_paths(), k, last, (0.0, PLAYER_OFF_Y));
         let p = &mut self.player;
         p.control = Control::Demo;
-        (p.vx, p.vy) = (0.0, 0.0);
         p.crouch = false;
-        p.on_ground = false;
-        (p.x, p.y) = t.pos();
+        // (it stays where it stood this frame, its speeds as they were, on the ground: the ride
+        // moves it from the mouth from the next [obs: X_cpipe, 3 px past the mouth the frame
+        // after; X_cpipev_u, the speed of the jump into a mouth kept on that frame])
         self.cpipe.player = Some(PlayerRide { t, roll: 0 });
         self.cue(None, CueKind::In);
         true
@@ -466,7 +482,7 @@ impl World {
     /// once on a vertical segment (the front leading), eased by the traveller's 10° a frame in a
     /// bend — and the way out: a horizontal exit sets the player down by half its height (16 or
     /// 32: centred on the pipe's line), speeds stay 0, and a big player with no room to stand
-    /// stoops. Returns false when there is no ride.
+    /// stoops. Returns false when there is no ride, or it came out (its update runs on).
     pub(super) fn clear_pipe_player(&mut self) -> bool {
         let Some(mut ride) = self.cpipe.player else {
             return false;
@@ -487,6 +503,7 @@ impl World {
         let p = &mut self.player;
         (p.x, p.y) = t.pos();
         (p.vx, p.vy) = (0.0, 0.0);
+        p.on_ground = false;
         let right = p.facing > 0;
         const UP90: u32 = 0x4000_0000;
         const DOWN90: u32 = 0xc000_0000;
@@ -544,51 +561,28 @@ impl World {
             }
         }
         if t.leg == Some(Leg::Down) {
+            // out of a downward mouth the head is set at the mouth, the body below the pipe
+            // [obs: Ryujinx trace X_cpiped: small, out of a mouth at y 80 with the feet at 64.1,
+            // then that frame's fall step]
             let pts = &self.level.clear_pipe_paths.pipes[t.pipe];
             let end = if t.back { pts[0] } else { pts[pts.len() - 1] };
-            self.cpipe.drop = Some(end);
+            let head = p.sensors().head_y;
+            p.y = end.1 - head;
         }
         self.cpipe.player = None;
         self.cpipe.left_at = Some(self.tick);
         self.cue(None, CueKind::Out);
-        true
-    }
-
-    /// Before the player's own update: out of a downward mouth, the body starts inside the
-    /// pipe's last tiles; the game's terrain sensors meet faces, not insides, so nothing pushes
-    /// it until it has dropped clear [inf: the BG check is by edges]. The mouth's cells within
-    /// the body are lifted for the update (`clear_pipe_unlift` puts them back).
-    pub(super) fn clear_pipe_lift(&mut self) -> Vec<(i32, i32)> {
-        let Some((mx, my)) = self.cpipe.drop else {
-            return Vec::new();
-        };
-        let p = &self.player;
-        let head = p.y + p.sensors().head_y;
-        if head <= my || p.control != Control::Normal {
-            self.cpipe.drop = None;
-            return Vec::new();
+        if t.leg == Some(Leg::Up) {
+            // out on top: standing on the mouth, walking from the next frame [obs: Ryujinx trace
+            // X_cpipev: on the pipe's top that frame, the walk's own start (0.1 a frame) next]
+            self.player.on_ground = true;
+            return true;
         }
-        let (c0, r0, r1) = (
-            (mx / 16.0) as i32 - 1,
-            (my / 16.0) as i32,
-            (head / 16.0) as i32,
-        );
-        let mut lifted = Vec::new();
-        for tx in c0..c0 + 2 {
-            for ty in r0..=r1 {
-                if self.level.cell(tx, ty).is_solid() {
-                    self.level.set(tx, ty, crate::level::Cell::Empty);
-                    lifted.push((tx, ty));
-                }
-            }
-        }
-        lifted
-    }
-
-    pub(super) fn clear_pipe_unlift(&mut self, lifted: Vec<(i32, i32)>) {
-        for (tx, ty) in lifted {
-            self.level.set(tx, ty, crate::level::Cell::Solid);
-        }
+        // the state it goes on in (Fall) runs this frame too, before any input counts [obs:
+        // Ryujinx trace X_cpipe: out of a side mouth 8 px down and a fall step down that frame,
+        // its speed still 0]
+        self.cpipe.out_step = true;
+        false
     }
 
     /// The player's drawn pose inside: centred on the path (the sprite's origin is the feet),
@@ -630,7 +624,10 @@ impl World {
                             actor: Some(a.id),
                             kind: CueKind::Out,
                         });
-                        return come_out(a, r);
+                        // Out's first frame runs on the frame it comes out [obs: Ryujinx trace
+                        // X_cpipeg: 8 px past the mouth, then 3.6 px on (4 eased by 0.4) and
+                        // a gravity step, all that frame]
+                        return come_out(a, r) && out_frame(a, r, &self.level);
                     }
                     true
                 }
@@ -735,13 +732,18 @@ impl World {
 }
 
 /// Into the pipe (the context's enter and In's enter 0x7101055e90 / 0x71010560d0): no
-/// collision or contact, speeds and gravity 0, a parachute dropped.
+/// collision or contact, speeds and gravity 0, a parachute dropped; it stays where it stood
+/// this frame, the ride moving it from the mouth from the next [obs: Ryujinx trace X_cpipeg, a
+/// Goomba stopped 0.1 px into the face's wall the frame it goes in, 3 px past the mouth the
+/// next].
 fn go_in(a: &mut Actor, t: Traveller, profile: Profile, _side: Side) -> Rider {
     a.mode = Mode::ClearPipe;
     (a.vx, a.vy) = (0.0, 0.0);
     a.chute = false;
     a.on_ground = false;
-    (a.x, a.y) = t.pos();
+    // (the walk it comes back to is a new one: the mouth's face it pressed going in is no wall
+    // to turn at [obs: X_cpipeg, the Goomba walks on the way it came out])
+    (a.wall, a.wall_prev, a.touch_front) = (false, false, false);
     Rider {
         id: a.id,
         t,
@@ -751,6 +753,7 @@ fn go_in(a: &mut Actor, t: Traveller, profile: Profile, _side: Side) -> Rider {
         target: 0.0,
         accel: 0.0,
         gravity: 0.0,
+        moved: (0.0, 0.0),
     }
 }
 
@@ -758,7 +761,8 @@ fn go_in(a: &mut Actor, t: Traveller, profile: Profile, _side: Side) -> Rider {
 /// (atan2 of the heading, the rolled types) with the Screw spin.
 fn in_frame(a: &mut Actor, r: &mut Rider) {
     let (x, y) = r.t.pos();
-    (a.vx, a.vy) = (x - a.x, y - a.y);
+    r.moved = (x - a.x, y - a.y);
+    (a.vx, a.vy) = (0.0, 0.0);
     (a.x, a.y) = (x, y);
     let len = (r.t.dx * r.t.dx + r.t.dy * r.t.dy).sqrt();
     let ux = if len > 0.0 { r.t.dx / len } else { r.t.dx };
@@ -782,7 +786,7 @@ fn come_out(a: &mut Actor, r: &mut Rider) -> bool {
         (a.vx, a.vy) = (0.0, 0.0);
         return false;
     }
-    let (mx, my) = (a.vx, a.vy);
+    let (mx, my) = r.moved;
     let len = (mx * mx + my * my).sqrt();
     let (ux, uy) = if len > 0.0 {
         (mx / len, my / len)
@@ -958,10 +962,11 @@ mod tests {
             }
         );
         assert!(w.events.contains(&Event::ClearPipe));
-        // carried at 3 px a frame, 0.1 under the centre line
-        let x0 = w.player.x;
+        // still where it stood, then carried from the mouth at 3 px a frame, 0.1 under the
+        // centre line
+        assert!(w.player.x < 160.0);
         w.step(hold(0));
-        assert!((w.player.x - x0 - 3.0).abs() < 1e-4);
+        assert!((w.player.x - 163.0).abs() < 1e-4);
         assert!((w.player.y - 47.9).abs() < 1e-4);
         let mut out = None;
         for _ in 0..80 {
@@ -971,10 +976,11 @@ mod tests {
                 break;
             }
         }
-        // 8 px past the mouth, set down by half the small body (16): centred on the line
+        // 8 px past the mouth, set down by half the small body (16): centred on the line, and
+        // falling that frame
         let (x, y) = out.expect("came out");
         assert_eq!(x, 328.0);
-        assert!((y - 39.9).abs() < 1e-4, "{y}");
+        assert!((y - 39.65).abs() < 1e-4, "{y}");
         assert_eq!(w.player.control, Control::Normal);
         run_until(&mut w, 0, 30, |w| w.player.on_ground);
         assert_eq!(w.player.y, 32.0);
@@ -1044,9 +1050,10 @@ mod tests {
         });
         assert!(w.cpipe.cues.iter().any(|c| c.actor == Some(id)));
         // Kuribo3W rides 8 px under the centre line (its rows' offset y −8), rolled along the pipe
+        // (from the frame after it goes in)
+        w.step(hold(0));
         let a = goomba(&w).unwrap();
         assert!((a.y - 40.0).abs() < 1e-4, "{}", a.y);
-        w.step(hold(0));
         let r = w.cpipe.riders[0];
         assert_eq!(r.roll, 0x4000_0000, "heading left: a quarter turn");
         run_until(&mut w, 0, 100, |w| {
@@ -1091,12 +1098,18 @@ mod tests {
         run_until(&mut w, 0, 10, |w| w.player.on_ground);
         assert_eq!(w.player.y, 208.0, "stands on the mouth");
         run_until(&mut w, input::DOWN, 5, |w| w.cpipe.player.is_some());
-        // heading down: rolled −90° (facing right), lets go 8 px under the mouth
+        // heading down: rolled −90° (facing right), lets go with the head at the mouth and a
+        // fall step
         w.step(hold(0));
         assert_eq!(w.cpipe.player.unwrap().roll, 0xc000_0000);
         run_until(&mut w, 0, 60, |w| w.cpipe.player.is_none());
         assert_eq!(w.player.x, 176.0);
-        assert!((w.player.y - (112.0 - 8.1)).abs() < 1e-4, "{}", w.player.y);
+        let head = w.player.sensors().head_y;
+        assert!(
+            (w.player.y - (112.0 - head - 0.25)).abs() < 1e-4,
+            "{}",
+            w.player.y
+        );
         run_until(&mut w, 0, 60, |w| w.player.on_ground);
         assert_eq!((w.player.x, w.player.y), (176.0, 32.0));
     }

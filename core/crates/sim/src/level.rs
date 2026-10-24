@@ -64,10 +64,11 @@ pub struct Solid {
 }
 
 impl Solid {
-    /// Height of the top surface at x.
+    /// Height of the top surface at x (a sloped top's line goes on past its ends: a foot on it
+    /// holds the player there).
     pub fn top_at(&self, x: f32) -> f32 {
         let cx = (self.x0 + self.x1) / 2.0;
-        self.y1 + self.slope * (x.clamp(self.x0, self.x1) - cx)
+        self.y1 + self.slope * (x - cx)
     }
 }
 
@@ -1751,7 +1752,41 @@ impl Level {
                         }
                     }
                     lvl.draw_slope(&slope);
-                    lvl.slopes.push(slope);
+                    // a ground tile on the low end cap joins the slope's first step to the
+                    // ground: its diagonal cells beside that tile (a gentle slope's two, a steep
+                    // one's one) are full solids, the diagonal starts a step later [obs: Ryujinx
+                    // traces W_3049200 frame 374, X_slopejoin (gentle 4×2 and 6×3, rising and
+                    // falling) and X_slopejoins (steep 3×2 and 5×4, rising and falling); the
+                    // step's collider is type 0x11 / 0x12 sub 10); the slope's cell attribute is
+                    // replaced when the art layer has a non-slope piece there (v3.0.3
+                    // 0x7100db8df0, steep v1.0.0 0x7100392fd0), the auto-tiler's choice. Ground
+                    // only under the cap, or under the high cap, changes nothing]
+                    let cap_x = if rising { tx } else { tx + w - 1 };
+                    let step = if o.id == 87 { 2 } else { 1 };
+                    let joined = matches!(o.id, 87 | 88)
+                        && hgt >= 2
+                        && w >= step + 2
+                        && area
+                            .ground
+                            .iter()
+                            .any(|g| g.x as i32 == cap_x && g.y as i32 == ty + 1);
+                    if joined {
+                        let first = if rising { tx + 1 } else { tx + w - 1 - step };
+                        for x in first..first + step {
+                            lvl.set(x, ty + 1, Cell::Solid);
+                        }
+                        if hgt > 2 {
+                            lvl.slopes.push(Slope {
+                                left: if rising { tx + step } else { tx },
+                                bottom: ty + 1,
+                                width: w - step,
+                                height: hgt - 1,
+                                ..slope
+                            });
+                        }
+                    } else {
+                        lvl.slopes.push(slope);
+                    }
                 }
                 _ => {}
             }

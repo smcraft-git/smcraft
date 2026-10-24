@@ -153,11 +153,45 @@ pub fn run_all(course: &[u8], script: &[Input], start: &Start) -> Result<(String
 // Physics test courses
 
 pub const STYLES: [&str; 5] = ["M1", "M3", "MW", "WU", "3W"];
-pub const KINDS: [&str; 20] = [
-    "flat", "wall", "slope", "water", "items", "form", "enemy", "koopa", "shell", "hit",
-    "shellbrk", "shellq", "blocks", "bigblk", "spring", "note", "donut", "lift", "pswitch",
+pub const KINDS: [&str; 29] = [
+    "flat",
+    "wall",
+    "slope",
+    "water",
+    "items",
+    "form",
+    "enemy",
+    "koopa",
+    "shell",
+    "hit",
+    "shellbrk",
+    "shellq",
+    "blocks",
+    "bigblk",
+    "spring",
+    "note",
+    "donut",
+    "lift",
+    "pswitch",
     "bobomb",
+    "slopejoin",
+    "cpipe",
+    "cpipeg",
+    "mushstart",
+    "cpipev",
+    "cpiped",
+    "slopejoins",
+    "seesaw",
+    "seesawp",
 ];
+
+/// Kinds made in SMB1 only (the terrain they test is the same in every style).
+const M1_ONLY: [&str; 3] = ["slopejoin", "mushstart", "slopejoins"];
+/// Kinds made in NSMBU only (a ground pound in the air needs a style that has one in the
+/// engine).
+const WU_ONLY: [&str; 2] = ["seesaw", "seesawp"];
+/// Kinds made in 3D World only (clear pipes are a 3D World part).
+const W3_ONLY: [&str; 4] = ["cpipe", "cpipeg", "cpipev", "cpiped"];
 
 /// Where the items / form courses keep their power-up: the ? block's tile column and its row
 /// above the floor (the capture walks there first; no test script gets that far).
@@ -169,7 +203,11 @@ pub fn course_names() -> Vec<String> {
     for s in STYLES {
         for k in KINDS {
             // (3D World has no Note Blocks)
-            if s == "3W" && k == "note" {
+            if s == "3W" && k == "note"
+                || s != "M1" && M1_ONLY.contains(&k)
+                || s != "3W" && W3_ONLY.contains(&k)
+                || s != "WU" && WU_ONLY.contains(&k)
+            {
                 continue;
             }
             v.push(format!("{s}_{k}"));
@@ -194,7 +232,12 @@ pub fn build_course(name: &str) -> Result<Vec<u8>, String> {
         120
     };
     // floor height in tiles: the game rejects a 3D World course with start height 1
-    let base: i32 = if style == "3W" { 2 } else { 1 };
+    // (slopejoin: the start height of the course it copies)
+    let base: i32 = if style == "3W" || kind == "slopejoin" || kind == "slopejoins" {
+        2
+    } else {
+        1
+    };
     let mut e = Editor::new(style);
     e.set_name("Physics");
     e.set_theme(if kind == "water" { 4 } else { 0 });
@@ -444,6 +487,263 @@ pub fn build_course(name: &str) -> Result<Vec<u8>, String> {
             e.place_sized(87, 60, row, 8, 4, fall).map_err(err)?;
             floor(&mut e, 68, len - 1)?;
         }
+        "cpipe" => {
+            // clear pipes ridden left to right by a walking player, on the floor (top row 1) and
+            // a platform 6 high (top row 5) from x 36:
+            // - x 12..21: a straight pipe, 10 tiles, rows 2–3, out onto the floor;
+            // - x 28..35: right 3, a bend up, up 2, a bend right, right 3, out onto the platform;
+            // - x 40..47: two pipes of 4 joined end to end (one ride);
+            // - x 50..53: a pipe of 4 with a wall at its exit (the ride turns back)
+            floor(&mut e, 0, len - 1)?;
+            for x in 36..=63 {
+                for y in base..=5 {
+                    e.paint_ground(x, y).map_err(err)?;
+                }
+            }
+            for y in 6..=7 {
+                e.paint_ground(54, y).map_err(err)?;
+            }
+            clear_pipe(&mut e, (12, 3), &[(21, 2)])?;
+            clear_pipe(
+                &mut e,
+                (28, 3),
+                &[(30, 2), (31, 4), (31, 5), (33, 6), (35, 6)],
+            )?;
+            clear_pipe(&mut e, (40, 7), &[(43, 6)])?;
+            clear_pipe(&mut e, (44, 7), &[(47, 6)])?;
+            clear_pipe(&mut e, (50, 7), &[(53, 6)])?;
+        }
+        "mushstart" => {
+            // Super Mushrooms placed on the floor near the start, the player standing still: one
+            // in the open at x 10, one shut in a one-tile box at x 14 (walls at 13 and 15), one
+            // with a wall flush on its right at x 18 (wall 19), one with a wall flush on its left
+            // at x 21 (wall 20)
+            floor(&mut e, 0, len - 1)?;
+            for x in [13, 15, 19, 20] {
+                e.paint_ground(x, up(1)).map_err(err)?;
+            }
+            for x in [10, 14, 18, 21] {
+                e.place(20, x, up(1)).map_err(err)?;
+            }
+        }
+        "cpipev" => {
+            // clear pipes' vertical mouths: x 12..16, right 3 from a side mouth, a bend up and up
+            // 3 to an upward mouth (out on top, back in with Down, out of the side mouth); x 7–8,
+            // a pipe up 6 tiles from a downward mouth 3 tiles over the floor (in from below with
+            // Up held in a jump, out of its top)
+            floor(&mut e, 0, len - 1)?;
+            clear_pipe(&mut e, (12, 3), &[(14, 2), (15, 4), (15, 6)])?;
+            e.place_clear_pipe((8, 5), mmk_formats::smm2::clear_pipe::Dir::Up)
+                .map_err(err)?;
+            let slot = e.clear_pipes().last().map(|p| p.0).ok_or("no pipe")?;
+            e.draw_clear_pipe(slot, mmk_editor::clearpipe::PipeEnd::End, (8, 10))
+                .map_err(err)?;
+        }
+        "slopejoins" => {
+            // steep slopes beside ground as `slopejoin`'s gentle ones (an open pit under each, the
+            // 5-high floor reached by a steep ramp): rising 3×2 at x 16 with ground above the low
+            // cap and under it; rising 5×4 at x 28 (the same); falling 3×2 at x 44 (the low cap
+            // on the right, ground above it and under it); rising 3×2 at x 56 with no ground above
+            // the cap (the control)
+            let rise = mmk_editor::DEFAULT_FLAGS;
+            let fall = mmk_editor::DEFAULT_FLAGS | (1 << 20);
+            let pit = |e: &mut Editor, x0: i32, x1: i32, below: i32| {
+                for x in x0..=x1 {
+                    for y in 0..below {
+                        e.erase_ground(x, y);
+                    }
+                }
+            };
+            floor(&mut e, 0, len - 1)?;
+            for x in 12..len - 11 {
+                for y in 2..=4 {
+                    e.paint_ground(x, y).map_err(err)?;
+                }
+            }
+            pit(&mut e, 7, 11, 2);
+            for x in 7..=11 {
+                e.paint_ground(x, 0).map_err(err)?;
+            }
+            e.place_sized(88, 7, 1, 5, 4, rise).map_err(err)?;
+            for (x, w, h, rising, above) in [
+                (16, 3, 2, true, true),
+                (28, 5, 4, true, true),
+                (44, 3, 2, false, true),
+                (56, 3, 2, true, false),
+            ] {
+                let cap = if rising { x } else { x + w - 1 };
+                pit(&mut e, x, x + w - 1, 5);
+                for y in 0..=2 {
+                    e.paint_ground(cap, y).map_err(err)?;
+                }
+                if above {
+                    e.paint_ground(cap, 4).map_err(err)?;
+                }
+                e.place_sized(88, x, 3, w as u8, h as u8, if rising { rise } else { fall })
+                    .map_err(err)?;
+                if h > 2 {
+                    // the 5×4's top runs on 2 tiles higher: a step down back to the floor
+                    for xx in x + w..x + w + 3 {
+                        for y in 5..3 + h {
+                            e.paint_ground(xx, y).map_err(err)?;
+                        }
+                    }
+                }
+            }
+        }
+        "seesaw" => {
+            // a 5-tile Seesaw pivoting 3 tiles over the floor at x 20 (its plank x 304..384), to
+            // jump onto and ground-pound
+            floor(&mut e, 0, len - 1)?;
+            let (_, sh) = mmk_editor::default_size(91);
+            e.place_sized(91, 18, up(3), 5, sh, mmk_editor::DEFAULT_FLAGS)
+                .map_err(err)?;
+        }
+        "seesawp" => {
+            // a 5-tile Seesaw pivoting 3 tiles over the floor at x 12 (its plank x 152..232) right
+            // of an 8-high start ground, to walk off and ground-pound onto
+            floor(&mut e, 0, len - 1)?;
+            e.set_start_goal(8, base as u8);
+            let (_, sh) = mmk_editor::default_size(91);
+            e.place_sized(91, 10, up(3), 5, sh, mmk_editor::DEFAULT_FLAGS)
+                .map_err(err)?;
+        }
+        "cpiped" => {
+            // a clear pipe from a downward mouth 3 tiles over the floor at x 7–8 (in with Up held
+            // in a jump): up, a bend right, a bend down, out of a downward mouth at x 11–12 onto
+            // the floor; a Super Mushroom at x 18 walking right into the side mouth of a straight
+            // pipe at x 20..23
+            floor(&mut e, 0, len - 1)?;
+            use mmk_formats::smm2::clear_pipe::Dir;
+            let slot = e.place_clear_pipe((8, 5), Dir::Up).map_err(err)?;
+            for t in [(7, 7), (9, 8), (10, 8), (11, 7), (11, 5)] {
+                e.draw_clear_pipe(slot, mmk_editor::clearpipe::PipeEnd::End, t)
+                    .map_err(err)?;
+            }
+            clear_pipe(&mut e, (20, 3), &[(23, 2)])?;
+            e.place(20, 18, up(1)).map_err(err)?;
+        }
+        "cpipeg" => {
+            // a Goomba at x 22 walking left into the right mouth of a straight 8-tile pipe at
+            // x 10..17 (rows 2–3), out of its left mouth
+            floor(&mut e, 0, len - 1)?;
+            clear_pipe(&mut e, (10, 3), &[(17, 2)])?;
+            e.place(0, 22, up(1)).map_err(err)?;
+        }
+        "slopejoin" => {
+            // gentle slopes (4×2 unless noted) beside ground, an open pit under each, walked over
+            // left to right on a 5-high floor (top row 4, up a steep slope from the start
+            // ground), flat stretches between them. A copies W_3049200's x 50..62, where the game
+            // walks flat over the slope's first step:
+            // - A x 14: rising, ground above the low end cap and under it (W_3049200's tile ids);
+            // - B x 34: rising 6×3, ground above the cap and under it;
+            // - D x 50: rising, ground above the cap only (nothing under the cap);
+            // - F x 62: rising, ground under the high cap only (the layout's other empty corner;
+            //   ground over a diagonal cell makes the game reject the course [obs: emulator]);
+            // - G x 74: rising, no ground above the cap (a plain dip: the control);
+            // - C x 86: falling, ground above the low cap (on the right) and under it
+            let rise = mmk_editor::DEFAULT_FLAGS;
+            let fall = mmk_editor::DEFAULT_FLAGS | (1 << 20);
+            let pit = |e: &mut Editor, x0: i32, x1: i32, below: i32| {
+                for x in x0..=x1 {
+                    for y in 0..below {
+                        e.erase_ground(x, y);
+                    }
+                }
+            };
+            floor(&mut e, 0, len - 1)?;
+            for x in 12..len - 11 {
+                for y in 2..=4 {
+                    e.paint_ground(x, y).map_err(err)?;
+                }
+            }
+            pit(&mut e, 7, 11, 2);
+            for x in 7..=11 {
+                e.paint_ground(x, 0).map_err(err)?;
+            }
+            e.place_sized(88, 7, 1, 5, 4, rise).map_err(err)?;
+            // A: W_3049200's tiles (columns 50..62 → 14..26), its slope at (55, 3) → (19, 3)
+            const A: [(i32, i32, u8); 33] = [
+                (51, 4, 59),
+                (52, 4, 9),
+                (53, 4, 10),
+                (54, 4, 10),
+                (55, 4, 59),
+                (55, 2, 63),
+                (55, 1, 63),
+                (55, 0, 63),
+                (54, 0, 62),
+                (53, 0, 62),
+                (52, 0, 14),
+                (51, 0, 62),
+                (50, 0, 13),
+                (50, 3, 62),
+                (50, 2, 13),
+                (51, 2, 62),
+                (51, 1, 62),
+                (50, 1, 12),
+                (52, 2, 14),
+                (52, 3, 13),
+                (51, 3, 62),
+                (52, 1, 13),
+                (53, 1, 62),
+                (53, 2, 62),
+                (54, 2, 12),
+                (54, 3, 62),
+                (54, 1, 14),
+                (53, 3, 62),
+                (50, 4, 11),
+                (59, 4, 26),
+                (60, 4, 7),
+                (61, 4, 6),
+                (62, 4, 26),
+            ];
+            pit(&mut e, 19, 22, 5);
+            e.place_sized(87, 19, 3, 4, 2, rise).map_err(err)?;
+            // B
+            pit(&mut e, 34, 39, 5);
+            for y in 0..=2 {
+                e.paint_ground(34, y).map_err(err)?;
+            }
+            e.paint_ground(34, 4).map_err(err)?;
+            e.place_sized(87, 34, 3, 6, 3, rise).map_err(err)?;
+            for x in 40..=43 {
+                e.paint_ground(x, 5).map_err(err)?;
+            }
+            // D
+            pit(&mut e, 50, 53, 5);
+            e.paint_ground(50, 4).map_err(err)?;
+            e.place_sized(87, 50, 3, 4, 2, rise).map_err(err)?;
+            // F
+            pit(&mut e, 62, 65, 5);
+            for y in 0..=2 {
+                e.paint_ground(62, y).map_err(err)?;
+            }
+            e.paint_ground(65, 3).map_err(err)?;
+            e.place_sized(87, 62, 3, 4, 2, rise).map_err(err)?;
+            // G
+            pit(&mut e, 74, 77, 5);
+            for y in 0..=2 {
+                e.paint_ground(74, y).map_err(err)?;
+            }
+            e.place_sized(87, 74, 3, 4, 2, rise).map_err(err)?;
+            // C (low end on the right, at x 89)
+            pit(&mut e, 86, 89, 5);
+            for y in 0..=2 {
+                e.paint_ground(89, y).map_err(err)?;
+            }
+            e.paint_ground(89, 4).map_err(err)?;
+            e.place_sized(87, 86, 3, 4, 2, fall).map_err(err)?;
+            // A's tile ids as W_3049200 has them (last: painting re-tiles neighbours)
+            for (x, y, id) in A {
+                let (x, y) = (x - 36, y);
+                e.paint_ground(x, y).map_err(err)?;
+                let g = e.course.main.ground.items.iter_mut();
+                for t in g.filter(|t| t.x as i32 == x && t.y as i32 == y) {
+                    t.id = id;
+                }
+            }
+        }
         _ => unreachable!(),
     }
     // under a slope's bottom row in 3D World (base 2): fill the floor row below it
@@ -453,6 +753,19 @@ pub fn build_course(name: &str) -> Result<Vec<u8>, String> {
         }
     }
     e.save().map_err(err)
+}
+
+/// A clear pipe drawn from grid corner `corner` to the right, then on toward each tile of
+/// `path` in turn (the editor's gesture: on, or round a bend to the side).
+fn clear_pipe(e: &mut Editor, corner: (i32, i32), path: &[(i32, i32)]) -> Result<(), String> {
+    use mmk_editor::clearpipe::PipeEnd;
+    use mmk_formats::smm2::clear_pipe::Dir;
+    let err = |x: mmk_editor::EditError| format!("{x:?}");
+    let slot = e.place_clear_pipe(corner, Dir::Right).map_err(err)?;
+    for &t in path {
+        e.draw_clear_pipe(slot, PipeEnd::End, t).map_err(err)?;
+    }
+    Ok(())
 }
 
 /// Encrypt a course and wrap it like the game's built-in courses (Yaz0 → SARC → `<stem>.bcd`).

@@ -393,6 +393,9 @@ pub struct World {
     /// Items taken by their own update, collected (the player's form change) after a frame:
     /// (kind, x, y, SMM1 subtype, frames left).
     pending_collect: Vec<(Kind, f32, f32, u8, u8)>,
+    /// The player's form change ended in this frame's update: the world moves on, the player's
+    /// own update having run.
+    change_done: bool,
     /// Walker contacts of last frame's enemy pass (walker id, other id): the touch flags, set
     /// at the next update for others still there after the player's update (a stomp then
     /// ends a contact) [obs: Ryujinx trace W_3051605, a Goomba beside one stomped that frame
@@ -617,6 +620,16 @@ fn item_touch_box(
 ) -> (f32, f32, f32, f32) {
     if style == crate::player::Style::W3 {
         (ab.0 + 1.0, ab.1, ab.2 - 1.0, ab.1 + 14.0)
+    } else if matches!(kind, Kind::Mushroom | Kind::OneUp) {
+        // a mushroom's box is narrower a side: 12 px between centres for the small player's
+        // box B in SMB1 / SMB3, 13 in SMW / NSMBU [obs: Ryujinx traces blk_mush, chased: M1 /
+        // M3 11.8, not 13.3, MW / WU 12.3, not 13.8]
+        let n = if matches!(style, crate::player::Style::MW | crate::player::Style::WU) {
+            1.0
+        } else {
+            2.0
+        };
+        (ab.0 + n, ab.1, ab.2 - n, ab.3)
     } else if kind == Kind::FireFlower {
         // a Fire Flower is touched a pixel inside its 16 px (table id 0x12's centre
         // (0, 8), half 7 × 7) [inf: its id's writer isn't found; a small player's box B
@@ -768,6 +781,7 @@ impl World {
             run_held: false,
             throw_wait: None,
             pending_collect: Vec::new(),
+            change_done: false,
             touch_pairs: Vec::new(),
             spring_ride: None,
             turn_rolling: Vec::new(),
@@ -2001,10 +2015,16 @@ impl World {
             }
             return;
         }
-        // grow/shrink: everything else waits
+        // grow/shrink: everything else waits, up to the frame the change ends in the player's
+        // update: the world moves on that frame [obs: Ryujinx trace X_mushstart (out-probe):
+        // the other mushrooms move again a frame before the grown player does]
+        self.change_done = false;
         if matches!(self.player.control, Control::Change { .. }) {
             self.player.step(input, &self.level);
-            return;
+            if matches!(self.player.control, Control::Change { .. }) {
+                return;
+            }
+            self.change_done = true;
         }
         if self.transit.is_some() {
             self.step_transit();
@@ -2082,12 +2102,21 @@ impl World {
             self.drive_koopa_car(input);
         } else if self.clear_pipe_player() {
             // in a clear pipe: the traveller carries the player (DrawDokanMove)
+            self.player.hold_buttons(input);
+        } else if std::mem::take(&mut self.change_done) {
+            // (its update this frame was the form change's last)
+        } else if self.clear_pipe_entry(input, true) {
+            // down into a clear pipe's upward mouth: its first step is this frame's
+            self.clear_pipe_player();
         } else {
             self.pu_sense();
             self.player.twister = self.twister_receiver();
-            let lifted = self.clear_pipe_lift();
-            self.player.step(input, &self.level);
-            self.clear_pipe_unlift(lifted);
+            let out = std::mem::take(&mut self.cpipe.out_step);
+            self.player
+                .step(if out { Input::default() } else { input }, &self.level);
+            if out {
+                self.player.hold_buttons(input);
+            }
         }
         if let (Some((tx, ty)), Some(c)) = (note_hole, note_cell) {
             self.level.set(tx, ty, c);
@@ -2238,7 +2267,7 @@ impl World {
                 }
             }
             if entry.is_none() {
-                self.clear_pipe_entry(input, pushing);
+                self.clear_pipe_entry(input, false);
             }
         }
         if was_ground && !self.player.on_ground && self.player.vy > 3.0 {
@@ -2304,6 +2333,25 @@ impl World {
         }
         if !main_pass {
             self.extra_player_rest(input, jump_held);
+            return;
+        }
+        // items taken last frame: the player's form changes now, after this frame's move; a
+        // growth freezes the rest of the world before it moves this frame [obs: Ryujinx trace
+        // X_mushstart (out-probe): the other mushrooms stand from the frame the form changes]
+        let due: Vec<_> = self
+            .pending_collect
+            .iter()
+            .filter(|p| p.4 == 0)
+            .map(|p| (p.0, p.1, p.2, p.3))
+            .collect();
+        self.pending_collect.retain(|p| p.4 > 0);
+        for p in &mut self.pending_collect {
+            p.4 -= 1;
+        }
+        for (kind, x, y, sub) in due {
+            self.collect_item(kind, x, y, sub);
+        }
+        if matches!(self.player.control, Control::Change { .. }) {
             return;
         }
 
@@ -2489,20 +2537,6 @@ impl World {
         self.shell_walls();
         self.thaw_frozen_coins();
         self.actor_interactions();
-        // items taken last frame: the player's form changes now, after this frame's move
-        let due: Vec<_> = self
-            .pending_collect
-            .iter()
-            .filter(|p| p.4 == 0)
-            .map(|p| (p.0, p.1, p.2, p.3))
-            .collect();
-        self.pending_collect.retain(|p| p.4 > 0);
-        for p in &mut self.pending_collect {
-            p.4 -= 1;
-        }
-        for (kind, x, y, sub) in due {
-            self.collect_item(kind, x, y, sub);
-        }
         self.player_interactions(jump_held);
         self.step_effects();
         self.carry_clown_riders();
@@ -3566,6 +3600,18 @@ impl World {
                 // the player changes form a frame after that (it still moves on that frame) [obs:
                 // Ryujinx trace M1_blocks blk_mush: touching 12.83 px apart at frame N, the
                 // mushroom's last move at N+1, the growth freeze from N+3]
+                // (a mushroom is met where it stood before this frame's move [obs: Ryujinx traces
+                // X_mushstart (out-probe), a mushroom walking at a standing / turned / walking
+                // player: touched 11.1 / 11.7 / 11.5 px from its last place, not 12.1 / 12.7 /
+                // 13.7])
+                let (dx, dy) = if matches!(a.kind, Kind::Mushroom | Kind::OneUp)
+                    && self.style != crate::player::Style::W3
+                {
+                    (a.pre.0 - a.x, a.pre.1 - a.y)
+                } else {
+                    (0.0, 0.0)
+                };
+                let ab = (ab.0 + dx, ab.1 + dy, ab.2 + dx, ab.3 + dy);
                 let ib = item_touch_box(self.style, a.kind, ab);
                 if a.taken == 0 && overlap(contact, ib) {
                     self.actors[i].taken = 1;
@@ -3989,8 +4035,11 @@ impl World {
             }
             // stomp window (interactions: 0x710076b6b0, classes 0x7101d035b0) [obs]: the feet
             // are inside the enemy's top by d > 0 and d < W; W = 10 − 3 + this frame's fall for
-            // ordinary enemies when falling (3 when rising), 12 / 10 for big ones
-            let d = ay + ah - p.y;
+            // ordinary enemies when falling (3 when rising), 12 / 10 for big ones; the top where
+            // the enemy stood before this frame's move, as the box [obs: Ryujinx trace
+            // W_3049200 frame 424: a stomp 1.41 px into a falling Koopa's last-frame top, which
+            // its move this frame takes 1.875 px down]
+            let d = ab.3 - p.y;
             let falling = p.vy <= 0.0;
             let w = match (a.big, falling) {
                 // SMM1 (0x0234aa14): a flat 10 for ordinary enemies when falling
@@ -4140,9 +4189,16 @@ impl World {
             } else if stomp {
                 let was_lakitu = self.actors[i].kind == Kind::Lakitu;
                 if self.actors[i].stomp() {
-                    // the stomped enemy doesn't move this frame (Actor::pre)
+                    // the stomped enemy doesn't move this frame (Actor::pre); a Koopa stomped
+                    // in the air falls that frame as its shell, from rest [obs: Ryujinx trace
+                    // W_3049200 frame 424: the new shell 0.1875 down, vx 0]
                     let (x, y) = self.actors[i].pre;
-                    (self.actors[i].x, self.actors[i].y) = (x, y);
+                    let a = &mut self.actors[i];
+                    (a.x, a.y) = (x, y);
+                    if a.mode == Mode::ShellWait && !a.on_ground {
+                        a.vy = crate::actors::ENEMY_GRAVITY;
+                        a.collide(&self.level);
+                    }
                     if was_lakitu {
                         // the empty cloud stays, rideable
                         let mut c = Actor::new(Kind::Cloud, ax, ay);
@@ -4414,9 +4470,11 @@ impl World {
                 a.dir = if right { 1 } else { -1 };
             }
             // a walker placed on the ground starts in its walk (the Basic enter picks Walk on the
-            // ground flag, 0-goomba.md), moving on its first frame [obs: Ryujinx trace M1_hit]
+            // ground flag, 0-goomba.md), moving on its first frame [obs: Ryujinx trace M1_hit]; a
+            // placed Super Mushroom / 1-Up too, to the right [obs: Ryujinx trace X_mushstart]
             let below = self.level.cell_at(a.x, a.y - 1.0);
-            if a.kind.is_walker() && (below.is_solid() || below == Cell::SemiTop) {
+            let walks = a.kind.is_walker() || matches!(a.kind, Kind::Mushroom | Kind::OneUp);
+            if walks && (below.is_solid() || below == Cell::SemiTop) {
                 a.on_ground = true;
             }
             if s.kind == Kind::Blooper && s.alt {
@@ -5686,12 +5744,15 @@ impl World {
         }
     }
 
-    /// Seesaws tilt after the player's move, by the rider's lever arm where it now stands, and
-    /// the rider stands on the plank as it now lies [obs: Ryujinx trace W_3010660: the torque
-    /// from the frame's x, the rider's height from the frame's angle].
+    /// Seesaws tilt after the player's move, by the rider's torque where it now stands, and
+    /// carry their rider by the plank's turn (actors/seesaw.rs) [obs: Ryujinx trace W_3010660
+    /// with the Seesaw watched: the torque from the frame's position before the carry, the
+    /// carry the ends' movement taken at the rider's place along them, the rider's step along
+    /// the plank by the angle it had two frames before].
     fn step_seesaws(&mut self) {
         let (px, py) = (self.player.x, self.player.y);
         let ride = self.player.ride;
+        let mut angle = 0;
         for i in 0..self.actors.len() {
             let a = &mut self.actors[i];
             if !matches!(a.kind, Kind::Seesaw { .. }) {
@@ -5699,24 +5760,26 @@ impl World {
             }
             a.target = (px, py);
             a.ridden = ride == Some(a.id);
-            let before = a.heading;
+            // a ground pound's dive landing on the plank this frame slams it
+            a.chain = (a.ridden && self.player.on_ground && self.player.pound == -1) as u32;
             a.step_spawning(&self.level);
             let (id, b, slope) = (a.id, a.solid_box(), a.solid_slope());
-            // the rider turns with the plank about its turning point, 8 px under the top
-            let turn = (a.heading - before).to_radians();
-            let (cx, cy) = (a.x, a.y + 8.0);
             if let Some(s) = self.level.solids.iter_mut().find(|s| s.owner == id)
                 && let Some((x0, y0, x1, y1, _)) = b
             {
                 (s.x0, s.y0, s.x1, s.y1, s.slope) = (x0, y0, x1, y1, slope);
-                if ride == Some(id) && self.player.on_ground && turn != 0.0 {
-                    let (sn, cs) = turn.dsin_cos();
-                    let (dx, dy) = (self.player.x - cx, self.player.y - cy);
-                    self.player.x = cx + dx * cs - dy * sn;
-                    self.player.y = cy + dx * sn + dy * cs;
+                if ride == Some(id)
+                    && self.player.on_ground
+                    && let Some(p) = a.plank
+                {
+                    let (dx, dy) = p.carry(self.player.x - a.x);
+                    self.player.x += dx;
+                    self.player.y += dy;
+                    angle = p.prev_angle();
                 }
             }
         }
+        self.player.solid_angle = angle;
     }
 
     /// Moving solids step before the player; riders are carried by their movement. A spring

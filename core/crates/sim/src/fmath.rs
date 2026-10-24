@@ -96,7 +96,7 @@ fn atan_entry(i: u32) -> i32 {
 
 /// atan(t) for 0 ≤ t ≤ 1 as a binary angle, the game's way: table entry ⌊128·t⌋ plus its
 /// step times the fraction, truncated [obs v3.0.3 0x710027eed0].
-fn table_atan(t: f32) -> i32 {
+pub(crate) fn table_atan(t: f32) -> i32 {
     let i = (t * 128.0) as i32;
     let (a, b) = (atan_entry(i as u32), atan_entry(i as u32 + 1));
     a.wrapping_add(((t * 128.0 - i as f32) * (b - a) as f32) as i32)
