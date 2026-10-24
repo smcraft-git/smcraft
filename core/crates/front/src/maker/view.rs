@@ -13,6 +13,8 @@ use crate::DrawItem;
 use crate::layout::UiKind;
 
 pub const GROUP: &str = "EditModel";
+/// Player 2's glove (`Edit_mainCursor2P`: the same textures, green-edged) [obs RomFS].
+pub const GROUP_2P: &str = "EditModel2P";
 /// The textures the maker draws with.
 pub const TEXTURES: [&str; 4] = [
     "selectCursor1unit.0",
@@ -162,6 +164,17 @@ fn selection(f: &MakerFlow, q: &mut Vec<Quad>) {
     }
 }
 
+/// The frame round what is under the live cursor alone (co-op making's player 2).
+pub fn frame_item(f: &MakerFlow) -> DrawItem {
+    let mut q = Vec::new();
+    frame(f, &mut q);
+    DrawItem::Layout {
+        ui: UiKind::Smm2,
+        size: [1280.0, 720.0],
+        quads: q,
+    }
+}
+
 /// The frame round what is under the cursor (`selectCursor1unit` stretched over it, else
 /// four lines).
 fn frame(f: &MakerFlow, q: &mut Vec<Quad>) {
@@ -221,7 +234,8 @@ pub fn glove(f: &MakerFlow) -> Option<DrawItem> {
             [255, 255, 255, 220],
         ));
     }
-    quads.extend(match texture(f, name) {
+    let (tex, tint) = f.glove_texture(name);
+    quads.extend(match tex {
         // the fingertip at the cursor: the glove's top-left quarter points [inf]
         Some(t) => {
             let s = 112.0;
@@ -234,7 +248,7 @@ pub fn glove(f: &MakerFlow) -> Option<DrawItem> {
                 ],
                 t,
                 FULL,
-                [255; 4],
+                tint,
             )]
         }
         None => {
@@ -244,13 +258,13 @@ pub fn glove(f: &MakerFlow) -> Option<DrawItem> {
                     [p[0] - s, p[1] - 2.0, p[0] + s, p[1] + 2.0],
                     TEXTURE_NONE,
                     FULL,
-                    [255; 4],
+                    tint,
                 ),
                 quad(
                     [p[0] - 2.0, p[1] - s, p[0] + 2.0, p[1] + s],
                     TEXTURE_NONE,
                     FULL,
-                    [255; 4],
+                    tint,
                 ),
             ]
         }

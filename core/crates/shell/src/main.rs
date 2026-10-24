@@ -230,7 +230,9 @@ mod native {
         /// Maker on a new course: maker, maker-parts, maker-menu, maker-save, maker-style,
         /// maker-theme, maker-timer, maker-autoscroll, maker-water (-rising, -both, -speed,
         /// -tip: the Water Level mode), maker-scroll (-nodes, -tip: Custom Scroll),
-        /// maker-clearpipe (--style 3W: drawn clear pipes), maker-play
+        /// maker-clearpipe (--style 3W: drawn clear pipes), maker-coop (the co-op window),
+        /// maker-coop-on / -menu / -carry (co-op making's two cursors, player 2's part menu,
+        /// player 2 holding a Goomba; --front-script p2:right … moves player 2), maker-play
         /// (test play from the start,
         /// --ticks of it); --style for the new course's style, --front-course to open a course
         /// instead; with

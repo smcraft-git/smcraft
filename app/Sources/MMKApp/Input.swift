@@ -138,7 +138,10 @@ final class InputState {
     }
 
     /// Engine buttons. The pause action is reported as MMK_BTN_START (the shell consumes it).
-    var current: MmkInput {
+    var current: MmkInput { current(skipping: nil) }
+
+    /// Engine buttons without controller `skipping` (its index in `padButtons`).
+    func current(skipping: Int?) -> MmkInput {
         var b: UInt32 = 0
         if held(.left) { b |= UInt32(MMK_BTN_LEFT) }
         if held(.right) { b |= UInt32(MMK_BTN_RIGHT) }
@@ -149,7 +152,7 @@ final class InputState {
         if held(.spin) { b |= UInt32(MMK_BTN_SPIN) }
         if held(.pause) { b |= UInt32(MMK_BTN_START) }
 
-        for p in padButtons { b |= p }
+        for (k, p) in padButtons.enumerated() where k != skipping { b |= p }
         #if os(iOS)
         b |= TouchInput.buttons
         #endif
@@ -221,7 +224,11 @@ final class InputState {
     }
 
     /// Buttons held for menu navigation.
-    var menu: MenuInput {
+    var menu: MenuInput { menu(skipping: nil) }
+
+    /// Buttons held for menu navigation, without controller `skipping` (its index in
+    /// `padButtons`: co-op making's player 2, whose buttons go to the front end on their own).
+    func menu(skipping: Int?) -> MenuInput {
         var m: MenuInput = []
         if held(.up) { m.insert(.up) }
         if held(.down) { m.insert(.down) }
@@ -230,8 +237,8 @@ final class InputState {
         if anyDown(Self.confirmKeys) || held(.jump) { m.insert(.confirm) }
         if held(.pause) { m.insert(.back) }
         for (code, b) in Self.shoulderKeys where anyDown([code]) { m.insert(b) }
-        for c in GCController.controllers() {
-            guard let g = c.extendedGamepad else { continue }
+        let pads = GCController.controllers().compactMap { $0.extendedGamepad }
+        for (k, g) in pads.enumerated() where k != skipping {
             let x = g.leftThumbstick.xAxis.value, y = g.leftThumbstick.yAxis.value
             if g.dpad.up.isPressed || y > 0.5 { m.insert(.up) }
             if g.dpad.down.isPressed || y < -0.5 { m.insert(.down) }

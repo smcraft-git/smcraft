@@ -2054,3 +2054,262 @@ fn balloons_take_the_side_the_game_picks_from_the_screen_place() {
         [0, 1, 2, 3]
     );
 }
+
+// ------------------------------------------------------------ co-op making
+
+/// Player 2's controller held this tick (engine buttons, `crate::host::buttons`).
+fn p2(b: u32) -> MakerInput {
+    MakerInput {
+        pad2: b,
+        ..Default::default()
+    }
+}
+
+/// A press of player 2's buttons: one tick down, one up.
+fn p2_press(m: &mut MakerFlow, host: &mut MockHost, saves: &mut Saves, b: u32) {
+    run(m, host, saves, p2(b));
+    run(m, host, saves, idle());
+}
+
+/// A new course in co-op making (two controllers; through the window when the import has it).
+fn coop_maker(host: &mut MockHost, saves: &mut Saves) -> MakerFlow {
+    host.controllers = 2;
+    let mut m = maker(host, saves, MakerStart::New("M1".into()));
+    m.slot = m.palette.iter().position(|&t| t == Tool::Part(0)).unwrap();
+    with(host, saves, |cx| m.coop_button(cx));
+    if m.mode == Mode::Coop {
+        run(&mut m, host, saves, press(Buttons::CONFIRM));
+    }
+    assert!(m.coop_on());
+    m
+}
+
+fn p2_cur(m: &MakerFlow) -> (i32, i32) {
+    m.coop.as_ref().unwrap().hand.cur
+}
+
+fn set_p2_cur(m: &mut MakerFlow, t: (i32, i32)) {
+    let g = m.tile_center(t);
+    let h = &mut m.coop.as_mut().unwrap().hand;
+    h.cur = t;
+    h.glove = g;
+}
+
+#[test]
+fn co_op_making_needs_two_controllers_and_starts_both_cursors_in_the_middle() {
+    use crate::host::buttons as pad;
+    let (mut host, mut saves) = (MockHost::default(), Saves::default());
+    let mut m = maker(&mut host, &mut saves, MakerStart::New("M1".into()));
+    m.slot = m.palette.iter().position(|&t| t == Tool::Part(0)).unwrap();
+    m.cur = (20, 3);
+    run(&mut m, &mut host, &mut saves, press(Buttons::CONFIRM));
+    run(&mut m, &mut host, &mut saves, idle());
+    assert!(m.editor.can_undo());
+    // one controller: the maker stays solo
+    with(&mut host, &mut saves, |cx| m.coop_button(cx));
+    if m.mode == Mode::Coop {
+        run(&mut m, &mut host, &mut saves, press(Buttons::CONFIRM));
+    }
+    assert!(!m.coop_on() && m.mode == Mode::Edit);
+    // two: the cursors in the middle of the view, 16 px either side (0x710103e490)
+    host.controllers = 2;
+    with(&mut host, &mut saves, |cx| m.coop_button(cx));
+    if m.mode == Mode::Coop {
+        run(&mut m, &mut host, &mut saves, press(Buttons::CONFIRM));
+    }
+    assert!(m.coop_on());
+    let mid = (m.cam[0] + VIEW_W / 2.0, m.cam[1] + VIEW_H / 2.0);
+    let y = (mid.1 / TILE).floor() as i32;
+    assert_eq!(m.cur, (((mid.0 - 16.0) / TILE).floor() as i32, y));
+    assert_eq!(p2_cur(&m), (((mid.0 + 16.0) / TILE).floor() as i32, y));
+    // the history is gone and none is kept: nothing to undo
+    assert!(!m.editor.can_undo());
+    run(&mut m, &mut host, &mut saves, press(Buttons::CONFIRM));
+    run(&mut m, &mut host, &mut saves, idle());
+    assert!(m.editor.object_at(m.cur.0, m.cur.1).is_some());
+    run(&mut m, &mut host, &mut saves, keys(keys::UNDO));
+    assert!(
+        m.editor.object_at(m.cur.0, m.cur.1).is_some(),
+        "no undo in co-op"
+    );
+    // player 2's button presses don't move player 1
+    let cur = m.cur;
+    p2_press(&mut m, &mut host, &mut saves, pad::RIGHT);
+    assert_eq!(m.cur, cur);
+    // solo again: history is kept again
+    with(&mut host, &mut saves, |cx| m.coop_button(cx));
+    assert!(!m.coop_on());
+    m.cur = (30, 3);
+    run(&mut m, &mut host, &mut saves, press(Buttons::CONFIRM));
+    run(&mut m, &mut host, &mut saves, idle());
+    assert!(m.editor.can_undo());
+}
+
+#[test]
+fn player_two_moves_puts_down_and_erases_with_its_own_part() {
+    use crate::host::buttons as pad;
+    let (mut host, mut saves) = (MockHost::default(), Saves::default());
+    let mut m = coop_maker(&mut host, &mut saves);
+    // player 2 starts with player 1's part, the Goomba
+    assert_eq!(m.coop.as_ref().unwrap().hand.palette, vec![Tool::Part(0)]);
+    set_p2_cur(&mut m, (14, 4));
+    p2_press(&mut m, &mut host, &mut saves, pad::RIGHT);
+    p2_press(&mut m, &mut host, &mut saves, pad::UP);
+    assert_eq!(p2_cur(&m), (15, 5));
+    p2_press(&mut m, &mut host, &mut saves, pad::JUMP);
+    let g = m.editor.object_at(15, 5).expect("player 2's Goomba");
+    assert_eq!(m.editor.object(g).unwrap().id, 0);
+    assert!(
+        m.editor.object_at(m.cur.0, m.cur.1).is_none(),
+        "nothing at player 1's"
+    );
+    p2_press(&mut m, &mut host, &mut saves, pad::RUN);
+    assert!(m.editor.object_at(15, 5).is_none(), "erased");
+}
+
+#[test]
+fn a_part_one_cursor_holds_is_not_taken_or_erased_by_the_other() {
+    use crate::host::buttons as pad;
+    let (mut host, mut saves) = (MockHost::default(), Saves::default());
+    let mut m = coop_maker(&mut host, &mut saves);
+    // (a Hard Block: a ? Block would take player 2's Goomba in)
+    m.editor.place(6, 15, 4).unwrap();
+    set_p2_cur(&mut m, (15, 4));
+    run(&mut m, &mut host, &mut saves, p2(pad::JUMP));
+    assert!(matches!(
+        m.coop.as_ref().unwrap().hand.drag,
+        Some(Drag::Carry { .. })
+    ));
+    // player 1 presses on it: not taken (0x7100f99260); erases there: left (0x7100fb57f0)
+    m.cur = (15, 4);
+    m.glove = m.tile_center(m.cur);
+    let mut i = press(Buttons::CONFIRM);
+    i.pad2 = pad::JUMP;
+    run(&mut m, &mut host, &mut saves, i);
+    assert!(!m.carrying(), "player 1 doesn't take it");
+    let mut i = held(Buttons::BACK);
+    i.ui.pressed = Buttons::BACK;
+    i.pad2 = pad::JUMP;
+    run(&mut m, &mut host, &mut saves, i);
+    assert!(m.editor.object_at(15, 4).is_some(), "not erased while held");
+    // player 2 carries it on and lets go
+    let mut i = p2(pad::JUMP | pad::RIGHT);
+    i.ui.held = Buttons::BACK;
+    run(&mut m, &mut host, &mut saves, i);
+    run(&mut m, &mut host, &mut saves, idle());
+    assert!(m.editor.object_at(16, 4).is_some(), "moved by player 2");
+    assert!(m.editor.object_at(15, 4).is_none());
+}
+
+#[test]
+fn the_other_cursor_keeps_its_part_when_parts_before_it_go() {
+    use crate::host::buttons as pad;
+    let (mut host, mut saves) = (MockHost::default(), Saves::default());
+    let mut m = coop_maker(&mut host, &mut saves);
+    m.editor.place(6, 10, 4).unwrap();
+    m.editor.place(6, 15, 4).unwrap();
+    set_p2_cur(&mut m, (15, 4));
+    run(&mut m, &mut host, &mut saves, p2(pad::JUMP));
+    // player 1 erases the block placed before the held one: the held part's index moves
+    m.cur = (10, 4);
+    m.glove = m.tile_center(m.cur);
+    let mut i = press(Buttons::BACK);
+    i.pad2 = pad::JUMP;
+    run(&mut m, &mut host, &mut saves, i);
+    assert!(m.editor.object_at(10, 4).is_none());
+    run(&mut m, &mut host, &mut saves, p2(pad::JUMP | pad::UP));
+    run(&mut m, &mut host, &mut saves, idle());
+    let q = m.editor.object_at(15, 5).expect("the held block moved up");
+    assert_eq!(m.editor.object(q).unwrap().id, 6);
+    assert!(m.editor.object_at(15, 4).is_none());
+}
+
+#[test]
+fn player_twos_part_menu_steps_through_the_order_and_decides() {
+    use crate::host::buttons as pad;
+    let (mut host, mut saves) = (MockHost::default(), Saves::default());
+    let mut m = coop_maker(&mut host, &mut saves);
+    let at = m.coop.as_ref().unwrap().menu.at;
+    // the Goomba (palette id 24) is the first part of the menu's page 3
+    assert_eq!(at, coop::Place { page: 3, index: 0 });
+    p2_press(&mut m, &mut host, &mut saves, pad::START);
+    assert!(m.coop.as_ref().unwrap().menu.open);
+    // the cursor stays while the menu is open
+    let cur = p2_cur(&m);
+    p2_press(&mut m, &mut host, &mut saves, pad::RIGHT);
+    assert_eq!(p2_cur(&m), cur);
+    p2_press(&mut m, &mut host, &mut saves, pad::JUMP);
+    let c = m.coop.as_ref().unwrap();
+    assert!(!c.menu.open);
+    // one to the right of the Goomba: the Koopa Troopa (palette id 25, part 1)
+    assert_eq!(c.hand.palette, vec![Tool::Part(1)]);
+    // a new category: Gizmos' first page; back cancels
+    p2_press(&mut m, &mut host, &mut saves, pad::START);
+    p2_press(&mut m, &mut host, &mut saves, pad::DOWN);
+    p2_press(&mut m, &mut host, &mut saves, pad::RUN);
+    let c = m.coop.as_ref().unwrap();
+    assert!(!c.menu.open);
+    assert_eq!(c.hand.palette, vec![Tool::Part(1)], "cancelled");
+    assert_eq!(c.menu.at, coop::Place { page: 3, index: 1 });
+    // player 1's palette is its own
+    assert_eq!(m.tool(), Tool::Part(0));
+}
+
+#[test]
+fn co_op_test_play_is_for_two_players() {
+    let (mut host, mut saves) = (MockHost::default(), Saves::default());
+    let mut m = coop_maker(&mut host, &mut saves);
+    with(&mut host, &mut saves, |cx| m.start_test(cx, Some(None)));
+    assert!(m.testing());
+    assert_eq!(host.players.last(), Some(&2));
+    with(&mut host, &mut saves, |cx| m.end_test(cx));
+    with(&mut host, &mut saves, |cx| m.coop_button(cx));
+    with(&mut host, &mut saves, |cx| m.start_test(cx, Some(None)));
+    assert_eq!(host.players.last(), Some(&1));
+}
+
+#[test]
+fn the_view_follows_the_cursor_that_moves_and_keeps_the_other_inside() {
+    use crate::host::buttons as pad;
+    let (mut host, mut saves) = (MockHost::default(), Saves::default());
+    let mut m = coop_maker(&mut host, &mut saves);
+    for _ in 0..40 {
+        p2_press(&mut m, &mut host, &mut saves, pad::RIGHT);
+    }
+    assert!(m.cam[0] > 0.0, "the view scrolled after player 2");
+    let left = (m.cam[0] / TILE).ceil() as i32;
+    assert!(
+        m.cur.0 >= left,
+        "player 1 kept in view: {:?} {}",
+        m.cur,
+        left
+    );
+    assert!(p2_cur(&m).0 * 16 < (m.cam[0] + VIEW_W) as i32);
+}
+
+#[test]
+fn the_palette_table_names_the_editor_s_parts() {
+    // the editor's name table: id 0 Ground, 3 Dokan, 24 Kuribo, 80 Rail, 119 OnOffTrampoline
+    assert_eq!(coop::label(0), Some("Ground"));
+    assert_eq!(coop::tool(3), Some(Tool::Pipe));
+    assert_eq!(coop::tool(24), Some(Tool::Part(0)));
+    assert_eq!(coop::tool(80), Some(Tool::Track));
+    assert_eq!(coop::tool(119), Some(Tool::Part(132)));
+    assert_eq!(coop::tool(71), None, "icicles");
+    for (i, e) in coop::PALETTE.iter().enumerate() {
+        assert_eq!(e.0 as usize, i);
+    }
+    // every page entry is a palette id, and every usable one puts something down
+    for style in STYLES {
+        let pages = if style == "3W" {
+            &coop::PAGES_3W[..]
+        } else {
+            &coop::PAGES[..]
+        };
+        for p in pages {
+            for &id in p.iter() {
+                assert!((id as usize) < coop::PALETTE.len());
+            }
+        }
+    }
+}

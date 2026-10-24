@@ -118,6 +118,11 @@ pub struct FrontInput {
     pub pointer_alt: bool,
     /// Course Maker keys held ([`maker::keys`]).
     pub keys: u16,
+    /// Co-op making's player 2: the engine buttons (`mmk_sim::input`) of the controller that is
+    /// player 2's (as [`coop::assign_pads`] gives two players their controllers), while
+    /// [`Front::coop_making`]; that controller is then left out of `menu` and `start`. 0 when
+    /// there is none.
+    pub pad2: u32,
 }
 
 /// A deferred scene change (run when its fade has covered the screen).
@@ -891,6 +896,7 @@ impl Front {
                     down: input.pointer_down,
                     alt: input.pointer_alt,
                     keys: input.keys,
+                    pad2: input.pad2,
                 };
                 let ev = m.step(&mi, &mut cx);
                 m.load_icons(cx.host);
@@ -939,6 +945,13 @@ impl Front {
         {
             self.apply(host, g);
         }
+    }
+
+    /// Co-op making is on (`Edit_MultiEditWindow_00`, research/specs/maker.md C16): two players
+    /// share the maker, each with a controller. The host hands player 2's controller over as
+    /// [`FrontInput::pad2`] and leaves it out of the menu buttons.
+    pub fn coop_making(&self) -> bool {
+        matches!(&self.screen, Screen::Maker(m) if m.coop_on())
     }
 
     /// A text field is open: the host should send typed keys ([`FrontInput::text`]) and keep

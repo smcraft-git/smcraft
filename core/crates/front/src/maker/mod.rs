@@ -35,6 +35,7 @@
 pub mod art;
 pub mod attr;
 pub mod catalog;
+pub mod coop;
 pub mod help;
 pub mod inparts;
 pub mod liquid;
@@ -132,6 +133,8 @@ pub struct MakerInput {
     pub alt: bool,
     /// [`keys`] held.
     pub keys: u16,
+    /// Co-op making: player 2's controller ([`crate::FrontInput::pad2`]).
+    pub pad2: u32,
 }
 
 /// What the maker asks of its owner.
@@ -184,6 +187,8 @@ enum Mode {
     Scroll,
     /// A one-time tip (`help`).
     Help,
+    /// "Start making cooperatively?" (`coop::CoopWindow`).
+    Coop,
     Test,
 }
 
@@ -275,6 +280,31 @@ struct Ring {
     sel: usize,
 }
 
+/// What a cursor owns: player 1's live in [`MakerFlow`], co-op making's player 2's in
+/// [`Coop::hand`]; the two trade places for player 2's tick ([`MakerFlow::swap_hand`]), so both
+/// cursors go through the same edit code.
+#[derive(Clone, Debug, Default)]
+struct Hand {
+    cur: (i32, i32),
+    glove: [f32; 2],
+    pointer_was: Option<[f32; 2]>,
+    drag: Option<Drag>,
+    repeat: i32,
+    move_cur: (i32, i32),
+    eraser: bool,
+    selection: Option<Rect>,
+    palette: Vec<Tool>,
+    slot: usize,
+}
+
+/// Co-op making while it is on (`coop`).
+struct Coop {
+    /// The cursor that isn't live: player 2's (player 1's during player 2's tick).
+    hand: Hand,
+    pad: coop::Pad2,
+    menu: coop::PartsMenu,
+}
+
 pub struct MakerFlow {
     ui: Ui,
     pub editor: Editor,
@@ -362,6 +392,13 @@ pub struct MakerFlow {
     /// The one-time tip while it is up, and one to show once the window closes.
     help: Option<help::HelpTip>,
     pending_tip: Option<help::Tip>,
+    /// Co-op making: player 2's cursor and part menu while on; the window asking first.
+    coop: Option<Coop>,
+    coop_window: Option<coop::CoopWindow>,
+    /// Player 2's tick (or drawing) is running: its cursor is the live one.
+    p2_turn: bool,
+    /// Player 2's glove (`Edit_mainCursor2P`'s textures), if the import has them.
+    textures_2p: std::collections::HashMap<&'static str, u32>,
 }
 
 impl MakerFlow {
@@ -456,6 +493,17 @@ impl MakerFlow {
             scroll: Default::default(),
             help: None,
             pending_tip: None,
+            coop: None,
+            coop_window: None,
+            p2_turn: false,
+            textures_2p: view::TEXTURES
+                .iter()
+                .filter_map(|&n| {
+                    ui.cache_mut()
+                        .texture_file(view::GROUP_2P, n)
+                        .map(|t| (n, t.id))
+                })
+                .collect(),
         };
         f.reset_palette();
         f.setup_page();
@@ -506,7 +554,6 @@ impl MakerFlow {
             "L_PullBtnSlider_00",
             "N_View_00",
             "L_LeftParts_00/N_Content_00",
-            "L_LeftParts_00/L_MultiEditBtn_00",
         ] {
             p.show(pane, false);
         }
@@ -593,6 +640,7 @@ impl MakerFlow {
         self.update_timer();
         self.update_mission_button();
         self.update_trail_button();
+        self.update_coop_button();
     }
 
     // ------------------------------------------------------------ coordinates
@@ -816,6 +864,20 @@ impl MakerFlow {
                 }
                 None
             }
+            Mode::Coop => {
+                let ev = self
+                    .coop_window
+                    .as_mut()
+                    .and_then(|w| w.step(pressed, click));
+                if let Some(e) = ev {
+                    self.coop_window = None;
+                    self.mode = Mode::Edit;
+                    if e == coop::WindowEvent::Make {
+                        self.start_coop(cx);
+                    }
+                }
+                None
+            }
             Mode::Mission => {
                 let tabs = match keys_pressed {
                     k if k & keys::NEXT != 0 => 1,
@@ -854,7 +916,12 @@ impl MakerFlow {
                     }
                     let _ = (play_pressed, play_released);
                     if self.mode == Mode::Edit {
+                        let other = self.other_held_record();
                         self.edit_tick(input, pressed, keys_pressed, cx);
+                        self.find_other_held(other);
+                    }
+                    if self.mode == Mode::Edit && self.coop.is_some() {
+                        self.coop_tick(input, cx);
                     }
                     None
                 }
@@ -1111,9 +1178,10 @@ impl MakerFlow {
                 }
                 if !place_held {
                     self.drop_carried(cx, index, from, held);
-                } else if held >= 0 && self.cur == from {
+                } else if held >= 0 && self.cur == from && !self.p2_turn {
                     // held still on the part: what is inside it shows, else its attribute
-                    // balloon opens (0x7100e90c70 tries 0x7100e9e400 first)
+                    // balloon opens (0x7100e90c70 tries 0x7100e9e400 first; player 1's cursor
+                    // only, `+0x1c0 == 0`)
                     let held = held + 1;
                     self.drag = Some(Drag::Carry { index, from, held });
                     if held >= attr::HOLD {
@@ -1469,6 +1537,11 @@ impl MakerFlow {
         // contents, a Super Mushroom makes it big), is stretched by its edge, else it is picked
         // up (ground isn't a part)
         if let Some(i) = self.editor.object_at(tx, ty) {
+            // a part the other cursor holds isn't taken (0x7100f99260: the drag starts only
+            // when the part's holder is none or this cursor) [obs v3.0.3]
+            if self.other_held() == Some(i) {
+                return;
+            }
             self.editor.checkpoint();
             if let Some((width, height)) = self.resize_edge(i, (tx, ty)) {
                 self.drag = Some(Drag::Resize {
@@ -1780,6 +1853,11 @@ impl MakerFlow {
 
     fn erase_here(&mut self) {
         let (tx, ty) = self.cur;
+        // the eraser leaves a part a cursor holds (0x7100fb57f0 gathers only parts whose
+        // holder is none) [obs v3.0.3]
+        if self.other_held().is_some() && self.editor.object_at(tx, ty) == self.other_held() {
+            return;
+        }
         let part = match self.editor.object_at(tx, ty) {
             Some(i) => self.editor.object(i).map_or(7, |o| o.id),
             None if self.editor.clear_pipe_at(tx, ty).is_some() => CLEAR_PIPE,
@@ -1860,7 +1938,7 @@ impl MakerFlow {
         if let Some(t) = self
             .editor
             .object_at(self.cur.0, self.cur.1)
-            .filter(|&t| t != index)
+            .filter(|&t| t != index && Some(t) != self.other_held())
             // it goes in as it is: its wings, parachute, form and size (the contents
             // balloon draws a child's wings and parachute, maker spec C10)
             && let Some(snd) = self.put_into(t, o.id, DEFAULT_FLAGS | (o.flags & CHILD_KEEPS), true)
@@ -1993,6 +2071,14 @@ impl MakerFlow {
         self.cam = [0.0, 0.0];
         self.cur = (8, 2);
         self.glove = self.tile_center(self.cur);
+        // co-op making: player 2 comes along, its press ended, a tile right of player 1 [inf]
+        if self.coop.is_some() {
+            self.swap_hand();
+            self.end_drag_if_any();
+            self.cur = (9, 2);
+            self.glove = self.tile_center(self.cur);
+            self.swap_hand();
+        }
         self.dirty = true;
         // an empty sub-area: its orientation first (Edit_SubAreaWindow_00)
         let a = self.editor.area();
@@ -2043,7 +2129,7 @@ impl MakerFlow {
             self.select_slot(i);
             return true;
         }
-        let buttons: [(&str, u8); 14] = [
+        let buttons: [(&str, u8); 15] = [
             ("L_PaletteSet_00/L_SearchBtn_00/B_Btn_00", 0),
             ("L_Play_00/L_PlayBtn_00/B_Btn_00", 1),
             ("L_RightParts_00/L_UndoBtn_00/B_Btn_00", 2),
@@ -2058,6 +2144,7 @@ impl MakerFlow {
             ("L_LeftParts_00/L_ZanzoBtn_00/B_Btn_00", 11),
             ("L_LeftParts_00/L_WaterLevelBtn_00/B_Btn_00", 12),
             ("L_LeftParts_00/L_ScrollEditBtn_00/B_Btn_00", 13),
+            ("L_LeftParts_00/L_MultiEditBtn_00/B_Btn_00", 14),
         ];
         let panes: Vec<String> = buttons.iter().map(|b| b.0.to_string()).collect();
         let Some(i) = hit(page, self.tick, &panes, p) else {
@@ -2133,6 +2220,7 @@ impl MakerFlow {
             5 => self.open_save(),
             10 => self.open_mission(),
             11 => self.toggle_trail(cx),
+            14 => self.coop_button(cx),
             w => self.open_window(w - 6),
         }
         true
@@ -2264,6 +2352,11 @@ impl MakerFlow {
     /// Some(Some(area, px)) = from there.
     fn start_test(&mut self, cx: &mut crate::Cx, from: Option<Option<(usize, [f32; 2])>>) {
         self.end_drag_if_any();
+        if self.coop.is_some() {
+            self.swap_hand();
+            self.end_drag_if_any();
+            self.swap_hand();
+        }
         let start = match from {
             None => self.mario,
             Some(s) => s,
@@ -2280,6 +2373,9 @@ impl MakerFlow {
             cx.host.edit_music(None);
             self.music_sent = Some(None);
         }
+        // co-op making's test play is the co-op one (play mode 4 instead of 5, 0x710103f540)
+        // [obs v3.0.3]: both players play (the host's local co-op)
+        cx.host.set_players(if self.coop.is_some() { 2 } else { 1 });
         if let Err(e) = cx.host.test_play(&bytes, area, at) {
             cx.toast(&e);
             return;
@@ -3458,6 +3554,317 @@ impl MakerFlow {
             .collect()
     }
 
+    // ------------------------------------------------------------ co-op making
+
+    /// Co-op making is on (two cursors).
+    pub fn coop_on(&self) -> bool {
+        self.coop.is_some()
+    }
+
+    /// The left column's co-op button (`Edit_LeftSubBtn_00`): two players' icon
+    /// (`Icon_EditBtn_02`, `Check` frame 0) and "Co-op Making" while solo, one player's (frame
+    /// 1, `Icon_EditBtn_03`) and "Solo Making" while co-op [obs data: `MultiEdit_00` / `_01`].
+    fn update_coop_button(&mut self) {
+        let on = self.coop.is_some();
+        let label = self
+            .ui
+            .message(PAGE, if on { "MultiEdit_01" } else { "MultiEdit_00" });
+        let Some(p) = &mut self.page else { return };
+        let b = "L_LeftParts_00/L_MultiEditBtn_00";
+        p.hold(&format!("{b}/Check"), if on { 1.0 } else { 0.0 });
+        if let Some(t) = label {
+            p.text(&format!("{b}/T_Btn_00"), &t);
+        }
+    }
+
+    /// The co-op button: solo, "Start making cooperatively?" first; co-op, back to solo making
+    /// [inf: no window on the way back].
+    fn coop_button(&mut self, cx: &mut crate::Cx) {
+        if self.coop.is_some() {
+            self.end_coop();
+            return;
+        }
+        self.coop_window = coop::CoopWindow::new(&self.ui);
+        if self.coop_window.is_some() {
+            self.mode = Mode::Coop;
+        } else {
+            self.start_coop(cx);
+        }
+    }
+
+    /// "Make": with two controllers (the system set-up asks for exactly two, and with fewer the
+    /// maker stays solo, 0x7100e363a0 / 0x710103e390) both cursors go to the middle of the view,
+    /// player 1's 16 px left of it and player 2's 16 px right (0x710103e490), and the undo
+    /// history is emptied and kept no more [obs v3.0.3].
+    fn start_coop(&mut self, cx: &mut crate::Cx) {
+        if cx.host.controllers() < 2 {
+            cx.toast("Co-op Making: one controller per player. Connect another controller.");
+            return;
+        }
+        self.begin_coop();
+    }
+
+    fn begin_coop(&mut self) {
+        self.end_drag_if_any();
+        self.selection = None;
+        let mid = [self.cam[0] + VIEW_W / 2.0, self.cam[1] + VIEW_H / 2.0];
+        let tile = |x: f32| ((x / TILE).floor() as i32, (mid[1] / TILE).floor() as i32);
+        self.cur = tile(mid[0] - 16.0);
+        self.glove = self.tile_center(self.cur);
+        let cur2 = tile(mid[0] + 16.0);
+        let at = self.p2_first_part();
+        let style = self.style();
+        let tool = coop::id_at(&style, at)
+            .and_then(coop::tool)
+            .unwrap_or(Tool::Ground);
+        let hand = Hand {
+            cur: cur2,
+            glove: self.tile_center(cur2),
+            move_cur: cur2,
+            palette: vec![tool],
+            ..Default::default()
+        };
+        let mut menu = coop::PartsMenu::new(&self.ui);
+        menu.at = at;
+        self.coop = Some(Coop {
+            hand,
+            pad: Default::default(),
+            menu,
+        });
+        self.editor.clear_history();
+        self.editor.set_history(false);
+        self.update_coop_button();
+        self.update_page();
+        self.fill_coop_menu();
+    }
+
+    /// Player 2's part when co-op starts: player 1's, if the 2P menu has it [inf], else the
+    /// menu's first.
+    fn p2_first_part(&self) -> coop::Place {
+        let style = self.style();
+        let tool = self.tool();
+        coop::PALETTE
+            .iter()
+            .filter(|e| e.1 == Some(tool))
+            .find_map(|e| coop::find(&style, e.0))
+            .filter(|&at| coop::usable(&style, at))
+            .unwrap_or_else(|| {
+                let first = coop::Place::default();
+                if coop::usable(&style, first) {
+                    first
+                } else {
+                    coop::step(&style, first, true)
+                }
+            })
+    }
+
+    /// Back to solo making: player 2's press ends where it is, the history is kept again.
+    fn end_coop(&mut self) {
+        if self.coop.is_none() {
+            return;
+        }
+        self.swap_hand();
+        self.end_drag_if_any();
+        self.swap_hand();
+        self.coop = None;
+        self.editor.set_history(true);
+        self.update_coop_button();
+        self.update_page();
+    }
+
+    /// The live cursor and the other one trade places ([`Hand`]).
+    fn swap_hand(&mut self) {
+        let Some(c) = &mut self.coop else { return };
+        let h = &mut c.hand;
+        std::mem::swap(&mut self.cur, &mut h.cur);
+        std::mem::swap(&mut self.glove, &mut h.glove);
+        std::mem::swap(&mut self.pointer_was, &mut h.pointer_was);
+        std::mem::swap(&mut self.drag, &mut h.drag);
+        std::mem::swap(&mut self.repeat, &mut h.repeat);
+        std::mem::swap(&mut self.move_cur, &mut h.move_cur);
+        std::mem::swap(&mut self.eraser, &mut h.eraser);
+        std::mem::swap(&mut self.selection, &mut h.selection);
+        std::mem::swap(&mut self.palette, &mut h.palette);
+        std::mem::swap(&mut self.slot, &mut h.slot);
+        self.p2_turn = !self.p2_turn;
+    }
+
+    /// The part the other cursor holds (co-op making): its index and record.
+    fn other_held(&self) -> Option<usize> {
+        match self.coop.as_ref()?.hand.drag? {
+            Drag::Carry { index, .. } | Drag::Resize { index, .. } => Some(index),
+            _ => None,
+        }
+    }
+
+    fn other_held_record(&self) -> Option<(usize, Vec<u8>)> {
+        use mmk_formats::record::Record;
+        let i = self.other_held()?;
+        Some((i, self.editor.object(i)?.to_bytes().ok()?))
+    }
+
+    /// After the live cursor's edits, the other cursor's part found again: parts erased or
+    /// moved before it change its index; gone (a multigrab erased or moved it) its press ends
+    /// [inf: the game's holder flag keeps such edits off it].
+    fn find_other_held(&mut self, before: Option<(usize, Vec<u8>)>) {
+        use mmk_formats::record::Record;
+        let Some((was, bytes)) = before else { return };
+        let same = |i: usize, e: &Editor| {
+            e.object(i)
+                .and_then(|o| o.to_bytes().ok())
+                .is_some_and(|b| b == bytes)
+        };
+        let now = if same(was, &self.editor) {
+            Some(was)
+        } else {
+            (0..self.editor.area().objects.items.len()).find(|&i| same(i, &self.editor))
+        };
+        let Some(c) = &mut self.coop else { return };
+        match (&mut c.hand.drag, now) {
+            (Some(Drag::Carry { index, .. } | Drag::Resize { index, .. }), Some(i)) => *index = i,
+            (d @ Some(_), None) => *d = None,
+            _ => {}
+        }
+    }
+
+    /// Player 2's tick: its part menu while open (the menu button opens it), else its cursor,
+    /// through the same edit code as player 1's (the cursors trade places for it). The view
+    /// follows the cursor that moves; the other is kept inside it [inf: what the game does
+    /// when the cursors pull apart wasn't found].
+    fn coop_tick(&mut self, input: &MakerInput, cx: &mut crate::Cx) {
+        let style = self.style();
+        let tick = self.tick;
+        let ui = self.ui.clone();
+        let Some(c) = &mut self.coop else { return };
+        let (held, pressed, menu_key) = c.pad.step(input.pad2);
+        if c.menu.open {
+            let e = c.menu.step(&ui, &style, pressed, menu_key, tick);
+            if e == Some(coop::MenuEvent::Decide)
+                && let Some(t) = coop::id_at(&style, c.menu.at).and_then(coop::tool)
+            {
+                c.hand.palette = vec![t];
+                c.hand.slot = 0;
+            }
+            if e.is_some() {
+                self.fill_coop_menu();
+            }
+            return;
+        }
+        if menu_key && c.hand.drag.is_none() {
+            c.menu.open(&ui, tick);
+            self.fill_coop_menu();
+            return;
+        }
+        let cam = self.cam;
+        self.swap_hand();
+        // (player 1's part is the other's now)
+        let other = self.other_held_record();
+        let mi = MakerInput {
+            ui: crate::menu::UiInput {
+                pressed,
+                held,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        self.edit_tick(&mi, pressed, 0, cx);
+        self.find_other_held(other);
+        self.keep_in_view();
+        self.swap_hand();
+        if self.cam != cam {
+            self.keep_in_view();
+        }
+        if pressed != Buttons::NONE || held != Buttons::NONE {
+            self.update_page();
+        }
+        self.place_coop_menu();
+    }
+
+    /// The live cursor back inside the view after the other moved it: a pointer's tile is the
+    /// one under it, a pad cursor's tile is pushed in from the edge.
+    fn keep_in_view(&mut self) {
+        if self.pointer_was.is_some() && !self.p2_turn {
+            self.cur = self.tile_at(self.glove);
+            return;
+        }
+        let (w, h) = self.editor.size();
+        let x0 = (self.cam[0] / TILE).ceil() as i32;
+        let x1 = ((self.cam[0] + VIEW_W) / TILE).floor() as i32 - 1;
+        let y0 = (self.cam[1] / TILE).ceil() as i32;
+        let y1 = ((self.cam[1] + VIEW_H) / TILE).floor() as i32 - 1;
+        let cur = (
+            self.cur.0.clamp(x0.max(0), x1.min(w - 1).max(x0.max(0))),
+            self.cur.1.clamp(y0.max(0), y1.min(h - 1).max(y0.max(0))),
+        );
+        self.cur = cur;
+        self.glove = self.tile_center(cur);
+    }
+
+    /// The 2P menu's strip, name and place for player 2's part.
+    fn fill_coop_menu(&mut self) {
+        let style = self.style();
+        let Some(at) = self.coop.as_ref().map(|c| c.menu.at) else {
+            return;
+        };
+        let strip = coop::strip(&style, at);
+        let pictures: [Option<String>; 5] = std::array::from_fn(|k| {
+            coop::id_at(&style, strip[k])
+                .and_then(coop::tool)
+                .and_then(|t| self.icon_key(&style, t.part()))
+        });
+        let name = coop::id_at(&style, at).and_then(|id| self.palette_name(&style, id));
+        if let Some(c) = &mut self.coop {
+            c.menu.fill(&style, &pictures, name.as_deref());
+        }
+        self.place_coop_menu();
+    }
+
+    /// A palette id's name: the catalog's (as the ring names it), else `PartsIconName`'s by the
+    /// editor's label.
+    fn palette_name(&self, style: &str, id: u8) -> Option<String> {
+        if let Some(e) = coop::tool(id).and_then(catalog::entry) {
+            return Some(self.part_name(&e));
+        }
+        let l = coop::label(id)?;
+        [format!("{style}_{l}"), l.to_string(), format!("{l}_00")]
+            .iter()
+            .find_map(|k| self.ui.message("PartsIconName", k))
+    }
+
+    /// The 2P menu by player 2's glove.
+    fn place_coop_menu(&mut self) {
+        let Some(c) = &mut self.coop else { return };
+        let at = c.hand.glove;
+        let d = attr::direction(at, 20.0, 40.0);
+        c.menu.place(at, d);
+    }
+
+    /// The frame round what is under player 2's cursor (drawn with it live), under the page.
+    fn draw_coop_frame(&mut self, out: &mut Vec<DrawItem>) {
+        if self.coop.is_none() || !self.glove_shown() {
+            return;
+        }
+        self.swap_hand();
+        out.push(view::frame_item(self));
+        self.swap_hand();
+    }
+
+    /// Player 2's green glove and part menu, over everything.
+    fn draw_coop(&mut self, out: &mut Vec<DrawItem>) {
+        if self.coop.is_none() || !self.glove_shown() {
+            return;
+        }
+        self.swap_hand();
+        if let Some(g) = view::glove(self) {
+            out.push(g);
+        }
+        self.swap_hand();
+        let tick = self.tick;
+        if let Some(l) = self.coop.as_mut().and_then(|c| c.menu.layout.as_mut()) {
+            push_layout(out, l, tick);
+        }
+    }
+
     /// After a style change: parts the style lacks leave the palette.
     fn reset_palette_for_style(&mut self) {
         let style = self.style();
@@ -3492,6 +3899,7 @@ impl MakerFlow {
         }
         let over = view::overlay(self);
         out.push(over);
+        self.draw_coop_frame(out);
         let tick = self.tick;
         if let Some(p) = &mut self.page {
             push_layout(out, p, tick);
@@ -3543,6 +3951,13 @@ impl MakerFlow {
             && let Some(m) = &mut self.mission
         {
             push_layout(out, &mut m.layout, m.tick);
+        } else if self.mode == Mode::Coop
+            && let Some(w) = &mut self.coop_window
+        {
+            push_layout(out, &mut w.layout, w.tick);
+            let pane = format!("{}/B_Btn_00", coop::WINDOW_BUTTONS[w.sel]);
+            self.cursor.place(&mut w.layout, &pane, tick, 1.0);
+            self.cursor.draw(tick, out);
         } else if self.mode == Mode::SubArea
             && let Some(w) = &mut self.subarea
         {
@@ -3558,6 +3973,7 @@ impl MakerFlow {
             self.cursor.place(s, &pane, tick, 1.0);
             self.cursor.draw(tick, out);
         }
+        self.draw_coop(out);
         if let Some(c) = view::glove(self) {
             out.push(c);
         }
@@ -3594,6 +4010,22 @@ impl MakerFlow {
                 self.cur = (x, y);
                 self.follow_cursor();
                 self.glove = self.tile_center(self.cur);
+                continue;
+            }
+            // player 2's controller (co-op making): p2:up / down / left / right / confirm (A) /
+            // back (erase) / menu (the part menu's button), pressed for that tick
+            if let Some(b) = what.strip_prefix("p2:") {
+                use crate::host::buttons as pad;
+                i.pad2 |= match b {
+                    "up" => pad::UP,
+                    "down" => pad::DOWN,
+                    "left" => pad::LEFT,
+                    "right" => pad::RIGHT,
+                    "confirm" => pad::JUMP,
+                    "back" => pad::RUN,
+                    "menu" => pad::START,
+                    _ => 0,
+                };
                 continue;
             }
             if let Some(n) = what
@@ -3679,6 +4111,18 @@ impl MakerFlow {
         self.textures.get(name).copied()
     }
 
+    /// The glove's texture and colour: player 2's own (green-edged) while drawing player 2, or
+    /// player 1's tinted green when the import lacks them.
+    pub fn glove_texture(&self, name: &str) -> (Option<u32>, [u8; 4]) {
+        if !self.p2_turn {
+            return (self.ui_texture(name), [255; 4]);
+        }
+        match self.textures_2p.get(name) {
+            Some(&t) => (Some(t), [255; 4]),
+            None => (self.ui_texture(name), [150, 255, 150, 255]),
+        }
+    }
+
     /// The glove: hidden while a menu is up.
     pub fn glove_shown(&self) -> bool {
         matches!(self.mode, Mode::Edit | Mode::Water | Mode::Scroll)
@@ -3705,7 +4149,8 @@ impl MakerFlow {
     /// "inparts", "inparts-big": the contents balloon over a ? block;
     /// "vertical": a vertical sub-area; "water", "water-rising", "water-both", "water-speed",
     /// "water-tip": the Water Level mode in the forest; "scroll", "scroll-nodes", "scroll-tip":
-    /// Custom Scroll).
+    /// Custom Scroll; "coop": the co-op window, "coop-on", "coop-menu", "coop-carry": co-op
+    /// making's two cursors, player 2's part menu, player 2 holding a Goomba).
     pub fn debug_open(&mut self, cx: &mut crate::Cx, what: &str) -> bool {
         match what {
             "parts" => self.open_ring(),
@@ -3719,6 +4164,38 @@ impl MakerFlow {
             "play" => self.start_test(cx, Some(None)),
             // the sub-area's orientation window, and a vertical sub-area (its scroll bar)
             "subarea" => self.switch_area(),
+            // co-op making: its window; two cursors (player 2 with the Super Mushroom, holding a
+            // Goomba with "coop-carry"); player 2's part menu open
+            "coop" => self.coop_button(cx),
+            "coop-on" | "coop-menu" | "coop-carry" => {
+                self.begin_coop();
+                let style = self.style();
+                let Some(c) = &mut self.coop else {
+                    return false;
+                };
+                if let Some(at) = coop::find(&style, 19) {
+                    c.menu.at = at;
+                    c.hand.palette = vec![Tool::Part(20)];
+                }
+                if what == "coop-menu" {
+                    c.menu.open(&self.ui, self.tick);
+                }
+                if what == "coop-carry" {
+                    let (x, y) = c.hand.cur;
+                    let Ok(g) = self.editor.place(0, x, y) else {
+                        return false;
+                    };
+                    if let Some(c) = &mut self.coop {
+                        c.hand.drag = Some(Drag::Carry {
+                            index: g,
+                            from: (x, y),
+                            held: -1,
+                        });
+                    }
+                    self.dirty = true;
+                }
+                self.fill_coop_menu();
+            }
             "vertical" => {
                 self.editor.set_area(1);
                 let _ = self.editor.set_vertical(true);
@@ -3831,6 +4308,15 @@ impl MakerFlow {
         if let Some(c) = &self.contents {
             wanted.push((c.child, c.picture_flags()));
         }
+        // player 2's part and the 2P menu's strip
+        if let Some(c) = &self.coop {
+            wanted.extend(c.hand.palette.iter().map(|t| (t.part(), DEFAULT_FLAGS)));
+            for at in coop::strip(&style, c.menu.at) {
+                if let Some(t) = coop::id_at(&style, at).and_then(coop::tool) {
+                    wanted.push((t.part(), DEFAULT_FLAGS));
+                }
+            }
+        }
         // the balloon's pictures: the part as each choice would make it
         if let Some(b) = &self.attr
             && let Some(o) = self.editor.object(b.index)
@@ -3878,6 +4364,9 @@ impl MakerFlow {
             }
             if self.contents.is_some() {
                 self.layout_contents(false);
+            }
+            if self.coop.is_some() {
+                self.fill_coop_menu();
             }
         }
     }

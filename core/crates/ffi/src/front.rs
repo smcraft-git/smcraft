@@ -1342,13 +1342,33 @@ fn front_input(i: &MmkFrontInput) -> FrontInput {
         pointer_down: i.flags & 16 != 0,
         pointer_alt: i.flags & 32 != 0,
         keys: ((i.flags >> 8) & 0xffff) as u16,
+        pad2: 0,
     }
 }
 
 impl MmkFront {
     fn tick(&mut self, input: &MmkFrontInput) {
         self.host.input = input.buttons;
-        self.front.tick(&front_input(input), &mut self.host);
+        let mut i = front_input(input);
+        // co-op making: player 2's controller, as local co-op gives two players theirs
+        if self.front.coop_making() {
+            let (_, extra) = mmk_front::coop::assign_pads(&self.host.pads, 2);
+            i.pad2 = extra.first().copied().unwrap_or(0);
+        }
+        self.front.tick(&i, &mut self.host);
+    }
+
+    /// Co-op making's player 2's controller: its index in the `mmk_front_set_controls` list
+    /// (-1: co-op making is off or there is no such controller).
+    fn coop_pad(&self) -> i32 {
+        if !self.front.coop_making() {
+            return -1;
+        }
+        match self.host.pads.len() {
+            0 => -1,
+            1 => 0,
+            _ => 1,
+        }
     }
 
     fn engine_tick(&self) -> u64 {
@@ -1383,6 +1403,19 @@ pub unsafe extern "C" fn mmk_front_set_controls(
         } else {
             unsafe { std::slice::from_raw_parts(pads, count.min(8)) }.to_vec()
         };
+    })
+}
+
+/// Co-op making (two players editing on one device): which of the controllers given to
+/// `mmk_front_set_controls` is player 2's (-1: none, or co-op making is off). Leave that
+/// controller out of `MmkFrontInput.menu`: the front end reads it as player 2's.
+///
+/// # Safety
+/// `front` live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mmk_front_coop_pad(front: *const MmkFront) -> i32 {
+    guard(-1, || {
+        unsafe { front.as_ref() }.map_or(-1, |f| f.coop_pad())
     })
 }
 

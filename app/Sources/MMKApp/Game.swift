@@ -280,10 +280,13 @@ final class GameSession: ObservableObject, Identifiable {
     }
 
     private func frontTick(_ front: OpaquePointer, first: Bool) {
-        let live = input.current
+        // co-op making: player 2's controller is read on its own (mmk_front_coop_pad), not as
+        // player 1's menu buttons or pause
+        let p2 = Int(mmk_front_coop_pad(front))
+        let live = input.current(skipping: p2 >= 0 ? p2 : nil)
         var i = MmkFrontInput()
         if scriptedInput == nil {
-            i.menu = UInt32(input.menu.rawValue)
+            i.menu = UInt32(input.menu(skipping: p2 >= 0 ? p2 : nil).rawValue)
             i.buttons = live.buttons & ~UInt32(MMK_BTN_START)
             if live.buttons & UInt32(MMK_BTN_START) != 0 { i.flags |= 1 }
             if input.skipHeld { i.flags |= 2 }
