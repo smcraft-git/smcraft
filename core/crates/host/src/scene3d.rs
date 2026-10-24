@@ -41,6 +41,10 @@ pub struct SceneRow {
     pub proj_offset_y: f32,
     pub proj_move_y: f32,
     pub cam_move_y: f32,
+    /// Where the background model sits (`DV_pos_x` / `DV_pos_y`, vertical areas `DV_V_pos_*`;
+    /// NSMBU only: (1920, 0), vertical (384, 0)) [inf: measured, the model moved by it lines up
+    /// with the reference frames — NSMBU ground MAE 40.5 → 14.3 —, the camera unchanged].
+    pub pos: [f32; 2],
     /// NSMBU edge-light colour (rim), RGB.
     pub edge_light: Option<[f32; 3]>,
 }
@@ -80,6 +84,10 @@ pub fn scene_row(
         proj_offset_y: f(&format!("{v}ProjOffsetY")).unwrap_or(0.0),
         proj_move_y: f(&format!("{v}ProjMoveY")).unwrap_or(1.0),
         cam_move_y: f(&format!("{v}CamMoveY")).unwrap_or(0.0),
+        pos: [
+            f(&format!("{v}pos_x")).unwrap_or(0.0),
+            f(&format!("{v}pos_y")).unwrap_or(0.0),
+        ],
         edge_light: match (
             f("EdgeLightColor_R"),
             f("EdgeLightColor_G"),
@@ -101,6 +109,8 @@ pub struct DirLight {
     pub diffuse: [f32; 3],
     pub backside: [f32; 3],
     pub specular: [f32; 3],
+    /// The light map's exponent on the light's LUT index (`pow`).
+    pub pow: f32,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -108,6 +118,8 @@ pub struct Hemi {
     pub sky: [f32; 3],
     pub ground: [f32; 3],
     pub dir: [f32; 3],
+    /// The light map's exponent on the LUT index.
+    pub pow: f32,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -196,25 +208,48 @@ pub fn load_env(root: &Path, name: &str) -> Option<Env> {
             .collect::<Vec<_>>()
     };
     let num = |o: &Value, k: &str, d: f32| o.get(k).and_then(Value::as_f64).map_or(d, |v| v as f32);
+    // the light map's (`lightmap`, from the env set's `.bagllmap`) say in which lights take part,
+    // by type and name, with an `effect` scale and a `pow`; without one, every light at pow 1
+    let lightmap = j
+        .get("lightmap")
+        .and_then(|m| m.get("lights"))
+        .and_then(Value::as_array);
+    let in_map = |o: &Value, kind: &str| -> Option<(f32, f32)> {
+        let Some(map) = lightmap else {
+            return Some((1.0, 1.0));
+        };
+        let name = o.get("name").and_then(Value::as_str).unwrap_or("");
+        map.iter()
+            .find(|l| {
+                l.get("type").and_then(Value::as_str) == Some(kind)
+                    && !name.is_empty()
+                    && l.get("name").and_then(Value::as_str) == Some(name)
+            })
+            .map(|l| (num(l, "effect", 1.0), num(l, "pow", 1.0)))
+    };
     let dirs = list("directional")
         .iter()
-        .map(|o| {
-            let i = num(o, "intensity", 1.0);
-            DirLight {
+        .filter_map(|o| {
+            let (effect, pow) = in_map(o, "DirectionalLight")?;
+            let i = num(o, "intensity", 1.0) * effect;
+            Some(DirLight {
                 dir: normalised(v3(&o["direction"])),
                 diffuse: scaled(&o["diffuse"], i),
                 backside: scaled(&o["backside"], i),
                 specular: scaled(&o["specular"], i),
-            }
+                pow,
+            })
         })
         .collect();
-    let hemi = list("hemisphere").first().map(|o| {
-        let i = num(o, "intensity", 1.0);
-        Hemi {
+    let hemi = list("hemisphere").iter().find_map(|o| {
+        let (effect, pow) = in_map(o, "HemisphereLight")?;
+        let i = num(o, "intensity", 1.0) * effect;
+        Some(Hemi {
             sky: scaled(&o["sky"], i),
             ground: scaled(&o["ground"], i),
             dir: normalised(v3(&o["direction"])),
-        }
+            pow,
+        })
     });
     let ambient = list("ambient").iter().fold([0.0; 3], |a, o| {
         let c = scaled(&o["color"], num(o, "intensity", 1.0));
@@ -269,7 +304,7 @@ pub const EXPOSURE: f32 = 1.0;
 impl Env {
     /// The environment as the shaders' uniform block (`LIGHT_ROWS` × vec4):
     /// 0 eye xyz, w = 1 if lit at all; 1–9 three directional lights (direction xyz, –;
-    /// diffuse rgb, –; backside rgb, –); 10 hemisphere sky rgb, w = 1 if present; 11 ground;
+    /// diffuse rgb, pow; backside rgb, –); 10 hemisphere sky rgb, w = 1 if present; 11 ground, pow;
     /// 12 hemisphere direction; 13 ambient; 14–22 three fogs — `Fog::slot` 0 the distance fog,
     /// 1 the second distance fog, 2 the height fog — (start, end, density power, 1 = height
     /// fog; colour rgba; direction xyz, w = 1 if enabled); 23 exposure; 24–29 the sky's constant
@@ -280,12 +315,12 @@ impl Env {
         u[0] = [eye[0], eye[1], eye[2], 1.0];
         for (i, d) in self.dirs.iter().take(3).enumerate() {
             u[1 + 3 * i] = [d.dir[0], d.dir[1], d.dir[2], 1.0];
-            u[2 + 3 * i] = [d.diffuse[0], d.diffuse[1], d.diffuse[2], 0.0];
+            u[2 + 3 * i] = [d.diffuse[0], d.diffuse[1], d.diffuse[2], d.pow];
             u[3 + 3 * i] = [d.backside[0], d.backside[1], d.backside[2], 0.0];
         }
         if let Some(h) = &self.hemi {
             u[10] = [h.sky[0], h.sky[1], h.sky[2], 1.0];
-            u[11] = [h.ground[0], h.ground[1], h.ground[2], 0.0];
+            u[11] = [h.ground[0], h.ground[1], h.ground[2], h.pow];
             u[12] = [h.dir[0], h.dir[1], h.dir[2], 0.0];
         }
         u[13] = [self.ambient[0], self.ambient[1], self.ambient[2], 0.0];
@@ -530,6 +565,7 @@ mod tests {
             proj_offset_y: -0.25,
             proj_move_y: 0.0,
             cam_move_y: 0.0,
+            pos: [0.0; 2],
             edge_light: None,
         };
         let c = background_camera(&row, (0.0, 0.0));

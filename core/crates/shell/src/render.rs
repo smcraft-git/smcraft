@@ -202,7 +202,7 @@ struct VOut {
     @location(5) aref: f32,
     @location(6) emission: f32,
     @location(7) form_add: vec4<f32>,
-    @location(8) form_mul: vec3<f32>,
+    @location(8) form_mul: vec4<f32>,
 };
 
 @vertex
@@ -220,7 +220,7 @@ fn vs(@location(0) clip: vec4<f32>, @location(1) world: vec3<f32>, @location(2) 
     o.aref = aref;
     o.emission = pad.x;
     o.form_add = form_add;
-    o.form_mul = form_mul.xyz;
+    o.form_mul = form_mul;
     return o;
 }
 
@@ -228,25 +228,154 @@ fn vs(@location(0) clip: vec4<f32>, @location(1) world: vec3<f32>, @location(2) 
 @group(0) @binding(1) var samp: sampler;
 @group(0) @binding(2) var extra: texture_2d<f32>;
 @group(0) @binding(3) var extra2: texture_2d<f32>;
+@group(0) @binding(4) var extra3: texture_2d<f32>;
+// each extra texture has its own sampler (its own wrap modes)
+@group(0) @binding(5) var samp1: sampler;
+@group(0) @binding(6) var samp2: sampler;
+@group(0) @binding(7) var samp3: sampler;
+
+// the colour combiner of NSMBU's materials (mmk_host::mesh::tev_of has the layout)
+struct Tev {
+    rows: array<vec4<f32>, 28>,
+};
+@group(2) @binding(0) var<uniform> tev: Tev;
+
+// texture `k`'s coordinates (0 albedo, 1 `_a1`, 2 `gsys_user0`, 3 indirect)
+fn tev_uv(k: i32, uv: vec2<f32>) -> vec2<f32> {
+    let a = tev.rows[16 + 2 * k];
+    let b = tev.rows[17 + 2 * k];
+    return vec2<f32>(dot(a.xy, uv) + a.z, dot(b.xy, uv) + b.z);
+}
+
+// what a combiner stage works with: its texture, its colour, the two registers, the vertex colour
+struct TevIn {
+    t: vec4<f32>,
+    s: vec4<f32>,
+    r0: vec4<f32>,
+    r1: vec4<f32>,
+    vc: vec4<f32>,
+};
+
+fn tev_rgb(code: f32, x: TevIn) -> vec3<f32> {
+    switch (i32(code + 0.5)) {
+        case 1: { return vec3<f32>(1.0); }
+        case 2: { return vec3<f32>(0.5); }
+        case 3: { return x.t.rgb; }
+        case 4: { return vec3<f32>(x.t.a); }
+        case 5: { return x.s.rgb; }
+        case 6: { return vec3<f32>(x.s.a); }
+        case 7: { return x.r0.rgb; }
+        case 8: { return vec3<f32>(x.r0.a); }
+        case 9: { return x.r1.rgb; }
+        case 10: { return vec3<f32>(x.r1.a); }
+        case 11: { return x.vc.rgb; }
+        case 12: { return vec3<f32>(x.vc.a); }
+        default: { return vec3<f32>(0.0); }
+    }
+}
+
+fn luma(c: vec3<f32>) -> f32 {
+    return dot(c, vec3<f32>(0.299, 0.587, 0.114));
+}
+
+fn tev_alpha(code: f32, x: TevIn) -> f32 {
+    switch (i32(code + 0.5)) {
+        case 1: { return 1.0; }
+        case 2: { return 0.5; }
+        case 3: { return luma(x.t.rgb); }
+        case 4: { return x.t.a; }
+        case 5: { return luma(x.s.rgb); }
+        case 6: { return x.s.a; }
+        case 7: { return luma(x.r0.rgb); }
+        case 8: { return x.r0.a; }
+        case 9: { return luma(x.r1.rgb); }
+        case 10: { return x.r1.a; }
+        case 11: { return luma(x.vc.rgb); }
+        case 12: { return x.vc.a; }
+        default: { return 0.0; }
+    }
+}
+
+// a stage's texture (0 albedo, 1 `_a1`, 2 `gsys_user0`, 3 indirect) and colour by kind (0 the
+// albedo, 1 the constant, 2 the vertex colour, 3 / 4 a register)
+fn tev_pick(k: f32, tx: array<vec4<f32>, 4>) -> vec4<f32> {
+    return tx[clamp(i32(k + 0.5), 0, 3)];
+}
+
+fn tev_source(kind: f32, k: vec4<f32>, albedo: vec4<f32>, vc: vec4<f32>, r0: vec4<f32>,
+              r1: vec4<f32>) -> vec4<f32> {
+    switch (i32(kind + 0.5)) {
+        case 1: { return k; }
+        case 2: { return vc; }
+        case 3: { return r0; }
+        case 4: { return r1; }
+        default: { return albedo; }
+    }
+}
+
+// the combiner's two registers after its stages
+fn tev_regs(tx: array<vec4<f32>, 4>, vc: vec4<f32>) -> array<vec4<f32>, 2> {
+    var r0 = tev.rows[8];
+    var r1 = tev.rows[9];
+    let on = tev.rows[4];
+    let kind = tev.rows[5];
+    let so = tev.rows[6];
+    let sa = tev.rows[7];
+    for (var st = 0; st < 2; st = st + 1) {
+        var n0 = r0;
+        var n1 = r1;
+        let c = st;
+        if (on[c] >= 0.0) {
+            let x = TevIn(tev_pick(on[c], tx),
+                          tev_source(kind[c], tev.rows[10 + c], tx[0], vc, r0, r1), r0, r1, vc);
+            let q = tev.rows[c];
+            let v = tev_rgb(q.w, x) + mix(tev_rgb(q.x, x), tev_rgb(q.y, x), tev_rgb(q.z, x));
+            let o = clamp(v * so[2 * c] + so[2 * c + 1], vec3<f32>(0.0), vec3<f32>(1.0));
+            if (st == 0) { n0 = vec4<f32>(o, n0.a); } else { n1 = vec4<f32>(o, n1.a); }
+        }
+        let a = 2 + st;
+        if (on[a] >= 0.0) {
+            let x = TevIn(tev_pick(on[a], tx),
+                          tev_source(kind[a], tev.rows[10 + a], tx[0], vc, r0, r1), r0, r1, vc);
+            let q = tev.rows[a];
+            let v = tev_alpha(q.w, x) + mix(tev_alpha(q.x, x), tev_alpha(q.y, x), tev_alpha(q.z, x));
+            let o = clamp(v * sa[2 * st] + sa[2 * st + 1], 0.0, 1.0);
+            if (st == 0) { n0.a = o; } else { n1.a = o; }
+        }
+        r0 = n0;
+        r1 = n1;
+    }
+    return array<vec4<f32>, 2>(r0, r1);
+}
+
+// the combiner's lit colour and alpha
+fn tev_color(albedo: vec4<f32>, vc: vec4<f32>, r: array<vec4<f32>, 2>) -> vec4<f32> {
+    let f = tev.rows[14];
+    let k = tev.rows[15];
+    let rgb = tev_source(f.x, k, albedo, vc, r[0], r[1]).rgb;
+    let alpha = tev_source(f.y, k, albedo, vc, r[0], r[1]).a;
+    return vec4<f32>(rgb, alpha * f.w);
+}
 
 fn has(flags: f32, bit: u32) -> bool {
     return (u32(flags + 0.5) & bit) != 0u;
 }
 
+// the light map (the uber shader's `Diffuse` cube, made by the game's light-map program): per
+// light mix(back-side colour, colour, LUT(n·l · ½ + ½)^pow) with the identity "Lambert" LUT; the
+// hemisphere mix(ground, sky, (n·up · ½ + ½)^pow) [inf: which colour the narrow lobe takes]
 fn lighting(n: vec3<f32>) -> vec3<f32> {
     var c = light.rows[13].xyz;
     if (light.rows[10].w > 0.5) {
         let k = dot(n, light.rows[12].xyz) * 0.5 + 0.5;
-        c = c + mix(light.rows[11].xyz, light.rows[10].xyz, k);
+        c = c + mix(light.rows[11].xyz, light.rows[10].xyz, pow(k, max(light.rows[11].w, 1.0)));
     }
     for (var i = 0; i < 3; i = i + 1) {
         let d = light.rows[1 + 3 * i];
         if (d.w > 0.5) {
-            // light-map LUT indexed by n·l * 0.5 + 0.5 (identity "Lambert" curve): the light
-            // wraps around; the back-side colour fills the rest [inf]
-            let ndl = dot(n, -d.xyz);
-            c = c + light.rows[2 + 3 * i].xyz * max(ndl, 0.0)
-                  + light.rows[3 + 3 * i].xyz * max(-ndl, 0.0);
+            let k = dot(n, -d.xyz) * 0.5 + 0.5;
+            let p = max(light.rows[2 + 3 * i].w, 1.0);
+            c = c + mix(light.rows[3 + 3 * i].xyz, light.rows[2 + 3 * i].xyz, pow(k, p));
         }
     }
     return c;
@@ -313,13 +442,21 @@ fn sky_uv(k: i32, uv: vec2<f32>) -> vec2<f32> {
 fn fs(i: VOut) -> @location(0) vec4<f32> {
     let mode = (u32(i.flags + 0.5) >> 6u) & 3u;
     let sky = mode == 3u && light.rows[24].w > 0.5;
+    let combiner = tev.rows[14].z > 0.5;
+    // the colour combiner's coordinates: each texture's own matrix, offset by the indirect
+    // texture's blue / alpha (scaled) where the material says so
+    let ind = textureSample(extra3, samp3, tev_uv(3, i.uv));
+    let off = ind.ba * vec2<f32>(tev.rows[22].w, tev.rows[23].w);
+    let uv0 = tev_uv(0, i.uv) + off * tev.rows[16].w;
     // (every texture is sampled up front: the mode varies per piece, so not uniformly)
-    let t = textureSample(tex, samp, select(i.uv, sky_uv(0, i.uv), sky));
-    let x = textureSample(extra, samp, select(i.uv, sky_uv(2, i.uv), sky));
-    let h = textureSample(extra2, samp, sky_uv(1, i.uv));
+    let t = textureSample(tex, samp, select(select(i.uv, sky_uv(0, i.uv), sky), uv0, combiner));
+    let x = textureSample(extra, samp1,
+        select(select(i.uv, sky_uv(2, i.uv), sky), tev_uv(2, i.uv) + off * tev.rows[20].w, combiner));
+    let h = textureSample(extra2, samp2,
+        select(sky_uv(1, i.uv), tev_uv(1, i.uv) + off * tev.rows[18].w, combiner));
     // the albedo combiner: (albedo + add) · mul, clamped when add.w is set (vertex colour terms
     // worked out per vertex), then the light's vertex-colour tint
-    var albedo = (t.rgb + i.form_add.rgb) * i.form_mul;
+    var albedo = (t.rgb + i.form_add.rgb) * i.form_mul.rgb;
     if (i.form_add.w > 0.5) {
         albedo = clamp(albedo, vec3<f32>(0.0), vec3<f32>(1.0));
     }
@@ -327,7 +464,11 @@ fn fs(i: VOut) -> @location(0) vec4<f32> {
     if (mode == 2u) {
         c.a = c.a * x.a;
     }
-    if (sky) {
+    var regs = array<vec4<f32>, 2>(vec4<f32>(0.0), vec4<f32>(0.0));
+    if (combiner) {
+        regs = tev_regs(array<vec4<f32>, 4>(t, h, x, ind), i.form_mul);
+        c = tev_color(t, i.form_mul, regs) * vec4<f32>(i.color.rgb, i.color.a);
+    } else if (sky) {
         // the uber shader's sky (`enable_sky`, research/specs/render-3d.md): the base (_s0)
         // colours constant colour 5 → 4 per channel with an HDR boost in its alpha; the horizon
         // layer (_n0) colours 3 → 2 and covers by alpha^5; the clouds (_a0) colour 1 → 0 and
@@ -361,12 +502,32 @@ fn fs(i: VOut) -> @location(0) vec4<f32> {
     if (mode == 1u) {
         rgb = rgb + x.rgb * i.emission;
     }
+    if (tev.rows[26].w > 0.5) {
+        // the edge (rim) light: (1 − n·v)^sharpness · intensity · colour, scaled towards the light
+        // map behind the surface
+        let v = normalize(light.rows[0].xyz - i.world);
+        let e = tev.rows[26];
+        let rim = mix(vec3<f32>(1.0), lighting(-v), e.z);
+        rgb = rgb + pow(1.0 - clamp(dot(normalize(i.n), v), 0.0, 1.0), e.y) * e.x
+            * tev.rows[27].rgb * rim;
+    }
+    if (combiner && tev.rows[24].z > 0.5) {
+        // the combiner's emission: _e0 times `emission_mul_color`'s colour
+        let e = tev.rows[24];
+        let k = tev_source(e.x, tev.rows[25], t, i.form_mul, regs[0], regs[1]);
+        rgb = rgb + x.rgb * k.rgb * e.y;
+    }
     // the uber shader clamps the lit colour to 0 … 2 before its fogs
     rgb = clamp(rgb, vec3<f32>(0.0), vec3<f32>(2.0));
     rgb = fogged(rgb, i.world, i.flags);
     return vec4<f32>(rgb, c.a);
 }
 "#;
+
+/// Bytes of a colour-combiner block (`mmk_host::mesh::TEV_ROWS` vec4) and the stride between
+/// blocks in their dynamic uniform buffer (a multiple of the 256-byte offset alignment).
+const TEV_BLOCK: u64 = (mmk_host::mesh::TEV_ROWS * 16) as u64;
+const TEV_STRIDE: u64 = TEV_BLOCK.div_ceil(256) * 256;
 
 /// Depth buffer format of the frame pass (meshes test and write it, sprites ignore it).
 pub const DEPTH: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
@@ -457,7 +618,11 @@ pub struct Renderer {
     /// Linear samplers by wrap mode (bits 0–1 u, 2–3 v).
     mesh_samplers: std::collections::HashMap<u32, wgpu::Sampler>,
     /// (texture or u32::MAX for plain grey, extra texture or u32::MAX, wrap) → bind group.
-    mesh_binds: std::collections::HashMap<(u32, u32, u32, u32), wgpu::BindGroup>,
+    mesh_binds: std::collections::HashMap<(u32, u32, u32, u32, u32), wgpu::BindGroup>,
+    /// Colour-combiner blocks of the play field's and the background's pieces (a dynamic
+    /// uniform buffer, `TEV_STRIDE` bytes per block) with their bind groups.
+    tev: [(wgpu::Buffer, wgpu::BindGroup); 2],
+    tev_layout: wgpu::BindGroupLayout,
     grey: wgpu::TextureView,
     mesh_vbuf: wgpu::Buffer,
     mesh_ibuf: wgpu::Buffer,
@@ -589,6 +754,12 @@ impl Renderer {
             },
             count: None,
         };
+        let samp_entry = |binding: u32| wgpu::BindGroupLayoutEntry {
+            binding,
+            visibility: wgpu::ShaderStages::FRAGMENT,
+            ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+            count: None,
+        };
         let mesh_tex_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("mesh textures"),
             entries: &[
@@ -601,7 +772,24 @@ impl Renderer {
                 },
                 tex_entry(2),
                 tex_entry(3),
+                tex_entry(4),
+                samp_entry(5),
+                samp_entry(6),
+                samp_entry(7),
             ],
+        });
+        let tev_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("tev"),
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: true,
+                    min_binding_size: wgpu::BufferSize::new(TEV_BLOCK),
+                },
+                count: None,
+            }],
         });
         let light_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("light"),
@@ -640,7 +828,11 @@ impl Renderer {
         });
         let mesh_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("mesh"),
-            bind_group_layouts: &[Some(&mesh_tex_layout), Some(&light_layout)],
+            bind_group_layouts: &[
+                Some(&mesh_tex_layout),
+                Some(&light_layout),
+                Some(&tev_layout),
+            ],
             immediate_size: 0,
         });
         // nearest sampling, clamped (SMB1 style is pixel-exact)
@@ -712,10 +904,13 @@ impl Renderer {
             1 << 16,
             wgpu::BufferUsages::INDEX,
         );
+        let tev = [0, 1].map(|_| Self::tev_buffer(device, &tev_layout, 64));
         Self {
             effects,
             shadow,
             dark,
+            tev,
+            tev_layout,
             mesh_pipelines: Default::default(),
             mesh_tex_layout,
             mesh_module,
@@ -749,6 +944,54 @@ impl Renderer {
             integer_scale: true,
             skipped_textures: skipped,
         }
+    }
+
+    /// A colour-combiner buffer of `blocks` blocks and its bind group.
+    fn tev_buffer(
+        device: &wgpu::Device,
+        layout: &wgpu::BindGroupLayout,
+        blocks: u64,
+    ) -> (wgpu::Buffer, wgpu::BindGroup) {
+        let buf = Self::buffer(
+            device,
+            "tev",
+            blocks * TEV_STRIDE,
+            wgpu::BufferUsages::UNIFORM,
+        );
+        let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("tev"),
+            layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                    buffer: &buf,
+                    offset: 0,
+                    size: wgpu::BufferSize::new(TEV_BLOCK),
+                }),
+            }],
+        });
+        (buf, group)
+    }
+
+    /// Upload a mesh frame's colour-combiner blocks into buffer `i` (grown as needed).
+    fn upload_tev(&mut self, gpu: &Gpu, i: usize, blocks: &[[f32; mmk_host::mesh::TEV_ROWS * 4]]) {
+        if blocks.is_empty() {
+            return;
+        }
+        let need = blocks.len() as u64 * TEV_STRIDE;
+        if need > self.tev[i].0.size() {
+            self.tev[i] = Self::tev_buffer(
+                &gpu.device,
+                &self.tev_layout,
+                (blocks.len() as u64).next_power_of_two(),
+            );
+        }
+        let mut data = vec![0u8; need as usize];
+        for (k, b) in blocks.iter().enumerate() {
+            let o = k * TEV_STRIDE as usize;
+            data[o..o + TEV_BLOCK as usize].copy_from_slice(bytemuck::cast_slice(b));
+        }
+        gpu.queue.write_buffer(&self.tev[i].0, 0, &data);
     }
 
     fn buffer(
@@ -853,40 +1096,53 @@ impl Renderer {
         texture: Option<u32>,
         extra: Option<u32>,
         extra2: Option<u32>,
+        extra3: Option<u32>,
         wrap: u32,
     ) -> Option<()> {
         let key = (
             texture.unwrap_or(u32::MAX),
             extra.unwrap_or(u32::MAX),
             extra2.unwrap_or(u32::MAX),
+            extra3.unwrap_or(u32::MAX),
             wrap,
         );
         if self.mesh_binds.contains_key(&key) {
             return Some(());
         }
-        for t in [texture, extra, extra2].into_iter().flatten() {
+        for t in [texture, extra, extra2, extra3].into_iter().flatten() {
             self.ensure(gpu, t as usize);
         }
         let view_of = |t: Option<u32>| match t.map(|t| self.textures.get(t as usize)) {
             Some(Some(TexState::Ready(_, v))) => v,
             _ => &self.grey,
         };
-        let (view, extra_view, extra2_view) = (view_of(texture), view_of(extra), view_of(extra2));
+        let (view, extra_view, extra2_view, extra3_view) = (
+            view_of(texture),
+            view_of(extra),
+            view_of(extra2),
+            view_of(extra3),
+        );
         let mode = |w: u32| match w {
             1 => wgpu::AddressMode::MirrorRepeat,
             2 => wgpu::AddressMode::ClampToEdge,
             _ => wgpu::AddressMode::Repeat,
         };
-        let sampler = self.mesh_samplers.entry(wrap).or_insert_with(|| {
-            gpu.device.create_sampler(&wgpu::SamplerDescriptor {
-                label: Some("mesh"),
-                address_mode_u: mode(wrap & 3),
-                address_mode_v: mode(wrap >> 2),
-                mag_filter: wgpu::FilterMode::Linear,
-                min_filter: wgpu::FilterMode::Linear,
-                ..Default::default()
-            })
-        });
+        // wrap: 4 bits per texture (albedo, extra, extra2, extra3), u in the low 2, v the next 2
+        for k in 0..4 {
+            let w = (wrap >> (4 * k)) & 0xF;
+            self.mesh_samplers.entry(w).or_insert_with(|| {
+                gpu.device.create_sampler(&wgpu::SamplerDescriptor {
+                    label: Some("mesh"),
+                    address_mode_u: mode(w & 3),
+                    address_mode_v: mode(w >> 2),
+                    mag_filter: wgpu::FilterMode::Linear,
+                    min_filter: wgpu::FilterMode::Linear,
+                    ..Default::default()
+                })
+            });
+        }
+        let samp = |k: u32| &self.mesh_samplers[&((wrap >> (4 * k)) & 0xF)];
+        let sampler = samp(0);
         let group = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: None,
             layout: &self.mesh_tex_layout,
@@ -906,6 +1162,22 @@ impl Renderer {
                 wgpu::BindGroupEntry {
                     binding: 3,
                     resource: wgpu::BindingResource::TextureView(extra2_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: wgpu::BindingResource::TextureView(extra3_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 5,
+                    resource: wgpu::BindingResource::Sampler(samp(1)),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 6,
+                    resource: wgpu::BindingResource::Sampler(samp(2)),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 7,
+                    resource: wgpu::BindingResource::Sampler(samp(3)),
                 },
             ],
         });
@@ -1116,6 +1388,7 @@ impl Renderer {
                     p.texture.unwrap_or(u32::MAX),
                     p.extra.unwrap_or(u32::MAX),
                     p.extra2.unwrap_or(u32::MAX),
+                    p.extra3.unwrap_or(u32::MAX),
                     p.wrap,
                 );
                 let Some(b) = self.mesh_binds.get(&key).cloned() else {
@@ -1126,6 +1399,8 @@ impl Renderer {
                     .clone();
                 pass.set_pipeline(&pipeline);
                 pass.set_bind_group(0, &b, &[]);
+                let tev = &self.tev[background as usize].1;
+                pass.set_bind_group(2, tev, &[p.tev * TEV_STRIDE as u32]);
                 pass.draw_indexed(p.first..p.first + p.count, 0, 0..1);
             }
         }
@@ -1179,7 +1454,7 @@ impl Renderer {
         }
         let meshes = scene.meshes;
         for p in meshes.pieces.iter().chain(&scene.background.pieces) {
-            self.mesh_bind(gpu, p.texture, p.extra, p.extra2, p.wrap);
+            self.mesh_bind(gpu, p.texture, p.extra, p.extra2, p.extra3, p.wrap);
         }
         // the 2D drop shadow: every sprite but the backdrop (layer 0) and the start sign (far
         // behind the field, it casts none but takes the field's), moved right and down on the
@@ -1318,6 +1593,8 @@ impl Renderer {
         // meshes arrive in clip space
         Self::upload_meshes(gpu, meshes, &mut self.mesh_vbuf, &mut self.mesh_ibuf);
         Self::upload_meshes(gpu, scene.background, &mut self.bg_vbuf, &mut self.bg_ibuf);
+        self.upload_tev(gpu, 0, &meshes.tev);
+        self.upload_tev(gpu, 1, &scene.background.tev);
         if self
             .depth
             .as_ref()

@@ -15,7 +15,7 @@ use std::ops::Range;
 use mmk_assets::Cache;
 use mmk_host::mesh::{
     MMK_MESH_ALPHA_TEST, MMK_MESH_FOG, MMK_MESH_FOG_Y, MMK_MESH_FOG1, MMK_MESH_SELF_LIT,
-    MMK_MESH_UNLIT, MeshStore, MmkMeshDraw, TEXTURE_NONE, apply_srt, shape_look,
+    MMK_MESH_UNLIT, MeshStore, MmkMeshDraw, TEV_ROWS, TEXTURE_NONE, apply_srt, shape_look,
 };
 use mmk_host::scene3d::{Mat4, project};
 
@@ -51,12 +51,12 @@ pub struct MeshVertex {
     pub color: [f32; 4],
     /// The albedo combiner's added term (rgb; w = 1: clamp the result to 0 … 1).
     pub form_add: [f32; 4],
-    /// The albedo combiner's factor (rgb).
+    /// The albedo combiner's factor (rgb); with the colour combiner, the vertex colour (rgba).
     pub form_mul: [f32; 4],
 }
 
-/// Indices `first..first + count` drawn with one texture (None: plain grey), wrap mode (bits
-/// 0–1 u, 2–3 v: 0 repeat, 1 mirror, 2 clamp), blending (0 opaque / alpha-tested, 2 alpha
+/// Indices `first..first + count` drawn with one texture (None: plain grey), wrap modes (bits
+/// 0–1 u, 2–3 v: 0 repeat, 1 mirror, 2 clamp; the extra textures' in the next three nibbles), blending (0 opaque / alpha-tested, 2 alpha
 /// blended, 3 additive) and face culling (0 back faces culled, 1 front, 2 none).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Piece {
@@ -65,8 +65,12 @@ pub struct Piece {
     pub texture: Option<u32>,
     /// The extra texture (emission, mask or sky base; see `FLAG_EXTRA_SHIFT`).
     pub extra: Option<u32>,
-    /// The second extra texture (the sky's horizon layer).
+    /// The second extra texture (the sky's horizon layer; the colour combiner's `_a1`).
     pub extra2: Option<u32>,
+    /// The third extra texture (the colour combiner's indirect texture).
+    pub extra3: Option<u32>,
+    /// The piece's colour-combiner block in [`MeshFrame::tev`] (0: none).
+    pub tev: u32,
     pub wrap: u32,
     pub blend: u8,
     pub cull: u8,
@@ -80,6 +84,9 @@ pub struct MeshFrame {
     pub pieces: Vec<Piece>,
     /// (order: number of sprites drawn before, pieces).
     pub groups: Vec<(u32, Range<usize>)>,
+    /// Colour-combiner blocks (`mmk_host::mesh::tev_of`) the pieces use; block 0 is all zero
+    /// (no combiner).
+    pub tev: Vec<[f32; TEV_ROWS * 4]>,
 }
 
 impl MeshFrame {
@@ -88,6 +95,8 @@ impl MeshFrame {
         self.indices.clear();
         self.pieces.clear();
         self.groups.clear();
+        self.tev.clear();
+        self.tev.push([0.0; TEV_ROWS * 4]);
     }
 }
 
@@ -151,7 +160,7 @@ pub fn build(
                 .iter()
                 .enumerate()
                 .map(|(i, mat)| (i, shape_look(Some(mat))))
-                .filter(|(_, l)| l.extra.is_some())
+                .filter(|(_, l)| l.extra.is_some() || l.extra2.is_some() || l.extra3.is_some())
                 .collect();
             for (i, l) in looks {
                 extras.insert(
@@ -159,6 +168,7 @@ pub fn build(
                     (
                         store.extra_texture(cache, d.mesh, &l),
                         store.extra2_texture(cache, d.mesh, &l),
+                        store.extra3_texture(cache, d.mesh, &l),
                     ),
                 );
             }
@@ -184,12 +194,14 @@ pub fn build(
                 continue;
             }
             let look = shape_look(m.materials.get(sh.material));
-            let (extra, extra2) = match look.extra {
-                Some(_) => extras
-                    .get(&sh.material)
-                    .copied()
-                    .unwrap_or((TEXTURE_NONE, TEXTURE_NONE)),
-                None => (TEXTURE_NONE, TEXTURE_NONE),
+            let none = (TEXTURE_NONE, TEXTURE_NONE, TEXTURE_NONE);
+            let (extra, extra2, extra3) = extras.get(&sh.material).copied().unwrap_or(none);
+            let tev = match &look.tev {
+                Some(b) => {
+                    out.tev.push(*b);
+                    out.tev.len() as u32 - 1
+                }
+                None => 0,
             };
             if look.faces() == 3 {
                 continue; // drawn with no faces (helper geometry)
@@ -255,7 +267,14 @@ pub fn build(
                     let lerp = |x: u8| 1.0 + (x as f32 / 255.0 - 1.0) * vc_ratio;
                     let vc = c.map(|x| x as f32 / 255.0);
                     let fa = look.form.add.eval(vc);
-                    let fm = look.form.mul.eval(vc);
+                    // (the colour combiner takes the vertex colour as it is)
+                    let combiner = look.tev.is_some_and(|b| b[14 * 4 + 2] > 0.5);
+                    let fm = if combiner {
+                        vc
+                    } else {
+                        let m = look.form.mul.eval(vc);
+                        [m[0], m[1], m[2], 0.0]
+                    };
                     remap[i] = out.vertices.len() as u32;
                     out.vertices.push(MeshVertex {
                         clip,
@@ -277,10 +296,14 @@ pub fn build(
                             lerp(c[0]) * look.tint[0],
                             lerp(c[1]) * look.tint[1],
                             lerp(c[2]) * look.tint[2],
-                            c[3] as f32 / 255.0,
+                            if look.flags & mmk_host::mesh::MMK_MESH_NO_VERTEX_ALPHA != 0 {
+                                1.0
+                            } else {
+                                c[3] as f32 / 255.0
+                            },
                         ],
                         form_add: [fa[0], fa[1], fa[2], look.form.sat as u32 as f32],
-                        form_mul: [fm[0], fm[1], fm[2], 0.0],
+                        form_mul: fm,
                     });
                 }
                 out.indices.push(remap[i]);
@@ -298,7 +321,9 @@ pub fn build(
                 texture: (tex != TEXTURE_NONE).then_some(tex),
                 extra: (extra != TEXTURE_NONE).then_some(extra),
                 extra2: (extra2 != TEXTURE_NONE).then_some(extra2),
-                wrap: (look.flags >> 8) & 0xF,
+                extra3: (extra3 != TEXTURE_NONE).then_some(extra3),
+                tev,
+                wrap: (look.flags >> 8) & 0xF | look.extra_wraps << 4,
                 blend: match look.blend() {
                     1 => 2,
                     2 => 3,

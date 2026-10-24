@@ -42,7 +42,10 @@ pub mod sprites;
 ///     note blocks, conveyors… with their frames, one set per theme's SceneDB `FieldAnime`).
 /// 11: the Course Maker's sound: the edit music (`BGM_<Theme>_Edit`) and the `<S>_Edit*` users.
 /// 12: the night darkness's light shapes (`M0_Object_mask` from `Pack/StaticModel.pack`).
-pub const IMPORTER_VERSION: u32 = 12;
+/// 13: each environment's light map (`env/<name>.json` `lightmap`: the lights its `Diffuse` map
+///     is made of, their `effect` and `pow`, and its rim); the mesh materials' other samplers'
+///     wrap modes (`wraps`).
+pub const IMPORTER_VERSION: u32 = 13;
 pub mod smm1;
 pub mod smm1_costumes;
 pub use smm1::{Smm1Config, Smm1Report, run_smm1};
