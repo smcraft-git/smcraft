@@ -28,6 +28,8 @@ SMCraft is back in development (it was archived in October 2026).
 - **Seesaws tilt exactly as in SMM2**: the plank's swing, how it carries Mario and how he walks
   along it (slower uphill once it tilts past 7°) follow the game's own maths; he can stand on its
   end a little past the edge.
+- Ground-pounding a Seesaw slams it down as in SMM2, and a ground pound needs some air under
+  Mario: pressing Down just above the ground no longer starts one.
 - 3D World Goombas notice Mario ahead of them, stop for a moment and run at him.
 - A gentle slope whose low end is buried under ground is walked over flat, as in SMM2.
 - Stomping a falling enemy works as in the game (a Koopa stomped in mid-air drops as its shell
