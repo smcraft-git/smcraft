@@ -561,6 +561,7 @@ impl Host for FfiHost {
     }
 
     fn load_course(&mut self, source: &Source) -> Result<LoadedCourse, String> {
+        self.engine().editing = false;
         match source {
             Source::Library(path) => {
                 self.recording = false;
@@ -603,10 +604,12 @@ impl Host for FfiHost {
             return false;
         };
         self.recording = false;
+        self.engine().editing = false;
         self.load_file(&p).is_ok()
     }
 
     fn unload_course(&mut self) {
+        self.engine().editing = false;
         let audio = self.audio;
         if let Some(a) = unsafe { audio.as_ref() } {
             a.send(mmk_audio::Command::StopAll);
@@ -846,6 +849,7 @@ impl Host for FfiHost {
         e.world = World::from_course(&c);
         e.world.set_options(e.options);
         e.world.show_area(area);
+        e.editing = true;
         e.world.player.hidden = area != 0;
         e.course = Some(c);
         e.resolver.reset();
@@ -884,6 +888,7 @@ impl Host for FfiHost {
         start: Option<[f32; 2]>,
     ) -> Result<LoadedCourse, String> {
         self.recording = false;
+        self.engine().editing = false;
         let loaded = self.load_bytes(course)?;
         let w = &mut self.engine().world;
         if area != 0 {

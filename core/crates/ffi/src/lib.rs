@@ -263,6 +263,9 @@ pub struct MmkEngine {
     /// The night darkness's tables and this frame's lights (`mmk_engine_darkness`).
     dark_tables: mmk_host::darkness::DarknessTables,
     dark: Vec<MmkDarkLight>,
+    /// The front end's Course Maker shows the course still: the 3D styles' flat view (3D World's
+    /// perspective only comes in when playing, as the portable shell draws it).
+    pub(crate) editing: bool,
 }
 
 /// A theme's drop shadow, looked up once: ((style, theme, night), shadow).
@@ -335,6 +338,7 @@ pub unsafe extern "C" fn mmk_engine_new(assets: *const MmkAssets) -> *mut MmkEng
             shadow: None,
             dark_tables: Default::default(),
             dark: Vec::new(),
+            editing: false,
             options: {
                 // random Mystery Mushroom costumes come from those the assets have art for
                 let mut o = mmk_sim::Options::default();
@@ -926,6 +930,7 @@ mod tests {
             shadow: None,
             dark_tables: Default::default(),
             dark: Vec::new(),
+            editing: false,
             options: Default::default(),
         };
         unsafe {

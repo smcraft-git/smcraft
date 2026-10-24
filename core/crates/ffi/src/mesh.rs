@@ -359,7 +359,11 @@ pub unsafe extern "C" fn mmk_engine_scene3d(
             v
         };
         *out = MmkScene3d {
-            field_view_proj: sc.field.view_proj,
+            field_view_proj: if e.editing {
+                mmk_host::scene3d::field_camera("", e.world.view_camera()).view_proj
+            } else {
+                sc.field.view_proj
+            },
             background_view_proj: sc.background.map_or([0.0; 16], |c| c.view_proj),
             field_light: flat(&sc.field_light),
             background_light: flat(&sc.background_light),

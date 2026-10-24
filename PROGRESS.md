@@ -267,8 +267,9 @@ sway, importer and pack 12, the dev cache already at v12).
   names
 - 🔄 The Swift app: its host has the maker and Coursebot hooks ✅; a finger / mouse held down
   reaches the maker (paint, carry, erase) ✅; the maker keys from its keyboard ✅ (the portable
-  shell's: U / ⌃Z, Y / ⌃⇧Z, Q, [ ], T, E, G, M, C; macOS and iOS hardware keyboards); 3D styles'
-  still view uses the play camera ⬜
+  shell's: U / ⌃Z, Y / ⌃⇧Z, Q, [ ], T, E, G, M, C; macOS and iOS hardware keyboards); the 3D
+  styles' still view is flat as in the portable shell ✅ (the engine's `editing`: the scene's field
+  camera is the orthographic one while the maker shows the course)
 
 **G5 — Super Worlds** 🔄
 - ✅ Research (`research/specs/super-worlds.md`, public format `docs/formats/smm2-super-world.md`):
