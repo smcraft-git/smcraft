@@ -29,8 +29,10 @@ sway, importer and pack 12, the dev cache already at v12).
   TGRCode; the game's track tiles; CJK names; the Toad House minigames; SMB3 / SMW wings; boss
   jump sounds by style.
 - **GPU-slot queue** (one game instance at a time; the physics agent holds it most of the time):
-  re-render the pixel table (`research/tools/pixel-ref`, `ours` for all; an older run drew SMB1
-  desert night as day), captures of the track tiles in play and of NSMBU / 3D World wings (the mesh
+  ✅ pixel table re-rendered 2026-10-24 (2D means: SMB1 2.4 / night 1.8, SMB3 5.0 / 2.5, SMW 6.1 /
+  3.0; NSMBU 17.8 / 14.6; 3D World 29.5; SMW small Mario now drawn 16 × 32 as its quads); left in 2D:
+  the day sky (SMW 19, SMB3 10: the backdrop's placement, not a plain shift; the nights use a
+  static backdrop and match) and the day airship (SMW 17, SMB3 11), the coins' animation phase; captures of the track tiles in play and of NSMBU / 3D World wings (the mesh
   planner maps `M1_Enemy_wingcommon` to `<style>_Enemy_wingcommon`), a look at Water Level mode
   and custom scroll in the recomp (`research/tools/maker-look`: touch taps / drags by script).
 - **Agent queue** (when a helper slot frees): ~~the Super Worlds 3D map~~ (agent running); the

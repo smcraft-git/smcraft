@@ -7701,9 +7701,16 @@ impl World {
         } else {
             model
         };
-        // (Mega Mario's art is 16×16 drawn through a 32×32 quad)
-        let h = if small || p.pose == Pose::Dead || form == Form::Mega {
+        // (Mega Mario's art is 16×16 drawn through a 32×32 quad); SMW's small Mario quads are
+        // 16 × 32 [obs data: MW_Player_MarioMdl, dead.0 too], SMB1's and SMB3's 16 × 16
+        let h = if form == Form::Mega {
             16.0
+        } else if small || p.pose == Pose::Dead {
+            if p.style == crate::player::Style::MW {
+                32.0
+            } else {
+                16.0
+            }
         } else {
             32.0
         };
