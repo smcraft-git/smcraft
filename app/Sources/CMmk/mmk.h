@@ -485,7 +485,9 @@ typedef struct {
                                 // all zero: none; layout: mmk_host::mesh::tev_of, edge_rows). With it the textures are
                                 // albedo, extra2 (_a1), extra (gsys_user0, or the emission
                                 // _e0), extra3 (indirect)
-} MmkMeshShape;                                                        // 588 bytes
+    uint32_t extra_wraps;       // the extra textures' samplers' wraps, 4 bits each (u bits 0-1,
+                                // v 2-3): extra bits 0-3, extra2 4-7, extra3 8-11
+} MmkMeshShape;                                                        // 592 bytes
 
 typedef struct {
     const float *skin;          // bone_count x 12 floats (row-major 3x4)

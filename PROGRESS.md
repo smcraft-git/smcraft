@@ -33,7 +33,7 @@ sway, importer and pack 12, the dev cache already at v12).
      boots again from /private/tmp copies — a macOS privacy prompt hung it on ~/Documents and the
      SSD): the 3D World courses (a MoltenVK build without 3D texture compression is ready,
      `ryubuild/no3dbc`), Koopa / shell traces, WU form. Pixels (3D World mean 46.0 → 29.4;
-     NSMBU day 38.5 → 17.8, night 39.9 → 19.4; NSMBU's TEV stages ✅, its background's place ✅,
+     NSMBU day 38.5 → 17.8, night 39.9 → 14.6; NSMBU's TEV stages ✅, its background's place ✅,
      the light-map domain ✅ (wrapped, with the light map's pow; needs re-import, pack 13), rim light ✅): specular /
      env-map reflections, baked AO (needs an importer bump), the other sky variants,
      3D World snow, the colour table.
@@ -382,7 +382,7 @@ Nextendo; `docs/nextendo-network-play.md`, spec `research/specs/network-play.md`
   | SMW | 2.5 / 1.9% | 2.4 / 2.3% | 4.7 / 5.7% | 17.0 / 19.9% | 3.1 / 3.5% | 1.4 / 1.1% | 2.6 / 2.0% | 2.6 / 1.9% | 19.2 / 21.4% | 5.3 / 4.7% | 6.1 |
   | SMW night | 2.4 / 2.5% | 2.9 / 5.2% | 5.0 / 6.2% | 5.6 / 5.8% | 1.1 / 1.6% | 0.6 / 0.9% | 2.2 / 2.5% | 2.6 / 2.6% | 2.3 / 2.1% | 4.9 / 6.0% | 3.0 |
   | NSMBU | 16.1 / 45% | 9.1 / 13% | 15.9 / 31% | 33.4 / 63% | 22.7 / 53% | 7.8 / 14% | 6.7 / 9% | 13.6 / 43% | 35.0 / 62% | 17.6 / 38% | 17.8 |
-  | NSMBU night | 21.4 / 36% | 21.3 / 34% | 26.7 / 49% | 15.9 / 47% | 2.8 / 7% | 2.4 / 4% | 20.5 / 34% | 27.0 / 51% | 20.4 / 34% | 36.0 / 52% | 19.4 |
+  | NSMBU night | 14.4 / 24% | 14.3 / 22% | 19.7 / 36% | 15.8 / 47% | 2.8 / 7% | 2.4 / 4% | 13.5 / 22% | 20.9 / 42% | 13.3 / 21% | 29.0 / 40% | 14.6 |
 
   NSMBU colour combiner (branch tev-wu, 2026-10-24; the uber shader's TEV stages read from the
   game's programs, research/specs/render-3d.md): two registers from `tev_color0` / `tev_color1`,
@@ -411,6 +411,9 @@ Nextendo; `docs/nextendo-network-play.md`, spec `research/specs/network-play.md`
   mix(1, L(−v), rim_i), from the 3W castle field's program) → NSMBU day 18.1 → 17.8 (table
   above), night 19.4, 3D World 29.5 → 29.4 (ground 34.4, underground 18.0, castle 32.1, airship
   27.9, water 38.3, ghost 22.4, snow 43.3, desert 19.4, sky 26.0, forest 32.6).
+  Every texture with its own sampler's wrap modes (imported per shader sampler, mesh `wraps`;
+  importer 13: the night sky's noise and sky layers repeat where the albedo clamps) → NSMBU night
+  19.4 → 14.6 (table above), day 17.8, 3D World 29.5 (ground 34.4 → 34.7).
   3D World light pass (branch light3w, the uber shader read from its own programs,
   research/specs/render-3d.md): the sky material as the game computes it and g3d's "Maya"
   texture SRT → ground 38.6, underground 34.3, castle 75.9, airship 26.5, water 32.8, ghost

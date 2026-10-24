@@ -100,6 +100,9 @@ pub struct MeshMaterial {
     pub params: Vec<(String, Vec<f32>)>,
     /// Shader options that differ from the defaults (`enable_fog`, `enable_sky`, …).
     pub options: Vec<(String, String)>,
+    /// The wrap modes (u, v as `wrap`) of the other textures' samplers, by shader sampler
+    /// (empty in caches made before importer 13: they take the albedo's).
+    pub wraps: Vec<(String, [u8; 2])>,
 }
 
 impl MeshMaterial {
@@ -114,6 +117,13 @@ impl MeshMaterial {
             .iter()
             .find(|(n, _)| n == name)
             .map(|(_, v)| v.as_str())
+    }
+    /// Wrap modes of the sampler feeding shader sampler `sampler` (the albedo's when unknown).
+    pub fn wrap_of(&self, sampler: &str) -> [u8; 2] {
+        self.wraps
+            .iter()
+            .find(|(n, _)| n == sampler)
+            .map_or(self.wrap, |(_, w)| *w)
     }
     /// Texture fed to shader sampler `sampler` (`_a0` is the albedo).
     pub fn texture(&self, sampler: &str) -> Option<&str> {
@@ -629,6 +639,9 @@ impl MeshFile {
                         if !x.textures.is_empty() {
                             j["textures"] = json!(x.textures);
                         }
+                        if !x.wraps.is_empty() {
+                            j["wraps"] = json!(x.wraps);
+                        }
                         if x.blend != 0 {
                             j["blend"] = json!(x.blend);
                             j["alpha_ref"] = json!(x.alpha_ref);
@@ -740,6 +753,18 @@ impl MeshFile {
                             })
                             .collect(),
                         options: pairs("options"),
+                        wraps: x
+                            .get("wraps")
+                            .and_then(Value::as_array)
+                            .into_iter()
+                            .flatten()
+                            .filter_map(|p| {
+                                let w = p.get(1)?.as_array()?;
+                                let c =
+                                    |i: usize| w.get(i).and_then(Value::as_u64).unwrap_or(0) as u8;
+                                Some((p.get(0)?.as_str()?.to_string(), [c(0), c(1)]))
+                            })
+                            .collect(),
                     }
                 })
                 .collect::<Vec<_>>();

@@ -118,6 +118,8 @@ pub struct MmkMeshShape {
     /// The colour combiner ([`tev_of`]; all zero: none). With it the albedo's coordinates are
     /// the model's own (`srt` is the identity) and the block holds every texture's matrix.
     pub tev: [f32; TEV_ROWS * 4],
+    /// The extra textures' samplers' wrap modes ([`ShapeLook::extra_wraps`]).
+    pub extra_wraps: u32,
 }
 
 impl Default for MmkMeshShape {
@@ -138,6 +140,7 @@ impl Default for MmkMeshShape {
             form: [0.0; 16],
             extra3_texture: TEXTURE_NONE,
             tev: [0.0; TEV_ROWS * 4],
+            extra_wraps: 0,
         }
     }
 }
@@ -547,6 +550,9 @@ pub struct ShapeLook {
     pub tev: Option<[f32; TEV_ROWS * 4]>,
     /// A third extra texture: the colour combiner's indirect texture (`_i0`).
     pub extra3: Option<String>,
+    /// The extra textures' samplers' wrap modes, 4 bits each (u in bits 0–1, v in 2–3): `extra`
+    /// bits 0–3, `extra2` 4–7, `extra3` 8–11.
+    pub extra_wraps: u32,
 }
 
 impl ShapeLook {
@@ -578,6 +584,7 @@ pub fn shape_look(mat: Option<&mmk_assets::mesh::MeshMaterial>) -> ShapeLook {
             form: Form::default(),
             tev: None,
             extra3: None,
+            extra_wraps: 0,
         };
     };
     let self_lit = !m.unlit && !m.options.is_empty() && m.option("enable_diffuse") != Some("1");
@@ -586,21 +593,36 @@ pub fn shape_look(mat: Option<&mmk_assets::mesh::MeshMaterial>) -> ShapeLook {
     let tev = tev_of(m);
     // the extra texture: the sky's base (HDRI) under its cloud layer, an emission map, or the
     // alpha mask the uber shader reads through `gsys_user0`
-    let (extra_mode, extra) = if tev.is_some() {
+    let (extra_mode, extra_sampler) = if tev.is_some() {
         (
             0,
-            m.texture("gsys_user0")
-                .or(m.texture("_e0").filter(|_| on("enable_emission"))),
+            if m.texture("gsys_user0").is_some() {
+                "gsys_user0"
+            } else {
+                "_e0"
+            },
         )
     } else if on("enable_sky") && m.texture("_s0").is_some() {
-        (3, m.texture("_s0"))
+        (3, "_s0")
     } else if on("enable_emission") && m.texture("_e0").is_some() {
-        (1, m.texture("_e0"))
+        (1, "_e0")
     } else if m.texture("gsys_user0").is_some() {
-        (2, m.texture("gsys_user0"))
+        (2, "gsys_user0")
     } else {
-        (0, None)
+        (0, "")
     };
+    let extra = match extra_sampler {
+        "" => None,
+        "_e0" if tev.is_some() && !on("enable_emission") => None,
+        s => m.texture(s),
+    };
+    let extra2_sampler = if extra_mode == 3 { "_n0" } else { "_a1" };
+    let wrap_bits = |s: &str| {
+        let w = m.wrap_of(s);
+        (w[0] as u32 & 3) | (w[1] as u32 & 3) << 2
+    };
+    let extra_wraps =
+        wrap_bits(extra_sampler) | wrap_bits(extra2_sampler) << 4 | wrap_bits("_i0") << 8;
     let blend = match m.blend {
         2 => 1,
         3 => 2,
@@ -674,6 +696,7 @@ pub fn shape_look(mat: Option<&mmk_assets::mesh::MeshMaterial>) -> ShapeLook {
             form_of(m).unwrap_or_default()
         },
         extra3: tev.and(m.texture("_i0")).map(String::from),
+        extra_wraps,
         tev: match (tev, edge_rows(m)) {
             (b, None) => b,
             (b, Some(e)) => {

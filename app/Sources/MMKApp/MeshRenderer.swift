@@ -261,18 +261,19 @@ final class MeshRenderer {
                                   texture2d<float> extra [[texture(1)]],
                                   texture2d<float> extra2 [[texture(2)]],
                                   texture2d<float> extra3 [[texture(3)]],
-                                  sampler s [[sampler(0)]], constant U& u [[buffer(0)]],
+                                  sampler s [[sampler(0)]], sampler s1 [[sampler(1)]],
+                                  sampler s2 [[sampler(2)]], sampler s3 [[sampler(3)]], constant U& u [[buffer(0)]],
                                   constant float4* L [[buffer(1)]], constant float4* T [[buffer(2)]]) {
         uint mode = (u.flags >> 12) & 3;
         bool sky = mode == 3 && L[24].w > 0.5;
         if (T[14].z > 0.5) {
             // the colour combiner: each texture through its own matrix, offset by the indirect
             // texture's blue / alpha (scaled) where the material says so
-            float4 ind = extra3.sample(s, tev_uv(3, in.uv, T));
+            float4 ind = extra3.sample(s3, tev_uv(3, in.uv, T));
             float2 off = ind.ba * float2(T[22].w, T[23].w);
             float4 tx[4] = { t.sample(s, tev_uv(0, in.uv, T) + off * T[16].w),
-                             extra2.sample(s, tev_uv(1, in.uv, T) + off * T[18].w),
-                             extra.sample(s, tev_uv(2, in.uv, T) + off * T[20].w), ind };
+                             extra2.sample(s2, tev_uv(1, in.uv, T) + off * T[18].w),
+                             extra.sample(s1, tev_uv(2, in.uv, T) + off * T[20].w), ind };
             float4 R0, R1;
             tev_regs(tx, in.vc, T, R0, R1);
             float4 f = T[14];
@@ -289,7 +290,7 @@ final class MeshRenderer {
             return float4(rgb, c.a);
         }
         float4 tc = t.sample(s, sky ? sky_uv(0, in.uv, L) : in.uv);
-        float4 x = extra.sample(s, sky ? sky_uv(2, in.uv, L) : in.uv);
+        float4 x = extra.sample(s1, sky ? sky_uv(2, in.uv, L) : in.uv);
         // the albedo combiner: (albedo + add) * mul, clamped with flag bit 30
         float3 albedo = (tc.rgb + in.fadd) * in.fmul;
         if ((u.flags & (1u << 30)) != 0) albedo = saturate(albedo);
@@ -300,7 +301,7 @@ final class MeshRenderer {
             // colour 5 -> 4 with an HDR boost in its alpha; the horizon layer (_n0) colours 3 -> 2
             // and covers by alpha^5; the clouds (_a0) colour 1 -> 0 and cover by
             // alpha^2 sin(pi (alpha - 1/2))
-            float4 h = extra2.sample(s, sky_uv(1, in.uv, L));
+            float4 h = extra2.sample(s2, sky_uv(1, in.uv, L));
             float3 base = mix(L[29].rgb, L[28].rgb, x.rgb) * (1.0 + 1024.0 * pow(x.a * 0.99975, 4.0));
             float3 horizon = mix(L[27].rgb, L[26].rgb, h.rgb);
             float ha = pow(h.a, 5.0);
@@ -423,8 +424,8 @@ final class MeshRenderer {
         return frame
     }
 
-    private func sampler(_ flags: UInt32) -> MTLSamplerState? {
-        let key = (flags >> 8) & 0xF
+    /// Linear sampler of wrap bits `key` (u in bits 0-1, v in 2-3).
+    private func sampler(wrap key: UInt32) -> MTLSamplerState? {
         if let s = samplers[key] { return s }
         func mode(_ w: UInt32) -> MTLSamplerAddressMode {
             switch w { case 1: .mirrorRepeat; case 2: .clampToEdge; default: .repeat }
@@ -500,7 +501,11 @@ final class MeshRenderer {
                     enc.setFragmentBytes(&u, length: MemoryLayout<Uniforms>.stride, index: 0)
                     let tex = p.textures[i] == MMK_TEXTURE_NONE ? nil : texture(p.textures[i])
                     enc.setFragmentTexture(tex ?? white, index: 0)
-                    enc.setFragmentSamplerState(sampler(sh.flags), index: 0)
+                    enc.setFragmentSamplerState(sampler(wrap: (sh.flags >> 8) & 0xF), index: 0)
+                    // the extra textures' own samplers (MmkMeshShape.extra_wraps)
+                    for k in 0..<3 {
+                        enc.setFragmentSamplerState(sampler(wrap: (sh.extra_wraps >> UInt32(4 * k)) & 0xF), index: k + 1)
+                    }
                     enc.drawIndexedPrimitives(type: .triangle, indexCount: Int(sh.index_count), indexType: .uint32,
                                               indexBuffer: m.indices, indexBufferOffset: Int(sh.first_index) * 4)
                 }

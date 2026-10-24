@@ -55,8 +55,8 @@ pub struct MeshVertex {
     pub form_mul: [f32; 4],
 }
 
-/// Indices `first..first + count` drawn with one texture (None: plain grey), wrap mode (bits
-/// 0–1 u, 2–3 v: 0 repeat, 1 mirror, 2 clamp), blending (0 opaque / alpha-tested, 2 alpha
+/// Indices `first..first + count` drawn with one texture (None: plain grey), wrap modes (bits
+/// 0–1 u, 2–3 v: 0 repeat, 1 mirror, 2 clamp; the extra textures' in the next three nibbles), blending (0 opaque / alpha-tested, 2 alpha
 /// blended, 3 additive) and face culling (0 back faces culled, 1 front, 2 none).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Piece {
@@ -323,7 +323,7 @@ pub fn build(
                 extra2: (extra2 != TEXTURE_NONE).then_some(extra2),
                 extra3: (extra3 != TEXTURE_NONE).then_some(extra3),
                 tev,
-                wrap: (look.flags >> 8) & 0xF,
+                wrap: (look.flags >> 8) & 0xF | look.extra_wraps << 4,
                 blend: match look.blend() {
                     1 => 2,
                     2 => 3,

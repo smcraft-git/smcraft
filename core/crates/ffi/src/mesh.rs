@@ -155,6 +155,7 @@ pub unsafe extern "C" fn mmk_mesh_shape(
             form: look.form.packed(),
             extra3_texture: TEXTURE_NONE,
             tev: look.tev.unwrap_or([0.0; mmk_host::mesh::TEV_ROWS * 4]),
+            extra_wraps: look.extra_wraps,
         };
         // the extra texture is resolved against the cache (named in the model file's folder)
         drop(s);
@@ -564,7 +565,7 @@ mod tests {
     fn layout_matches_header() {
         assert_eq!(size_of::<MmkMeshVertex>(), 56);
         assert_eq!(size_of::<MmkMeshModel>(), 80);
-        assert_eq!(size_of::<MmkMeshShape>(), 588);
+        assert_eq!(size_of::<MmkMeshShape>(), 592);
         assert_eq!(size_of::<MmkScene3d>(), 1380);
         assert_eq!(size_of::<MmkMeshPose>(), 32);
         assert_eq!(size_of::<MmkMeshDraw>(), 80);

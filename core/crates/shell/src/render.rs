@@ -229,6 +229,10 @@ fn vs(@location(0) clip: vec4<f32>, @location(1) world: vec3<f32>, @location(2) 
 @group(0) @binding(2) var extra: texture_2d<f32>;
 @group(0) @binding(3) var extra2: texture_2d<f32>;
 @group(0) @binding(4) var extra3: texture_2d<f32>;
+// each extra texture has its own sampler (its own wrap modes)
+@group(0) @binding(5) var samp1: sampler;
+@group(0) @binding(6) var samp2: sampler;
+@group(0) @binding(7) var samp3: sampler;
 
 // the colour combiner of NSMBU's materials (mmk_host::mesh::tev_of has the layout)
 struct Tev {
@@ -441,14 +445,14 @@ fn fs(i: VOut) -> @location(0) vec4<f32> {
     let combiner = tev.rows[14].z > 0.5;
     // the colour combiner's coordinates: each texture's own matrix, offset by the indirect
     // texture's blue / alpha (scaled) where the material says so
-    let ind = textureSample(extra3, samp, tev_uv(3, i.uv));
+    let ind = textureSample(extra3, samp3, tev_uv(3, i.uv));
     let off = ind.ba * vec2<f32>(tev.rows[22].w, tev.rows[23].w);
     let uv0 = tev_uv(0, i.uv) + off * tev.rows[16].w;
     // (every texture is sampled up front: the mode varies per piece, so not uniformly)
     let t = textureSample(tex, samp, select(select(i.uv, sky_uv(0, i.uv), sky), uv0, combiner));
-    let x = textureSample(extra, samp,
+    let x = textureSample(extra, samp1,
         select(select(i.uv, sky_uv(2, i.uv), sky), tev_uv(2, i.uv) + off * tev.rows[20].w, combiner));
-    let h = textureSample(extra2, samp,
+    let h = textureSample(extra2, samp2,
         select(sky_uv(1, i.uv), tev_uv(1, i.uv) + off * tev.rows[18].w, combiner));
     // the albedo combiner: (albedo + add) · mul, clamped when add.w is set (vertex colour terms
     // worked out per vertex), then the light's vertex-colour tint
@@ -750,6 +754,12 @@ impl Renderer {
             },
             count: None,
         };
+        let samp_entry = |binding: u32| wgpu::BindGroupLayoutEntry {
+            binding,
+            visibility: wgpu::ShaderStages::FRAGMENT,
+            ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+            count: None,
+        };
         let mesh_tex_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("mesh textures"),
             entries: &[
@@ -763,6 +773,9 @@ impl Renderer {
                 tex_entry(2),
                 tex_entry(3),
                 tex_entry(4),
+                samp_entry(5),
+                samp_entry(6),
+                samp_entry(7),
             ],
         });
         let tev_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -1114,16 +1127,22 @@ impl Renderer {
             2 => wgpu::AddressMode::ClampToEdge,
             _ => wgpu::AddressMode::Repeat,
         };
-        let sampler = self.mesh_samplers.entry(wrap).or_insert_with(|| {
-            gpu.device.create_sampler(&wgpu::SamplerDescriptor {
-                label: Some("mesh"),
-                address_mode_u: mode(wrap & 3),
-                address_mode_v: mode(wrap >> 2),
-                mag_filter: wgpu::FilterMode::Linear,
-                min_filter: wgpu::FilterMode::Linear,
-                ..Default::default()
-            })
-        });
+        // wrap: 4 bits per texture (albedo, extra, extra2, extra3), u in the low 2, v the next 2
+        for k in 0..4 {
+            let w = (wrap >> (4 * k)) & 0xF;
+            self.mesh_samplers.entry(w).or_insert_with(|| {
+                gpu.device.create_sampler(&wgpu::SamplerDescriptor {
+                    label: Some("mesh"),
+                    address_mode_u: mode(w & 3),
+                    address_mode_v: mode(w >> 2),
+                    mag_filter: wgpu::FilterMode::Linear,
+                    min_filter: wgpu::FilterMode::Linear,
+                    ..Default::default()
+                })
+            });
+        }
+        let samp = |k: u32| &self.mesh_samplers[&((wrap >> (4 * k)) & 0xF)];
+        let sampler = samp(0);
         let group = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: None,
             layout: &self.mesh_tex_layout,
@@ -1147,6 +1166,18 @@ impl Renderer {
                 wgpu::BindGroupEntry {
                     binding: 4,
                     resource: wgpu::BindingResource::TextureView(extra3_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 5,
+                    resource: wgpu::BindingResource::Sampler(samp(1)),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 6,
+                    resource: wgpu::BindingResource::Sampler(samp(2)),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 7,
+                    resource: wgpu::BindingResource::Sampler(samp(3)),
                 },
             ],
         });

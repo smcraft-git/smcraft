@@ -106,20 +106,26 @@ pub fn convert_material(mat: &bfres::Material) -> MeshMaterial {
         ),
     };
     let mut textures = Vec::new();
+    let mut wraps = Vec::new();
     if mat.sampler_assign.is_empty() {
         for (i, smp) in mat.samplers.iter().enumerate() {
             if smp.name != "_a0"
                 && let Some(t) = mat.textures.get(i)
             {
                 textures.push((smp.name.clone(), t.clone()));
+                wraps.push((
+                    smp.name.clone(),
+                    [wrap_code(smp.wrap[0]), wrap_code(smp.wrap[1])],
+                ));
             }
         }
     } else {
         for (shader_sampler, _) in &mat.sampler_assign {
             if shader_sampler != "_a0"
-                && let Some((t, _)) = tex_of(shader_sampler)
+                && let Some((t, w)) = tex_of(shader_sampler)
             {
                 textures.push((shader_sampler.clone(), t));
+                wraps.push((shader_sampler.clone(), w));
             }
         }
     }
@@ -162,6 +168,7 @@ pub fn convert_material(mat: &bfres::Material) -> MeshMaterial {
             .filter(|(n, v)| keep_option(n, v))
             .cloned()
             .collect(),
+        wraps,
     }
 }
 
