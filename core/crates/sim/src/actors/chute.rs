@@ -5,7 +5,10 @@
 //!   0x71028c68e8) serves the Parachute context and carries the parachute folded; each Fall
 //!   (exe 0x71010c9330) opens it once vy ≤ −4 (−2.5 in water): vy 0, gravity −0.1, max fall
 //!   −1.0; Fall's exit (0x71010c99f0) folds it again (gravity −0.25, max fall −5), so every
-//!   drop opens it anew.
+//!   drop opens it anew. The **Side Thwomp** (SideDossun, vtable 0x710290e888; spawn
+//!   0x7101263ef0 folds it too) does the same in its charge (Fall enter / exe / exit
+//!   0x7101264e30 / 0x7101265210 / 0x7101265850): once |vx| ≥ 2.3 (2.0 in water or liquid)
+//!   it opens — vx 0, then 0.1 px/f² to 1.0 instead of 0.075 to 3.0; the exit folds it.
 //! - **Lava Bubble** (Bubble, vtable 0x71028bec00, Fall exe 0x710109a710): the Default fall
 //!   until it touches the lava (+0x658 bit 34) or sinks below its hiding level less 16 (big
 //!   32) and 16 more for the parachute; it snaps onto that level and leaps as usual.
@@ -26,14 +29,21 @@ use super::{Actor, Kind};
 /// The Thwomp's parachute opens at this fall speed (−2.5 in water), then falls at −0.1 / −1.0.
 const THWOMP_OPEN: f32 = -4.0;
 const THWOMP_OPEN_WET: f32 = -2.5;
+/// The Side Thwomp's opens at this charge speed (2.0 in water), then charges at 0.1 / 1.0
+/// (folded: 0.075 / 3.0) [obs v3.0.3 0x7101265210, DAT 0x71023190c4].
+const SIDE_OPEN: f32 = 2.3;
+const SIDE_OPEN_WET: f32 = 2.0;
+pub(super) const SIDE_CHARGE: (f32, f32) = (0.075, 3.0);
+const SIDE_CHUTE_CHARGE: (f32, f32) = (0.1, 1.0);
 pub(super) const THWOMP_CHUTE_GRAVITY: f32 = -0.1;
 pub(super) const THWOMP_CHUTE_FALL: f32 = -1.0;
 
 impl Actor {
     /// Parts whose own action carries the parachute (folded) instead of the Parachute
-    /// context's fall: the Thwomp (the Side Thwomp charges sideways and never opens it [inf]).
+    /// context's fall: the Thwomp and the Side Thwomp (their EnemyDB `action_parachute` is
+    /// their own Dossun / SideDossun action).
     pub fn folds_chute(kind: Kind) -> bool {
-        matches!(kind, Kind::Thwomp { side: false, .. })
+        matches!(kind, Kind::Thwomp { .. })
     }
 
     /// A Thwomp's parachute is open (it carries one, `chute`, and this fall opened it).
@@ -59,6 +69,27 @@ impl Actor {
             (THWOMP_CHUTE_GRAVITY, THWOMP_CHUTE_FALL)
         } else {
             (-0.25, -5.0)
+        }
+    }
+
+    /// The Side Thwomp's charge (0x7101265210): open the parachute once charging fast
+    /// enough. Returns the acceleration and top speed for this frame.
+    pub(super) fn side_thwomp_chute(&mut self) -> (f32, f32) {
+        if self.chute && self.hops == 0 {
+            let open = if self.wet() || self.in_lava() {
+                SIDE_OPEN_WET
+            } else {
+                SIDE_OPEN
+            };
+            if self.vx.abs() >= open {
+                self.hops = 1;
+                self.vx = 0.0;
+            }
+        }
+        if self.thwomp_chute_open() {
+            SIDE_CHUTE_CHARGE
+        } else {
+            SIDE_CHARGE
         }
     }
 
@@ -165,5 +196,33 @@ mod tests {
         b.step(&air(), 0.0);
         assert_eq!(b.mode, Mode::Normal);
         assert_eq!((b.phase, b.timer), (0, 120));
+    }
+
+    #[test]
+    fn side_thwomp_opens_its_parachute_in_the_charge() {
+        let mut t = Actor::new(
+            Kind::Thwomp {
+                side: true,
+                right: true,
+            },
+            200.0,
+            300.0,
+        );
+        t.chute = true;
+        t.phase = 1;
+        t.dir = 1;
+        t.home_x = t.x;
+        let mut speeds = Vec::new();
+        for _ in 0..200 {
+            t.step(&air(), 0.0);
+            speeds.push(t.vx);
+        }
+        // 0.075 a frame up to 2.3 (31 frames), opens (vx 0), then 0.1 a frame to 1.0
+        let open = speeds.windows(2).position(|w| w[1] < w[0]).unwrap() + 1;
+        assert_eq!(open, 31, "{speeds:?}");
+        assert!((speeds[open] - 0.1).abs() < 1e-5);
+        assert!(speeds[open..].iter().all(|&v| v <= 1.0));
+        assert_eq!(*speeds.last().unwrap(), 1.0);
+        assert!(t.thwomp_chute_open());
     }
 }

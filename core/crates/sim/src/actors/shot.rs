@@ -220,14 +220,22 @@ impl Actor {
     /// A coin of a blaster's TenCoin burst (slot 0–9) leaves the muzzle: the Coin actor's Shot
     /// enter (0x7100848b70, velocity vf 0x1a0 0x7100849240) [obs]. Winged coins fly straight
     /// at the Default 1.5 (4.5); a coin with a parachute launches at 1.5 (4.5), vy 0.6 in v3.0.3
-    /// (v1.0.0 used the slot's vx ± 1.5) [obs v3.0.3 0x7101366c30].
+    /// (v1.0.0 used the slot's vx ± 1.5); with both, the Default parachute launch, 2.5 (5.0)
+    /// with vy 0. Only a wingless coin is pushed 3 px out (the winged branch of 0x7101366c30
+    /// runs the Default enter 0x7101063f20 alone) [obs v3.0.3 0x7101366c30].
     pub fn coin_shot(&mut self, slot: usize, fast: bool) {
         let d = self.dir as f32;
-        self.x += COIN_PUSH * d;
+        if !self.wings {
+            self.x += COIN_PUSH * d;
+        }
         let f = fast as usize;
         self.hops = 0;
         self.timer = 0;
-        if self.wings && !self.chute {
+        if self.wings && self.chute {
+            self.vx = CHUTE_SPEED[f] * d;
+            self.vy = 0.0;
+            self.timer = CHUTE_FRAMES;
+        } else if self.wings {
             self.vx = SHOT_SPEED[f] * d;
             self.vy = 0.0;
         } else if self.chute {

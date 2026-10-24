@@ -47,12 +47,13 @@ sway, importer and pack 12, the dev cache already at v12).
   research 42-koopa-clown-car.md "Pass 5": the car's fire helper 0x71028e83f8 / record, cooldown
   90 then [90, 180), a 90-frame charge braking the car, one KoopaClownFire EnemyShot at 1.5 px/f
   plus the car's speed; bosses in a Fire car too; a player flying it fires PlayerShots on each
-  change of Run (cooldown 12 / 50, ≤ 8 out, three spread as Fire Mario [inf]); left: the
-  ChargeShot's own flight, the object budget); ✅ own Parachute falls (2026-10-25, branch `enemysys2`, actors/chute.rs,
+  change of Run (cooldown 12 / 50, ≤ 8 out, three spread as Fire Mario [inf]); ✅ the
+  ChargeShot's flight (branch `blockout2`); left: its ChargeExplode burst, the object budget); ✅ own Parachute falls (2026-10-25, branch `enemysys2`, actors/chute.rs,
   shared enemy draft §5.2 "Traced"): the Thwomp's Dossun action folds its parachute and opens it
   on each drop (vy ≤ −4: −0.1 / −1.0), the Lava Bubble's ends in lava or at its hiding level, the
   Cheep Cheep's and Porcupuffer's in water or below the area, the Wiggler's is the Default (its
-  segments' rotation is drawn only); left: the Side Thwomp's (SideDossun Fall 0x7101265210); ✅
+  segments' rotation is drawn only); ✅ the Side Thwomp's (SideDossun Fall 0x7101265210, branch
+  `blockout2`); ✅
   ceiling Spinies and Buzzy Beetles (2026-10-25, branch `enemysys2`, actors/ceiling.rs, 25-spiny.md
   "v3.0.3 check": placed upside down — 58 in the sample — or out of a down pipe at normal size,
   they walk the ceiling and drop as their shells on a player below; Togezo Basic 0x7102913c70);
@@ -65,10 +66,16 @@ sway, importer and pack 12, the dev cache already at v12).
   a block in water holds still, then swims; a Lava Bubble leaps 3.5 (5.0); Fish Bones fired in
   water glide level and slow to a stop, Wigglers swim off at once; the winged red Koopa's climb
   eases by 0.06 out of water (the speed bands were its water variant); ✅ Gesso3W's Block Out
-  (collides from the start); left: Hanachan's and Togezo's water Block Outs, the ItemBalloon /
-  ItemHeaddress eased Block Out (partial, shared enemy draft §5.9), the Coin Block Out and the
-  winged coin's own side-pipe state (none in either sample; 8-coin.md: Coin Dokan enter
-  0x7101367620 sends it to the Coin actor's own state 8, not traced); ✅ the Super World map's music, sounds, point / goal / road states and ledge cliffs
+  (collides from the start); ✅ the rest of the Block Outs (2026-10-25, branch `blockout2`,
+  shared enemy draft §5.4 / §5.9 / §5.10): ItemBalloon / ItemHeaddress eased out (the
+  P-Balloon and the wearables: 63 in 7 tgr2 courses), the Coin's (winged / parachuted coins),
+  Hanachan's and Togezo's water variants; the winged coin out of a side pipe (the Coin Dokan enter's state 8 is EnemySys
+  context 8, Killer: v3.0.3 context list 0x7101286ee0); the Side Thwomp's parachute (folded,
+  opens in each charge at |vx| ≥ 2.3: 0.1 / 1.0; 36 in the samples); the Fire car's ChargeShot
+  flight (4.0 px/f, no life count); left: the ChargeExplode burst's hit kind 2 on blocks
+  (0x7100e22210 → 0x7100e258d0), the 100-unit projectile budget (0x7100de9960: what fills its
+  +0x8 / +0x670 counts, for every shooter), Coin10's Block Out, Block sideways (multiplayer)
+  variants; ✅ the Super World map's music, sounds, point / goal / road states and ledge cliffs
   (2026-10-25, branch `swmap2`, game pack 14; left: `passPoint`, the camera, ghosts are online); ✅ the Cursed Key and Phanto (2026-10-25,
   research 95-key.md; co-op: Phanto hurts only the player in front [inf]); ✅ SMM1 UI sounds for
   the SMM1-look 100 Mario (2026-10-25, branch `smm1snd`, research smm1-sound.md: SMM1's SLink2DB
@@ -134,9 +141,9 @@ sway, importer and pack 12, the dev cache already at v12).
      Bill at the muzzle's height), Parachute swing direction and wall hold. Left: ✅ liquid
      variants (Kuribo / Pukupuku / Bubble / FishBone / Hanachan shots / RedPataPata in water), Block
      sideways (multiplayer) spreads and ✅ note blocks' contents, Gesso3W / Hanachan / FishBone /
-     ✅ TeresaSpread / FishBone Block Outs (Hanachan's on land is the Default's; its water mode and
-     Gesso3W's not done), KutsuKuribo, ✅ Togezo's ceiling mode, the winged coin's own pipe
-     state 8, ✅ Bubble / Thwomp / Porcupuffer / Wiggler / Cheep Cheep own Parachute Falls, the
+     ✅ TeresaSpread / FishBone / Gesso3W / Hanachan / Togezo / ItemBalloon / ItemHeaddress /
+     Coin Block Outs, KutsuKuribo, ✅ Togezo's ceiling mode, ✅ the winged coin's side-pipe exit
+     (context 8 = Killer), ✅ Bubble / Thwomp / Porcupuffer / Wiggler / Cheep Cheep own Parachute Falls, the
      parachute body sway (drawn), DokanOutBig's 0.5 → 0.7 scale and other draw-only scales;
      Super World enemy-icon courses, point icons by model, map ghosts; ✅ CJK course
      names (branch `cjk`, 2026-10-24: the

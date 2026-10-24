@@ -8,7 +8,7 @@
 use crate::fmath::DetMath;
 use crate::level::{Cell, Level, PipeDir, TILE};
 
-mod block_out;
+pub mod block_out;
 mod bosses;
 mod ceiling;
 mod chute;
@@ -595,8 +595,10 @@ pub enum Mode {
     },
     /// Coming out of a block (the Block context's Out, actors/block_out.rs): the block centre
     /// `yb`, where the motion started, this frame's gravity, whether it comes out downward
-    /// and a parachute's countdown (a Goomba's hold in water); terrain collision is off while
-    /// `timer` runs. `wet`: it came out in water (the presets' water variants).
+    /// and a parachute's countdown (a Goomba's hold in water, a preset's own count); terrain
+    /// collision is off while `timer` runs. `wet`: it came out in water (the presets' water
+    /// variants); `preset`: whose Out it runs; `note`: out of a note block (or a tree);
+    /// `clear`: a coin is clear of the block (its hit box is in).
     BlockOut {
         yb: f32,
         y0: f32,
@@ -604,6 +606,9 @@ pub enum Mode {
         down: bool,
         left: i32,
         wet: bool,
+        preset: block_out::Preset,
+        note: bool,
+        clear: bool,
     },
     /// Coming out of a pipe mouth (the Dokan context, actors/dokan.rs): the slide's target
     /// (tx, ty) and where it is in the context.
@@ -1323,6 +1328,14 @@ impl Actor {
         px >= x0 && px <= x1 && py < cy + hh && py + 16.0 > cy - hh
     }
 
+    /// A Side Thwomp's charge starts: it faces its side and returns here afterwards.
+    fn charge_from(&mut self, side: bool, right: bool) {
+        if side {
+            self.dir = if right { 1 } else { -1 };
+            self.home_x = self.x;
+        }
+    }
+
     fn step_thwomp(&mut self, level: &Level, side: bool, right: bool) {
         let (px, py) = self.target;
         let w = if self.big { 32.0 } else { 16.0 };
@@ -1350,6 +1363,7 @@ impl Actor {
                     self.phase = 1;
                     self.vx = 0.0;
                     self.vy = 0.0;
+                    self.charge_from(side, right);
                 }
             }
             0 => {
@@ -1357,20 +1371,18 @@ impl Actor {
                 self.vy = 0.0;
                 if triggered(self) {
                     self.phase = 1;
+                    self.charge_from(side, right);
                 }
             }
             1 => {
                 if side {
-                    if self.vx == 0.0 {
-                        // the charge starts: it returns to here afterwards
-                        self.dir = if right { 1 } else { -1 };
-                        self.home_x = self.x;
-                    }
-                    let t = 3.0 * self.dir as f32;
+                    // a parachute it carries opens in the charge (actors/chute.rs)
+                    let (acc, top) = self.side_thwomp_chute();
+                    let t = top * self.dir as f32;
                     self.vx = if self.vx < t {
-                        (self.vx + 0.075).min(t)
+                        (self.vx + acc).min(t)
                     } else {
-                        (self.vx - 0.075).max(t)
+                        (self.vx - acc).max(t)
                     };
                     self.vy = 0.0;
                 } else {
@@ -2377,8 +2389,12 @@ impl Actor {
             }
             Kind::Fireball if self.alt => {
                 // a Fire Koopa Clown Car's PlayerShot (exe 0x7100ddf010, v3.0.3): straight at
-                // its launch speed, put out by terrain, at most 600 frames [obs]
-                self.timer -= 1;
+                // its launch speed, put out by terrain, at most 600 frames [obs]; the charged
+                // one (`phase` 1, ChargeShot 0x7100ddf610) has no life count and bursts on
+                // terrain (its burst's tile hits are not modelled)
+                if self.phase != 1 {
+                    self.timer -= 1;
+                }
                 self.x += self.vx;
                 self.y += self.vy;
                 if level.cell_at(self.x, self.y + 4.0).is_solid() || self.timer <= 0 {

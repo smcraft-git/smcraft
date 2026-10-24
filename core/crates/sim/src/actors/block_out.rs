@@ -1,5 +1,6 @@
 //! What a block releases, actor side: the EnemySys **Block** context (shared enemy draft §5.4,
-//! 4-brick.md B9). A part that is not a simple item (those rise out in `Mode::Emerge`) enters
+//! §5.9, 4-brick.md B9). A part that is not a simple item (those rise out in `Mode::Emerge`;
+//! the P-Balloon and the wearables ease out in their own preset here) enters
 //! its EnemyDB `action_block` preset's `cState_Out`: placed in the block and pushed out, with
 //! its terrain collision off for the first frames, until the preset's end condition hands it
 //! over through the shared return-to-normal rule (`end_shot`: Parachute, Wing, else Basic).
@@ -86,6 +87,65 @@ const MAPOBJ_NOTE_WING_VY: f32 = 4.0;
 const MAPOBJ_DOWN_VY: f32 = -1.0;
 const MAPOBJ_DOWN_WING_VY: f32 = -4.0;
 const MAPOBJ_WING_END: f32 = -2.0;
+/// ItemBalloon / ItemHeaddress (P-Balloon, the 3D World wearables; vtables 0x7102920d40 /
+/// 0x7102923cf0, Out 0x7101339d60 / 0x7101339de0 and 0x71013451a0 / 0x7101345220, velocity vf
+/// 0x170 0x710133a050, end vf 0x168 0x7101339ff0) [obs v3.0.3]: no launch (vy, gravity 0); the
+/// feet ease to Yb + 7 (down Yb − 24; out of a note block Yb + 39 / Yb − 40) by max(0.05,
+/// 0.1 × the distance) a frame, 0.05 × in water, and it hands over on arriving. Contact and
+/// terrain stay off for the whole Out (their clear time only runs under a parachute,
+/// 0x71013475a0). Unlike ItemDefault it is not moved 8 px back in (vf 0x1d0 0x710133a260 = 0).
+const EASE_UP: f32 = 7.0;
+const EASE_DOWN: f32 = -24.0;
+const EASE_NOTE_UP: f32 = 39.0;
+const EASE_NOTE_DOWN: f32 = -40.0;
+const EASE_RATE: f32 = 0.1;
+const EASE_WET_RATE: f32 = 0.05;
+const EASE_MIN_STEP: f32 = 0.05;
+/// Arrived: within 2e-5 of the target (DAT 0x7102318820 / 0x7102318cf4 = ∓1e-5).
+const EASE_ARRIVED: f32 = 2e-5;
+/// Winged: up vy 4.0 under −0.25, done once vy ≤ 0; down vy −0.24 under −0.0625 for 9
+/// frames (+0xa9 = 9, vf 0x1e8 0x7101347770).
+const EASE_WING_VY: f32 = 4.0;
+const EASE_WING_GRAVITY: f32 = -0.25;
+const EASE_WING_DOWN_VY: f32 = -0.24;
+const EASE_WING_DOWN_GRAVITY: f32 = -0.0625;
+const EASE_WING_DOWN_FRAMES: i32 = 9;
+/// The headdress is drawn in front once its feet are 2 px under the block top (down: its head
+/// 2 px over the block bottom; 0x7101345220).
+const HEADDRESS_DRAW: f32 = 2.0;
+/// An ItemDefault-family item out of a note block starts 4 px higher (0x7101340330, the note
+/// flag +0x98 from 0x71013400d0), where others start 8 px further in.
+const ITEM_NOTE_UP: f32 = 4.0;
+/// The Coin actor (Block vtable 0x7102932130; Out 0x7101366650 / 0x71013666b0, velocity vf
+/// 0x170 0x71013668e0, end vf 0x168 0x71013668b0) [obs v3.0.3]: vy 2.5 under −0.14 (also
+/// winged or out of a note block), done at vy ≤ −1; down vy −2.5 with its gravity turned over
+/// (+0x530 bit 16), done once vy ≥ 0. No terrain (+0x524 bit 4, kept for a parachute's) and
+/// its hit box out of the grid (0x7100e26430 each frame) until its feet are 24 px over the
+/// block origin (down: 16 px under it), then the box is entered (0x7100e265e0) and terrain
+/// turns on.
+const COIN_VY: f32 = 2.5;
+const COIN_GRAVITY: f32 = -0.14;
+const COIN_END: f32 = -1.0;
+const COIN_CLEAR_UP: f32 = 24.0;
+const COIN_CLEAR_DOWN: f32 = -16.0;
+/// Hanachan (Wiggler) in water (context enter 0x7101112840 sets the water mode +0x540 = 1;
+/// Out 0x7101112d00 / 0x7101112de0) [obs v3.0.3]: contact on from the start but no terrain
+/// (+0x524 bit 4); down vy −2.5 (−3.375 out of a note block, ×1.5 big) with gravity × −0.7
+/// (DAT 0x7102318f80); done once |vy| ≤ 0.2 (DAT 0x7102319384). Out of water: the Default Out,
+/// also handing over as soon as it is in water.
+const WIGGLER_WET_VY: f32 = -2.5;
+const WIGGLER_WET_NOTE_VY: f32 = -3.375;
+const WIGGLER_WET_BIG: f32 = 1.5;
+const WIGGLER_WET_GRAVITY: f32 = -0.7;
+const WIGGLER_WET_STOP: f32 = 0.2;
+/// Togezo (Spiny) in water: its ball form, mode +0x540 = 3 (0x710127f300: not winged, not the
+/// 0x4 form, in water). Out 0x710127f750 / 0x710127f890 [obs v3.0.3]: down vy −2.4 (−1.2 × 2;
+/// a note block's −2.0 × 2) with the gravity turned over; done once |vy| ≤ 0.5, or while
+/// faster once its top is out of the water (the surface ≤ its feet + 4). Out of water (mode
+/// 0): the Default Out, handing over once clear of the block (or its clear time) in liquid.
+const SPINY_WET_DOWN_VY: f32 = -1.2;
+const SPINY_WET_STOP: f32 = 0.5;
+const SPINY_WET_TOP: f32 = 4.0;
 
 /// The `action_block` presets (EnemyDB) that differ in what this engine models.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -107,12 +167,23 @@ pub enum Preset {
     Bubble,
     /// MapObjDefault / MapObjYoshiEgg (P Switch, POW, springs, Stone, Yoshi's egg, …).
     MapObj,
+    /// ItemBalloon / ItemHeaddress (the P-Balloon, the 3D World wearables): eased out to the
+    /// block top (the world picks it for the P-Balloon, which is only SMW's part 81).
+    ItemEase,
+    /// The Coin actor (a winged or parachuted coin).
+    Coin,
+    /// Hanachan (Wiggler): its water variant.
+    Hanachan,
+    /// Togezo (a wingless Spiny): its water ball form.
+    Togezo,
 }
 
 /// A part's `action_block` preset (enemydb.tsv; v3 Out slots 37–39 in vtables 0x71028b2350
 /// PataTogezo, 0x71028b2570 RedPataPata, 0x71028b2730 FloatSearch, 0x71028bf270 Bubble,
-/// 0x7102905608 Pukupuku, 0x7102933d48 MapObjDefault) [obs]. Only winged RedPataPata /
-/// PataTogezo parts use their own Out; wingless ones take Default's [obs].
+/// 0x7102905608 Pukupuku, 0x7102933d48 MapObjDefault, 0x7102923cf0 ItemHeaddress, 0x7102932130
+/// Coin, 0x71028d7358 Hanachan, 0x7102913238 Togezo) [obs]. Only winged RedPataPata /
+/// PataTogezo parts use their own Out; wingless ones take Default's [obs]. The P-Balloon
+/// (ItemBalloon 0x7102920d40) is part 81 in SMW only: the world passes its preset.
 pub fn preset(kind: Kind, wings: bool) -> Preset {
     match kind {
         Kind::Koopa { red: true } | Kind::DryBones if wings => Preset::RedPataPata,
@@ -139,6 +210,11 @@ pub fn preset(kind: Kind, wings: bool) -> Preset {
         | Kind::Stone
         | Kind::Crate { .. }
         | Kind::YoshiEgg { .. } => Preset::MapObj,
+        // (the wearables are 3D World's only; the P-Balloon is the world's call)
+        Kind::PowerItem { what } if what >= super::WEAR => Preset::ItemEase,
+        Kind::FloatCoin => Preset::Coin,
+        Kind::Wiggler => Preset::Hanachan,
+        Kind::Spiny => Preset::Togezo,
         _ => Preset::Default,
     }
 }
@@ -149,12 +225,16 @@ impl Actor {
     /// above; `note`: a note block's (or a tree's) bounce-out. `self.wings`, `big` and `chute`
     /// (a parachute) must be set.
     pub fn block_out(&mut self, by: f32, down: bool, note: bool) {
+        self.block_out_as(preset(self.kind, self.wings), by, down, note);
+    }
+
+    /// `block_out` with the preset given (the world's pick where it depends on the style).
+    pub fn block_out_as(&mut self, preset: Preset, by: f32, down: bool, note: bool) {
         let yb = by + 8.0;
         // in water (the world senses the liquid into `w3` first)
         let wet = self.wet();
         let h = self.height();
         let winged = self.wings && !self.chute;
-        let preset = preset(self.kind, self.wings);
         self.vx = 0.0;
         self.y = match (down, note) {
             (false, false) => yb + (HEAD_CLEAR - (h - 8.0)).max(0.0),
@@ -164,9 +244,16 @@ impl Actor {
         };
         let sign = if down { -1.0 } else { 1.0 };
         if self.kind.is_item() {
-            // an item (only a parachute one comes here) starts 8 px further in (vf 0x1d0
-            // 0x7101340fe0) [obs]
-            self.y -= 8.0 * sign;
+            // ItemDefault's placement (0x7101340330): out of a note block 4 px higher (up),
+            // else 8 px further in (vf 0x1d0 0x7101340fe0; 0 for ItemBalloon / ItemHeaddress)
+            // [obs v3.0.3]
+            if note {
+                if !down {
+                    self.y += ITEM_NOTE_UP;
+                }
+            } else if preset != Preset::ItemEase {
+                self.y -= 8.0 * sign;
+            }
         }
         let mut gravity = ENEMY_GRAVITY;
         let mut left = 0;
@@ -252,6 +339,38 @@ impl Actor {
                         (true, false) => MAPOBJ_DOWN_VY,
                     };
                 }
+                Preset::ItemEase => {
+                    (self.vy, gravity) = match (winged, down) {
+                        (false, _) => (0.0, 0.0),
+                        (true, false) => (EASE_WING_VY, EASE_WING_GRAVITY),
+                        (true, true) => {
+                            left = EASE_WING_DOWN_FRAMES;
+                            (EASE_WING_DOWN_VY, EASE_WING_DOWN_GRAVITY)
+                        }
+                    };
+                }
+                Preset::Coin => {
+                    self.vy = COIN_VY * sign;
+                    gravity = COIN_GRAVITY * sign;
+                }
+                Preset::Hanachan if wet => {
+                    // contact from the start (its clear-time flags cleared at once)
+                    self.timer = 0;
+                    if down {
+                        let v = if note {
+                            WIGGLER_WET_NOTE_VY
+                        } else {
+                            WIGGLER_WET_VY
+                        };
+                        self.vy = v * if self.big { WIGGLER_WET_BIG } else { 1.0 };
+                        gravity *= WIGGLER_WET_GRAVITY;
+                    }
+                }
+                Preset::Togezo if wet && !self.alt && down => {
+                    let v = if note { self.vy } else { SPINY_WET_DOWN_VY };
+                    self.vy = v * 2.0;
+                    gravity = -gravity;
+                }
                 _ => {}
             }
         }
@@ -273,6 +392,9 @@ impl Actor {
             down,
             left,
             wet,
+            preset,
+            note,
+            clear: false,
         };
     }
 
@@ -283,14 +405,27 @@ impl Actor {
     }
 
     /// Still inside the block it came out of (drawn behind it): its feet below the block top
-    /// (up), its head above the block bottom (down) (z swap vf 0x180) [obs].
+    /// (up), its head above the block bottom (down) (z swap vf 0x180) [obs]. The P-Balloon
+    /// keeps the block's depth for its whole Out (its depth changes in the exit, vf 0x1a8
+    /// 0x710104a050); a wearable changes once 2 px out (0x7101345220) [obs v3.0.3].
     pub fn in_block(&self) -> bool {
         match self.mode {
-            Mode::BlockOut { yb, down, .. } => {
+            Mode::BlockOut {
+                yb, down, preset, ..
+            } => {
+                let d = match preset {
+                    Preset::ItemEase if !self.chute => {
+                        if !matches!(self.kind, Kind::PowerItem { what } if what >= super::WEAR) {
+                            return true;
+                        }
+                        HEADDRESS_DRAW
+                    }
+                    _ => 0.0,
+                };
                 if down {
-                    self.y + self.height() > yb - 8.0
+                    self.y + self.height() - d > yb - 8.0
                 } else {
-                    self.y < yb + 8.0
+                    self.y + d < yb + 8.0
                 }
             }
             _ => false,
@@ -306,6 +441,9 @@ impl Actor {
             down,
             mut left,
             wet,
+            preset,
+            note,
+            mut clear,
         } = self.mode
         else {
             return;
@@ -322,6 +460,9 @@ impl Actor {
                     down,
                     left,
                     wet,
+                    preset,
+                    note,
+                    clear,
                 };
             } else {
                 self.end_shot();
@@ -329,7 +470,9 @@ impl Actor {
             return;
         }
         let winged = self.wings && !self.chute;
-        let preset = preset(self.kind, self.wings);
+        if preset == Preset::ItemEase && !self.chute {
+            return self.step_item_ease(yb, y0, gravity, down, left, wet, note);
+        }
         // FloatSearch eases its speed, RedPataPata its climb (no gravity)
         if preset == Preset::RedPataPata && !self.chute {
             let v = self.vy.abs();
@@ -357,12 +500,25 @@ impl Actor {
             self.vy = (self.vy + gravity).max(MAX_FALL);
         }
         let ceiling_before = self.vy > 0.0;
-        if self.timer > 0 {
-            self.timer -= 1;
+        // a Wiggler in water has no terrain for its Out (+0x524 bit 4) [obs v3.0.3]
+        let no_terrain = preset == Preset::Hanachan && wet && !self.chute;
+        if self.timer > 0 || no_terrain {
+            self.timer = (self.timer - 1).max(0);
             self.x += self.vx;
             self.y += self.vy;
         } else {
             self.collide(level);
+        }
+        if preset == Preset::Coin {
+            // the coin's box and terrain wait until it is clear of the block, once
+            clear |= if down {
+                self.y <= yb - 8.0 + COIN_CLEAR_DOWN
+            } else {
+                self.y >= yb - 8.0 + COIN_CLEAR_UP
+            };
+            if !clear {
+                self.timer = self.timer.max(1);
+            }
         }
         // the end conditions (the preset's exe and its vf 0x168)
         let done = if self.chute {
@@ -398,6 +554,31 @@ impl Actor {
                         self.vy <= MAPOBJ_WING_END
                     }
                 }
+                Preset::Coin => {
+                    if down {
+                        self.vy >= 0.0
+                    } else {
+                        self.vy <= COIN_END
+                    }
+                }
+                // in water: once nearly still; out of it: on landing, or once in water
+                Preset::Hanachan if wet => self.vy.abs() <= WIGGLER_WET_STOP,
+                Preset::Hanachan => self.on_ground || self.wet(),
+                Preset::Togezo if wet && !self.alt => {
+                    let out = self
+                        .w3
+                        .liquid
+                        .is_some_and(|(y, water)| !water || y <= self.y + SPINY_WET_TOP);
+                    self.vy.abs() <= SPINY_WET_STOP || out || self.on_ground
+                }
+                Preset::Togezo => {
+                    let past = if down {
+                        self.y + self.height() <= yb - 8.0
+                    } else {
+                        self.y >= yb + 8.0
+                    };
+                    self.on_ground || ((past || self.timer <= 0) && (self.wet() || self.in_lava()))
+                }
                 _ => self.on_ground,
             }
         };
@@ -408,12 +589,71 @@ impl Actor {
             down,
             left,
             wet,
+            preset,
+            note,
+            clear,
         };
         if done {
             if self.kind == Kind::LavaBubble && !self.chute {
                 // falls from here into its own cycle
                 self.phase = 2;
             }
+            self.end_shot();
+        }
+    }
+
+    /// ItemBalloon / ItemHeaddress without a parachute (0x7101339de0 → 0x7101347480): eased
+    /// out to its spot, or a winged one's hop; nothing touches it meanwhile (`timer` is left).
+    #[allow(clippy::too_many_arguments)]
+    fn step_item_ease(
+        &mut self,
+        yb: f32,
+        y0: f32,
+        gravity: f32,
+        down: bool,
+        mut left: i32,
+        wet: bool,
+        note: bool,
+    ) {
+        let done = if self.wings {
+            self.vy = (self.vy + gravity).max(MAX_FALL);
+            self.y += self.vy;
+            if down {
+                left -= 1;
+                left < 1
+            } else {
+                self.vy <= 0.0
+            }
+        } else {
+            let target = yb
+                + match (down, note) {
+                    (false, false) => EASE_UP,
+                    (true, false) => EASE_DOWN,
+                    (false, true) => EASE_NOTE_UP,
+                    (true, true) => EASE_NOTE_DOWN,
+                };
+            let k = if wet { EASE_WET_RATE } else { EASE_RATE };
+            let d = target - self.y;
+            let step = (d * k).abs().max(EASE_MIN_STEP);
+            self.y = if d > 0.0 {
+                (self.y + step).min(target)
+            } else {
+                (self.y - step).max(target)
+            };
+            (target - self.y).abs() <= EASE_ARRIVED
+        };
+        self.mode = Mode::BlockOut {
+            yb,
+            y0,
+            gravity,
+            down,
+            left,
+            wet,
+            preset: Preset::ItemEase,
+            note,
+            clear: false,
+        };
+        if done {
             self.end_shot();
         }
     }
@@ -613,5 +853,203 @@ mod tests {
         run_out(&mut a, &lvl);
         assert_eq!(a.y, BY + TILE);
         assert_eq!(out(Kind::PSwitch, false, true).vy, -1.0);
+    }
+
+    #[test]
+    fn a_wearable_eases_out_to_the_block_top_untouchable() {
+        let lvl = course();
+        let mut a = out(
+            Kind::PowerItem {
+                what: super::super::WEAR,
+            },
+            false,
+            false,
+        );
+        // not moved 8 px back in; no launch
+        assert_eq!((a.y, a.vy), (BY + 8.0, 0.0));
+        let yb = BY + 8.0;
+        let mut ys = vec![];
+        while matches!(a.mode, Mode::BlockOut { .. }) && ys.len() < 200 {
+            assert!(!a.block_clear() && !a.solid_contact(), "untouchable");
+            a.step(&lvl, 0.0);
+            ys.push(a.y);
+        }
+        // 7 px at a tenth of the distance (0.7, 0.63, …), then 0.05 a frame: 36 frames
+        assert!((ys[0] - (yb + 0.7)).abs() < 1e-4, "{}", ys[0]);
+        assert!((34..=38).contains(&ys.len()), "{}", ys.len());
+        assert!(ys.windows(2).all(|w| w[1] > w[0]));
+        assert_eq!(*ys.last().unwrap(), yb + 7.0);
+        assert_eq!(a.mode, Mode::Normal);
+        // in water it eases at half the rate
+        let mut w = Actor::new(
+            Kind::PowerItem {
+                what: super::super::WEAR + 2,
+            },
+            BX,
+            BY,
+        );
+        w.w3.flooded = true;
+        w.block_out(BY, false, false);
+        assert!(run_out(&mut w, &lvl) > 50);
+    }
+
+    #[test]
+    fn the_eased_targets_downward_and_out_of_a_note_block() {
+        let lvl = course();
+        let yb = BY + 8.0;
+        let mut d = out(
+            Kind::PowerItem {
+                what: super::super::WEAR + 1,
+            },
+            false,
+            true,
+        );
+        assert_eq!(d.y, yb - 16.0);
+        run_out(&mut d, &lvl);
+        assert_eq!(d.y, yb - 24.0, "hangs under the block");
+        let mut n = Actor::new(
+            Kind::PowerItem {
+                what: super::super::WEAR + 1,
+            },
+            BX,
+            BY,
+        );
+        n.block_out(BY, false, true);
+        assert_eq!(n.y, yb + 12.0, "a note block's Yb + 8, 4 px higher");
+        run_out(&mut n, &lvl);
+        assert_eq!(n.y, yb + 39.0);
+        // the P-Balloon is the world's pick (SMW's part 81)
+        let mut b = Actor::new(
+            Kind::PowerItem {
+                what: super::super::STYLE2,
+            },
+            BX,
+            BY,
+        );
+        b.block_out_as(Preset::ItemEase, BY, false, false);
+        run_out(&mut b, &lvl);
+        assert_eq!(b.y, yb + 7.0);
+    }
+
+    #[test]
+    fn a_winged_wearable_hops_and_a_wearable_shows_once_out() {
+        let lvl = course();
+        let mut a = out(
+            Kind::PowerItem {
+                what: super::super::WEAR,
+            },
+            true,
+            false,
+        );
+        assert_eq!(a.vy, 4.0);
+        assert_eq!(run_out(&mut a, &lvl), 16, "4.0 / 0.25");
+        assert!(a.wings && a.mode == Mode::Normal);
+        let mut d = out(
+            Kind::PowerItem {
+                what: super::super::WEAR,
+            },
+            true,
+            true,
+        );
+        assert_eq!(run_out(&mut d, &lvl), 9);
+        // the wearable is drawn in front once its feet are 2 px under the block top; the
+        // P-Balloon stays behind the block for its whole Out
+        let mut h = out(
+            Kind::PowerItem {
+                what: super::super::WEAR,
+            },
+            false,
+            false,
+        );
+        let mut b = Actor::new(
+            Kind::PowerItem {
+                what: super::super::STYLE2,
+            },
+            BX,
+            BY,
+        );
+        b.block_out_as(Preset::ItemEase, BY, false, false);
+        let mut front = 0;
+        while matches!(h.mode, Mode::BlockOut { .. }) {
+            assert!(b.in_block());
+            front += !h.in_block() as i32;
+            h.step(&lvl, 0.0);
+            b.step(&lvl, 0.0);
+        }
+        assert!(front > 5, "{front}");
+    }
+
+    #[test]
+    fn a_winged_coin_pops_and_is_touchable_only_once_clear_of_the_block() {
+        let lvl = course();
+        let mut a = out(Kind::FloatCoin, true, false);
+        assert_eq!(a.vy, 2.5);
+        let mut n = 0;
+        while matches!(a.mode, Mode::BlockOut { .. }) {
+            if a.solid_contact() {
+                assert!(a.y >= BY + 24.0 - 3.0, "{}", a.y);
+            }
+            a.step(&lvl, 0.0);
+            n += 1;
+        }
+        // 2.5 → −1.0 at −0.14 a frame
+        assert_eq!(n, 25);
+        assert!(a.y > BY + 24.0);
+        assert!(a.wings && a.mode == Mode::Normal);
+        // down: −2.5 slowing (its gravity turned over) until it stops
+        let mut d = out(Kind::FloatCoin, true, true);
+        assert_eq!(d.vy, -2.5);
+        let n = run_out(&mut d, &lvl);
+        assert!((17..=19).contains(&n), "{n}");
+        assert!(d.y < BY - 16.0);
+    }
+
+    #[test]
+    fn a_wiggler_in_water_has_contact_at_once_and_stops_slowing() {
+        let lvl = course();
+        let mut a = Actor::new(Kind::Wiggler, BX, BY);
+        a.w3.flooded = true;
+        a.block_out(BY, true, false);
+        assert!(a.block_clear(), "contact from the start");
+        assert_eq!(a.vy, -2.5);
+        let n = run_out(&mut a, &lvl);
+        // −2.5 + 0.13125 a frame to |vy| ≤ 0.2
+        assert_eq!(n, 18);
+        // up it leaves at |vy| ≤ 0.2 without landing (no terrain)
+        let mut u = Actor::new(Kind::Wiggler, BX, BY);
+        u.w3.flooded = true;
+        u.block_out(BY, false, false);
+        assert_eq!(run_out(&mut u, &lvl), 13);
+        // out of water it hands over on reaching the water
+        let mut l = Actor::new(Kind::Wiggler, BX, BY);
+        l.w3.liquid = Some((BY - 4.0, true));
+        l.block_out(BY, true, false);
+        let n = run_out(&mut l, &lvl);
+        assert!(l.y < BY - 4.0 && l.y > BY - 12.0, "{} after {n}", l.y);
+    }
+
+    #[test]
+    fn a_spiny_in_water_balls_out_and_one_on_land_hands_over_in_water() {
+        let lvl = course();
+        let mut a = Actor::new(Kind::Spiny, BX, BY);
+        a.w3.flooded = true;
+        a.block_out(BY, true, false);
+        assert_eq!(a.vy, -2.4);
+        // −2.4 + 0.1875 a frame to |vy| ≤ 0.5
+        assert_eq!(run_out(&mut a, &lvl), 11);
+        // up: done once its top leaves the water
+        let mut u = Actor::new(Kind::Spiny, BX, BY);
+        u.w3.liquid = Some((BY + 16.0, true));
+        u.block_out(BY, false, false);
+        assert_eq!(u.vy, 2.5);
+        run_out(&mut u, &lvl);
+        assert!(u.y + 4.0 >= BY + 16.0 && u.y < BY + 16.0, "{}", u.y);
+        // on land (above the water): handed over once out of the block and in the water
+        let mut l = Actor::new(Kind::Spiny, BX, BY);
+        l.w3.liquid = Some((BY - 12.0, true));
+        l.block_out(BY, true, false);
+        assert_eq!(l.vy, 0.0, "dry: the Default drop");
+        assert_eq!(run_out(&mut l, &lvl), 9, "clear of the block, in the water");
+        assert!(l.y < BY - 12.0 && l.y > BY - 24.0, "{}", l.y);
     }
 }

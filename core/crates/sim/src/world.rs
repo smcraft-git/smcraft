@@ -6,6 +6,7 @@
 
 use mmk_formats::smm2::Course;
 
+use crate::actors::block_out::{self, Preset};
 use crate::actors::{Actor, DieCause, Effect, FIREBALL_LIFE, FIREBALL_SPEED, Kind, Mode};
 use crate::blocks::{self, Block, BlockKind, Blocks, Contents, HitPower, HitResult, Release};
 use crate::camera::{self, Camera};
@@ -3079,7 +3080,17 @@ impl World {
         a.big = big;
         // the part's own form (a lit Bob-omb, a Sledge Bro, a fast Spike Top, …)
         a.alt = alt;
-        if kind.is_item() && !parachute {
+        // the P-Balloon (SMW's part 81, ItemBalloon) and the wearables (ItemHeaddress) ease
+        // out of the block in their own Block Out (actors/block_out.rs) [obs v3.0.3]
+        let preset = match kind {
+            Kind::PowerItem { what }
+                if what == crate::actors::STYLE2 && self.style == crate::player::Style::MW =>
+            {
+                Preset::ItemEase
+            }
+            _ => block_out::preset(kind, wings),
+        };
+        if kind.is_item() && !parachute && preset != Preset::ItemEase {
             // rise 16 px at 0.5 (down: 1.0), no gravity
             a.vy = if r.down { -1.0 } else { 0.5 };
             a.mode = Mode::Emerge {
@@ -3100,7 +3111,7 @@ impl World {
                 .liquid
                 .filter(|l| !l.spec.full)
                 .map(|l| (l.y, l.water()));
-            a.block_out(by, r.down, r.note);
+            a.block_out_as(preset, by, r.down, r.note);
             if kind == Kind::Blooper && self.level.style == "3W" && !parachute {
                 // 3D World's Blooper (Gesso3W, Block vtable 0x71028d40f8: Out 0x71011037a0 /
                 // 0x71011037e0, v3.0.3) floats out as FloatSearch does but with terrain
@@ -5887,10 +5898,13 @@ impl World {
                 a.wings = c.wings;
                 a.chute = c.parachute;
                 if let Some((gi, dir, px, py)) = c.pipe {
-                    // the Coin's Dokan context: a table launch from the mouth; a winged or
-                    // parachute coin slides out as any part [inf: their own states]
+                    // the Coin's Dokan context: a table launch from the mouth; a winged coin
+                    // out of a side pipe is fired as from a blaster (actors/dokan.rs); other
+                    // winged or parachute coins slide out as any part [inf: their own states]
                     a.generator = Some(gi);
-                    if c.wings || c.parachute {
+                    if c.wings && !c.parachute && matches!(dir, PipeDir::Left | PipeDir::Right) {
+                        a.coin_side_dokan(dir, px, py);
+                    } else if c.wings || c.parachute {
                         a.dokan_out(dir, px, py, c.dir < 0);
                     } else {
                         a.coin_dokan(c.sent as usize, dir, px, py);
@@ -8627,6 +8641,52 @@ mod tests {
         let b = w.actors.iter().find(|a| a.kind == Kind::BobOmb).unwrap();
         assert!(matches!(b.mode, Mode::Parachute { .. }), "{:?}", b.mode);
         assert!(b.y > 6.0 * TILE, "clear of the block: {}", b.y);
+    }
+
+    /// SMW's P-Balloon and a wearable ease out of a block in their own Block Out
+    /// (ItemBalloon / ItemHeaddress); a Super Mushroom still rises in `Emerge`.
+    #[test]
+    fn block_eases_out_the_p_balloon_and_the_wearables() {
+        for (style, contents) in [
+            ("MW", Contents::Power(crate::actors::STYLE2)),
+            ("3W", Contents::Power(crate::actors::WEAR + 3)),
+        ] {
+            let mut lvl = Level::flat(100);
+            lvl.style = style.to_string();
+            lvl.set(3, 5, Cell::Solid);
+            lvl.blocks.push(BlockPlacement {
+                x: 3,
+                y: 5,
+                kind: BlockKind::Question,
+                contents: Some(contents),
+            });
+            let mut w = World::with_level(lvl);
+            w.player.form = Form::Super;
+            let mut seen = false;
+            for _ in 0..40 {
+                run(&mut w, input::JUMP, 1);
+                if let Some(a) = w
+                    .actors
+                    .iter()
+                    .find(|a| matches!(a.kind, Kind::PowerItem { .. }))
+                {
+                    seen |= matches!(
+                        a.mode,
+                        Mode::BlockOut {
+                            preset: Preset::ItemEase,
+                            ..
+                        }
+                    );
+                }
+            }
+            assert!(seen, "{style}: {:?}", w.actors);
+        }
+        let w = hit_block_holding(Contents::Mushroom, None);
+        assert!(
+            w.actors
+                .iter()
+                .all(|a| !matches!(a.mode, Mode::BlockOut { .. }))
+        );
     }
 
     /// Boo Buddies in a block come out as a Boo circle spreading round the block's centre
