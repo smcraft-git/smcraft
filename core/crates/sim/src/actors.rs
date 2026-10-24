@@ -1212,7 +1212,7 @@ impl Actor {
     /// Spring compression c (0…4 px), kept in `pause`.
     pub fn aux_compression(&self) -> f32 {
         if self.kind == Kind::Spring {
-            self.pause as f32
+            self.speed
         } else {
             0.0
         }
@@ -2486,6 +2486,24 @@ impl Actor {
                         }
                     }
                 }
+                // the drawn / stood-on press: 1 px a frame to 4; 3D World eases down 3 px
+                // [obs: Ryujinx trace 3W_spring: 0, 0, 0.277, 0.985, 1.975, 3 from the first
+                // ridden frame, the launch at the same frame as in 2D]
+                let n = match self.phase {
+                    1 => self.pause,
+                    2 => 8 - self.timer,
+                    _ => 0,
+                };
+                self.speed = if level.style == "3W" {
+                    const EASE: [f32; 7] = [0.0, 0.0, 0.0, 0.277, 0.985, 1.975, 3.0];
+                    if self.phase == 3 {
+                        (self.pause as f32 * 0.75).min(3.0)
+                    } else {
+                        EASE[(n.max(0) as usize).min(6)]
+                    }
+                } else {
+                    self.pause as f32
+                };
                 self.vy = (self.vy + ENEMY_GRAVITY).max(MAX_FALL);
                 self.vx = 0.0;
                 self.collide(level);
@@ -2526,6 +2544,13 @@ impl Actor {
                 self.y += a.dsin();
             }
             Kind::Donut => {
+                // 3D World: gone after 21 frames of its fall (the rider drops on its own from
+                // there) [obs: Ryujinx trace 3W_donut]; `pause` counts the fall frames
+                self.pause += 1;
+                if level.style == "3W" && self.pause > 21 {
+                    self.phase = 9;
+                    return None;
+                }
                 self.vy = (self.vy - 0.1875).max(-2.0);
                 self.y += self.vy;
             }

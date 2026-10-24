@@ -5138,6 +5138,9 @@ impl World {
                 && x - s.foot_x < b.x1
                 && y >= b.y0
                 && y <= b.top_at(x)
+                // (feet 4.14 under the top are pushed up, 7.42 not [obs: M1_lift, MW_lift];
+                // the depth limit between is a guess)
+                && b.top_at(x) - y <= 6.0
         });
         if let Some(b) = caught {
             let (top, dx, id) = (b.top_at(x), b.dx, b.owner);
@@ -5706,17 +5709,21 @@ impl World {
         let mut under: Vec<(i32, i32)> = Vec::new();
         if p.on_ground {
             for fx in [-4.9f32, 4.9] {
-                let t = (
-                    ((p.x + fx) / TILE).floor() as i32,
-                    ((p.y - 1.0) / TILE).floor() as i32,
-                );
-                if !under.contains(&t)
-                    && self
-                        .blocks
-                        .get(t.0, t.1)
-                        .is_some_and(|b| b.kind == BlockKind::Donut)
-                {
-                    under.push(t);
+                let px = p.x + fx;
+                let tx = (px / TILE).floor() as i32;
+                let ty = ((p.y - 1.0) / TILE).floor() as i32;
+                // a foot exactly on a column boundary stands on both columns [obs: Ryujinx
+                // trace MW_donut, the left foot at 256.0 rides the donut at 240..256]
+                let edge = px == tx as f32 * TILE;
+                for t in [(tx, ty), (tx - 1, ty)].into_iter().take(1 + edge as usize) {
+                    if !under.contains(&t)
+                        && self
+                            .blocks
+                            .get(t.0, t.1)
+                            .is_some_and(|b| b.kind == BlockKind::Donut)
+                    {
+                        under.push(t);
+                    }
                 }
             }
         }
@@ -5748,13 +5755,14 @@ impl World {
             // its first fall step now, carrying a rider standing on it
             let mut a = Actor::new(Kind::Donut, bx, by - 0.1875);
             a.vy = -0.1875;
+            a.pause = 1;
             a.home_x = x as f32;
             a.home_y = y as f32;
             let p = &self.player;
             let rides = p.on_ground
                 && (p.y - (by + TILE)).abs() < 0.01
                 && p.x + 4.9 >= bx - 8.0
-                && p.x - 4.9 < bx + 8.0;
+                && p.x - 4.9 <= bx + 8.0;
             let id = self.next_id;
             self.add_actor(a);
             if rides {
@@ -5767,7 +5775,8 @@ impl World {
             return;
         }
         for a in &mut self.actors {
-            if a.kind == Kind::Donut && a.y < -2.0 * TILE && a.mode != Mode::Dead {
+            if a.kind == Kind::Donut && (a.y < -2.0 * TILE || a.phase == 9) && a.mode != Mode::Dead
+            {
                 a.mode = Mode::Dead;
                 self.donut_respawn
                     .push(((a.home_x as i32, a.home_y as i32), 120));
