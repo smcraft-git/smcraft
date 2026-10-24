@@ -877,6 +877,8 @@ impl Actor {
                 self.on_ground = false;
                 self.bowser_walk_speed(st);
                 self.timer = 3;
+                // (a gap jump sets its own speed and flag after this, bowser_chase_jumps)
+                self.gap_jump = false;
             }
             bw::BIG_JUMP => {
                 self.vx = 0.0;
@@ -1035,7 +1037,7 @@ impl Actor {
                 }
             }
             bw::MIDDLE_JUMP => {
-                if m1 {
+                if m1 && !self.gap_jump {
                     self.bowser_walk_speed(st);
                     if breathing {
                         self.vx = 0.0;
@@ -1323,10 +1325,13 @@ impl Actor {
         self.bowser_chase(level, if fast { 2 } else { 1 }, st);
     }
 
-    /// Chase decision (0x71006ab370): the first time, switch mode. While the player stays
-    /// past his front edge he heads that way (turning round at a ledge); otherwise home moves
-    /// here and he goes back to patrolling. The obstacle and gap jumps it can also choose are
-    /// not decoded [?].
+    /// Chase decision (0x71006ab370 [obs v1.0.0]): the first time, switch mode. While the
+    /// player stays past his front edge he heads that way; otherwise home moves here and he
+    /// goes back to patrolling. On the way, with a wall on his right (BG bit 12) he jumps it —
+    /// the middle jump for a low one, the big jump for a high one — when the obstacle scan finds
+    /// a way over; at a gap he middle-jumps across at the speed that lands him on its far
+    /// ground (also when the scan finds no way over a wall he has no jump), else turns round
+    /// (`bowser_chase_jumps`).
     fn bowser_chase(&mut self, level: &Level, mode: u8, st: usize) {
         if self.bowser_mode() != mode {
             return self.bowser_set_mode(mode, st);
@@ -1336,8 +1341,8 @@ impl Actor {
             if self.bowser_player_behind(st) {
                 return self.bowser_enter(bw::TURN, st);
             }
-            if self.ledge_ahead(level, self.heading) {
-                self.heading = -self.heading;
+            if self.bowser_chase_jumps(level, st) {
+                return;
             }
             return self.bowser_counters(st);
         }
@@ -1346,6 +1351,131 @@ impl Actor {
         self.set_byte(3, b);
         self.bowser_rearm_fire();
         self.bowser_decide(level, st);
+    }
+
+    /// The chase's obstacle and gap jumps (0x71006ab370 [obs v1.0.0]); true when a jump
+    /// started. The obstacle kind (vtable slot 0x310 → 0x71006abfe0; SMB1 never takes the big
+    /// jump); whether that jump is allowed (slot 0x428, 0x71006aa9d0: not for kind 0; its
+    /// overhead and jump-height queries test collider kinds the engine has no source of, so
+    /// they pass [inf]); a wall on his right (BG bit 12: v1.0.0's +0x649 bit 4) with a way
+    /// over → kind 2 the big jump (slot 0x308, state BigJump), kind 1 the middle jump (slot
+    /// 0x300); then the gap scan (0x71006ab810): a gap with the jump allowed and no wall in the
+    /// way → the middle jump across (slot 0x2f8, the counters reset by slots 0x358 / 0x360,
+    /// the gap flag set for MiddleJump's enter 0x71006b0370), otherwise he turns round.
+    fn bowser_chase_jumps(&mut self, level: &Level, st: usize) -> bool {
+        let mut kind = self.bowser_obstacle_kind(level);
+        if st == 0 && kind > 1 {
+            kind = 1;
+        }
+        let can = kind != 0;
+        let wall = self.touching_wall(level, 1);
+        if wall && can {
+            self.bowser_enter(
+                if kind == 2 {
+                    bw::BIG_JUMP
+                } else {
+                    bw::MIDDLE_JUMP
+                },
+                st,
+            );
+            return true;
+        }
+        let (gap, landing) = self.bowser_gap_ahead(level);
+        if gap {
+            if can && !wall {
+                self.bowser_reset_jump(st);
+                self.bowser_reset_big();
+                self.bowser_enter(bw::MIDDLE_JUMP, st);
+                self.vx = self.bowser_gap_speed(level, landing);
+                self.gap_jump = true;
+                return true;
+            }
+            self.heading = -self.heading;
+        }
+        false
+    }
+
+    /// The obstacle scan (0x71006abfe0 [obs v1.0.0]): at 24 px ahead (big 36) the points 8,
+    /// 24, 40, … px over his feet are tested for terrain until a free run as tall as he is (3
+    /// tiles, big 5) is found; the run starting 0–2 tiles up is kind 1, 3–5 tiles up kind 2,
+    /// higher or none kind 0.
+    fn bowser_obstacle_kind(&self, level: &Level) -> u8 {
+        let px = self.x + if self.big { 36.0 } else { 24.0 };
+        let need = if self.big { 5 } else { 3 };
+        let solid = |k: i32| level.cell_at(px, self.y + 8.0 + 16.0 * k as f32).is_solid();
+        let mut run = 0;
+        for k in 0..10 {
+            if solid(k) {
+                run = 0;
+                continue;
+            }
+            run += 1;
+            if run == need {
+                let up = k + 1 - need;
+                return match up {
+                    0..=2 => 1,
+                    3..=5 => 2,
+                    _ => 0,
+                };
+            }
+        }
+        0
+    }
+
+    /// The gap scan (0x71006ab810 with no third argument [obs v1.0.0]): ground is looked for
+    /// by downward rays at 2 + 24, 16, 8, 0 px ahead (big 2 + 48 … 0), farthest first, each from
+    /// 8 px over his feet to 8 px under them, both stretched by its distance; none found, or no
+    /// ground just past the one found (1, then 8 (16) and 16 (32) px further), is a gap. Returns
+    /// the gap and the ground found (his own position when none), where the landing search
+    /// starts.
+    fn bowser_gap_ahead(&self, level: &Level) -> (bool, (f32, f32)) {
+        let d = self.dir as f32;
+        let step = if self.big { 16.0 } else { 8.0 };
+        let ray = |x: f32| -> Option<f32> {
+            let reach = (x - self.x).abs();
+            let (top, bottom) = (self.y + 8.0 + reach, self.y - 8.001 - reach);
+            ground_ray(level, x, top, bottom)
+        };
+        let Some((x, y)) = (0..4).rev().find_map(|k| {
+            let x = self.x + 2.0 * d + step * k as f32 * d;
+            ray(x).map(|y| (x, y))
+        }) else {
+            return (true, (self.x, self.y));
+        };
+        let x1 = x + d;
+        let x2 = x1 + d + step * d;
+        let x3 = x2 + d + 2.0 * step * d;
+        let gap = ray(x1).is_none() || ray(x2).is_none() || ray(x3).is_none();
+        (gap, (x, y))
+    }
+
+    /// The gap jump's speed (0x71006ac370 [obs v1.0.0]): the landing is looked for from the
+    /// tile 40 px past the ground found (rounded to tiles), every 32 px up to 6 times, by a
+    /// 4-px ray down from 2 px over that tile row; the speed covers the distance in the
+    /// jump's time, |d| / 2 · |g| / vy, at most 1.8 (in water × 0.6); with no landing found
+    /// 1.8.
+    fn bowser_gap_speed(&self, level: &Level, from: (f32, f32)) -> f32 {
+        const MAX: f32 = 1.8;
+        let mut x = ((from.0 - 4.0) * (1.0 / 16.0)).floor() * 16.0 + 40.0;
+        let top = ((from.1 + 4.0) * (1.0 / 16.0)).floor() * 16.0 + 2.0;
+        let mut land = None;
+        for _ in 0..6 {
+            if ground_ray(level, x, top, top - 4.0).is_some() {
+                land = Some(x);
+                break;
+            }
+            x += 32.0;
+        }
+        let Some(lx) = land.filter(|&lx| lx.abs() > f32::EPSILON) else {
+            return MAX;
+        };
+        let d = lx - self.x;
+        let half = (d * 0.5).abs();
+        let mut v = (half * BOWSER_GRAVITY / self.vy).abs().min(MAX);
+        if self.wet() {
+            v *= 0.6;
+        }
+        if d * 0.5 >= 0.0 { v } else { -v }
     }
 
     /// The fire helper (0x71006a2710): counts down; at 1 the breath animation starts; the
@@ -2902,6 +3032,25 @@ impl Actor {
     }
 }
 
+/// A downward BG ray at x from `top` to `bottom`: the first terrain surface it meets (the top
+/// of a solid cell, or of a one-way top it crosses), if any [inf: the game's BG ray 0x7100606de0
+/// taken as a cell scan].
+fn ground_ray(level: &Level, x: f32, top: f32, bottom: f32) -> Option<f32> {
+    if level.cell_at(x, top).is_solid() {
+        return Some(top);
+    }
+    let mut row = (top / TILE).floor() - 1.0;
+    while (row + 1.0) * TILE >= bottom {
+        let surface = (row + 1.0) * TILE;
+        let cell = level.cell_at(x, row * TILE + TILE * 0.5);
+        if (cell.is_solid() || cell == Cell::SemiTop) && surface <= top {
+            return Some(surface);
+        }
+        row -= 1.0;
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2930,6 +3079,45 @@ mod tests {
         key: false,
         clown: false,
     };
+
+    #[test]
+    fn the_chase_scans_jump_over_walls_and_gaps() {
+        let (mut level, mut a) = boss(BOWSER, 30.0 * TILE);
+        a.dir = 1;
+        // flat ground ahead: nothing in the way, no gap
+        assert_eq!(a.bowser_obstacle_kind(&level), 1);
+        assert!(!a.bowser_gap_ahead(&level).0);
+        // a 2-tile wall right ahead: free from 2 tiles up, the middle jump
+        let tx = ((a.x + 24.0) / TILE).floor() as i32;
+        level.set_solid(tx, 2);
+        level.set_solid(tx, 3);
+        assert_eq!(a.bowser_obstacle_kind(&level), 1);
+        // a 4-tile one: the big jump; a 7-tile one: no way over
+        level.set_solid(tx, 4);
+        level.set_solid(tx, 5);
+        assert_eq!(a.bowser_obstacle_kind(&level), 2);
+        for y in 6..9 {
+            level.set_solid(tx, y);
+        }
+        assert_eq!(a.bowser_obstacle_kind(&level), 0);
+        // a gap: no ground under 26 px ahead nor nearer, ground again 4 tiles on
+        let mut level = Level::flat(80);
+        let gx = (a.x / TILE).floor() as i32 + 1;
+        for x in gx..gx + 4 {
+            level.set(x, 0, Cell::Empty);
+            level.set(x, 1, Cell::Empty);
+        }
+        let (gap, from) = a.bowser_gap_ahead(&level);
+        assert!(gap);
+        // the landing is searched from 40 px past where it looked: speed |d| / 2 · 0.1 / 3
+        a.vy = 3.0;
+        let v = a.bowser_gap_speed(&level, from);
+        assert!(v > 0.0 && v <= 1.8, "{v}");
+        // in the chase it middle-jumps across
+        assert!(a.bowser_chase_jumps(&level, 2));
+        assert_eq!(a.phase, bw::MIDDLE_JUMP);
+        assert!(a.gap_jump && a.vx > 0.0);
+    }
 
     #[test]
     fn bowser_paces_within_64_px_of_home_at_0_3() {

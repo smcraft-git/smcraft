@@ -708,7 +708,6 @@ impl World {
     pub(super) fn extra_player_rest(&mut self, input: Input, jump_held: bool) {
         self.carry_held();
         self.step_crates();
-        self.twister_lift();
         self.claws(input);
         self.pow_quake();
         self.cape_quake();

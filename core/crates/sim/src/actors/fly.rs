@@ -208,6 +208,19 @@ const PATA_TURN_LOCK: i32 = 8;
 
 impl Actor {
     pub(super) fn step_pata_togezo(&mut self, level: &Level) {
+        self.step_pata_hover(level, true);
+    }
+
+    /// The Para-Beetle (a winged Buzzy Beetle or Spike Top: Met's Wing, FlyMove enter
+    /// 0x7100709100 / exe 0x71007091f0) flies with the same hover helper 0x7100782a80 [obs
+    /// v1.0.0]: the same start, speed and bob as the winged Spiny's, but no wall turn.
+    /// Not modelled [inf]: its PlayerOn dip and climb while ridden (0x7100709230 /
+    /// 0x7100709300), as the engine doesn't let the player stand on it.
+    pub(super) fn step_para_beetle(&mut self, level: &Level) {
+        self.step_pata_hover(level, false);
+    }
+
+    fn step_pata_hover(&mut self, level: &Level, turns: bool) {
         if !self.fly.on {
             self.fly = Fly::start(self.x, self.y + PATA_ABOVE, false);
             if self.spawn.is_some() {
@@ -241,7 +254,7 @@ impl Actor {
         } else {
             self.vy = vy;
         }
-        if self.wall && self.turn_lock == 0 {
+        if turns && self.wall && self.turn_lock == 0 {
             self.dir = -self.dir;
             self.vx = self.vx.abs() * self.dir as f32;
             self.turn_lock = PATA_TURN_LOCK;
@@ -252,7 +265,7 @@ impl Actor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::level::Level;
+    use crate::level::{Level, TILE};
 
     fn level(style: &str) -> Level {
         let mut l = Level::flat(40);
@@ -362,6 +375,27 @@ mod tests {
         // vy swings ±0.18 in steps of 0.004 about the height 4 px up
         assert!(lo < 68.0 && hi > 68.0 && hi - lo < 20.0, "{lo} {hi}");
         assert!(a.vy.abs() <= 0.18 + 1e-6);
+    }
+
+    #[test]
+    fn a_para_beetle_hovers_as_the_spiny_but_never_turns_at_a_wall() {
+        let mut lvl = level("3W");
+        for y in 3..6 {
+            lvl.set_solid(15, y);
+        }
+        let mut spiny = Actor::new(Kind::Spiny, 300.0, 64.0);
+        let mut beetle = Actor::new(Kind::Buzzy, 300.0, 64.0);
+        for a in [&mut spiny, &mut beetle] {
+            a.wings = true;
+            a.spawn = Some(0);
+        }
+        for _ in 0..200 {
+            spiny.step_pata_togezo(&lvl);
+            beetle.step_para_beetle(&lvl);
+        }
+        assert_eq!(spiny.dir, 1, "the Spiny turned at the wall");
+        assert_eq!(beetle.dir, -1, "the beetle presses on against it");
+        assert!(beetle.x >= 16.0 * TILE - 1.0);
     }
 
     #[test]

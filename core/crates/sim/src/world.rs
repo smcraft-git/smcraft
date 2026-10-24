@@ -23,6 +23,15 @@ const EXCL_OWNER: u32 = 0x9000_0000;
 const TREE_OWNER: u32 = 0x9800_0000;
 /// Solid ids of Piranha Creeper stalk boxes (actor index × 128 + box).
 const CREEPER_OWNER: u32 = 0x9C00_0000;
+/// The Twister's column box: half width 16 (descriptor, 76-twister.md), half height
+/// max(10, h / 128 · 54) for its column h (12 … 128, +0.7 a frame) [obs v3.0.3 column update
+/// 0x71013ed4a0], and the player's twister receiver's margin (vfunc 0x7100de9950 = 4.0) [obs
+/// v3.0.3].
+const TWISTER_HALF_W: f32 = 16.0;
+const TWISTER_BOX_H: f32 = 54.0;
+const TWISTER_MARGIN: f32 = 4.0;
+/// A held player's feet hang this far under the claw's end (the catch's hold point) [inf].
+const CLAW_HANG: f32 = 24.0;
 use crate::fmath::DetMath;
 use crate::player::{Control, Form, Player, Pose, STAR_FRAMES};
 use crate::render::{Sprite, SpriteImage};
@@ -585,7 +594,7 @@ fn spawn_profile(kind: Kind, big: bool) -> (f32, f32, f32, f32) {
         Kind::ClownCar { .. } => (0.0, 16.0, 32.0, 32.0),
         Kind::Lift { falling: true, .. } | Kind::LavaLift { .. } => (0.0, 0.0, 64.0, 128.0),
         Kind::Lift { .. } | Kind::Trampoline { .. } => (0.0, 0.0, 80.0, 128.0),
-        Kind::Seesaw { .. } => (0.0, 0.0, 128.0, 128.0),
+        Kind::Seesaw { .. } | Kind::Claw => (0.0, 0.0, 128.0, 128.0),
         Kind::Key => (0.0, 8.0, 128.0, 128.0),
         Kind::Star => (0.0, 8.0, 8.0, 128.0),
         Kind::YoshiEgg { .. } => (0.0, 8.0, 22.0, 22.0),
@@ -2022,6 +2031,7 @@ impl World {
             self.drive_koopa_car(input);
         } else {
             self.pu_sense();
+            self.player.twister = self.twister_receiver();
             self.player.step(input, &self.level);
         }
         if let (Some((tx, ty)), Some(c)) = (note_hole, note_cell) {
@@ -2387,7 +2397,6 @@ impl World {
         self.step_blasters();
         self.fire_hazards();
         self.step_cannons();
-        self.twister_lift();
         self.magikoopas();
         self.claws(input);
         self.pow_quake();
@@ -3340,7 +3349,9 @@ impl World {
                     }
                     continue;
                 }
-                // a tower's riders don't bump walkers: the tower turns them [inf]
+                // a tower's riders don't bump walkers: a rider's Tower context has empty contact
+                // slots (Default Tower vtable 0x7102147cc8 slots 12 / 13 v1.0.0) [obs], so it
+                // never turns on a touch; that a walker meeting a rider doesn't turn either [inf]
                 let walkers = a.kind.is_walker() && b.kind.is_walker() && !a.stacked && !b.stacked;
                 let a_slide = a.mode == Mode::ShellSlide;
                 let b_slide = b.mode == Mode::ShellSlide;
@@ -4178,17 +4189,16 @@ impl World {
         let touches = |b: (f32, f32, f32, f32), z: (f32, f32, f32, f32)| {
             b.0 <= z.2 && b.2 >= z.0 && b.1 <= z.3 && b.3 >= z.1
         };
-        let spawn_box = |s: &Spawn| {
-            let (cx, cy, hw, hh) = spawn_profile(s.kind, s.big);
-            (s.x + cx - hw, s.y + cy - hh, s.x + cx + hw, s.y + cy + hh)
-        };
-        // a column of stacked parts spawns together, when any of its members is due [inf: the
-        // game queues one tower record covering the whole column]
-        let due = |i: usize| {
-            let r = &self.spawns[i];
-            !r.spawned && !r.alive && !r.killed && touches(spawn_box(&r.spawn), za)
-        };
-        let together = self.tower_columns_to_spawn(&due);
+        // a column's members spawn only through its tower manager record: a member record has
+        // a tower id and no spawn of its own (0x71003fbef0), the manager's box reaching the zone
+        // spawns every member not out yet, then itself (0x71003fc820) [obs v1.0.0]
+        let column = self.tower_member_columns();
+        let col_due: Vec<(bool, bool)> = self
+            .level
+            .towers
+            .iter()
+            .map(|c| (touches(c.spawn_box, za), touches(c.spawn_box, zc)))
+            .collect();
         let mut fresh: Vec<usize> = Vec::new();
         for idx in 0..self.spawns.len() {
             let rec = &self.spawns[idx];
@@ -4197,13 +4207,17 @@ impl World {
             // the placement, which 0x71003fcb90 tests against the zone [obs profiles.txt]
             let (cx, cy, hw, hh) = spawn_profile(s.kind, s.big);
             let sb = (s.x + cx - hw, s.y + cy - hh, s.x + cx + hw, s.y + cy + hh);
+            let (due, near) = match column.get(idx).copied().flatten() {
+                Some(c) => col_due[c],
+                None => (touches(sb, za), touches(sb, zc)),
+            };
             if rec.spawned {
-                if !touches(sb, zc) {
+                if !near {
                     self.spawns[idx].spawned = false;
                 }
                 continue;
             }
-            if !(touches(sb, za) || together.contains(&idx)) || rec.alive || rec.killed {
+            if !due || rec.alive || rec.killed {
                 continue;
             }
             self.spawns[idx].spawned = true;
@@ -4264,11 +4278,6 @@ impl World {
             if s.kind == Kind::Magikoopa {
                 a.timer = 30;
             }
-            if s.kind == Kind::Claw {
-                // pivot at the top centre of the 3×4 object
-                a.home_x = s.x;
-                a.home_y = s.y + 64.0;
-            }
             if let Kind::ChainChomp { chained: true } = s.kind {
                 // the stake stays at the placement; the Chomp starts beside it
                 a.home_x = s.x;
@@ -4285,6 +4294,10 @@ impl World {
                     a.rail_off = (s.x - p.0, s.y - p.1);
                     a.rail = Some(r);
                 }
+            }
+            if s.kind == Kind::Claw {
+                // the rope and its pivot 48 px up, with the creation's step (actors/claw.rs)
+                a.claw_start();
             }
             // enemies face the player (left if player.x ≤ x); items face right; a Twister
             // starts facing left
@@ -4343,12 +4356,14 @@ impl World {
         }
     }
 
-    /// Remove actors whose culling box (half-size 32 × 32, big 48, a sliding shell 160 × 32;
-    /// 0x7100792c90) grown by 80 px misses the view; dead ones stay dead.
+    /// Remove actors whose culling box (half-size 32 × 32, big 48, a sliding shell 160 × 32, a
+    /// Swinging Claw 256 × 1024; 0x7100792c90) grown by 80 px misses the view; dead ones stay dead.
     fn despawn(&mut self) {
         let v = self.zone(DESPAWN_MARGIN, DESPAWN_MARGIN);
         for a in &mut self.actors {
             let (hx, hy) = match (a.mode, a.big) {
+                // a claw's own box (its init writes +0x294) [obs v3.0.3 0x71013e7780]
+                _ if a.kind == Kind::Claw => (256.0, 1024.0),
                 (Mode::ShellSlide, _) => (160.0, 32.0),
                 (_, true) => (48.0, 48.0),
                 _ => (32.0, 32.0),
@@ -4621,41 +4636,61 @@ impl World {
         fb.start + fb.dir * (turn * 360.0) as f32
     }
 
-    /// Swinging claws (105-swinging-claw.md): grab the player when the claw tip is within 46 px
-    /// and the vertical offset is in (−8, 10); the player hangs from the tip until jump is
-    /// pressed, then leaves with the tip's velocity; 30-frame re-grab cooldown.
+    /// Swinging claws (105-swinging-claw.md): the catch takes a player whose hold point is
+    /// under 46 px from the pivot and within (−8, 10) of the claw's height [obs v3.0.3
+    /// 0x71013e87c0]; the claw's end goes to it and the player's speed into the rope. The player
+    /// hangs from the end, their left / right nudging the rope ±0.05 a frame (0x71013e8bf0),
+    /// until jump is pressed, then leaves with the end's motion; 30-frame re-grab cooldown. The
+    /// hold point (the player's Crane record offsets) is taken 24 px over the feet [inf].
     fn claws(&mut self, input: Input) {
         if let Some(id) = self.held_by {
-            let Some(c) = self.actors.iter().find(|a| a.id == id) else {
+            let Some(c) = self.actors.iter_mut().find(|a| a.id == id) else {
                 self.held_by = None;
                 self.player.control = Control::Normal;
                 return;
             };
             let (tx, ty) = c.claw_tip();
-            let (vx, vy) = (tx - self.player.x, ty - 24.0 - self.player.y);
+            let (vx, vy) = (tx - self.player.x, ty - CLAW_HANG - self.player.y);
             self.player.x = tx;
-            self.player.y = ty - 24.0;
+            self.player.y = ty - CLAW_HANG;
+            let (hx, hy) = (c.home_x, c.home_y);
+            if let Some(rope) = c.claw.as_mut() {
+                let nudge = match (input.held(input::LEFT), input.held(input::RIGHT)) {
+                    (false, true) => crate::actors::CLAW_NUDGE,
+                    (true, false) => -crate::actors::CLAW_NUDGE,
+                    _ => 0.0,
+                };
+                if nudge != 0.0 {
+                    rope.vx = (rope.vx + nudge).max(-7.0);
+                }
+                rope.hold((tx, ty), (hx, hy));
+            }
             if input.held(input::JUMP) && !self.prev_jump_claw {
                 self.player.control = Control::Normal;
                 self.player.vx = vx.clamp(-3.0, 3.0);
                 self.player.vy = vy.max(0.0) + 3.0;
                 self.player.on_ground = false;
-                if let Some(c) = self.actors.iter_mut().find(|a| a.id == id) {
-                    c.timer = 30;
-                }
+                c.timer = 30;
                 self.held_by = None;
             }
         } else if self.player.control == Control::Normal {
             let p = &self.player;
-            let grab = self.actors.iter().find(|a| {
+            let (hx, hy) = (p.x, p.y + CLAW_HANG);
+            let grab = self.actors.iter_mut().find(|a| {
                 if a.kind != Kind::Claw || a.timer > 0 {
                     return false;
                 }
-                let (tx, ty) = a.claw_tip();
-                let dy = p.y + 16.0 - (ty - 8.0);
-                (p.x - tx).abs() < 23.0 && dy > -8.0 && dy < 10.0
+                let dy = a.y - hy;
+                let d = ((a.home_x - hx).powi(2) + (a.home_y - hy).powi(2)).sqrt();
+                dy < 10.0 && dy > -8.0 && d < crate::actors::CLAW_REACH
             });
             if let Some(c) = grab {
+                c.x = hx;
+                c.y = hy;
+                let (px, py) = (c.home_x, c.home_y);
+                if let Some(rope) = c.claw.as_mut() {
+                    rope.catch((hx, hy), (px, py), (p.vx, p.vy));
+                }
                 self.held_by = Some(c.id);
                 self.player.control = Control::Demo;
                 self.player.vx = 0.0;
@@ -4834,23 +4869,35 @@ impl World {
         Some(Darkness { level, lights })
     }
 
-    /// Twister wind column: x within ±16 of the twister, from its feet to the column top. The
-    /// player is lifted (vy toward 4.5 at +0.6/frame) [inf: the twister's contact 0x71008c0630
-    /// fills the player's tornado receiver (actor +0x398: the twister's centre x, top y and x
-    /// speed, flag bit 0); the player state list has no Tornado state, and the code reading
-    /// the receiver for the player wasn't found].
-    fn twister_lift(&mut self) {
+    /// The Twister's contact with the player (0x71013ec330 [obs v3.0.3]): a column's box (the
+    /// Twister's feet up to twice its half height max(10, h · 54 / 128), h its column) touching
+    /// the player's body, horizontally deep enough — half the overlap of the two half widths
+    /// (16 and the player's) at least (their mean − the receiver's 4.0 margin) × (1 − rise /
+    /// 128), so the column widens upward — hands the player its top, its last movement and its
+    /// centre for this frame (player/twister.rs). The player's box is taken as body box B [inf].
+    fn twister_receiver(&self) -> Option<crate::player::TwisterPull> {
         let p = &self.player;
-        let inside = self.actors.iter().any(|a| {
-            a.kind == Kind::Twister
-                && (p.x - a.x).abs() < 16.0
-                && p.y >= a.y - 4.0
-                && p.y <= a.y + a.heading
-        });
-        if inside && self.player.control == Control::Normal {
-            self.player.vy = (self.player.vy + 0.6).min(4.5);
-            self.player.on_ground = false;
-        }
+        let (x0, y0, x1, y1) = p.contact_box();
+        let phw = (x1 - x0) * 0.5;
+        self.actors.iter().find_map(|a| {
+            if a.kind != Kind::Twister || a.mode != Mode::Normal {
+                return None;
+            }
+            let hh = (a.heading * (1.0 / 128.0) * TWISTER_BOX_H).max(10.0);
+            let top = a.y + hh + hh;
+            let dx = (a.x - p.x).abs();
+            let sum = TWISTER_HALF_W + phw;
+            if y1 <= a.y || y0 >= top || dx >= sum {
+                return None;
+            }
+            let need = sum * 0.5 - TWISTER_MARGIN;
+            let rise = (p.y - a.y) * -(1.0 / 128.0);
+            (need + rise * need <= (sum - dx).abs() * 0.5).then_some(crate::player::TwisterPull {
+                top,
+                vx: a.moved.0,
+                cx: a.x,
+            })
+        })
     }
 
     /// Blinking and spike blocks share one area timer (240 frames), which also turns the Fire
@@ -10682,6 +10729,26 @@ mod tests {
     }
 
     #[test]
+    fn a_yoshi_egg_hatches_40_frames_after_landing_in_view() {
+        let mut a = Actor::new(Kind::YoshiEgg { red: false }, 100.0, 32.0);
+        let lvl = Level::flat(60);
+        // off the view (the camera far to the right): it waits
+        a.camera = (600.0, 0.0);
+        for _ in 0..100 {
+            a.step(&lvl, 0.0);
+        }
+        assert!(matches!(a.kind, Kind::YoshiEgg { .. }));
+        // in view and on the ground: Land, then 40 frames to the hatch
+        a.camera = (0.0, 0.0);
+        let mut f = 0;
+        while matches!(a.kind, Kind::YoshiEgg { .. }) && f < 100 {
+            a.step(&lvl, 0.0);
+            f += 1;
+        }
+        assert_eq!(f, 40);
+    }
+
+    #[test]
     fn yoshi_hatches_is_ridden_eats_and_runs_off_when_hit() {
         let mut lvl = Level::flat(60);
         lvl.spawns
@@ -11722,11 +11789,13 @@ mod tests {
         lvl.spawns.push(spawn(Kind::Twister, 120.0, 32.0));
         let mut w = World::with_level(lvl);
         let mut top: f32 = 0.0;
-        for _ in 0..200 {
+        for _ in 0..400 {
             w.step(Input::default());
             top = top.max(w.player.y);
         }
-        assert!(top > 80.0, "lifted to {top}");
+        // carried up to about its column's box top (32 + 108 once grown to 128 px)
+        assert!(top > 120.0 && top < 190.0, "lifted to {top}");
+        assert!(w.player.alive());
     }
 
     #[test]

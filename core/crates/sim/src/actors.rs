@@ -12,6 +12,8 @@ pub mod block_out;
 mod bosses;
 mod ceiling;
 mod chute;
+mod claw;
+pub use claw::{ClawRope, NUDGE as CLAW_NUDGE, REACH as CLAW_REACH};
 mod clown;
 pub use clown::ClownFire;
 mod dokan;
@@ -29,6 +31,7 @@ pub use powerups::{THROW_MAX as THROW_MAX_USA, THROW_SPEED as THROW_SPEED_USA};
 pub use shot::{COIN_PUSH, spout_limit};
 mod v3;
 mod w3;
+mod wing;
 pub use bosses::{BossAttack, BossHit};
 pub use v3::{LASER_SIGN, MECHA_DOWN, MISSILE_LIFE, Seg, V3State};
 pub use w3::{CREEP_CELL, W3Look, W3State, creeper_corner, push as bully_push};
@@ -43,6 +46,10 @@ pub const STOMP_FRAMES: i32 = 30;
 pub const SHELL_WAKE: i32 = 511;
 pub const SHELL_SHAKE: i32 = 96;
 pub const ITEM_SPEED: f32 = 1.0;
+/// A Yoshi's Egg: its box's half size round its position (profile YoshiEgg {0, 8, 22, 22}) and
+/// the hatch helper's count from Land (+0x8 reset to 0x28) [obs v3.0.3 0x71013f7990].
+const EGG_BOX: f32 = 22.0;
+const EGG_HATCH: i32 = 40;
 pub const FIREBALL_SPEED: f32 = 3.625;
 pub const FIREBALL_GRAVITY: f32 = -0.4375;
 pub const FIREBALL_BOUNCE: f32 = 4.0;
@@ -832,6 +839,11 @@ pub struct Actor {
     pub spiny_shell: bool,
     /// The shared winged flight (items, coins, map objects and blocks with wings; actors/fly.rs).
     pub fly: Fly,
+    /// A Swinging Claw's rope; the actor's own position is the rope's end (actors/claw.rs).
+    pub claw: Option<ClawRope>,
+    /// Bowser's middle jump is a gap jump (its speed set to land past the gap; MiddleJump's
+    /// enter 0x71006b0370 flag +0x90).
+    pub gap_jump: bool,
 }
 
 impl Actor {
@@ -911,6 +923,8 @@ impl Actor {
             ceiling: false,
             spiny_shell: false,
             fly: Fly::default(),
+            claw: None,
+            gap_jump: false,
         }
     }
 
@@ -1303,10 +1317,10 @@ impl Actor {
         }
     }
 
-    /// Swinging claw tip (where a held player hangs): pivot (home) + rope of 40 px.
+    /// Swinging claw tip (where a held player hangs): the rope's end, the claw actor's own
+    /// position (actors/claw.rs); the pivot is `home`.
     pub fn claw_tip(&self) -> (f32, f32) {
-        let a = self.heading.to_radians();
-        (self.home_x + 40.0 * a.dsin(), self.home_y - 40.0 * a.dcos())
+        (self.x, self.y)
     }
 
     /// Spring compression c (0…4 px), kept in `pause`.
@@ -1742,6 +1756,11 @@ impl Actor {
     /// One frame; may return a new actor to add (a Fire Piranha's fireball). Uses `target`.
     pub fn step_spawning(&mut self, level: &Level) -> Option<Actor> {
         let before = (self.x, self.y);
+        // a claw's track moves its pivot before the rope's step [obs v3.0.3 0x71013e7b10]
+        let pivot_first = self.kind == Kind::Claw;
+        if pivot_first {
+            self.ride_track(level);
+        }
         let out = if self.derailed && self.falls_when_derailed() {
             // gravity as a falling lift's [inf: the rider's own FallDown state isn't decoded]
             self.vy = (self.vy - 0.0625).max(-4.0);
@@ -1751,7 +1770,9 @@ impl Actor {
         } else {
             self.step_inner(level)
         };
-        self.ride_track(level);
+        if !pivot_first {
+            self.ride_track(level);
+        }
         self.moved = (self.x - before.0, self.y - before.1);
         out
     }
@@ -2166,6 +2187,34 @@ impl Actor {
                     self.step_winged_plant(level);
                     return None;
                 }
+                // their Wing action is their Basic one (the same action class: Teresa,
+                // Pukupuku, FishBone, Hanachan, Kameck, Bros1st / BrosU / FireBros / MegaBros,
+                // Choropoo, Gesso, Wanwan) [obs v1.0.0 actionmap]: they act as unwinged
+                // [inf: the wing-only states inside it — the Boo's PataCharge, the Bros'
+                // WingWalk — are not ported]
+                Kind::Boo
+                | Kind::CheepCheep { .. }
+                | Kind::FishBone
+                | Kind::Wiggler
+                | Kind::Magikoopa
+                | Kind::HammerBro
+                | Kind::MontyMole
+                | Kind::Blooper
+                | Kind::ChainChomp { .. } => {}
+                // a Dry Bones' Wing is the red Paratroopa's (Karon Wing vtable 0x7102179e68 =
+                // NokonokoRed's; its Fly enter 0x7100697e40 is the same and its exe 0x7100697ec0
+                // runs NokonokoRed's Fly exe 0x710072b370) [obs v1.0.0]: step_wings
+                Kind::DryBones => {}
+                // the Para-Beetle: the Spiny's hover without its wall turn (actors/fly.rs)
+                Kind::Buzzy | Kind::SpikeTop { .. } if !self.ceiling => {
+                    self.step_para_beetle(level);
+                    return None;
+                }
+                // its own Fly / Turn (actors/wing.rs)
+                Kind::BobOmb if self.phase == 0 => {
+                    self.step_winged_bobomb(level);
+                    return None;
+                }
                 k if k.is_enemy() => {
                     self.step_generic_wings(level);
                     return None;
@@ -2235,15 +2284,39 @@ impl Actor {
             Kind::LavaBubble => self.step_lava_bubble(),
             Kind::FishBone => self.step_fish_bone(level),
             Kind::YoshiEgg { red } => {
-                // [inf: the hatch trigger isn't decoded] it hatches 30 frames after appearing
-                self.vy = (self.vy - 0.34).max(-4.0);
-                self.vx *= 0.9;
-                self.collide(level);
-                self.timer += 1;
-                if self.timer >= 30 && self.on_ground {
-                    self.kind = Kind::Yoshi { red };
-                    self.timer = 0;
-                    self.vx = 0.0;
+                if self.phase == 0 {
+                    // Wait: the item base's movement
+                    self.vy = (self.vy - 0.34).max(-4.0);
+                    self.vx *= 0.9;
+                    self.collide(level);
+                    // Land the first frame it stands on the ground with its box (22 px each
+                    // way round its position) touching the camera's view, edges included
+                    // (Wait exe 0x7100852bb0 → vfunc 0x4e8 0x71008cc760: the camera views
+                    // list; sticky through 0x4f8) [obs v1.0.0]; Land's enter plays "break"
+                    // and starts the hatch helper's 40-frame count (0x7100859b00 = v3.0.3
+                    // 0x710137acd0)
+                    let (cx, cy) = self.camera;
+                    let seen = self.x + EGG_BOX >= cx
+                        && self.x - EGG_BOX <= cx + crate::world::VIEW_W
+                        && self.y + EGG_BOX >= cy
+                        && self.y - EGG_BOX <= cy + crate::world::VIEW_H;
+                    if self.on_ground && seen {
+                        self.phase = 1;
+                        self.timer = EGG_HATCH;
+                        self.vx = 0.0;
+                    }
+                }
+                if self.phase == 1 {
+                    // the helper hatches it when its count runs out (0x71013f7990 [obs
+                    // v3.0.3]) [inf: it also waits for the break animation's end, taken as
+                    // no longer; the helper counting from Land's own frame]
+                    self.timer -= 1;
+                    if self.timer <= 0 {
+                        self.kind = Kind::Yoshi { red };
+                        self.phase = 0;
+                        self.timer = 0;
+                        self.vx = 0.0;
+                    }
                 }
             }
             Kind::Yoshi { .. } => self.step_yoshi(level),
@@ -2299,7 +2372,7 @@ impl Actor {
                 if self.wings
                     && matches!(
                         self.kind,
-                        Kind::Goomba | Kind::Goombrat | Kind::Koopa { .. }
+                        Kind::Goomba | Kind::Goombrat | Kind::Koopa { .. } | Kind::DryBones
                     )
                 {
                     self.step_wings(level, player_x);
@@ -2893,12 +2966,11 @@ impl Actor {
             }
             Kind::Magikoopa => {}
             Kind::Claw => {
-                // pendulum: angle = A·sin(2π t / T); A 60°, T 160 frames [inf: the rope helper
-                // simulation is outside the decompiled range]
-                self.heading = 60.0 * (self.age as f32 * std::f32::consts::TAU / 160.0).dsin();
                 if self.timer > 0 {
                     self.timer -= 1; // re-grab cooldown
                 }
+                // the rope (actors/claw.rs) [obs v3.0.3 0x71013e7b10 → 0x7101ca03f0]
+                self.step_claw();
             }
             Kind::Twister => {
                 if self.on_ground {
@@ -4449,7 +4521,7 @@ impl Actor {
                     self.turn();
                 }
             }
-            Kind::Koopa { red: true } => {
+            Kind::Koopa { red: true } | Kind::DryBones => {
                 // vertical speed eases toward ±0.5 by 0.01/frame between home−32 and home+48
                 let above = self.y + 8.0 > self.home_y + 48.0;
                 let below = self.y + 8.0 < self.home_y - 32.0;

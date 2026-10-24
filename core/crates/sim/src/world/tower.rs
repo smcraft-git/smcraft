@@ -12,6 +12,7 @@
 use super::World;
 use crate::actors::{Actor, Kind, Mode};
 use crate::fmath::DetMath;
+use crate::level::TILE;
 
 /// Riders take this share of the lower member's sideways movement [obs].
 const CARRY: f32 = 0.9;
@@ -23,6 +24,8 @@ const GAP: f32 = 64.0;
 /// Fall acceleration and fastest fall of a rider [obs].
 const GRAVITY: f32 = 0.1875;
 const MAX_FALL: f32 = 4.0;
+/// How far past its side a rider feels a wall it touches [inf].
+const WALL_TOUCH: f32 = 0.5;
 /// Facing passes up one member every this many frames [obs].
 const TURN_STEP: u8 = 4;
 /// The column holds at most this many members [obs].
@@ -185,21 +188,25 @@ impl Actor {
         )
     }
 
-    /// Still part of its column: alive, not held, and not knocked into motion (a kicked shell
-    /// leaves; a shell at rest stays) [inf: the game drops dying, held and pipe / blaster
-    /// members].
+    /// Still part of its column. The manager drops a member that is gone, dying or without
+    /// collision, out of its tower id, in the Dokan, Carried, Killer, Block or DrawDokan context
+    /// (contexts 5, 7, 8, 9, 15), or whose part no longer stacks (its profile's tower bit) [obs
+    /// v3.0.3 0x7101285500]: so a stomped Koopa or Buzzy Beetle leaves (its shell is a new
+    /// object in the game), as do held, fired and defeated members.
     fn stays_in_tower(&self) -> bool {
-        matches!(self.mode, Mode::Normal | Mode::ShellWait) && !self.held
+        self.mode == Mode::Normal && !self.held
     }
 }
 
 impl World {
-    /// Spawn indices of every tower column member (for spawning a column together).
-    pub(super) fn tower_columns_to_spawn(&self, due: &dyn Fn(usize) -> bool) -> Vec<usize> {
-        let mut out = Vec::new();
-        for col in &self.level.towers {
-            if col.members.iter().any(|&s| due(s)) {
-                out.extend(col.members.iter().copied());
+    /// The column each spawn record belongs to, if any (indexed by spawn record).
+    pub(super) fn tower_member_columns(&self) -> Vec<Option<usize>> {
+        let mut out = vec![None; self.spawns.len()];
+        for (c, col) in self.level.towers.iter().enumerate() {
+            for &s in &col.members {
+                if let Some(o) = out.get_mut(s) {
+                    *o = Some(c);
+                }
             }
         }
         out
@@ -399,14 +406,24 @@ impl World {
             } else {
                 (v + DECAY).min(0.0)
             };
-            let mut nx = x + v + below_dx * CARRY;
-            // a wall stops the rider's own sideways motion [inf: the game's rider runs its
-            // terrain check]
+            // a wall the rider touches cuts its own speed into it to the pull (the carry still
+            // moves it) [obs v3.0.3 0x7101299dd0: the rider's BG wall flags +0x659 bits 4 / 5];
+            // its terrain check then holds it out of the wall [inf: taken as flush with the cell]
             let a = &self.actors[i];
-            let side = if nx > x { nx + hw } else { nx - hw };
-            if (nx - x).abs() > 0.0 && self.level.cell_at(side, a.y + a.height() / 2.0).is_solid() {
-                nx = x;
-                v = 0.0;
+            let mid = a.y + a.height() / 2.0;
+            let solid = |px: f32| self.level.cell_at(px, mid).is_solid();
+            if !(pull >= 0.0 && v > 0.0) {
+                if pull <= 0.0 && v < 0.0 && solid(x - hw - WALL_TOUCH) {
+                    v = v.max(pull);
+                }
+            } else if solid(x + hw + WALL_TOUCH) {
+                v = v.min(pull);
+            }
+            let mut nx = v + below_dx * CARRY + x;
+            if nx > x && solid(nx + hw) {
+                nx = ((nx + hw) / TILE).floor() * TILE - hw;
+            } else if nx < x && solid(nx - hw) {
+                nx = (((nx - hw) / TILE).floor() + 1.0) * TILE + hw;
             }
             // down: gravity plus the base's vertical movement, landing on the lower member's top
             let mut vy = (m.vy - GRAVITY).max(-MAX_FALL);
@@ -496,9 +513,11 @@ mod tests {
             lvl.spawns
                 .push(spawn(kind, 20.0 * TILE + 8.0, 32.0 + 16.0 * k as f32));
         }
+        let x = 20.0 * TILE + 8.0;
         lvl.towers = vec![TowerColumn {
             fixed: None,
             members: (0..kinds.len()).collect(),
+            spawn_box: (x - 8.0, 32.0, x + 8.0, 32.0 + 16.0 * kinds.len() as f32),
         }];
         World::with_level(lvl)
     }
@@ -649,6 +668,7 @@ mod tests {
         lvl.towers = vec![TowerColumn {
             fixed: Some((x, 32.0 + 30.0)),
             members: vec![0],
+            spawn_box: (x - 8.0, 32.0, x + 8.0, 32.0 + 48.0),
         }];
         // the blaster itself: two solid tiles
         lvl.set_solid(20, 2);
@@ -677,6 +697,58 @@ mod tests {
     }
 
     #[test]
+    fn a_column_spawns_only_through_its_manager_box() {
+        // the members stand in view, but the column's manager box is far off: nothing yet
+        let mut lvl = Level::flat(400);
+        let x = 20.0 * TILE + 8.0;
+        lvl.spawns.push(spawn(Kind::Goomba, x, 32.0));
+        lvl.spawns.push(spawn(Kind::Goomba, x, 48.0));
+        lvl.towers = vec![TowerColumn {
+            fixed: None,
+            members: vec![0, 1],
+            spawn_box: (5000.0, 32.0, 5016.0, 64.0),
+        }];
+        let mut w = World::with_level(lvl);
+        run(&mut w, 2);
+        assert!(w.actors.iter().all(|a| a.spawn.is_none_or(|s| s > 1)));
+        // with the box in view both come out in the same frame, stacked
+        let mut w = column(&[Kind::Goomba, Kind::Goomba]);
+        run(&mut w, 1);
+        assert!(at(&w, 0).age == at(&w, 1).age && at(&w, 1).stacked);
+    }
+
+    #[test]
+    fn a_stomped_koopa_leaves_the_column_as_its_shell() {
+        let mut w = column(&[Kind::Goomba, Kind::Koopa { red: false }, Kind::Goomba]);
+        run(&mut w, 30);
+        assert!(at_mut(&mut w, 1).stomp());
+        run(&mut w, 30);
+        let (a, b, c) = (at(&w, 0), at(&w, 1), at(&w, 2));
+        assert!(!b.stacked, "the shell is out of the column");
+        assert!(
+            c.stacked && (c.y - a.y - 15.0).abs() < 1.5,
+            "the top one fell onto the bottom"
+        );
+    }
+
+    #[test]
+    fn a_rider_against_a_wall_keeps_only_the_pull_into_it() {
+        let mut w = column(&[Kind::Muncher, Kind::Goomba]);
+        run(&mut w, 2);
+        // a wall right of the rider, touching it, and a fast relative speed into it
+        let x = at(&w, 1).x;
+        let tx = ((x + 8.0) / TILE).floor() as i32;
+        w.level.set_solid(tx, 3);
+        let id = at(&w, 1).id;
+        let m = w.towers[0].members.iter_mut().find(|m| m.id == id).unwrap();
+        m.rel_vx = 1.0;
+        run(&mut w, 1);
+        let m = w.towers[0].members.iter().find(|m| m.id == id).unwrap();
+        assert!(m.rel_vx <= super::PULL, "{}", m.rel_vx);
+        assert!(at(&w, 1).x + 8.0 <= tx as f32 * TILE + 1e-3);
+    }
+
+    #[test]
     fn a_column_holds_at_most_128_members() {
         let mut lvl = Level::flat(60);
         lvl.top = 200.0 * TILE;
@@ -687,9 +759,11 @@ mod tests {
                 32.0 + 16.0 * k as f32,
             ));
         }
+        let x = 20.0 * TILE + 8.0;
         lvl.towers = vec![TowerColumn {
             fixed: None,
             members: (0..130).collect(),
+            spawn_box: (x - 8.0, 32.0, x + 8.0, 32.0 + 16.0 * 130.0),
         }];
         let mut w = World::with_level(lvl);
         run(&mut w, 1);

@@ -19,6 +19,25 @@ SMCraft is back in development (it was archived in October 2026).
   Chomp flies back onto its stake along the game's curve; a Red Yoshi's Egg is the one with the
   big flag; a custom autoscroll node set to "stop" stops the camera, and vertical custom
   autoscroll uses the game's vertical speeds.
+- **Swinging Claws swing as in SMM2**: the claw hangs on its rope 48 px under the pivot and an
+  empty one starts at rest, swaying by itself in a slowly growing swing (it was a wide 60°
+  pendulum); a caught player's speed carries into the swing and left / right nudge it. Claws are
+  set up as the course starts, like the game's.
+- **Twisters carry Mario as in SMM2**: a Twister's column lifts Mario off the ground and up at a
+  steady speed (it was a guess), first pulling him toward its middle for half a second; near the
+  top he bobs; a jump inside it sends him up faster; at night in the Sky theme it lifts more
+  gently. The column widens toward its top.
+- Stacked parts: a column comes out together when the whole column reaches the screen (as the
+  game's tower record does); a stomped Koopa or Buzzy Beetle in a column drops out of it as its
+  shell; a rider pushed against a wall is no longer stopped dead but keeps riding along.
+- More winged enemies as in SMM2: a winged Bob-omb flies level, bobbing 8 px up and down and
+  turning at walls; a winged Dry Bones flies like a red Paratroopa; winged Buzzy Beetles and
+  Spike Tops fly like a winged Spiny but don't turn at walls; winged Boos, Cheep Cheeps,
+  Fish Bones, Wigglers, Magikoopas, Hammer Bros, Monty Moles, Bloopers and Chain Chomps act as
+  their wingless selves (the game runs the same behaviour for both) instead of drifting.
+- Bowser chasing you jumps walls in his way (a big jump for a tall one) and jumps across gaps,
+  aiming to land on the far side, instead of only turning round at ledges. A Yoshi's Egg hatches
+  40 frames after it first lands on screen (it was 30 frames after appearing).
 
 - **Import once, then no dump or keys.** SMCraft reads your NSPs and `prod.keys` itself (no
   hactool, nothing extracted) and writes its own asset pack; the game runs from the pack alone.

@@ -821,6 +821,9 @@ pub struct TowerColumn {
     pub fixed: Option<(f32, f32)>,
     /// Spawn indices of the members that move, bottom first.
     pub members: Vec<usize>,
+    /// The spawn box of the whole chain's tower manager record (x0, y0, x1, y1): the members
+    /// spawn only through it (see `tower_columns`).
+    pub spawn_box: (f32, f32, f32, f32),
 }
 
 /// A part that can be in a column: centre x, feet y, height in tiles, and either its spawn or
@@ -829,6 +832,7 @@ pub struct TowerColumn {
 struct TowerPart {
     x: f32,
     y: f32,
+    w: i32,
     h: i32,
     spawn: Option<usize>,
     top: f32,
@@ -872,7 +876,24 @@ fn tower_columns(parts: &[TowerPart]) -> Vec<TowerColumn> {
         if chain.len() < 2 {
             continue;
         }
-        let mut col = TowerColumn::default();
+        // the chain's manager record (actor 0xeb) sits at the bottom part, as wide as the
+        // widest member and as tall as all of them; its profile box {0, 8, 8, 8} grows by the
+        // record's size (profile flag 0x400: 8 px a side per tile of width past one, 16 px up
+        // per tile of height past one) [obs 0x7100404f80 / 0x71003fcb90 v1.0.0, profiles.txt
+        // EnemyTowerManager flags 0x448]
+        let bottom = parts[first];
+        let w = chain.iter().map(|&p| parts[p].w).max().unwrap_or(1) as f32;
+        let h = chain.iter().map(|&p| parts[p].h).sum::<i32>() as f32;
+        let spawn_box = (
+            bottom.x - 8.0 * w,
+            bottom.y,
+            bottom.x + 8.0 * w,
+            bottom.y + 16.0 * h,
+        );
+        let mut col = TowerColumn {
+            spawn_box,
+            ..TowerColumn::default()
+        };
         for &p in &chain {
             match parts[p].spawn {
                 Some(s) => col.members.push(s),
@@ -883,6 +904,7 @@ fn tower_columns(parts: &[TowerPart]) -> Vec<TowerColumn> {
                     col = TowerColumn {
                         fixed: Some((parts[p].x, parts[p].top)),
                         members: Vec::new(),
+                        spawn_box,
                     };
                 }
             }
@@ -1178,6 +1200,7 @@ impl Level {
                     tower_parts.push(TowerPart {
                         x: ox,
                         y: oy - 8.0,
+                        w,
                         h: hgt,
                         spawn: Some(lvl.spawns.len() - 1),
                         top: 0.0,
@@ -1230,6 +1253,7 @@ impl Level {
                     tower_parts.push(TowerPart {
                         x: tx as f32 * TILE + TILE / 2.0,
                         y: ty as f32 * TILE,
+                        w: 1,
                         h: hgt.max(2),
                         spawn: None,
                         top: ty as f32 * TILE + hgt.max(2) as f32 * TILE - 2.0,
@@ -1430,6 +1454,7 @@ impl Level {
                     tower_parts.push(TowerPart {
                         x: tx as f32 * TILE + 8.0,
                         y: ty as f32 * TILE,
+                        w: 1,
                         h: 1,
                         spawn: None,
                         top: ty as f32 * TILE + 14.0,
