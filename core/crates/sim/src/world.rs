@@ -392,7 +392,7 @@ fn character_model(model: &'static str, who: usize) -> &'static str {
         .map_or(model, |row| row[who.min(3)])
 }
 
-fn field_model(style: &str, theme: u8) -> String {
+fn field_model(style: &str, theme: u8, night: bool) -> String {
     let name = [
         "plain",
         "underground",
@@ -408,7 +408,10 @@ fn field_model(style: &str, theme: u8) -> String {
     .get(theme as usize)
     .copied()
     .unwrap_or("plain");
-    format!("{style}_Field_{name}")
+    // night themes have their own field art (`<style>_Field_<theme>_D`, the SceneDB rows 10–19);
+    // 3D World has no night
+    let night = if night && style != "3W" { "_D" } else { "" };
+    format!("{style}_Field_{name}{night}")
 }
 
 /// The play field's animated parts in the 2D styles are models of their own (the game's
@@ -626,7 +629,8 @@ impl World {
             wind_n: 0,
             options: Default::default(),
         };
-        w.field_model = Box::leak(field_model(&w.level.style, w.level.theme).into_boxed_str());
+        w.field_model =
+            Box::leak(field_model(&w.level.style, w.level.theme, w.level.night).into_boxed_str());
         w.reset_course();
         w
     }
@@ -715,8 +719,9 @@ impl World {
     /// Build the current area's live state from its loaded level.
     fn load_area_fresh(&mut self) {
         self.level = self.initial.clone();
-        self.field_model =
-            Box::leak(field_model(&self.level.style, self.level.theme).into_boxed_str());
+        self.field_model = Box::leak(
+            field_model(&self.level.style, self.level.theme, self.level.night).into_boxed_str(),
+        );
         self.blocks = Blocks::default();
         for b in &self.level.blocks {
             self.blocks
@@ -796,8 +801,10 @@ impl World {
                 self.level = st.level;
                 self.blocks = st.blocks;
                 self.spawns = st.spawns;
-                self.field_model =
-                    Box::leak(field_model(&self.level.style, self.level.theme).into_boxed_str());
+                self.field_model = Box::leak(
+                    field_model(&self.level.style, self.level.theme, self.level.night)
+                        .into_boxed_str(),
+                );
                 self.actors.clear();
                 self.escort_down.clear();
                 self.effects.clear();
@@ -6308,7 +6315,8 @@ impl World {
                 9 => "M1_Object_yajirushi_woods",
                 _ => "M1_Object_yajirushi_plain",
             },
-            (_, 6) => "M1_Object_yajirushi_S",
+            // (snow at night stands on ice: the plain sign [obs])
+            (_, 6) if !self.level.night => "M1_Object_yajirushi_S",
             _ => "M1_Object_yajirushi",
         };
         out.push(Self::model_sprite(
