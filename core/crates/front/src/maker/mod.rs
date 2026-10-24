@@ -431,7 +431,6 @@ impl MakerFlow {
             "L_LeftParts_00/L_MultiEditBtn_00",
             "L_LeftParts_00/L_WaterLevelBtn_00",
             "L_LeftParts_00/L_ScrollEditBtn_00",
-            "L_Slider_00/N_SlideBarV_00",
         ] {
             p.show(pane, false);
         }
@@ -559,10 +558,27 @@ impl MakerFlow {
         self.clamp_cam();
     }
 
+    /// A vertical area: the scroll bar is the vertical one (`N_SlideBarV_00`).
+    fn vertical(&self) -> bool {
+        self.editor.area().header.orientation != 0
+    }
+
     /// Scroll to where pointer `p` is along the scroll bar.
     fn slide_to(&mut self, p: [f32; 2]) {
+        let vertical = self.vertical();
         let Some(page) = &mut self.page else { return };
         page.apply(self.tick);
+        if vertical {
+            let Some(r) = page.rect("L_Slider_00/L_SlideBarV_00/B_ScrollArea_00") else {
+                return;
+            };
+            let travel = (r.size[1] - HANDLE_V).max(1.0);
+            let f = ((p[1] - (r.center[1] - travel / 2.0)) / travel).clamp(0.0, 1.0);
+            let (_, h) = self.editor.size();
+            self.cam[1] = f * (h as f32 * TILE - VIEW_H).max(0.0);
+            self.clamp_cam();
+            return;
+        }
         let Some(r) = page.rect("L_Slider_00/L_SlideBarH_00/B_ScrollArea_00") else {
             return;
         };
@@ -575,6 +591,26 @@ impl MakerFlow {
 
     /// The scroll bar's handle where the view is.
     fn place_slider(&mut self) {
+        let vertical = self.vertical();
+        if let Some(p) = &mut self.page {
+            p.show("L_Slider_00/N_SlideBarV_00", vertical);
+            p.show("L_Slider_00/N_SlideBarH_00", !vertical);
+        }
+        if vertical {
+            let (_, h) = self.editor.size();
+            let span = (h as f32 * TILE - VIEW_H).max(1.0);
+            let f = (self.cam[1] / span).clamp(0.0, 1.0);
+            if let Some(p) = &mut self.page {
+                // the handle inside the scroll area (from −234 up, 334.8 tall) [obs data; its
+                // bottom anchor read from where the bar shows]
+                let (lo, hi) = (-234.0 + HANDLE_V / 2.0, -234.0 + 334.8 - HANDLE_V / 2.0);
+                p.set_translate(
+                    "L_Slider_00/L_SlideBarV_00/N_TransRoot_00",
+                    [0.0, lo + (hi - lo) * f],
+                );
+            }
+            return;
+        }
         let (w, _) = self.editor.size();
         let span = (w as f32 * TILE - VIEW_W).max(1.0);
         let f = (self.cam[0] / span).clamp(0.0, 1.0);
@@ -1657,13 +1693,14 @@ impl MakerFlow {
                 format!("{bar}/L_AreaBtn_00/B_Btn_00"),
                 format!("{bar}/L_SlideBarH_00/B_ScrollArea_00"),
                 format!("{bar}/L_VerticalBtn_00/B_Btn_00"),
+                format!("{bar}/L_SlideBarV_00/B_ScrollArea_00"),
             ];
             if let Some(k) = hit(page, self.tick, &slider, p) {
                 match k {
                     0 => self.cam[0] = 0.0,
                     1 => self.cam[0] = f32::MAX,
                     2 => self.switch_area(),
-                    3 => {
+                    3 | 5 => {
                         self.drag = Some(Drag::Slider);
                         self.slide_to(p);
                     }
@@ -3137,7 +3174,8 @@ impl MakerFlow {
         self.mode == Mode::Test
     }
 
-    /// Captures: open a window ("parts", "menu", "save", "style", "theme", "play").
+    /// Captures: open a window ("parts", "menu", "save", "style", "theme", "play", "subarea";
+    /// "vertical": a vertical sub-area).
     pub fn debug_open(&mut self, cx: &mut crate::Cx, what: &str) -> bool {
         match what {
             "parts" => self.open_ring(),
@@ -3149,6 +3187,14 @@ impl MakerFlow {
             "autoscroll" => self.open_window(3),
             "mission" => self.open_mission(),
             "play" => self.start_test(cx, Some(None)),
+            // the sub-area's orientation window, and a vertical sub-area (its scroll bar)
+            "subarea" => self.switch_area(),
+            "vertical" => {
+                self.editor.set_area(1);
+                let _ = self.editor.set_vertical(true);
+                self.cam = [0.0, 0.0];
+                self.dirty = true;
+            }
             _ => return false,
         }
         true
@@ -3214,6 +3260,8 @@ impl MakerFlow {
 
 /// The scroll bar handle's width (`N_TransRoot_00` of `Edit_SlideAreaBtnH_00`) [obs data].
 const HANDLE: f32 = 110.0;
+/// The vertical bar's handle height (`N_TransRoot_00` of `Edit_SlideAreaBtnV_00`) [obs data].
+const HANDLE_V: f32 = 41.6;
 
 /// Why an upload went nowhere: uploads go to the own course server (the host sends them there
 /// whichever Course World is shown); TGRCode only reads.

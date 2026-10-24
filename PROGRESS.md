@@ -226,9 +226,10 @@ sway, importer and pack 12, the dev cache already at v12).
     inside" balloon with its dummy wings / parachute, wings on the NSMBU / 3D World models
     (their own textures; SMB1 art stands in), parts that drop wings / parachute with their
     other form (vtables not resolved), winged Bill Blasters in play
-  - ⬜ custom autoscroll and its nodes, water level, the vertical
-    scroll bar, the part variants balloon (Fast Conveyor …), tracks / doors' partners placed
+  - ⬜ custom autoscroll and its nodes, water level, the part variants balloon (Fast Conveyor …), tracks / doors' partners placed
     by hand, the trash can, Mario's Trail, co-op making
+  - ✅ the vertical scroll bar for vertical sub-areas (`N_SlideBarV_00`: its handle by the view's
+    height, pressed / dragged to scroll; captures `maker-vertical`, `maker-subarea`)
   - ✅ the sub-area's orientation window (`Edit_SubAreaWindow_00`: Horizontal / Vertical) when
     the maker goes to an empty sub-area [inf: when the game asks]; one undo step
   - ✅ more parts in the part window (2026-10-24): Spike, Pokey, Piranha Creeper, Mechakoopa, the
