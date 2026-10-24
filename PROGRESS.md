@@ -133,30 +133,30 @@ sway, importer and pack 12, the dev cache already at v12).
   item touch boxes (not in EnemyDB or the item init 0x710134fe30; set by the shared enemy init
   0x7101286ee0) [inf]. 578 / 580 traces exact; coverage 550/550 + 273/273; simulate 0 crashes.
 - ✅ **Physics pass 8** (2026-10-25, branch `physics8`, research fidelity-log.md "physics8",
-  objects/93-clear-pipe.md "Traced", 91-seesaw.md, 87-gentle-slope.md): **588 / 588 traces exact**
-  (the 580 and eight new whole-course traces), every whole course exact — W_3049200 to its end,
-  W_3010660 to its death. ✅ a gentle slope whose low end cap lies under a ground tile has its
-  first step full solid (the floor collider 0x10100a11, type 0x11 sub 10; v3.0.3 cell function
-  0x7100db8df0 replaces a cell whose art is a joint piece) — six arrangements traced on a test
-  course (`mmk trace-courses --only M1_slopejoin`); ✅ the stomp window from the enemy's top
-  before its move; a Koopa stomped in the air falls as its shell that frame; a walker stands a
-  frame after a fall only on a slope; ✅ the Seesaw ported from v3.0.3 (actors/seesaw.rs: physics
-  0x71013d7d90, integrator 0x71013d9950 — binary angle, the torque through the game's atan / sine
-  tables, the chord integrator, the damping before and the return to level after the turn, the
-  ends from the table rotation; the rider on the ends' line past the turned end, carried by the
-  ends' movement, stepping x · cos of the angle two frames before, the terrain sensor's slope
-  classes for its speed); ✅ Clear Pipes against the game (test courses 3W_cpipe / 3W_cpipeg /
-  3W_cpipev: straight, two bends, joined, blocked, a Goomba, up and down mouths): side entry on
-  the face after 10 held frames, Down taken before the move, the entry frame standing, the out
-  frame running the next state (standing on an upward mouth), held buttons no new presses after
-  a ride, enemies' in-pipe speeds 0 — frame-exact; ✅ 3D World Goombas spot the player (80 px in front), stand 53 frames, run at 0.7
-  (the Kuribo3W Find / Run / Lost states); ✅ placed Super Mushrooms walk right from their first
-  frame, rest 0.1 px into walls and turn a frame late; ✅ a mushroom is touched where it stood
-  before its move, 12 px between centres (SMW / NSMBU 13), and a growth freezes the world from
-  the frame the form changes to the frame the change ends (test course M1_mushstart, three
-  scripts). Left [?]: the clear pipe's push entry (0x71015a9d00: 9 frames of pushing didn't
-  take the player in), a downward clear-pipe exit and items in pipes untraced, steep slopes
-  joined to ground untraced, the Seesaw's slam and blocked-rider sum.
+  objects/93-clear-pipe.md "Traced", 91-seesaw.md, 87-gentle-slope.md): **590 / 590 traces exact**
+  (the 580 and ten new whole-course traces), every whole course exact — W_3049200 to its end,
+  W_3010660 to its death. ✅ a slope whose low end cap lies under a ground tile has its first step
+  full solid (gentle: two cells, steep: one; the floor collider type 0x11 / 0x12 sub 10; v3.0.3
+  cell function 0x7100db8df0 replaces a cell whose art is a joint piece) — six arrangements traced
+  on test courses (`mmk trace-courses --only M1_slopejoin`, `M1_slopejoins`); ✅ the stomp window
+  from the enemy's top before its move; a Koopa stomped in the air falls as its shell that frame;
+  a walker stands a frame after a fall only on a slope; ✅ the Seesaw ported from v3.0.3
+  (actors/seesaw.rs: physics 0x71013d7d90, integrator 0x71013d9950 — binary angle, the torque
+  through the game's atan / sine tables, the chord integrator, the damping before and the return
+  to level after the turn, the ends from the table rotation; the rider on the ends' line past the
+  turned end, carried by the ends' movement, stepping x · cos of the angle two frames before, the
+  terrain sensor's slope classes for its speed); ✅ Clear Pipes against the game (test courses
+  3W_cpipe / 3W_cpipeg / 3W_cpipev / 3W_cpiped: straight, two bends, joined, blocked, a Goomba, a
+  mushroom, up and down mouths): side entry on the face after 10 held frames, Down taken before
+  the move, the entry frame standing, the out frame running the next state (standing on an upward
+  mouth; the head at a downward one), held buttons no new presses after a ride, enemies' in-pipe
+  speeds 0 — frame-exact; ✅ 3D World Goombas spot the player (80 px in front), stand 53 frames,
+  run at 0.7 (the Kuribo3W Find / Run / Lost states); ✅ placed Super Mushrooms walk right from
+  their first frame, rest 0.1 px into walls and turn a frame late; ✅ a mushroom is touched where
+  it stood before its move, 12 px between centres (SMW / NSMBU 13), and a growth freezes the world
+  from the frame the form changes to the frame the change ends (test course M1_mushstart, three
+  scripts). Left [?]: the clear pipe's push entry (0x71015a9d00: 9 frames of pushing didn't take
+  the player in), the Seesaw's slam and blocked-rider sum.
 - **Agent queue** (when a helper slot frees; running 2026-10-25: the maker's Water Level and
   Custom Scroll modes, physics): ✅ a Koopaling in a Clown Car (2026-10-25, branch
   `kclown`, research 120-koopalings.md "In a Koopa Clown Car": KoKoopaDefault's Clown vtable
@@ -708,8 +708,8 @@ Nextendo; `docs/nextendo-network-play.md`, spec `research/specs/network-play.md`
   out to belong to the parts' 0xC0000 bits, not stacks) · ⬜ the editor's height limit (play
   takes 128 members at most), pulling a member off a column
 - 🔄 Physics: re-recording every trace (2026-10-24; the old 428 / 454 was not a true count — the
-  old items / form traces were all small Mario). Re-recorded, current engine: **588 / 588 exact**
-  over 113 courses + 17 whole-course traces (2026-10-25 physics8: all 9 whole courses exact: W_3064188, W_3046973, W_3065813, W_3006094, W_3049200, and W_3051046, W_3051605, W_3145588, W_3010660 to their deaths, the title course not restarting; and the test courses X_slopejoin, X_cpipe, X_cpipeg, X_cpipev ×2, X_mushstart ×3) (2026-10-24 physics7: the shell courses now compare the shell too, which showed
+  old items / form traces were all small Mario). Re-recorded, current engine: **590 / 590 exact**
+  over 113 courses + 19 whole-course traces (2026-10-25 physics8: all 9 whole courses exact: W_3064188, W_3046973, W_3065813, W_3006094, W_3049200, and W_3051046, W_3051605, W_3145588, W_3010660 to their deaths, the title course not restarting; and the test courses X_slopejoin, X_slopejoins, X_cpipe, X_cpipeg, X_cpipev ×2, X_cpiped, X_mushstart ×3) (2026-10-24 physics7: the shell courses now compare the shell too, which showed
   3 carried-shell throws off; and object traces: the player plus every simulated actor matched to
   a recorded game object, found by scans while the game is paused in the trace hook): M1/M3/MW/WU/3W flat 34 each, M1/M3/MW/WU/3W items 34 each, M1/M3/MW/WU/3W
   slope 4 each, M1/M3/MW/WU/3W wall 4 each, M1/M3/MW/WU/3W water 2 each, M3/MW/WU/3W form 16 each
