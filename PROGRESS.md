@@ -53,7 +53,9 @@ sway, importer and pack 12, the dev cache already at v12).
      markers in the course), custom scroll nodes, Mario's Trail (`L_ZanzoBtn_00`), the trash can
      (`L_TrashCan_00`: UIEditMainPage part 8 at +0x800, set up in 0x71018cee20; `part(i)`
      0x71018fc060 is virtual; placed from code, the pane sits at 0,0; Act 45 plays
-     `se_ui_edit_trash` + `SE_DropErase`; where it shows: one Ryujinx look when the slot is free);
+     `se_ui_edit_trash` + `SE_DropErase`; a look in the recomp (2026-10-24, touch drags by script) shows no bin while a
+     part is dragged in the main maker, to the corner or past the palette: it may belong to another page
+     (`_INIT_1878`'s five-slot palette page) [?]);
      ✅ winged / parachuted items and any part out of a block (2026-10-24); ✅ coins from a Bill
      Blaster and the fired parts' launch (2026-10-24, branch `blaster`: the specs' addresses are
      v1.0.0's (the decomp corpus); in v3.0.3 the Coin Shot enter is 0x7101366c30, the blaster
