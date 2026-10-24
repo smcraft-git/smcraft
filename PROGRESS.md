@@ -355,16 +355,17 @@ Nextendo; `docs/nextendo-network-play.md`, spec `research/specs/network-play.md`
 
 **G8 — Fidelity: pixel, physics, sound** 🔄
 - 🔄 Physics: re-recording every trace (2026-10-24; the old 428 / 454 was not a true count — the
-  old items / form traces were all small Mario). Re-recorded, current engine: **456 / 456 exact**
-  over 37 courses: M1/M3/MW/WU/3W flat 34 each, M1/M3/MW/WU/3W items 34 each, M1/M3/MW/WU/3W
-  slope 4 each, M1/M3/MW/WU/3W wall 4 each, M1/M3/MW/WU/3W water 2 each, M3/MW/WU form 16 each
+  old items / form traces were all small Mario). Re-recorded, current engine: **480 / 480 exact**
+  over 42 courses: M1/M3/MW/WU/3W flat 34 each, M1/M3/MW/WU/3W items 34 each, M1/M3/MW/WU/3W
+  slope 4 each, M1/M3/MW/WU/3W wall 4 each, M1/M3/MW/WU/3W water 2 each, M3/MW/WU/3W form 16 each
   (WU: the Propeller Mushroom can't be collected at the title screen, so the capture makes the
   Super player a Propeller one, form +0x4a8 = 3),
   M1/M3/MW/WU/3W enemy 2 each (a stomp on a penned Goomba with the held-jump bounce; a running
   jump from against the pen wall onto Munchers (3D World: Piranha Plants): the death, its
   45-frame freeze and the hop), M1/M3/MW/WU koopa 2 each, player and Koopa both compared (a red
   Koopa pacing a 1-wide pillar: the stomp; a kick from above, the shell's slide off the pillar,
-  wall bounces back and forth for 280 frames) (was 274 of the first 286 with the engine at
+  wall bounces back and forth for 280 frames), M1/M3/MW/WU shell 2 each (an empty Buzzy shell:
+  walking and running side kicks, the wall bounce, a jump over the returning shell) (was 274 of the first 286 with the engine at
   39fdb6e). Fixed: pit death at view bottom − 56 with no hop, slip end on flat, raccoon tail
   wag, SMW cape take-off / climb end / slide end, jump bonus from the pre-move speed, the wall
   probes at the moved height, solid actors' sides (Munchers) flush like terrain; a foot probe
@@ -375,12 +376,14 @@ Nextendo; `docs/nextendo-network-play.md`, spec `research/specs/network-play.md`
   kick from above doesn't bounce; a kicked shell slides from its next update, stands on its
   centre ±1, meets walls with 6 px sides flush and turns back a frame later; the kicker's
   no-hit window also blocks stomps; NSMBU Koopa contact box 21 px tall; the Propeller launch
-  (vy 0.5, +0.7 to 3.0, 38 frames; the fall keeps the rising air control while going up). 3D
-  World slide-end stoop
+  (vy 0.5, +0.7 to 3.0, 38 frames; the fall keeps the rising air control while going up); a side
+  kick slides the shell that frame, and a shell slides on past the course's left edge (its
+  leftmost column continues); the Cat's air scratch keeps normal gravity and its Down-held pound
+  is the normal ground pound (the dive taken on Down with a direction [inf]). 3D World
+  slide-end stoop
   3 frames confirmed. 3D World recording works with a local Ryujinx fix (a zero-sized guest
-  texture with 2 levels made Metal abort under MoltenVK). ⬜ still to record: 3W form (Cat),
-  side kicks and running kicks (`<style>_shell` course, scripts ready), shells hitting enemies
-  and blocks, other objects; whole courses start to goal
+  texture with 2 levels made Metal abort under MoltenVK). ⬜ still to record: the Cat dive's real
+  trigger, shells hitting enemies and blocks, other objects; whole courses start to goal
 - 🔄 Pixels against the game (smm2recomp reference frames of `mmk ref-courses`, all 90, update
   900; MAE / % pixels off by > 24; `research/tools/pixel-ref/pixref.py`, 2026-10-24):
 

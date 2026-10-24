@@ -488,10 +488,8 @@ pub struct Player {
     /// Stunned by a Sledge Bro's landing quake (QuakeDamage 0x4e: no movement until the
     /// 100-frame counter runs out) [obs].
     pub stun: i32,
-    pub roll: i32,
     /// Cat slide attack: frames left of its 44-frame animation.
     pub cat_slide: i32,
-    roll_used: bool,
     /// Riding Yoshi (his actor id), the re-mount lockout, and what the world must do with
     /// Yoshi this frame (dismounted / knocked off by a hit).
     pub yoshi: Option<u32>,
@@ -657,9 +655,7 @@ impl Player {
             side_push: 0,
             side_chain: 0,
             stun: 0,
-            roll: 0,
             cat_slide: 0,
-            roll_used: false,
             yoshi: None,
             yoshi_lock: 0,
             yoshi_off: false,
@@ -1376,20 +1372,15 @@ impl Player {
                 Form::Cat => CAT_SCRATCH_FRAMES,
                 _ => 16,
             };
-            if self.form == Form::Cat {
-                if self.on_ground && self.crouch {
-                    // crouching, the attack is the slide (ClimbSlidingAttack, entered from the
-                    // crouch check 0x7100a1b3f0) [obs]
-                    self.attack = 0;
-                    self.cat_slide = CAT_SLIDE_FRAMES;
-                    self.crouch = false;
-                    self.vx = 2.5 * self.facing as f32;
-                } else if !self.on_ground && !self.roll_used && !self.in_water {
-                    // rolling attack: a small rise (vy 2.4, gravity −0.1) once per air time
-                    self.vy = 2.4;
-                    self.roll = 24;
-                    self.roll_used = true;
-                }
+            // (in the air too the scratch is ClimbAttackAir, state 32, with the normal air
+            // movement and gravity: no rise [obs: Ryujinx trace 3W_form form_attack])
+            if self.form == Form::Cat && self.on_ground && self.crouch {
+                // crouching, the attack is the slide (ClimbSlidingAttack, entered from the
+                // crouch check 0x7100a1b3f0) [obs]
+                self.attack = 0;
+                self.cat_slide = CAT_SLIDE_FRAMES;
+                self.crouch = false;
+                self.vx = 2.5 * self.facing as f32;
             }
         }
         if self.attack > 0 {
@@ -1771,12 +1762,6 @@ impl Player {
             self.vy = self.vy.max(-1.5);
             self.vx = self.vx.clamp(-1.125, 1.125);
         }
-        if self.roll > 0 {
-            self.roll -= 1;
-            if !self.on_ground && self.cat_climb == 0 && !self.dive {
-                self.vy = vy_before - 0.1;
-            }
-        }
         self.pu_after(inp, jump, vy_before, vx_before, level);
         self.was_in_water = self.in_water;
         self.x += self.wind;
@@ -2153,7 +2138,6 @@ impl Player {
             self.cat_climbs = 0;
             self.cat_reattach = 0;
             self.dive = false;
-            self.roll_used = false;
             return;
         }
         if self.form != Form::Cat {
@@ -2167,6 +2151,22 @@ impl Player {
         } else {
             self.pound_hold = 0;
         }
+        // the Cat's ground pound command (Down held, no direction) is the normal ground pound
+        // [obs: Ryujinx trace 3W_form pound_hold, states 19 / 20 as for Super Mario]; its dive
+        // (ClimbBodyAttack) is taken here on Down pressed with a direction held [inf]
+        if self.form == Form::Cat
+            && self.pu.headdress.is_none()
+            && down_pressed
+            && inp.dir_x() != 0
+            && self.pound == 0
+            && !self.dive
+            && self.cat_climb == 0
+            && self.held.is_none()
+            && self.shoe.is_none()
+        {
+            self.dive = true;
+            self.wall_slide = 0;
+        }
         if self.style.has_jump_chain()
             && self.pound_hold == 5
             && self.pound == 0
@@ -2175,15 +2175,11 @@ impl Player {
             && self.held.is_none()
             && self.shoe.is_none()
         {
-            if self.form == Form::Cat && self.pu.headdress.is_none() {
-                self.dive = true;
+            self.pound = if self.style == Style::W3 {
+                17 + 5
             } else {
-                self.pound = if self.style == Style::W3 {
-                    17 + 5
-                } else {
-                    10 + 5
-                };
-            }
+                10 + 5
+            };
             self.wall_slide = 0;
         }
         if self.dive {
@@ -3419,15 +3415,13 @@ mod tests {
                 &level,
             );
         }
-        // the ground-pound command needs Down held for 5 frames
-        for _ in 0..5 {
-            p.step(
-                Input {
-                    buttons: input::DOWN,
-                },
-                &level,
-            );
-        }
+        // Down with a direction dives [inf]; Down alone is the ground pound (below)
+        p.step(
+            Input {
+                buttons: input::DOWN | input::RIGHT,
+            },
+            &level,
+        );
         assert!(
             p.dive && p.vx == 4.0 && p.vy == -3.0,
             "dive {} {}",
@@ -3438,11 +3432,9 @@ mod tests {
             p.step(Input::default(), &level);
         }
         assert!(p.on_ground && !p.dive, "the dive ends on landing");
-    }
 
-    #[test]
-    fn cat_scratch_rises_once_per_air_time() {
-        let level = Level::flat(80);
+        // Down held 5 frames with no direction: the normal ground pound [obs: Ryujinx trace
+        // 3W_form pound_hold]
         let mut p = cat(&level);
         p.step(
             Input {
@@ -3450,33 +3442,56 @@ mod tests {
             },
             &level,
         );
-        for _ in 0..8 {
-            p.step(Input::default(), &level);
+        for _ in 0..10 {
+            p.step(
+                Input {
+                    buttons: input::JUMP,
+                },
+                &level,
+            );
         }
-        p.step(
+        for _ in 0..5 {
+            p.step(
+                Input {
+                    buttons: input::DOWN,
+                },
+                &level,
+            );
+        }
+        assert!(!p.dive && p.pound != 0, "ground pound");
+    }
+
+    /// The air scratch (ClimbAttackAir) leaves the air movement and gravity alone [obs: Ryujinx
+    /// trace 3W_form form_attack].
+    #[test]
+    fn cat_air_scratch_keeps_normal_gravity() {
+        let level = Level::flat(80);
+        let mut cat_p = cat(&level);
+        let mut plain = cat(&level);
+        for p in [&mut cat_p, &mut plain] {
+            p.step(
+                Input {
+                    buttons: input::JUMP,
+                },
+                &level,
+            );
+            for _ in 0..8 {
+                p.step(Input::default(), &level);
+            }
+        }
+        cat_p.step(
             Input {
                 buttons: input::RUN,
             },
             &level,
         );
-        assert!(p.attack > 0 && p.vy > 2.0, "rolling attack rise: {}", p.vy);
-        let vy = p.vy;
-        p.step(Input::default(), &level);
-        assert!(
-            (vy - p.vy - 0.1).abs() < 1e-4,
-            "gravity −0.1: {vy} → {}",
-            p.vy
-        );
-        for _ in 0..20 {
-            p.step(Input::default(), &level);
+        plain.step(Input::default(), &level);
+        assert!(cat_p.attack > 0, "scratching");
+        for _ in 0..10 {
+            assert_eq!(cat_p.vy, plain.vy);
+            cat_p.step(Input::default(), &level);
+            plain.step(Input::default(), &level);
         }
-        p.step(
-            Input {
-                buttons: input::RUN,
-            },
-            &level,
-        );
-        assert!(p.vy < 1.0, "no second rise in the same air time: {}", p.vy);
     }
 
     /// NSMBU jump chain: running jumps re-pressed within 8 frames of landing count 0, 1, 2; the
