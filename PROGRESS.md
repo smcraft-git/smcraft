@@ -349,18 +349,20 @@ Nextendo; `docs/nextendo-network-play.md`, spec `research/specs/network-play.md`
 
 **G8 — Fidelity: pixel, physics, sound** 🔄
 - 🔄 Physics: re-recording every trace (2026-10-24; the old 428 / 454 was not a true count — the
-  old items / form traces were all small Mario). Re-recorded so far, current engine: **344 / 344
-  exact** over 22 courses: M1/M3/MW/WU flat 34 each, M1/M3/MW/WU items 34 each, M1/M3/MW/WU
-  slope 4 each, M1/M3/MW/WU wall 4 each, M1/M3/MW/WU water 2 each, M3/MW form 16 each (was 274
+  old items / form traces were all small Mario). Re-recorded so far, current engine: **352 / 352
+  exact** over 26 courses: M1/M3/MW/WU flat 34 each, M1/M3/MW/WU items 34 each, M1/M3/MW/WU
+  slope 4 each, M1/M3/MW/WU wall 4 each, M1/M3/MW/WU water 2 each, M3/MW form 16 each,
+  M1/M3/MW/WU enemy 2 each (a stomp on a penned Goomba with the held-jump bounce; a running jump
+  from against the pen wall onto Munchers: the death, its 45-frame freeze and the hop) (was 274
   of the first 286 with the engine at 39fdb6e). Fixed: pit death at view bottom − 56 with no hop,
   slip end on flat, raccoon tail wag, SMW cape take-off / climb end / slide end, jump bonus from
-  the pre-move speed; 3D World slide-end stoop 3 frames (SquatStart's length + 1, as NSMBU's
-  9 → 10; not traced). ⬜ still to record: the 5 3D World courses (headless Ryujinx aborts in
-  MoltenVK: a Metal texture-descriptor validation failure in vkCmdBlitImage), WU form (the
-  Propeller Mushroom is never collected at the title screen: floor, block, open pen and a roofed
-  box with a doorway all tried), the new enemy courses (`<style>_enemy`: a penned Goomba to
-  stomp, Munchers to die on — WIP, not recorded yet; scripts enemy_stomp / enemy_die in the
-  private trace tools). Then enemy and object traces; whole courses start to goal
+  the pre-move speed, the wall probes at the moved height (rising past a wall's top corner frees
+  the player a frame earlier), solid actors' sides (Munchers) flush like terrain; 3D World
+  slide-end stoop 3 frames (SquatStart's length + 1, as NSMBU's 9 → 10; not traced). ⬜ still to
+  record: the 6 3D World courses incl. 3W_enemy (headless Ryujinx aborts in MoltenVK: a Metal
+  texture-descriptor validation failure in vkCmdBlitImage), WU form (the Propeller Mushroom is
+  never collected at the title screen: floor, block, open pen and a roofed box with a doorway all
+  tried). Then Koopa / shell and other object traces; whole courses start to goal
 - 🔄 Pixels against the game (smm2recomp reference frames of `mmk ref-courses`, all 90, update
   900; MAE / % pixels off by > 24; `research/tools/pixel-ref/pixref.py`, 2026-10-24):
 
