@@ -88,7 +88,11 @@ pub fn build(style: &str, theme: u8, night: bool) -> Result<Vec<u8>, String> {
     e.place(6, 9, 5).map_err(err)?;
     e.place(6, 12, 5).map_err(err)?;
     e.place(0, 10, 5).map_err(err)?;
-    e.place(1, 11, 5).map_err(err)?;
+    // (no Koopa in 3D World: the game rejects the course with it, falling back to a blank one
+    // [obs])
+    if style != "3W" {
+        e.place(1, 11, 5).map_err(err)?;
+    }
     // object fields as the game writes them: child flags default like the flags, pipes get a
     // link id and flag 0x80 [obs: every pipe of the owner's sample]
     let mut links = 0i16;
