@@ -9,6 +9,7 @@ use crate::fmath::DetMath;
 use crate::level::{Cell, Level, PipeDir, TILE};
 
 pub mod block_out;
+mod boo;
 mod bosses;
 mod ceiling;
 mod chute;
@@ -844,6 +845,9 @@ pub struct Actor {
     /// Bowser's middle jump is a gap jump (its speed set to land past the gap; MiddleJump's
     /// enter 0x71006b0370 flag +0x90).
     pub gap_jump: bool,
+    /// A winged enemy's wing helper: its flap rate (+0x20), eased toward the rate its body's
+    /// animation asks for (actors/boo.rs).
+    pub wing_rate: f32,
 }
 
 impl Actor {
@@ -925,6 +929,7 @@ impl Actor {
             fly: Fly::default(),
             claw: None,
             gap_jump: false,
+            wing_rate: 1.0,
         }
     }
 
@@ -2189,9 +2194,9 @@ impl Actor {
                 }
                 // their Wing action is their Basic one (the same action class: Teresa,
                 // Pukupuku, FishBone, Hanachan, Kameck, Bros1st / BrosU / FireBros / MegaBros,
-                // Choropoo, Gesso, Wanwan) [obs v1.0.0 actionmap]: they act as unwinged
-                // [inf: the wing-only states inside it — the Boo's PataCharge, the Bros'
-                // WingWalk — are not ported]
+                // Choropoo, Gesso, Wanwan) [obs v1.0.0 actionmap]: they act as unwinged, but
+                // for the wing-only states inside it: the Boo's PataCharge (actors/boo.rs)
+                // [inf: the Bros' WingWalk is not ported]
                 Kind::Boo
                 | Kind::CheepCheep { .. }
                 | Kind::FishBone
@@ -2244,7 +2249,7 @@ impl Actor {
                 self.x += self.vx;
                 self.y += self.vy;
             }
-            Kind::Boo => self.step_boo(),
+            Kind::Boo => self.step_boo(level.style == "3W"),
             Kind::RingBoo { slot } => {
                 let k = if self.big { 0.5 } else { 1.0 };
                 let r_max = if self.big { 52.0 * 1.4 } else { 52.0 };
@@ -3568,52 +3573,6 @@ impl Actor {
         h.vy = 3.0;
         h.dir = self.dir;
         h
-    }
-
-    /// Boo (41-boo.md): stops while the player faces it (speed decays by max(0.12·|v|, 0.002));
-    /// otherwise turns toward the player at ≤ 1°/frame (±45° from horizontal) and speeds up by
-    /// 0.005 to 0.4, with a wobble growing 0.0015/frame to 0.2 (2°/frame phase).
-    fn step_boo(&mut self) {
-        let (px, py) = self.target;
-        if self.age == 1 {
-            // spawned facing the player
-            self.heading = if self.dir < 0 { 180.0 } else { 0.0 };
-        }
-        let looking = (px < self.x) == (self.target_facing > 0);
-        if looking {
-            self.speed = (self.speed - (0.12 * self.speed).max(0.002)).max(0.0);
-        } else {
-            let want = (py + 8.0 - self.y).datan2(px - self.x).to_degrees();
-            let want = if want.abs() > 90.0 {
-                let w = if want < 0.0 { want + 360.0 } else { want };
-                w.clamp(135.0, 225.0)
-            } else {
-                want.clamp(-45.0, 45.0)
-            };
-            let mut diff = want - self.heading;
-            while diff > 180.0 {
-                diff -= 360.0;
-            }
-            while diff < -180.0 {
-                diff += 360.0;
-            }
-            self.heading += diff.clamp(-1.0, 1.0);
-            self.speed = (self.speed + 0.005).min(0.4);
-            self.dir = if px < self.x { -1 } else { 1 };
-        }
-        // wobble only while chasing (its amplitude grows from the start of the chase)
-        if looking {
-            self.timer = 0;
-        } else {
-            self.timer += 1;
-        }
-        let amp = (self.timer as f32 * 0.0015).min(0.2);
-        let w = amp * (self.timer as f32 * 2.0).to_radians().dsin();
-        let (s, c) = self.heading.to_radians().dsin_cos();
-        self.vx = self.speed * c - w * s;
-        self.vy = self.speed * s + w * c;
-        self.x += self.vx;
-        self.y += self.vy;
     }
 
     /// Koopa Clown Car (42-koopa-clown-car.md). Empty: velocity × 0.95 with a ±0.2 bob in 0.01
