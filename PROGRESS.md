@@ -59,7 +59,8 @@ sway, importer and pack 12, the dev cache already at v12).
   thumbnails and whole-course maps on the server, Played / Liked lists, `based_on` uploads, the
   listener that recovers from a failed accept, the `mmk-embed` crate, Endless's run slot per
   ruleset and no-repeat pool, the relay's 1450-byte messages; licence GPL-3.0-or-later
-- ⬜ CI on the public repo (Linux on push; macOS / Windows / wasm / Android by hand)
+- ✅ CI on the public repo (`tests.yml`: Linux on every push, superseded runs cancelled; macOS /
+  Windows / wasm by hand; `no-proprietary.yml` on every push; `release.yml` on a tag)
 
 **G1 — Import once, then ROM-free** 🔄
 - ✅ The importer reads the dump itself (`mmk import --nsp <base> --update <update> --keys
@@ -104,7 +105,9 @@ sway, importer and pack 12, the dev cache already at v12).
   the comment window)
 - ✅ Play without a pause: an opened row's course is fetched in the background (`Host::prefetch_course`;
   TGRCode's client caches it), so Play loads from the cache
-- ⬜ Popular across difficulties / TGRCode's sort options; more than 20 New courses (paging)
+- ⏳ Popular across difficulties / more than 20 New courses: TGRCode can't — `search_new` caps
+  at 20 with no paging, `search_popular` takes one difficulty and the client is held to one
+  request per 2 s (four lists ≈ 8 s); Popular stays TGRCode's Normal ranking
 - ⬜ Leaderboards / Ninji where TGRCode has data; Super Worlds screens (G5; the client has
   `super_world`)
 
