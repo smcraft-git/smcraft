@@ -1148,7 +1148,12 @@ impl Actor {
             self.ridden && (self.hops > 0 || (self.target.0 - self.x).abs() <= 8.0 * width as f32);
         self.hops = if on { self.hops.saturating_add(1) } else { 0 };
         let mut plank = self.plank.unwrap_or_else(|| seesaw::Plank::new(width));
-        let tau = if self.hops >= 3 {
+        // (a ground pound landing on it this frame: `chain` set by the world)
+        if std::mem::take(&mut self.chain) == 1 && on {
+            let (sin, _) = crate::fmath::table_sin_cos(plank.theta as u32);
+            plank.slam(width, self.target.0 >= self.x + sin * -8.0);
+        }
+        let tau = if self.hops >= 3 && !plank.slammed {
             let (rx, ry) = self.target;
             seesaw::torque(plank.theta, self.x, self.y + 8.0, rx, ry, 2.0)
         } else {

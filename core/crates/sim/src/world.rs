@@ -5708,6 +5708,8 @@ impl World {
             }
             a.target = (px, py);
             a.ridden = ride == Some(a.id);
+            // a ground pound's dive landing on the plank this frame slams it
+            a.chain = (a.ridden && self.player.on_ground && self.player.pound == -1) as u32;
             a.step_spawning(&self.level);
             let (id, b, slope) = (a.id, a.solid_box(), a.solid_slope());
             if let Some(s) = self.level.solids.iter_mut().find(|s| s.owner == id)

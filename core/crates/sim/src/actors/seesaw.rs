@@ -28,6 +28,11 @@ use crate::fmath::{table_atan, table_atan2, table_sin_cos};
 
 /// Half the plank's thickness: the top line is 8 px over the line through the pivot.
 pub const HALF: f32 = 8.0;
+/// A ground pound's push: ω = ±7.2 / (W + 3), turned with bounce 0.25 until the stop [obs
+/// v3.0.3 0x71013d7d90: DAT_71023192c4 / DAT_7102318dd0, the integrator called with 0x3e800000;
+/// Ryujinx trace X_seesawp: ω 0.9 on a 5-tile plank the frame the pound lands, the 45° stop six
+/// frames later, back at −0.225].
+const SLAM: f32 = 7.2;
 /// The plank's turn limit, ±45°.
 const LIMIT: i32 = 0x2000_0000;
 /// The tip speed's cap [obs v3.0.3: Seesaw +0x8e0 = 0.4 in the trace].
@@ -41,6 +46,8 @@ pub struct Plank {
     /// (left x, left y, right x, right y) relative to the pivot.
     pub ends: [f32; 4],
     pub prev: [f32; 4],
+    /// Turning from a ground pound (+0xc19): no torque, damping or return until the stop.
+    pub slammed: bool,
 }
 
 impl Plank {
@@ -51,6 +58,22 @@ impl Plank {
             omega: 0.0,
             ends,
             prev: ends,
+            slammed: false,
+        }
+    }
+
+    /// A rider's ground pound lands on it, right of the point 8 px under the top over the
+    /// pivot or left of it: the plank takes the slam's tip speed (not against a stop it rests
+    /// on that way).
+    pub fn slam(&mut self, width: u8, right: bool) {
+        let open = if right {
+            self.theta > -LIMIT
+        } else {
+            self.theta < LIMIT
+        };
+        if open {
+            self.omega = if right { SLAM } else { -SLAM } / (width as f32 + 3.0);
+            self.slammed = true;
         }
     }
 
@@ -80,6 +103,12 @@ impl Plank {
     /// One frame with the riders' summed torque `tau` (see the module notes).
     pub fn step(&mut self, width: u8, tau: f32) {
         let w = width as f32;
+        if self.slammed {
+            self.turn(0.25);
+            self.prev = self.ends;
+            self.ends = ends(width, self.theta);
+            return;
+        }
         let tau = if tau.abs() >= 15.0 { tau } else { 0.0 };
         let mut dw = 0.0;
         if !(-1e-5..=1e-5).contains(&tau) {
@@ -141,6 +170,7 @@ impl Plank {
                 self.omega = -(self.omega * e);
             }
             th = limit;
+            self.slammed = false;
         }
         // (resting on a limit, pushed into it: the tip speed stops)
         if th == before && (th == LIMIT && self.omega < 0.0 || th == -LIMIT && self.omega > 0.0) {

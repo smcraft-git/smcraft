@@ -153,7 +153,7 @@ pub fn run_all(course: &[u8], script: &[Input], start: &Start) -> Result<(String
 // Physics test courses
 
 pub const STYLES: [&str; 5] = ["M1", "M3", "MW", "WU", "3W"];
-pub const KINDS: [&str; 28] = [
+pub const KINDS: [&str; 29] = [
     "flat",
     "wall",
     "slope",
@@ -182,13 +182,14 @@ pub const KINDS: [&str; 28] = [
     "cpiped",
     "slopejoins",
     "seesaw",
+    "seesawp",
 ];
 
 /// Kinds made in SMB1 only (the terrain they test is the same in every style).
 const M1_ONLY: [&str; 3] = ["slopejoin", "mushstart", "slopejoins"];
 /// Kinds made in NSMBU only (a ground pound in the air needs a style that has one in the
 /// engine).
-const WU_ONLY: [&str; 1] = ["seesaw"];
+const WU_ONLY: [&str; 2] = ["seesaw", "seesawp"];
 /// Kinds made in 3D World only (clear pipes are a 3D World part).
 const W3_ONLY: [&str; 4] = ["cpipe", "cpipeg", "cpipev", "cpiped"];
 
@@ -596,6 +597,15 @@ pub fn build_course(name: &str) -> Result<Vec<u8>, String> {
             floor(&mut e, 0, len - 1)?;
             let (_, sh) = mmk_editor::default_size(91);
             e.place_sized(91, 18, up(3), 5, sh, mmk_editor::DEFAULT_FLAGS)
+                .map_err(err)?;
+        }
+        "seesawp" => {
+            // a 5-tile Seesaw pivoting 3 tiles over the floor at x 12 (its plank x 152..232) right
+            // of an 8-high start ground, to walk off and ground-pound onto
+            floor(&mut e, 0, len - 1)?;
+            e.set_start_goal(8, base as u8);
+            let (_, sh) = mmk_editor::default_size(91);
+            e.place_sized(91, 10, up(3), 5, sh, mmk_editor::DEFAULT_FLAGS)
                 .map_err(err)?;
         }
         "cpiped" => {
