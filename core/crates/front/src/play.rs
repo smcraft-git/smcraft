@@ -1172,11 +1172,18 @@ pub(crate) mod tests {
         /// Player 1 in test play (area, feet), and the trail pictures taken of it.
         pub player: Option<(usize, [f32; 2])>,
         pub snapshots: u32,
+        /// Play Together's players' buttons (`player_buttons`).
+        pub player_buttons: Vec<u32>,
     }
 
     impl Host for MockHost {
         fn controllers(&mut self) -> u32 {
             self.controllers.max(1)
+        }
+        fn player_buttons(&mut self, players: usize) -> Vec<u32> {
+            let mut b = self.player_buttons.clone();
+            b.resize(players, 0);
+            b
         }
         fn set_players(&mut self, n: u32) {
             self.players.push(n);

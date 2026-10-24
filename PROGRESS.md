@@ -313,7 +313,7 @@ sway, importer and pack 12, the dev cache already at v12).
      Coin Block Outs, KutsuKuribo, ✅ Togezo's ceiling mode, ✅ the winged coin's side-pipe exit
      (context 8 = Killer), ✅ Bubble / Thwomp / Porcupuffer / Wiggler / Cheep Cheep own Parachute Falls, the
      parachute body sway (drawn), DokanOutBig's 0.5 → 0.7 scale and other draw-only scales;
-     Super World enemy-icon courses, point icons by model, map ghosts; ✅ CJK course
+     ✅ Super World enemy-icon courses, point icons by model (branch `swmap3`), map ghosts; ✅ CJK course
      names (branch `cjk`, 2026-10-24: the
      UI pack keeps the decrypted scalable fonts (`ui/scalable/`, 31 MB) and each baked font's
      recipe; a character the sheets lack is rasterised on first use at the baked font's metrics
@@ -644,9 +644,24 @@ sway, importer and pack 12, the dev cache already at v12).
   crumbles, the cannon's prepare / launch (`nextWorld`), the next world's landing; unreached
   points stand still; the goal model by world / water / course (0x71014437e0); the ledges'
   cliffs from the atlas rows 6–7 [inf placement]. Captures `superworld-clear`,
-  `superworld-worldclear`. ⬜ `passPoint` (the game walks through some points: 0x7101472450's
-  stop flag not read), the map camera (the view keeps the map's height [inf]), the cliffs' row-7
-  pieces, map ghosts (online: other players' runs with name balloons)
+  `superworld-worldclear`. ✅ the ledges' cliffs as the game draws them (2026-10-25, branch
+  `swmap3`, spec §7.3: the ledge's land flags 0x7101445230 — land above / at its own cell from
+  roads, the map's edge and empty cells in Main themes, joined ledges —, its draw 0x7101444b20:
+  full land under them, face over land or meeting water, top, joined by same-kind ledges; the
+  "B" ledges (flag & 3 = 1) from row 7; the field's land asks the same flags). ⬜ map ghosts
+  (online: other players' runs with name balloons)
+- ✅ The walk and the camera (2026-10-25, branch `swmap3`; spec §7.7, §7.9, read from v3.0.3):
+  the route graph's walk-through flag (0x710147b9a0: curves always, roads with exactly two
+  reached neighbours; every point, pipe and Toad House stops) — `passPoint` is the stop's sound
+  on a course, the goal or a Toad House (`sw::walks_through`, `plays_pass_point`); 1.5 units a
+  frame, 0.75 on ladders; hops onto / off pipes (12 up, the game's arc) and stands on them; A
+  enters only a course not cleared / a house not used, after the player's `coursein`; balloons
+  only there. Enemy icons (8–15) start their course on contact (10 units, on arrival walking
+  down the screen; `sw::contact_course`), no `coursein`; back without a clear the player walks
+  straight back to the walk's start at 2 a frame (0x7101470e30 → state 10). Enemy points don't
+  move. The camera: fixed 460.8 × 259.2 over (168, 110) (0x710170b610), dipping 16 over 15
+  frames during a button course-in. The progress record keeps used houses in bits 5–7 (spec §3).
+  Captures `superworld-enemy`, `-retreat`, `-pipe`
 - ✅ Toad House minigames (`super-worlds.md` §6, read from the three sequences): each house runs
   its kind from the world data over the map — MATCH & WIN (`MyWEdit_Minigame_00`: three strips
   at 45 / 30 / 50 a frame, top and bottom left, centre right; A stops them in turn, four slots on;
@@ -655,12 +670,20 @@ sway, importer and pack 12, the dev cache already at v12).
   Fastball / Changeup / Knuckleball / Forkball / Heater on the game's flights, A jumps, the
   game's catch test on the boxes, 3 misses lose, else 5 / 3 / 1 for 0 / 1 / 2 misses), with
   their animations and sounds; one go per house until a game over. Rules `mmk_modes::minigame`,
-  scenes `mmk_front::minigame`; captures `superworld-minigame0` / `1` / `2`. Left: Play
-  Together's per-player input (menus have one merged input), the controller rumble cues
-- ⬜ Enemy-icon courses that start on contact, point icons by model, map ghosts · ✅ co-op: the card's
+  scenes `mmk_front::minigame`; captures `superworld-minigame0` / `1` / `2`. ✅ Play Together
+  (2026-10-25, branch `swmap3`): Mario, Luigi, Toad, Toadette (`TypeMember`), each with their
+  own A (`Host::player_buttons`: the shell and the FFI hand each player's controls over as
+  co-op does): any player stops a strip, each pumps with their own animation, each jumps and
+  catches with their own box, the Forkball aims at a random player. ⬜ the rumble cues
+  (`MW_Minigame_01_Pump`, `_02_Catch`: the hosts have no rumble yet)
+- ✅ Enemy-icon courses that start on contact, point icons by model (icon order confirmed,
+  0x710143f150) · ⬜ map ghosts · ✅ co-op: the card's
   Play Together (left onto it, or a click; L / R change worlds), every controller plays, one
   shared life counter
-- ⬜ Super World maker (later)
+- ⬜ Super World maker (later; its rules are written up in `super-worlds.md` §8, 2026-10-25: the
+  limits, what makes a world valid — start to castle, the castle's course —, the parts, the
+  theme menu's order, the edit states, Worldbot's slots and the one-upload rule; left [?]: what
+  makes a world ready for upload)
 
 **G6 — Network Play through Nextendo** 🔄 (works end to end on a local server; live waits for
 Nextendo; `docs/nextendo-network-play.md`, spec `research/specs/network-play.md`)

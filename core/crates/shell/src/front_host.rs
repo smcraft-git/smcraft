@@ -43,6 +43,9 @@ pub struct HostData {
     pub input: u32,
     /// Players' controls connected: the keyboard (or touch) and each pad (set by the app).
     pub controllers: u32,
+    /// Play Together's players' buttons this tick (engine bits, player 1 first; set by the app
+    /// while more than one plays).
+    pub players: Vec<u32>,
     /// Sound output for courses.
     pub audio: Option<Arc<AudioOut>>,
     /// The Course Maker's music and edit sounds (made from `audio` when first needed).
@@ -127,6 +130,7 @@ impl HostData {
             data_dir: None,
             input: 0,
             controllers: 1,
+            players: Vec::new(),
             audio: None,
             maker_sounds: None,
             title: None,
@@ -674,6 +678,15 @@ impl Host for ShellHost<'_> {
 
     fn controllers(&mut self) -> u32 {
         self.data.controllers
+    }
+
+    fn player_buttons(&mut self, players: usize) -> Vec<u32> {
+        let p = &self.data.players;
+        if p.len() >= players {
+            p[..players].to_vec()
+        } else {
+            Vec::new()
+        }
     }
 
     fn set_run_counters(&mut self, score: u32, coins: u32, lives: u32) {

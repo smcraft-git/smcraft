@@ -212,6 +212,18 @@ SMCraft is back in development (it was archived in October 2026).
   (pack 14).
 - **Toad House minigames** in Super Worlds: Match & Win, Pop & Win and Catch & Win, with the
   game's own rules and prizes.
+- **Super World maps walk as in SMM2**: the player walks at the game's pace (slower on ladders),
+  passes straight through bends and two-way roads and stops at every point with its sound; he
+  hops up onto pipes and stands on them; a cleared course can't be entered again; enemy points
+  (Goombas, Koopas, Piranha Plants, Chain Chomps…) start their course when the player walks
+  into them, and if he comes back without clearing it he walks back to where he set off from.
+  The map is seen through the game's camera (the whole map with the land round it, the view
+  dipping as a course is entered).
+- **Toad House minigames in Play Together**: Mario, Luigi, Toad and Toadette play with their own
+  controllers — anyone stops a strip, everyone pumps the balloon, each jumps for the ball.
+- Super World ledges stand on the game's cliffs: land under them only where the land reaches
+  (a ladder out of the sea stands in the water), cloud, bush and water-blob cliffs for the
+  second kind of ledge.
 - **SMM2's own Endless Challenge**, and **Challenge Modes**: Course World's Endless button
   switches between it and the 100 Mario Challenge with ZL / ZR.
 - **Play Together (local co-op)** for up to four players with SMM2's rules: bubbles, shared
