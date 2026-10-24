@@ -132,6 +132,14 @@ typedef struct {
     float color[4];
 } MmkFieldShadow;                                                      // 24 bytes
 bool mmk_engine_field_shadow(MmkEngine *engine, MmkFieldShadow *out);
+// The night darkness (underwater / ghost house at night): returns the level (0 none … 1), and
+// `count` lights whose shape textures (mmk_assets_texture) cover `half` world px each side of
+// (x, y); everything outside them is covered in black at that level, over the field.
+typedef struct {
+    uint32_t texture;
+    float x, y, half;
+} MmkDarkLight;                                                        // 16 bytes
+float mmk_engine_darkness(MmkEngine *engine, const MmkDarkLight **lights, size_t *count);
 // View flags: bit 0 = draw upside down (underground night)
 uint32_t mmk_engine_view_flags(const MmkEngine *engine);
 void mmk_engine_restart(MmkEngine *engine);
