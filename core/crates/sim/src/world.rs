@@ -96,6 +96,8 @@ pub enum Event {
     ConditionCount,
     ConditionMet,
     ConditionLost,
+    /// Up at a key door without a key.
+    Locked,
     /// SMM1 extras: a costumed player landed, started a skid, began the taunt (their costume
     /// sounds); Lanky Mario's float cue during a held jump.
     Land,
@@ -1812,6 +1814,18 @@ impl World {
                 )
                 .map(|w| (w, false))
             });
+            if entry.is_none() {
+                let (keys, area, unlocked) = (self.keys, self.area, &self.unlocked_doors);
+                if warp::locked_door_at(
+                    &self.player,
+                    input,
+                    up_pressed,
+                    |id| keys > 0 || unlocked.contains(&(area, id >> 1)),
+                    &self.level.warps,
+                ) {
+                    self.events.push(Event::Locked);
+                }
+            }
             if let Some((from, is_pipe)) = entry {
                 let warps: Vec<Vec<crate::level::Warp>> =
                     self.area_initial.iter().map(|l| l.warps.clone()).collect();
@@ -9110,11 +9124,12 @@ mod tests {
             lvl.doors.push((x, 32.0, 2));
         }
         let mut w = World::with_level(lvl);
-        // locked without a key
+        // locked without a key: it rattles (`key_notget`)
         w.player.x = 200.0;
         run(&mut w, 0, 2);
         run(&mut w, input::UP, 1);
         assert!(w.transit.is_none());
+        assert!(w.events.contains(&Event::Locked));
         // get the key, come back
         w.player.x = 100.0;
         run(&mut w, 0, 3);

@@ -77,7 +77,10 @@ fn db() -> serde_json::Value {
                 asset("MantAttack", "CapeSpin"),
                 asset("footstep_L", "StepL"),
                 asset("footstep_R", "StepR"),
-                asset("footstep_Dash", "DashStep")
+                asset("footstep_Dash", "DashStep"),
+                asset("r_get_met", "HelmetOn"),
+                asset("r_get_togemet", "SpikyHelmetOn"),
+                asset("r_lose_met", "HelmetOff")
             ]},
             "M1_JumpStep": {"calls": [asset("jump", "Spring"), asset("high_jump", "SpringHigh")]},
             "M1_PowBlock": {"calls": [asset("pow", "Pow")]},
@@ -343,6 +346,23 @@ fn an_enemy_fireball_spits_on_its_shooter_where_the_style_keeps_it_there() {
     w.actors.push(f);
     r.s.after_step(&w);
     assert_eq!(r.played(), ["sfx:Spit"]);
+}
+
+#[test]
+fn a_helmet_goes_on_and_comes_off_with_its_sounds() {
+    let mut r = rig();
+    let mut w = world();
+    r.s.start_course(&w);
+    r.played();
+    w.player.helmet = Some(1);
+    r.s.after_step(&w);
+    assert_eq!(r.played(), ["sfx:HelmetOn"]);
+    w.player.helmet = None;
+    r.s.after_step(&w);
+    assert_eq!(r.played(), ["sfx:HelmetOff"]);
+    w.player.helmet = Some(2);
+    r.s.after_step(&w);
+    assert_eq!(r.played(), ["sfx:SpikyHelmetOn"]);
 }
 
 #[test]

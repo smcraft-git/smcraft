@@ -167,6 +167,26 @@ pub fn door_entry(
         .copied()
 }
 
+/// Up pressed at a key door the player can't open (no key, not unlocked): the game's locked
+/// rattle (`key_notget`), same window as [`door_entry`].
+pub fn locked_door_at(
+    p: &Player,
+    inp: Input,
+    up_pressed: bool,
+    key_ok: impl Fn(u8) -> bool,
+    warps: &[Warp],
+) -> bool {
+    if !p.on_ground || !up_pressed || inp.held(input::LEFT) || inp.held(input::RIGHT) {
+        return false;
+    }
+    warps.iter().any(|w| {
+        w.kind == WarpKind::Door(2)
+            && !key_ok(w.id)
+            && (p.x - w.x).abs() <= 7.0
+            && (p.y - w.y).abs() < 2.0
+    })
+}
+
 /// The partner of `from`: pipes → same id in the other area; doors → id ^ 1 in the same area.
 /// Warp Box entry (97-warp-box.md): touching the trigger box (12×12 centred 8 px above the
 /// origin) is enough — no button, no ground check. The nearest box by |dx| wins. `usable` says

@@ -583,6 +583,24 @@ impl Sounds {
         if now.shoe && !prev.shoe {
             self.player_sfx(world, "kutsuIn", &[]);
         }
+        // a hit knocks the shoe off (not stepping out of it) [inf: told by the hit's
+        // invincibility]
+        if prev.shoe && !now.shoe && p.invuln > 0 {
+            self.player_sfx(world, "r_lose_shoe", &[]);
+        }
+        // a shell put on as a helmet (Buzzy / Spiny), and lost
+        match (prev.helmet, now.helmet) {
+            (None, Some(2)) => {
+                self.player_sfx(world, "r_get_togemet", &[]);
+            }
+            (None, Some(_)) => {
+                self.player_sfx(world, "r_get_met", &[]);
+            }
+            (Some(_), None) => {
+                self.player_sfx(world, "r_lose_met", &[]);
+            }
+            _ => {}
+        }
         if now.yoshi && !prev.yoshi {
             self.yoshi_sfx(world, "marioRideOn");
         }
@@ -1423,6 +1441,9 @@ impl Sounds {
                     let user = self.user("Balloon");
                     self.sfx_at(world, &user, key, &PropList::default(), pe, 0);
                 }
+                Event::Locked => {
+                    self.player_sfx(world, "key_notget", &[]);
+                }
                 Event::ConditionLost => {
                     self.player_sfx(world, "p_lose_missionClear", &[]);
                 }
@@ -1888,6 +1909,8 @@ struct PlayerSnap {
     wall_slide: bool,
     climbing: bool,
     shoe: bool,
+    /// The shell worn as a helmet (1 Buzzy, 2 Spiny).
+    helmet: Option<u8>,
     yoshi: bool,
     skid: bool,
     propeller: bool,
@@ -1914,6 +1937,7 @@ impl PlayerSnap {
             wall_slide: p.wall_slide > 0,
             climbing: p.climbing.is_some(),
             shoe: p.shoe.is_some(),
+            helmet: p.helmet,
             yoshi: p.yoshi.is_some(),
             skid: p.pose == Pose::Skid,
             propeller: p.prop_rise > 0,
