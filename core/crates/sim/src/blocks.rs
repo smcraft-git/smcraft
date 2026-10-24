@@ -21,6 +21,9 @@ pub enum BlockKind {
     Donut,
     Cloud,
     Ice,
+    /// A Frozen Coin (the coin's 0x4 form, 3.0's `FreezeCoin`): solid ice round a coin, thawed
+    /// into the coin by fire.
+    FrozenCoin,
     /// ON/OFF switch block: toggles the course-wide ON/OFF state when hit.
     OnOff,
     /// Dotted-line block: solid when its colour matches the ON/OFF state (red = ON).
@@ -234,7 +237,9 @@ impl Blocks {
         }
         let bump = if from_below { Bump::up() } else { Bump::down() };
         match b.kind {
-            BlockKind::Empty | BlockKind::Hard | BlockKind::Ice => HitResult::Nothing,
+            BlockKind::Empty | BlockKind::Hard | BlockKind::Ice | BlockKind::FrozenCoin => {
+                HitResult::Nothing
+            }
             BlockKind::Brick => {
                 if b.contents.is_none() && power == HitPower::Break {
                     self.map.remove(&(x, y));

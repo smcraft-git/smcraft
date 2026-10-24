@@ -99,6 +99,8 @@ pub enum Event {
     ConditionLost,
     /// Up at a key door without a key.
     Locked,
+    /// Fire thawed a Frozen Coin.
+    Thaw,
     /// A donut block began to shake under the player / dropped / came back.
     DonutShake,
     DonutFall,
@@ -441,6 +443,7 @@ fn field_anime(style: crate::player::Style, kind: BlockKind, on: bool) -> Option
         BlockKind::Brick => "M1_Field_anime_block_renga",
         BlockKind::Question => "M1_Field_anime_block_hatena",
         BlockKind::Note => "M1_Field_anime_block_onpu",
+        BlockKind::FrozenCoin => "M1_Field_anime_coin_freeze",
         BlockKind::OnOff if on => "M1_Field_anime_block_on",
         BlockKind::OnOff => "M1_Field_anime_block_off",
         _ => return None,
@@ -2077,6 +2080,7 @@ impl World {
         self.step_yoshi_rider();
         self.check_checkpoints();
         self.shell_walls();
+        self.thaw_frozen_coins();
         self.actor_interactions();
         self.player_interactions(jump_held);
         self.step_effects();
@@ -2170,6 +2174,49 @@ impl World {
         self.blocks
             .get(tx, ty)
             .is_some_and(|b| b.kind == BlockKind::Ice)
+    }
+
+    /// The player's fire thaws a Frozen Coin it touches: the ice is gone, the coin stays (to be
+    /// collected), and the fireball is spent [inf: the game's thawing fire — fireballs here; the
+    /// `p_IceCoinThawing` sound isn't in the imported sound users].
+    fn thaw_frozen_coins(&mut self) {
+        let mut thawed = Vec::new();
+        for a in &mut self.actors {
+            // (one snuffed against the ice this frame counts: it hit it)
+            if a.kind != Kind::Fireball || !(a.alive() || a.wall) {
+                continue;
+            }
+            // every tile the fireball's box (8 × 8, x centred, y up from its feet) touches, a
+            // pixel past it each way
+            let (x0, x1) = (
+                ((a.x - 5.0) / TILE).floor() as i32,
+                ((a.x + 5.0) / TILE).floor() as i32,
+            );
+            let (y0, y1) = (
+                ((a.y - 1.0) / TILE).floor() as i32,
+                ((a.y + 9.0) / TILE).floor() as i32,
+            );
+            'probe: for tx in x0..=x1 {
+                for ty in y0..=y1 {
+                    if self
+                        .blocks
+                        .get(tx, ty)
+                        .is_some_and(|b| b.kind == BlockKind::FrozenCoin)
+                    {
+                        thawed.push((tx, ty));
+                        a.mode = Mode::Dead;
+                        break 'probe;
+                    }
+                }
+            }
+        }
+        for (x, y) in thawed {
+            if self.blocks.map.remove(&(x, y)).is_some() {
+                self.level.set(x, y, Cell::Empty);
+                self.level.coins.push(crate::level::CoinTile { x, y });
+                self.events.push(Event::Thaw);
+            }
+        }
     }
 
     /// A hidden block is only solid to a head coming from below.
@@ -7663,6 +7710,36 @@ mod tests {
         assert!(w.cleared);
         assert_eq!(w.time, 0);
         assert!(w.player.hidden);
+    }
+
+    #[test]
+    fn a_fireball_thaws_a_frozen_coin_into_a_coin() {
+        let mut lvl = Level::flat(40);
+        lvl.set(15, 2, Cell::Solid);
+        lvl.blocks.push(crate::level::BlockPlacement {
+            x: 15,
+            y: 2,
+            kind: BlockKind::FrozenCoin,
+            contents: None,
+        });
+        let mut w = World::with_level(lvl);
+        assert_eq!(w.level.cell(15, 2), Cell::Solid, "ice is solid");
+        let mut f = Actor::new(Kind::Fireball, 13.0 * TILE, 2.0 * TILE);
+        f.vx = 4.0;
+        f.dir = 1;
+        f.timer = 120;
+        w.actors.push(f);
+        let mut thawed = false;
+        for _ in 0..30 {
+            w.step(Input::default());
+            thawed |= w.events.contains(&Event::Thaw);
+        }
+        assert!(thawed);
+        assert!(w.blocks.get(15, 2).is_none());
+        assert!(
+            w.level.coins.iter().any(|c| (c.x, c.y) == (15, 2)),
+            "the coin is free"
+        );
     }
 
     #[test]

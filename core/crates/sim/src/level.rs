@@ -421,7 +421,9 @@ pub fn block_atlas(kind: BlockKind) -> u32 {
         BlockKind::Hard => 6,
         BlockKind::Donut => 64,
         BlockKind::Cloud => 102,
-        BlockKind::Ice => 120,
+        // the frozen coin: the ice block's tile in the atlas (its own art is the field's
+        // `anime_block_freeze` model in the 2D styles) [inf for NSMBU / 3D World]
+        BlockKind::Ice | BlockKind::FrozenCoin => 120,
         BlockKind::OnOff => 21 * 16 + 2 + 32,
         BlockKind::Dotted { blue } => 21 * 16 + 2 + blue as u32,
     }
@@ -466,7 +468,8 @@ const ALT_FORMS: &[i16] = &[
     // 2.0 / 3.0: the spike ball, the P Block that appears, the blue ON/OFF Trampoline; on a
     // Mechakoopa the bit does nothing [obs]
     74, 79, 111, 132, // the Super Mushroom's 0x4 form: the SMB1 Master Sword
-    20,
+    20,  // the coin's: the Frozen Coin
+    8,
 ];
 
 /// Game styles the engine plays.
@@ -1436,6 +1439,16 @@ impl Level {
                 continue;
             }
             match o.id {
+                // a Frozen Coin: a solid block until fire thaws it (3.0, `FreezeCoin`)
+                8 if !actorish && o.flags & 0x4 != 0 => {
+                    lvl.set(tx, ty, Cell::Solid);
+                    lvl.blocks.push(BlockPlacement {
+                        x: tx,
+                        y: ty,
+                        kind: BlockKind::FrozenCoin,
+                        contents: None,
+                    });
+                }
                 8 if !actorish => lvl.coins.push(CoinTile { x: tx, y: ty }),
                 92 => lvl.pink_coins.push(CoinTile { x: tx, y: ty }),
                 id if !actorish && block_kind(id).is_some() => {
@@ -2012,6 +2025,20 @@ mod tests {
         // its top is its height less 2 px
         assert_eq!(col.fixed, Some((328.0, 16.0 + 32.0 - 2.0)));
         assert_eq!(col.members.len(), 1);
+    }
+
+    #[test]
+    fn a_coins_other_form_is_a_frozen_coin() {
+        let lvl = level(
+            vec![object(8, 10, 3, 1, 1, 0x4), object(8, 12, 3, 1, 1, 0)],
+            0,
+        );
+        assert!(
+            lvl.blocks
+                .iter()
+                .any(|b| (b.x, b.y, b.kind) == (10, 3, BlockKind::FrozenCoin))
+        );
+        assert_eq!(lvl.coins.len(), 1, "the plain coin stays a coin");
     }
 
     #[test]
