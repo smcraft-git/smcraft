@@ -345,7 +345,8 @@ Nextendo; `docs/nextendo-network-play.md`, spec `research/specs/network-play.md`
   shell's knock-outs climbing its combo (`DownComboCount` along the shell's chain), enemies and
   items splashing into and out of the area's liquid (`r_splash_in` / `_out` by `BgWaterType`); the
   Master Sword, Superball Flower and SMB2 Mushroom's own course music, hurry track and fanfares; the
-  update power-ups' sounds (sword, shield, arrow, SMB2 pull / throw, balloon, wearables, boomerang) ✅
+  update power-ups' sounds (sword, shield, arrow, SMB2 pull / throw, balloon, wearables, boomerang);
+  the cape's spin and climb, the cat's wall climb, slide down and dive landing ✅
 
 **G9 — Every platform** 🔄
 - 🔄 macOS (Swift app) · 🔄 iOS / iPadOS (built for the Simulator; the owner's iPad) · 🔄 Windows ·

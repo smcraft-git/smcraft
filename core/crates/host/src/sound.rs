@@ -595,6 +595,23 @@ impl Sounds {
         if now.propeller && !prev.propeller {
             self.player_sfx(world, "propellerjump", &[]);
         }
+        // the cape's spin and its climb (SMW); the cat's wall climb, its slide back down, the
+        // landing of its dive (3D World)
+        if now.attack && !prev.attack {
+            self.player_sfx(world, "MantAttack", &[]);
+        }
+        if now.cape_rise && !prev.cape_rise {
+            self.player_sfx(world, "MantRise", &[]);
+        }
+        if now.cat_climb > 0 && prev.cat_climb <= 0 {
+            self.player_sfx(world, "wall_climb_start", &[]);
+        }
+        if now.cat_climb < 0 && prev.cat_climb >= 0 {
+            self.player_sfx(world, "wall_climb_fall_start", &[]);
+        }
+        if prev.dive && !now.dive && now.on_ground {
+            self.player_sfx(world, "p_CatBodyAttackLand", &[]);
+        }
         // footsteps every half walk cycle while walking on the ground
         if now.on_ground && now.walking {
             let step = (p.walk_phase / FOOTSTEP_PHASE) as i32;
@@ -1827,6 +1844,12 @@ struct PlayerSnap {
     ride: Option<u32>,
     tongue: bool,
     form: Option<Form>,
+    /// Cape spin / tail swing under way, the cape's climb, the cat's wall climb (> 0) and its
+    /// slide back down (< 0), the cat's dive.
+    attack: bool,
+    cape_rise: bool,
+    cat_climb: i32,
+    dive: bool,
 }
 
 impl PlayerSnap {
@@ -1847,6 +1870,10 @@ impl PlayerSnap {
             ride: p.ride,
             tongue: world.tongue > 0,
             form: Some(p.form),
+            attack: p.attack > 0,
+            cape_rise: matches!(p.cape, mmk_sim::player::CapeState::Rise(_)),
+            cat_climb: p.cat_climb.signum(),
+            dive: p.dive,
         }
     }
 }

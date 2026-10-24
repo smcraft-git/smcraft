@@ -73,7 +73,8 @@ fn db() -> serde_json::Value {
                 asset("pole", "Pole"),
                 asset("swim", "Swim"),
                 asset("kabekick", "WallKick"),
-                asset("swordAttack", "Slash")
+                asset("swordAttack", "Slash"),
+                asset("MantAttack", "CapeSpin")
             ]},
             "M1_JumpStep": {"calls": [asset("jump", "Spring"), asset("high_jump", "SpringHigh")]},
             "M1_PowBlock": {"calls": [asset("pow", "Pow")]},
@@ -305,6 +306,20 @@ fn the_master_sword_plays_links_music_and_fanfare() {
     w.player.kill();
     r.s.after_step(&w);
     assert_eq!(r.played(), ["music:LinkDown"]);
+}
+
+#[test]
+fn a_cape_spin_sounds_once_when_it_starts() {
+    let mut r = rig();
+    let mut w = world();
+    r.s.start_course(&w);
+    r.played();
+    w.player.attack = 12;
+    r.s.after_step(&w);
+    assert_eq!(r.played(), ["sfx:CapeSpin"]);
+    w.player.attack = 11;
+    r.s.after_step(&w);
+    assert!(r.played().is_empty(), "not again while it lasts");
 }
 
 #[test]
