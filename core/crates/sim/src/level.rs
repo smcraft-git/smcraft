@@ -499,6 +499,9 @@ const RIDES_TRACKS: &[i16] = &[
     70, 76, 77, 82, 83, 91, 95, 96, 98, 102, 103, 105, 114, 117, 74, 111,
     // the Koopalings: the rail carries them as it carries Bowser; they still turn and shoot
     120, 121, 122, 123, 124, 125, 126,
+    // a hidden block (a moving one, as when winged), the style power-up, the SMB2 Mushroom, the
+    // wearables, Pokey
+    29, 44, 81, 127, 128, 129, 130, 131, 78,
 ];
 
 /// What a block (or tree, checkpoint flag) releases: its child part. The simple items keep
