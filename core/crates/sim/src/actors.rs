@@ -639,6 +639,13 @@ pub struct Actor {
     pub age: u32,
     /// Frames during which a just-kicked shell cannot hurt the kicker.
     pub kick_lock: i32,
+    /// A kick's slide speed (signed), taken up by the shell's next update: the kick message
+    /// is handled a frame later [obs: Ryujinx trace M1_koopa koopa_kick, vx still 0 on the
+    /// kick frame, moving at the kick speed from the next].
+    pub kick_speed: f32,
+    /// A sliding shell hit a wall last frame: it turns back at the start of this update [obs:
+    /// Ryujinx trace M1_koopa koopa_kick, flush against the wall with the old speed for a frame].
+    pub bounce_pending: bool,
     /// Kill chain (shells) / stomp chain bookkeeping.
     pub chain: u32,
     /// Paragoomba hop cycle and pause.
@@ -664,6 +671,9 @@ pub struct Actor {
     pub target: (f32, f32),
     /// Stable id (moving solids are tracked by it).
     pub id: u32,
+    /// Position before this frame's move (the world sets it; a stomp undoes the move: the
+    /// game's enemies update after the player-contact check) [obs: Ryujinx trace M1_koopa].
+    pub pre: (f32, f32),
     /// Something stands on this platform (set by the world).
     pub ridden: bool,
     /// Position change this frame (for carrying riders).
@@ -721,6 +731,7 @@ impl Actor {
             mode: Mode::Normal,
             x,
             y,
+            pre: (x, y),
             vx: 0.0,
             vy: 0.0,
             dir: 1,
@@ -731,6 +742,8 @@ impl Actor {
             turn_lock: 0,
             age: 0,
             kick_lock: 0,
+            kick_speed: 0.0,
+            bounce_pending: false,
             chain: 0,
             hops: 0,
             pause: 0,
@@ -1494,6 +1507,7 @@ impl Actor {
     }
 
     fn enter_shell_wait(&mut self) {
+        self.bounce_pending = false;
         self.mode = Mode::ShellWait;
         self.timer = SHELL_WAKE;
         self.vx = 0.0;
@@ -1508,10 +1522,18 @@ impl Actor {
             speed += 0.5 * kicker_vx.abs();
         }
         self.mode = Mode::ShellSlide;
+        self.bounce_pending = false;
         self.dir = dir;
         self.vx = speed * dir as f32;
         self.kick_lock = 16;
         self.chain = 0;
+    }
+
+    /// A player's touch kicks a still shell (kick()), the slide starting with the shell's next
+    /// update (`kick_speed`).
+    pub fn touch_kick(&mut self, dir: i32, kicker_vx: f32) {
+        self.kick(dir, kicker_vx);
+        self.kick_speed = std::mem::take(&mut self.vx);
     }
 
     pub fn turn(&mut self) {
@@ -1709,12 +1731,18 @@ impl Actor {
                 }
             }
             Mode::ShellSlide => {
+                if self.kick_speed != 0.0 {
+                    self.vx = std::mem::take(&mut self.kick_speed);
+                }
+                if std::mem::take(&mut self.bounce_pending) {
+                    self.dir = -self.dir;
+                    self.vx = -self.vx;
+                }
                 self.vy = (self.vy + ENEMY_GRAVITY).max(MAX_FALL);
                 self.collide(level);
                 if self.wall {
-                    // reverse, keeping the speed (the caller hits the block in the way)
-                    self.dir = -self.dir;
-                    self.vx = -self.vx;
+                    // reverse next frame, keeping the speed (the caller hits the block in the way)
+                    self.bounce_pending = true;
                 }
                 if self.vx.abs() < 0.001 {
                     self.enter_shell_wait();
@@ -2031,19 +2059,31 @@ impl Actor {
                 } else {
                     self.vx = self.vx.clamp(-speed, speed);
                 }
-                // red Koopa turns at ledges: probe |half width| + 0.1 ahead for floor
-                if self.kind.ledge_turner() && self.on_ground && self.turn_lock == 0 {
-                    let px = self.x + self.dir as f32 * (self.half_w() + 0.1);
-                    let below = level.cell_at(px, self.y - 1.0);
-                    let slope = level.slope_at(px).is_some_and(|(s, _)| s >= self.y - 8.0);
-                    if below == Cell::Empty && !slope {
-                        self.turn();
-                    }
-                }
+                let was_on_ground = self.on_ground;
                 self.vy = (self.vy + ENEMY_GRAVITY).max(MAX_FALL);
                 self.collide(level);
                 if self.wall && self.turn_lock == 0 {
                     self.turn();
+                }
+                // a red Koopa turns at ledges: after the move, the floor is probed |foot sensor
+                // half-width| + 0.1 ahead (the enemy sensor row 0x71023cd258: feet ±3.8; big ×2
+                // [inf]); off the floor, it faces back and walks back from the next frame (this
+                // frame's move stands) [obs: Ryujinx trace M1_koopa, a red Koopa pacing a 1-wide
+                // pillar between x 323.5 and 332.5, its facing flipping on those frames]
+                if self.kind.ledge_turner()
+                    && was_on_ground
+                    && self.on_ground
+                    && !self.wall
+                    && self.turn_lock == 0
+                {
+                    let reach = 3.8 * if self.big { 2.0 } else { 1.0 } + 0.1;
+                    let px = self.x + self.dir as f32 * reach;
+                    let below = level.cell_at(px, self.y - 1.0);
+                    let slope = level.slope_at(px).is_some_and(|(s, _)| s >= self.y - 8.0);
+                    if below == Cell::Empty && !slope {
+                        self.dir = -self.dir;
+                        self.turn_lock = TURN_LOCK;
+                    }
                 }
             }
             Kind::Mushroom | Kind::OneUp => {
@@ -3905,6 +3945,10 @@ impl Actor {
     /// Axis-separated movement against the tile grid and slopes. Sets on_ground and wall.
     pub fn collide(&mut self, level: &Level) {
         let (hw, h) = (self.half_w(), self.height());
+        // a shell's sides are 6 px out and it stops flush against a wall [obs: Ryujinx trace
+        // M1_koopa koopa_kick: x 538.0 against a wall at 544, 342.0 against one at 336]
+        let shell = matches!(self.kind, Kind::Shell { .. });
+        let (side_hw, gap) = if shell { (6.0, 0.0) } else { (hw, 0.001) };
         let was_ground = self.on_ground;
         let solid = |px: f32, py: f32| level.cell_at(px, py).is_solid();
 
@@ -3912,7 +3956,7 @@ impl Actor {
         self.x += self.vx;
         if self.vx != 0.0 {
             let side = self.vx.signum();
-            let wx = self.x + side * hw;
+            let wx = self.x + side * side_hw;
             let ys = [self.y + 2.0, self.y + (h - 2.0).max(2.0)];
             // one-way walls block only motion into them from their blocking side
             let prev_wx = wx - self.vx;
@@ -3928,7 +3972,7 @@ impl Actor {
                 } else {
                     ((wx / TILE).floor() + 1.0) * TILE
                 };
-                self.x = edge - side * (hw + 0.001);
+                self.x = edge - side * (side_hw + gap);
                 self.wall = true;
             }
         }
@@ -3940,7 +3984,13 @@ impl Actor {
         // vertical
         let prev_y = self.y;
         self.y += self.vy;
-        let fx = (hw - 3.0).max(1.0);
+        // feet: 3 px in from the sides; a shell stands on its centre ±1 (it drops off a ledge
+        // once its centre is 1 px past it) [obs: Ryujinx trace M1_koopa koopa_kick]
+        let fx = if matches!(self.kind, Kind::Shell { .. }) {
+            1.0
+        } else {
+            (hw - 3.0).max(1.0)
+        };
         if self.vy > 0.0 {
             let hy = self.y + h;
             if [-fx, fx].iter().any(|&dx| solid(self.x + dx, hy)) {

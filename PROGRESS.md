@@ -395,20 +395,29 @@ Nextendo; `docs/nextendo-network-play.md`, spec `research/specs/network-play.md`
   a carried part dropped on one that stacks goes on top of its column (`mmk_editor::stack`,
   `Combine`) [inf: the gesture; the palette pen on a part still picks it up]
 - 🔄 Physics: re-recording every trace (2026-10-24; the old 428 / 454 was not a true count — the
-  old items / form traces were all small Mario). Re-recorded so far, current engine: **352 / 352
-  exact** over 26 courses: M1/M3/MW/WU flat 34 each, M1/M3/MW/WU items 34 each, M1/M3/MW/WU
-  slope 4 each, M1/M3/MW/WU wall 4 each, M1/M3/MW/WU water 2 each, M3/MW form 16 each,
-  M1/M3/MW/WU enemy 2 each (a stomp on a penned Goomba with the held-jump bounce; a running jump
-  from against the pen wall onto Munchers: the death, its 45-frame freeze and the hop) (was 274
-  of the first 286 with the engine at 39fdb6e). Fixed: pit death at view bottom − 56 with no hop,
-  slip end on flat, raccoon tail wag, SMW cape take-off / climb end / slide end, jump bonus from
-  the pre-move speed, the wall probes at the moved height (rising past a wall's top corner frees
-  the player a frame earlier), solid actors' sides (Munchers) flush like terrain; 3D World
-  slide-end stoop 3 frames (SquatStart's length + 1, as NSMBU's 9 → 10; not traced). ⬜ still to
-  record: the 6 3D World courses incl. 3W_enemy (headless Ryujinx aborts in MoltenVK: a Metal
-  texture-descriptor validation failure in vkCmdBlitImage), WU form (the Propeller Mushroom is
-  never collected at the title screen: floor, block, open pen and a roofed box with a doorway all
-  tried). Then Koopa / shell and other object traces; whole courses start to goal
+  old items / form traces were all small Mario). Re-recorded, current engine: **440 / 440 exact**
+  over 36 courses: M1/M3/MW/WU/3W flat 34 each, M1/M3/MW/WU/3W items 34 each, M1/M3/MW/WU/3W
+  slope 4 each, M1/M3/MW/WU/3W wall 4 each, M1/M3/MW/WU/3W water 2 each, M3/MW form 16 each,
+  M1/M3/MW/WU/3W enemy 2 each (a stomp on a penned Goomba with the held-jump bounce; a running
+  jump from against the pen wall onto Munchers (3D World: Piranha Plants): the death, its
+  45-frame freeze and the hop), M1/M3/MW/WU koopa 2 each, player and Koopa both compared (a red
+  Koopa pacing a 1-wide pillar: the stomp; a kick from above, the shell's slide off the pillar,
+  wall bounces back and forth for 280 frames) (was 274 of the first 286 with the engine at
+  39fdb6e). Fixed: pit death at view bottom − 56 with no hop, slip end on flat, raccoon tail
+  wag, SMW cape take-off / climb end / slide end, jump bonus from the pre-move speed, the wall
+  probes at the moved height, solid actors' sides (Munchers) flush like terrain; a foot probe
+  exactly on a column boundary stands on the column to its left; an enemy's touch hurts on the
+  next frame (after that frame's move; a death then freezes the enemies before they move); 3D
+  World's air run target is 3.0 before the dash stage too; red Koopa ledge turns (probe ±3.9
+  after the move, the walk back from the next frame); a stomped enemy doesn't move that frame; a
+  kick from above doesn't bounce; a kicked shell slides from its next update, stands on its
+  centre ±1, meets walls with 6 px sides flush and turns back a frame later; the kicker's
+  no-hit window also blocks stomps; NSMBU Koopa contact box 21 px tall. 3D World slide-end stoop
+  3 frames confirmed. 3D World recording works with a local Ryujinx fix (a zero-sized guest
+  texture with 2 levels made Metal abort under MoltenVK). ⬜ still to record: WU form (the
+  Propeller Mushroom is never collected at the title screen: floor, block, open pen and a
+  roofed box with a doorway all tried); side kicks, running kicks, shells hitting enemies and
+  blocks, other objects; whole courses start to goal
 - 🔄 Pixels against the game (smm2recomp reference frames of `mmk ref-courses`, all 90, update
   900; MAE / % pixels off by > 24; `research/tools/pixel-ref/pixref.py`, 2026-10-24):
 

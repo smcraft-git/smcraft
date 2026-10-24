@@ -383,6 +383,10 @@ pub struct Player {
     pub hidden: bool,
     /// Stomp chain without touching the ground.
     pub stomp_chain: u32,
+    /// An enemy's touch hurts on the next frame: the enemy reports the contact after the
+    /// player's update, and the player takes the damage in its next update, after that frame's
+    /// move [obs: Ryujinx trace 3W_enemy enemy_die, a side touch of a Piranha Plant].
+    pub enemy_hit: bool,
     /// Standing on ice (set by the world from the ground under the feet).
     pub on_ice: bool,
     /// Actor id of the moving solid the player stands on.
@@ -594,6 +598,7 @@ impl Player {
             fire_pose: 0,
             hidden: false,
             stomp_chain: 0,
+            enemy_hit: false,
             on_ice: false,
             ride: None,
             spiked: false,
@@ -1233,8 +1238,16 @@ impl Player {
             let t = self.thresholds();
             let star = self.star > 0;
             let s = self.vx.abs();
+            // (3D World's two-stage run is a ground rule: in the air run + direction aims at
+            // T3 before the dash stage too [obs: Ryujinx trace 3W_enemy enemy_die, a running
+            // jump from a standstill accelerating past 2.25])
+            let run_max = if self.style == Style::W3 && self.star == 0 {
+                t[3]
+            } else {
+                self.run_max()
+            };
             let target = if run {
-                self.run_max().max(s.min(t[3]))
+                run_max.max(s.min(t[3]))
             } else if s > t[1] && self.vx.signum() as i32 == dir {
                 s
             } else {
@@ -2759,6 +2772,14 @@ impl Player {
                 }
                 let top = ((py / TILE).floor() + 1.0) * TILE;
                 let cell = level.cell_at(px, py);
+                // a probe exactly on a column boundary also touches the column to its left (tile
+                // edges are inclusive) [obs: Ryujinx trace 3W_flat ledge_run, left foot at x 1440.0
+                // over the pit's left edge still stands]
+                let cell = if cell == Cell::Empty && (px / TILE).fract() == 0.0 {
+                    level.cell_at(px - TILE * 0.5, py)
+                } else {
+                    cell
+                };
                 let ok = cell.is_solid() || (cell == Cell::SemiTop && prev_y >= top - 0.01);
                 if ok {
                     landed = Some(landed.map_or(top, |t: f32| t.max(top)));

@@ -1800,6 +1800,12 @@ impl World {
                 Event::Death
             });
         }
+        // last frame's enemy touch (Player::enemy_hit), in the player's update after its move:
+        // a death freezes the enemies before they move this frame [obs: Ryujinx trace M1_koopa
+        // koopa_kick, the Koopa that walked into the player keeps its place on the death frame]
+        if std::mem::take(&mut self.player.enemy_hit) && self.player.hurt() && self.player.alive() {
+            self.events.push(Event::PowerDown);
+        }
         // pipes and doors
         let up_pressed = input.held(input::UP) && !self.prev_up;
         self.prev_up = input.held(input::UP);
@@ -2038,6 +2044,7 @@ impl World {
                     .is_some_and(|l| l.water() && l.covers(a.y + 16.0));
             }
             w3::sense(a, self.liquid, &self.player);
+            a.pre = (a.x, a.y);
             if let Some(n) = a.step_spawning(&self.level) {
                 born.push(n);
             }
@@ -2862,6 +2869,17 @@ impl World {
         }
     }
 
+    /// An actor's box as the player meets it (stomps, touches): its hit box, except an NSMBU
+    /// Koopa's, 21 px tall (its walking stomp top sits 21 px above its feet [obs: Ryujinx traces
+    /// WU_koopa, stomps at feet 67.05 and 68.71 over a Koopa standing at 48, none at 70.07])
+    fn player_contact_box(style: crate::player::Style, a: &Actor) -> (f32, f32, f32, f32) {
+        let b = a.bbox();
+        if style == crate::player::Style::WU && matches!(a.kind, Kind::Koopa { .. }) && !a.big {
+            return (b.0, b.1, b.2, b.1 + 21.0);
+        }
+        b
+    }
+
     fn player_interactions(&mut self, jump_held: bool) {
         if !self.player.alive() {
             return;
@@ -2876,7 +2894,7 @@ impl World {
                 i += 1;
                 continue;
             }
-            let ab = a.bbox();
+            let ab = Self::player_contact_box(self.style, a);
             if let Kind::BigCoin { value } = a.kind {
                 if overlap(contact, ab) {
                     let (ax, ay) = (a.x, a.y);
@@ -3185,7 +3203,7 @@ impl World {
                 continue;
             }
             let p = &self.player;
-            let (ax, ay, ah) = (a.x, a.y, a.height());
+            let (ax, ay, ah) = (a.x, a.y, ab.3 - ab.1);
             let head = p.y + p.sensors().head_y;
             // empty shells (the 0x4 forms): a Buzzy or Spiny shell that comes down on the head
             // of a player without a helmet becomes the helmet (enemy contact 0x710072bca0 →
@@ -3430,19 +3448,24 @@ impl World {
             if still_shell {
                 let dir = if ax >= self.player.x { 1 } else { -1 };
                 let pvx = self.player.vx;
-                self.actors[i].kick(dir, pvx);
-                if stomp {
-                    self.player.bounce(jump_held);
-                }
+                self.actors[i].touch_kick(dir, pvx);
+                // (a kick from above doesn't bounce the player [obs: Ryujinx trace M1_koopa
+                // koopa_kick, the fall goes on onto the pillar])
                 // the kick scores as a stomp-family attack on the player's stomp chain
                 // (shell kick 0x71005f57a0 → 0x7100644610 with attack 0) [obs]
                 let n = self.player.stomp_chain;
                 self.player.stomp_chain += 1;
                 self.add_score(Self::chain_score(n), ax, ay + 24.0);
                 self.events.push(Event::Kick);
+            } else if self.actors[i].mode == Mode::ShellSlide && self.actors[i].kick_lock > 0 {
+                // the kicker's no-hit window (no stomp either: the kicker's fall onto the
+                // shell it just kicked from above goes on [obs: Ryujinx trace M1_koopa])
             } else if stomp {
                 let was_lakitu = self.actors[i].kind == Kind::Lakitu;
                 if self.actors[i].stomp() {
+                    // the stomped enemy doesn't move this frame (Actor::pre)
+                    let (x, y) = self.actors[i].pre;
+                    (self.actors[i].x, self.actors[i].y) = (x, y);
                     if was_lakitu {
                         // the empty cloud stays, rideable
                         let mut c = Actor::new(Kind::Cloud, ax, ay);
@@ -3456,15 +3479,9 @@ impl World {
                     self.add_score(Self::chain_score(n), ax, ay + 24.0);
                     self.events.push(Event::Stomp);
                 }
-            } else if self.actors[i].mode == Mode::ShellSlide && self.actors[i].kick_lock > 0 {
-                // the kicker's no-hit window
-            } else if self.player.hurt() {
-                if self.player.alive() {
-                    self.events.push(Event::PowerDown);
-                } else {
-                    self.events.push(Event::Death);
-                }
-                return;
+            } else {
+                // hurts on the next frame (Player::enemy_hit)
+                self.player.enemy_hit = true;
             }
             i += 1;
         }
