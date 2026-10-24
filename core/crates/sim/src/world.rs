@@ -596,7 +596,8 @@ fn walk_frame(frames: &[&'static str], age: u32, rate: u32) -> &'static str {
 
 /// An item's touch box (x0, y0, x1, y1) from its bbox `ab`, against the player's box B.
 /// The item's collider (the enemy collider 0x71012079a0) takes its box each frame
-/// from the table 0x71023cb8d0 by the actor's box id (+0x6a0; 0x7101208390); the
+/// from the table 0x71023cb8b0 (0x40-byte records, the box at +0x24) by the actor's box
+/// id (+0x6a0; 0x7101208390); the
 /// item init 0x710134fe30 sets id 0x5f = centre (0, 7), half 7 × 7 (×1.5 / ×2 big,
 /// × the actor's scale while +0x52c bit 2), and two boxes overlap when both centre
 /// distances are below the half sums (0x7100e28e20) [obs v3.0.3]. In 3D World that
