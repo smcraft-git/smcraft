@@ -107,6 +107,8 @@ pub struct Bump {
     /// M1_blocks blk_mush (a head hit, the mushroom 14 frames later) and M1_shellq (a shell side
     /// hit registered after the blocks' update: 15 frames)].
     pub fresh: bool,
+    /// An SMW turn block's bounce: it spins (Rolling) when it ends.
+    pub turn: bool,
 }
 
 impl Bump {
@@ -119,6 +121,7 @@ impl Bump {
             v_end: -2.0,
             frames: 0,
             fresh: true,
+            turn: false,
         }
     }
     pub fn down() -> Self {
@@ -130,6 +133,7 @@ impl Bump {
             v_end: 2.0,
             frames: 0,
             fresh: true,
+            turn: false,
         }
     }
     pub fn note_up() -> Self {
@@ -141,6 +145,7 @@ impl Bump {
             v_end: -4.5,
             frames: 0,
             fresh: true,
+            turn: false,
         }
     }
     pub fn note_down() -> Self {
@@ -152,6 +157,21 @@ impl Bump {
             v_end: 4.3,
             frames: 0,
             fresh: true,
+            turn: false,
+        }
+    }
+
+    /// The SMW turn block hit from below or the side (4-brick.md B6: +6.0, 1.2645, 9 frames).
+    pub fn turn_up() -> Self {
+        Self {
+            d: 0.0,
+            v: 6.0,
+            down: false,
+            a: 1.2645,
+            v_end: -6.0,
+            frames: 0,
+            fresh: true,
+            turn: true,
         }
     }
 
@@ -240,6 +260,10 @@ pub const MULTI_COIN_MAX: u8 = 10;
 #[derive(Clone, Debug, Default)]
 pub struct Blocks {
     pub map: BTreeMap<(i32, i32), Block>,
+    /// SMW: plain bricks are turn blocks (a hit from below or the side spins them).
+    pub turn_blocks: bool,
+    /// Turn blocks whose bounce ended this step (the world starts their spin).
+    pub turned: Vec<(i32, i32)>,
 }
 
 impl Blocks {
@@ -262,6 +286,11 @@ impl Blocks {
                 HitResult::Nothing
             }
             BlockKind::Brick => {
+                if b.contents.is_none() && self.turn_blocks && from_below {
+                    // (a non-top contact bumps an SMW turn block, Super or not: 4-brick.md)
+                    b.bump = Some(Bump::turn_up());
+                    return HitResult::Bumped;
+                }
                 if b.contents.is_none() && power == HitPower::Break {
                     self.map.remove(&(x, y));
                     return HitResult::Broke;
@@ -320,6 +349,7 @@ impl Blocks {
     /// Advance bumps and multi-coin timers; returns items to spawn (bump end, B9).
     pub fn step(&mut self) -> Vec<Release> {
         let mut out = Vec::new();
+        let mut turned = Vec::new();
         for (&(x, y), b) in self.map.iter_mut() {
             if b.coin_timer > 0 {
                 b.coin_timer -= 1;
@@ -333,6 +363,10 @@ impl Blocks {
                 let d_before = bump.d;
                 if bump.step() {
                     b.bump = None;
+                    if bump.turn {
+                        turned.push((x, y));
+                        continue;
+                    }
                     let down = bump.down;
                     match b.kind {
                         BlockKind::Question => {
@@ -369,6 +403,7 @@ impl Blocks {
                 }
             }
         }
+        self.turned.extend(turned);
         out
     }
 

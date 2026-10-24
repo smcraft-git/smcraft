@@ -95,6 +95,12 @@ pub const SMALL_M1: Sensors = Sensors {
     wall_y1: 8.5,
     wall_x: 7.9,
 };
+/// Small, standing, in SMW / NSMBU / 3D World (§6.1: head at 15.9) [obs: Ryujinx traces
+/// MW_blocks / WU_blocks, stopped under a block at 64 − 15.9].
+pub const SMALL_MW: Sensors = Sensors {
+    head_y: 15.9,
+    ..SMALL_M1
+};
 /// Super/Fire standing (§6.1 row 0) and crouching (row 1).
 pub const SUPER: Sensors = Sensors {
     foot_x: 4.9,
@@ -774,6 +780,7 @@ impl Player {
             return &MEGA;
         }
         match (self.big(), self.crouch) {
+            (false, false) if matches!(self.style, Style::MW | Style::WU | Style::W3) => &SMALL_MW,
             (false, _) => &SMALL_M1,
             (true, false) => &SUPER,
             (true, true) => &SUPER_CROUCH,

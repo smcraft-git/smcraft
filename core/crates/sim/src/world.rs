@@ -356,6 +356,8 @@ pub struct World {
     /// the pole since the grab.
     pub(crate) goal_touch: bool,
     goal_pole_t: i32,
+    /// Spinning SMW turn blocks: (tile, frames left, spin).
+    turn_rolling: Vec<((i32, i32), i32, f32)>,
     /// The Trampoline being ridden and the speed the player landed with.
     spring_ride: Option<(u32, f32)>,
     /// The Note Block the player landed on (tile), until its launch; then the block launched
@@ -682,6 +684,7 @@ impl World {
             throw_wait: None,
             pending_collect: Vec::new(),
             spring_ride: None,
+            turn_rolling: Vec::new(),
             goal_touch: false,
             goal_pole_t: 0,
             note_rider: None,
@@ -749,6 +752,7 @@ impl World {
         self.p_timer = 0;
         self.v3 = v3::V3World::default();
         self.p_bricks.clear();
+        self.turn_rolling.clear();
         self.p_coins.clear();
         self.donut_timers.clear();
         self.donut_respawn.clear();
@@ -2173,6 +2177,7 @@ impl World {
         // doesn't move on its first frame [obs: Ryujinx traces M1_blocks blk_mush, M1_shellq])
         let releases = self.blocks.step();
         self.note_ride();
+        self.step_turn_blocks();
         let px = self.player.x;
         let py = self.player.y;
         let mut born = Vec::new();
@@ -2764,8 +2769,43 @@ impl World {
         }
     }
 
+    /// SMW turn blocks after their bounce (Rolling, 4-brick.md, 0x7100869350 / 0x71008693b0):
+    /// passable for 240 frames while spinning (spin from 10, +1.5 a frame, wrapping at 40); from
+    /// 19 left, a player inside holds it at 20; back once the time is up, no player inside and
+    /// the spin near flat (not in (8, 30)) [obs: Ryujinx trace MW_blocks, the second jump into
+    /// the brick 90 frames later goes through].
+    fn step_turn_blocks(&mut self) {
+        for t in std::mem::take(&mut self.blocks.turned) {
+            self.level.set(t.0, t.1, Cell::Empty);
+            self.turn_rolling.push((t, 240, 10.0));
+        }
+        let p = &self.player;
+        let (px0, py0, px1, py1) = (p.x - 7.9, p.y, p.x + 7.9, p.y + 15.9);
+        let mut back = Vec::new();
+        self.turn_rolling.retain_mut(|(t, timer, spin)| {
+            *timer -= 1;
+            *spin = (*spin + 1.5) % 40.0;
+            let (bx0, by0) = (t.0 as f32 * TILE, t.1 as f32 * TILE);
+            let inside = px1 > bx0 && px0 < bx0 + TILE && py1 > by0 && py0 < by0 + TILE;
+            if *timer <= 19 && inside {
+                *timer = 20;
+            }
+            if *timer <= 0 && !inside && !(*spin > 8.0 && *spin < 30.0) {
+                back.push(*t);
+                return false;
+            }
+            true
+        });
+        for (x, y) in back {
+            if self.blocks.get(x, y).is_some() {
+                self.level.set(x, y, Cell::Solid);
+            }
+        }
+    }
+
     /// A hit on a block from below or above by the player or a shell.
     fn hit_block(&mut self, tx: i32, ty: i32, from_below: bool, power: HitPower) {
+        self.blocks.turn_blocks = self.style == crate::player::Style::MW;
         let (bx, by) = blocks::origin(tx, ty);
         match self.blocks.hit(tx, ty, from_below, power) {
             HitResult::Nothing => {}
