@@ -1331,6 +1331,17 @@ impl MakerFlow {
     /// end, 2 tiles a piece, in the cursor's direction (8 ways).
     fn put_track(&mut self, cx: &mut crate::Cx, first: bool) {
         let (tx, ty) = self.cur;
+        // a press on a track's end opens or closes it [inf: as tapping an end does in the game]
+        if first && let Some(open) = self.editor.track_end_open((tx, ty)) {
+            if self.editor.set_track_end((tx, ty), !open).is_ok() {
+                if let Some(Drag::Place { changed, .. }) = &mut self.drag {
+                    *changed = true;
+                }
+                self.changed();
+                self.sound(59, "p_AttributeChange");
+            }
+            return;
+        }
         let (r, end) = if first {
             (self.editor.place_track(tx, ty, 0).map(|_| ()), (tx + 1, ty))
         } else {

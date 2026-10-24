@@ -229,8 +229,8 @@ sway, importer and pack 12, the dev cache already at v12).
     by hand, the trash can, Mario's Trail, co-op making
   - ✅ tracks (2026-10-24): the Track part in Gizmos; a press lays a horizontal piece, dragging
     draws on from its end, 2 tiles a piece, 8 ways [inf: the gesture]; a part that rides tracks
-    put down on one is attached (flag 0x400); erasing, undo as for parts · ⬜ the track's ends
-    (open / closed) by hand, bends drawn by the game's own rules, the track art (placeholder)
+    put down on one is attached (flag 0x400); a press on an end opens / closes it; erasing,
+    undo as for parts · ⬜ bends drawn by the game's own rules, the track art (placeholder)
   - ✅ pipes turned and stretched by their mouth (the cursor round the base: the longer axis
     turns it, the distance is its length [inf]; `Editor::turn_pipe` keeps the base tile)
   - ✅ maker music and part sounds (2026-10-24; `research/specs/maker.md` C9): the style's

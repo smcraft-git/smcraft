@@ -1078,6 +1078,14 @@ fn a_track_is_drawn_by_dragging_and_a_lift_put_on_it_rides_it() {
         3,
         "a piece, then one per 2 tiles dragged"
     );
+    // a press on its far end opens it (new ends are closed)
+    assert_eq!(m.editor.track_end_open((25, 6)), Some(false));
+    m.cur = (25, 6);
+    run(&mut m, &mut host, &mut saves, press(Buttons::CONFIRM));
+    run(&mut m, &mut host, &mut saves, idle());
+    assert_eq!(m.editor.track_end_open((25, 6)), Some(true));
+    assert_eq!(m.editor.area().tracks.len(), 3, "no new piece");
+    m.editor.undo();
     // one undo step for the whole drag
     m.editor.undo();
     assert_eq!(m.editor.area().tracks.len(), 0);
