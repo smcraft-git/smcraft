@@ -11,11 +11,13 @@ use crate::level::{Cell, Level, PipeDir, TILE};
 mod bosses;
 mod koopalings;
 mod powerups;
+mod shot;
 pub use koopalings::{shot as koopaling_shot, who as koopaling_who};
 pub use powerups::{ARROW_LAUNCH, BOOMERANG_LEGS, STYLE2, SWORD, WEAR, item_for_part};
 pub use powerups::{Attack as PuAttack, Reaction as PuReaction};
 pub use powerups::{BOOMERANG_STOP as BOOMERANG_STOP_FRAMES, CANNON_LIFE as CANNON_SHOT_LIFE};
 pub use powerups::{THROW_MAX as THROW_MAX_USA, THROW_SPEED as THROW_SPEED_USA};
+pub use shot::{COIN_PUSH, spout_limit};
 mod v3;
 mod w3;
 pub use bosses::{BossAttack, BossHit};
@@ -585,6 +587,15 @@ pub enum Mode {
         tx: f32,
         ty: f32,
     },
+    /// Fired from a Bill Blaster (the Killer context's Shot, actors/shot.rs): the launch point,
+    /// frames since the shot, the alternate blaster's fast flag, and whether it has landed.
+    Shot {
+        x0: f32,
+        y0: f32,
+        t: u16,
+        fast: bool,
+        landed: bool,
+    },
     /// Drifting down under a parachute (shared enemy draft §5.2): gravity −0.01875, max fall
     /// −0.4, swinging ±24 px around x0 (2.5°/frame); landing drops the parachute.
     Parachute {
@@ -724,6 +735,9 @@ pub struct Actor {
     /// many of its children are alive (set by the world before it steps).
     pub parent: Option<u32>,
     pub children: u32,
+    /// The Bill Blaster (`Level::blasters` index) that fired it: each blaster keeps at most
+    /// its part's `spout_killer_count` alive.
+    pub blaster: Option<usize>,
     /// Rides a tower (a stacked member above the base): the world places it, and its own
     /// motion is skipped (world/tower.rs).
     pub stacked: bool,
@@ -792,6 +806,7 @@ impl Actor {
             v3: V3State::default(),
             parent: None,
             children: 0,
+            blaster: None,
             stacked: false,
             sway: 0.0,
             sway_amp: 0.0,
@@ -1414,7 +1429,8 @@ impl Actor {
 
     /// Can touch the player / other actors.
     pub fn solid_contact(&self) -> bool {
-        matches!(self.mode, Mode::Normal | Mode::ShellWait | Mode::ShellSlide)
+        (matches!(self.mode, Mode::Normal | Mode::ShellWait | Mode::ShellSlide)
+            || self.shot_clear())
             && !(matches!(self.kind, Kind::LavaBubble | Kind::MontyMole) && self.phase == 0)
             && !self.boss_hidden()
             && !(matches!(self.kind, Kind::Piranha { .. }) && self.piranha_hidden())
@@ -1741,6 +1757,7 @@ impl Actor {
                     };
                 }
             }
+            Mode::Shot { .. } => self.step_shot(level),
             Mode::Stomped => {
                 self.timer -= 1;
                 if self.timer <= 0 {

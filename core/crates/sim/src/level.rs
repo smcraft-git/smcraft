@@ -264,9 +264,22 @@ pub struct Blaster {
     pub y: f32,
     pub h: i32,
     /// None = Bullet Bill.
-    pub contents: Option<Kind>,
-    /// The red (0x4) Bull's-Eye Blaster: its Bullet Bills home in.
+    pub contents: Option<Fired>,
+    /// The red (0x4) Bull's-Eye Blaster: its own Bullet Bills home in (its default content is
+    /// KillerSearch, 0x710069e530), and whatever it fires leaves with the fast flag 0x2000000
+    /// (13-bill-blaster.md) [obs].
     pub homing: bool,
+}
+
+/// The part a Bill Blaster holds, dressed as placed. A coin (`Kind::FloatCoin`) is fired as a
+/// TenCoin burst of Coin actors (8-coin.md): the loader maps a coin held by a blaster to TenCoin
+/// whatever its flags (0x710041b520, 0x710035d920) [obs].
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Fired {
+    pub kind: Kind,
+    pub wings: bool,
+    pub parachute: bool,
+    pub big: bool,
 }
 
 /// A checkpoint flag: origin (bottom centre) and the power-up inside.
@@ -704,12 +717,11 @@ pub fn unsupported_features(course: &Course) -> Vec<String> {
         (probe.style, probe.theme) = (style.clone(), area.header.theme);
         for o in area.objects.iter() {
             // what a block, tree, checkpoint flag or Bill Blaster holds comes out as its actor
-            if o.child_id >= 0 && (block_kind(o.id).is_some() || matches!(o.id, 13 | 90 | 106)) {
-                if o.id == 13 && o.child_id == 8 {
-                    out.insert("coins from a Bill Blaster".to_string());
-                } else if block_contents(o, &probe).is_none() {
-                    out.insert(format!("part {} in part {}", o.child_id, o.id));
-                }
+            if o.child_id >= 0
+                && (block_kind(o.id).is_some() || matches!(o.id, 13 | 90 | 106))
+                && block_contents(o, &probe).is_none()
+            {
+                out.insert(format!("part {} in part {}", o.child_id, o.id));
             }
             if o.id == 30 && o.child_id == 8 {
                 out.insert("coins from a Lakitu".to_string());
@@ -1182,12 +1194,15 @@ impl Level {
                         lvl.set(tx, ty + dy, Cell::Solid);
                     }
                 }
-                // it fires its child part (13-bill-blaster.md); a coin needs the Coin actor's
-                // Killer shot, not made yet (the coverage check reports it)
-                let contents = lvl
-                    .part_actor(o.child_id, o.child_flags)
-                    .map(|(kind, ..)| kind)
-                    .filter(|&k| k != Kind::FloatCoin);
+                // it fires its child part, dressed (13-bill-blaster.md)
+                let contents = lvl.part_actor(o.child_id, o.child_flags).map(
+                    |(kind, wings, parachute, big)| Fired {
+                        kind,
+                        wings,
+                        parachute,
+                        big,
+                    },
+                );
                 if !on_track && tower_flags(o.flags) {
                     // a Bill Blaster adds its height less 2 px [obs]
                     tower_parts.push(TowerPart {
@@ -2055,7 +2070,7 @@ mod tests {
     }
 
     #[test]
-    fn coverage_reports_contents_and_blaster_coins_it_cannot_make() {
+    fn coverage_reports_contents_it_cannot_make() {
         let course = |id: i16, child: i16| {
             let mut c = Course::blank("M1");
             let mut o = object(id, 3, 5, 1, 2, 0);
@@ -2066,7 +2081,7 @@ mod tests {
         assert!(course(5, 25).is_empty(), "{:?}", course(5, 25));
         assert!(course(13, 15).is_empty(), "a Bob-omb blaster");
         assert_eq!(course(5, 7), vec!["part 7 in part 5".to_string()]);
-        assert_eq!(course(13, 8), vec!["coins from a Bill Blaster".to_string()]);
+        assert!(course(13, 8).is_empty(), "a coin blaster");
     }
 
     #[test]

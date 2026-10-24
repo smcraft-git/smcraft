@@ -62,6 +62,11 @@ SMCraft is back in development (it was archived in October 2026).
 - **Blocks hold any part**: enemies, springs, P Switches, keys and the rest come out of ? blocks,
   bricks, hidden blocks, trees and checkpoint flags as themselves, with their wings or parachute;
   vines grow out of blocks. Bill Blasters fire any enemy or object.
+- **Bill Blasters fire coins and launch what they fire as SMM2 does**: a coin blaster sends out
+  ten coins at a time that arc out, bounce twice and roll; enemies and items hop out of the
+  barrel (gliding for winged ones, Boos and Bloopers slowing to a stop, parachutes opening after
+  the shot), three times as fast from the red blaster; each blaster keeps as many alive as the
+  game allows. Fix: only coin blasters fire at random intervals.
 - **Enemies holding a Key** let it go when defeated; **Lakitus throw what they were given**.
 - **Tracks drawn with the game's own track tiles** (straights, bends, joints, open and closed
   ends) instead of a plain line.
