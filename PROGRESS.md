@@ -75,9 +75,20 @@ sway, importer and pack 12, the dev cache already at v12).
      (`nn::hid::ShowControllerSupport`, states `cRunControllerApplet` → `cPlayTogether`); SMCraft's
      controller step stands in for it.
   3b. Research queue (binary → spec → code), each an agent's task: stacking's tower rules and
-     `Tower_stack` (maker C11); the maker's Water Level mode (`L_WaterLevelBtn_00`, mode banner
-     "Water / Poison / Lava Level"; fixed / rising and the speed — not in the text, likely
-     markers in the course), custom scroll nodes, ✅ Mario's Trail (`L_ZanzoBtn_00`, 2026-10-24:
+     `Tower_stack` (maker C11); ✅ the maker's Water Level mode (2026-10-25, branch
+     `makermodes`, maker C13: the v3.0.3 edit actor 0x7100eff460 — handles at 31/48 of the view,
+     the end's round button ±8 px at the anchor − 16, the start's pill ±24 × ±8; dragging sets
+     the heights 0 … 24 (from 1 in 3D World, 167 vertical); lines together = still (mode / speed
+     saved, 1 / 1 at first); a tap on the button 1 ↔ 2, held > 15 frames the speed balloon;
+     built: banner, button states, lines / pill / path / button drawn, the balloon, the first-time
+     tip) · ⬜ the water-level actor's sound user, the right column's greyed buttons in the mode;
+     ✅ custom scroll nodes (2026-10-25, maker C13: the start / end units, a tap on a point's
+     speed square at + 16 px steps 0 → 1 → 2 → 0 (0x7100eb3300), the start's speed is header
+     0x0E; built: Custom in the autoscroll window, its tip, the mode with the band, birds, speed
+     squares and arrows; nodes on their own layer, numbered left to right) · ⬜ how the game adds
+     nodes (ours: drag a leg), the band's exact extent (the reference frames show it ~2.5 tiles
+     wider than the camera-centre range), the `Edit_camera` / `Edit_autoscroll` /
+     `Edit_WaterLevelLine` models' textures (not imported: flat shapes stand in), ✅ Mario's Trail (`L_ZanzoBtn_00`, 2026-10-24:
      maker C12 — 40 snapshots of player 1, one per 22 px of travel; built), the trash can
      (`L_TrashCan_00`: UIEditMainPage part 8 at +0x800, set up in 0x71018cee20; `part(i)`
      0x71018fc060 is virtual; placed from code, the pane sits at 0,0; Act 45 plays
@@ -297,7 +308,8 @@ sway, importer and pack 12, the dev cache already at v12).
     column's `L_ZanzoBtn_00` (Check = on, `se_ui_edit_open_ringmenu`, `yr_Delay_01` switched
     on) toggles it, kept as `maker.trail`. ⬜ 3D World's model player (no 2D art: no pictures),
     what Mario holds / rides in the picture, the maker following Mario to the area he ended in
-  - ⬜ custom autoscroll and its nodes, water level, the part variants balloon (Fast Conveyor …), tracks / doors' partners placed
+  - ✅ water level and custom autoscroll with its nodes (2026-10-25, see the research queue) ·
+    ⬜ the part variants balloon (Fast Conveyor …), tracks / doors' partners placed
     by hand, the trash can, co-op making
   - ✅ the vertical scroll bar for vertical sub-areas (`N_SlideBarV_00`: its handle by the view's
     height, pressed / dragged to scroll; captures `maker-vertical`, `maker-subarea`)

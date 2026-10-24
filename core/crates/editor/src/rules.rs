@@ -34,6 +34,14 @@ pub fn is_background(part: i16) -> bool {
     matches!(part, 14 | 16 | 17 | 71)
 }
 
+/// Parts on the maker's own layer: the custom-scroll nodes (part 89, the game's
+/// EditAutoScrollCamera units) are seen and edited only in the Custom Scroll mode, so they take
+/// no tiles from other parts and are not picked, erased or multigrabbed with them [inf: they are
+/// drawn only in that mode, research/specs/maker.md C13].
+pub fn own_layer(part: i16) -> bool {
+    part == 89
+}
+
 /// Parts that may sit in ground (but not in other parts): Monty Moles hide in walls, vines and
 /// claws hang from ceilings, fire bars, burners, grinders, bumpers and one-way walls are often
 /// set into terrain [corp: 7–60 % of their sample placements overlap ground].
@@ -215,7 +223,7 @@ impl Editor {
                 return Err(EditError::OutOfBounds);
             }
         }
-        if !is_rider(o) {
+        if !is_rider(o) && !own_layer(o.id) {
             for &(x, y) in &cells {
                 if self.protected(x, y) {
                     return Err(EditError::Protected);
@@ -252,6 +260,7 @@ impl Editor {
             Some(i) != skip
                 && !is_rider(p)
                 && !is_background(p.id)
+                && !own_layer(p.id)
                 && !(pipes_pass && p.id == PIPE)
                 && parts::covers(p, x, y)
         })
@@ -265,6 +274,7 @@ impl Editor {
         let blocked = self.area().objects.iter().any(|p| {
             !is_rider(p)
                 && !is_background(p.id)
+                && !own_layer(p.id)
                 && !embeds_in_ground(p.id)
                 && parts::covers(p, x, y)
         });
