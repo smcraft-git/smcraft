@@ -51,10 +51,14 @@ sway, importer and pack 12, the dev cache already at v12).
      "Water / Poison / Lava Level"; fixed / rising and the speed — not in the text, likely
      markers in the course), custom scroll nodes, Mario's Trail (`L_ZanzoBtn_00`), the trash can
      (`L_TrashCan_00`); a winged / parachuted item coming out of a block; Super World enemy-icon
-     courses, point icons by model, map ghosts; CJK course names (TGRCode's Japanese / Chinese /
-     Korean names draw as the replacement glyph: the UI import rasterises only the English text's
-     characters — rasterise a CJK set from the dump's `Font/ScalableFont.szs` at import, or keep
-     the decrypted fonts in the pack and rasterise missing glyphs at run time).
+     courses, point icons by model, map ghosts; ✅ CJK course names (branch `cjk`, 2026-10-24: the
+     UI pack keeps the decrypted scalable fonts (`ui/scalable/`, 31 MB) and each baked font's
+     recipe; a character the sheets lack is rasterised on first use at the baked font's metrics
+     onto shared 1024² glyph sheets (`mmk_ui::glyphs`), which the portable shell and the Swift
+     app upload again when they change; Chinese / Korean fonts as the game's `_CNzh` / `_TWzh` /
+     `_KRko` combinations add them; UI importer and pack 6 — **re-import the UI pack**). Left:
+     the region combinations' range modes 3 / 4 / 9 (not parsed; their fonts are tried after the
+     combination's own), the web build reads all 31 MB of fonts up front.
   4. Super Worlds' 3D map and Toad Houses; airship sway; the colour table; NSMBU / 3D World pixels.
   5. iPad / Android device runs; the macOS package; live Network Play once the ID and key arrive.
 
@@ -269,8 +273,8 @@ sway, importer and pack 12, the dev cache already at v12).
   from the engine's sprites), Downloaded Courses (the library's others), the course window (Make,
   Play, Upload, Name, Description typed, Delete; Make New Course), play from it; the maker's
   Save As ("Select Save Location", overwrite question) and Load ("Select a Course to Load") ·
-  ⬜ moving slots, the Super World filter, the download flow from Course World, CJK glyphs in
-  names
+  ✅ CJK glyphs in names (run-time glyphs, branch `cjk`) · ⬜ moving slots, the Super World
+  filter, the download flow from Course World
 - 🔄 The Swift app: its host has the maker and Coursebot hooks ✅; a finger / mouse held down
   reaches the maker (paint, carry, erase) ✅; the maker keys from its keyboard ✅ (the portable
   shell's: U / ⌃Z, Y / ⌃⇧Z, Q, [ ], T, E, G, M, C; macOS and iOS hardware keyboards); the 3D
@@ -994,8 +998,7 @@ a portable Rust shell runs the game everywhere, the Swift app stays as the Apple
       card jingle, the pause jingle per style, the Endless map's Telop / dots / Mario)
     - ⬜ Coursebot (`Lcl_*`), Story Mode map (`Qst_*`), Make, the main menu `Cmn_MainMenu_00`
       (the editor's), SMM2's own Endless Challenge rules (endless run, SMM2 lives), Leaderboards /
-      Ninji / Super Worlds over the course server, layout scissor clipping, CJK glyphs in course
-      names, the pause blur / clear capture effects, menus in `mmk-play`
+      Ninji / Super Worlds over the course server, layout scissor clipping, the pause blur / clear capture effects, menus in `mmk-play`
   - ✅ in-course screens over library courses (`SMM2Course.swift`, DECISIONS.md "SMM2 in-course
     screens"): HUD `Play_PlayScene_00` per style skin (lives + character icon, coins, score,
     timer with the 100 s pulse, clear-condition icon + counter / failed mark, pink-coin slots;

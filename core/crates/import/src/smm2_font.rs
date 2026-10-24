@@ -14,13 +14,19 @@
 //!   dump: the standard one is replaced by the combination's other fonts, and the controller
 //!   button icons (U+E0E0…) are drawn here as simple shapes with the button's letters.
 //! - Glyph borders (FontInfo `_B4` faces) are not drawn yet.
+//!
+//! Characters outside that set (course and maker names in any language) are drawn at run time
+//! from the same fonts (`mmk_ui::glyphs`): each baked font keeps its recipe ([`Baked::face`]),
+//! with the Chinese and Korean fonts the game's region combinations add ([`region_fonts`]).
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::sync::Arc;
 
 use ab_glyph::{Font as _, FontVec, PxScale, ScaleFont, point};
 use mmk_assets::{Mtex, MtexFormat, MtexVariant};
 use mmk_formats::bfcpx::Combination;
 use mmk_formats::bffnt::{CharWidth, Font};
+use mmk_ui::glyphs::{Face, Raster, Source};
 
 /// Line height / authored size [inf, see the module notes].
 pub const LINE_HEIGHT: f32 = 1.5;
@@ -29,6 +35,31 @@ const SHEET_MAX: u32 = 2048;
 /// Game fonts that stand in for the console's system fonts (`nintendo_udsg-r_std_003` …), which
 /// are not part of the game: UD Kakugo is the closest in the dump to the system's UD gothic.
 pub const SUBSTITUTES: &[&str] = &["ninP_UDKakugoSmall-DB.bfotf"];
+
+/// The fonts the game's Chinese and Korean combinations (`Font/Fcpx.szs`: `<Name>_CNzh`,
+/// `_TWzh`, `_KRko`) add to combination `name`'s, with their glyph scale and baseline shift
+/// [inf: read from those files' entries; their range modes 3 and 4 are not understood, so they
+/// are tried after the combination's own fonts, simplified Chinese, traditional, then Korean].
+/// `NX_std` takes the console's fonts in every region; it gets `MessageFont`'s, unshifted.
+pub fn region_fonts(name: &str) -> Vec<Source> {
+    match name {
+        "SpecialFont" => vec![
+            Source::new("DFP_GBZY7_0.bfttf", 1.0, 2),
+            Source::new("DFPT_ZY7_0.bfttf", 1.0, 2),
+            Source::new("AsiaKCOMCR.bfttf", 1.08, 4),
+        ],
+        "NX_std" => vec![
+            Source::new("DFHEI5A.bfttf", 1.0, 0),
+            Source::new("DFPT_3.bfttf", 1.0, 0),
+            Source::new("AsiaKDREAM4-R.bfttf", 1.0, 0),
+        ],
+        _ => vec![
+            Source::new("DFHEI5A.bfttf", 1.0, 3),
+            Source::new("DFPT_3.bfttf", 1.0, 6),
+            Source::new("AsiaKDREAM4-R.bfttf", 1.0, 5),
+        ],
+    }
+}
 
 /// A rasterised font: metrics and character map as a BFFNT would give them, plus its sheets
 /// (RGBA8, white with the glyph coverage in alpha).
@@ -39,6 +70,8 @@ pub struct Baked {
     pub missing: Vec<char>,
     /// Characters drawn from each source font file (or "(button)" for drawn icons).
     pub sources: BTreeMap<String, usize>,
+    /// How the font draws other characters at run time (its sources and metrics).
+    pub face: Face,
 }
 
 /// A controller button icon of the Switch system font, by code point [inf: the community's table
@@ -61,64 +94,9 @@ pub fn button_icon(c: char) -> Option<(&'static str, bool)> {
     })
 }
 
-struct Raster {
-    /// Coverage, `w`×`h`, row-major.
-    px: Vec<u8>,
-    w: u32,
-    h: u32,
-    width: CharWidth,
-}
-
 fn px_scale(f: &FontVec, px_per_em: f32) -> PxScale {
     let upem = f.units_per_em().unwrap_or(1000.0);
     PxScale::from(px_per_em * f.height_unscaled() / upem)
-}
-
-/// Rasterise `c` from `f` at `px_per_em`, baseline `baseline` px below the cell top, clipped to
-/// `cell_h` rows.
-fn raster(f: &FontVec, c: char, px_per_em: f32, baseline: f32, cell_h: u32) -> Option<Raster> {
-    let id = f.glyph_id(c);
-    if id.0 == 0 {
-        return None;
-    }
-    let scale = px_scale(f, px_per_em);
-    let advance = f.as_scaled(scale).h_advance(id);
-    let glyph = id.with_scale_and_position(scale, point(0.0, baseline));
-    let Some(outline) = f.outline_glyph(glyph) else {
-        // blank glyph (space): advance only
-        return Some(Raster {
-            px: Vec::new(),
-            w: 0,
-            h: cell_h,
-            width: CharWidth {
-                left: 0,
-                glyph_width: 0,
-                char_width: advance.round().clamp(0.0, 255.0) as u8,
-            },
-        });
-    };
-    let b = outline.px_bounds();
-    let left = b.min.x.floor();
-    let w = (b.max.x.ceil() - left).max(1.0) as u32;
-    let mut px = vec![0u8; (w * cell_h) as usize];
-    outline.draw(|x, y, cov| {
-        let gx = x as i64 + (b.min.x - left).round() as i64;
-        let gy = y as i64 + b.min.y.round() as i64;
-        if gx >= 0 && (gx as u32) < w && gy >= 0 && (gy as u32) < cell_h {
-            let i = (gy as u32 * w + gx as u32) as usize;
-            px[i] = px[i].max((cov * 255.0).round().clamp(0.0, 255.0) as u8);
-        }
-    });
-    Some(Raster {
-        px,
-        w,
-        h: cell_h,
-        width: CharWidth {
-            left: left.clamp(-128.0, 127.0) as i8,
-            glyph_width: w.min(255) as u8,
-            char_width: advance.round().clamp(0.0, 255.0) as u8,
-        },
-    })
 }
 
 /// A button icon: a filled circle (A, B, X, Y, +, −) or rounded rectangle (L, R, ZL, ZR…) with
@@ -204,8 +182,14 @@ fn button_raster(
 }
 
 /// Rasterise `chars` for combination `comb` from the decrypted source fonts (`fonts`, by file
-/// name). Characters without a source glyph are left out (the alternate glyph draws them).
-pub fn bake(comb: &Combination, fonts: &HashMap<String, FontVec>, chars: &BTreeSet<char>) -> Baked {
+/// name), `extra` fonts after the combination's own (and the console substitutes) for the run
+/// time. Characters without a source glyph are left out (the alternate glyph draws them).
+pub fn bake(
+    comb: &Combination,
+    fonts: &HashMap<String, Arc<FontVec>>,
+    chars: &BTreeSet<char>,
+    extra: Vec<Source>,
+) -> Baked {
     let size = comb.size.max(1.0);
     let line_h = (size * LINE_HEIGHT).round().clamp(1.0, 255.0) as u32;
     let present = |i: usize| fonts.get(&comb.fonts[i].file);
@@ -228,6 +212,15 @@ pub fn bake(comb: &Combination, fonts: &HashMap<String, FontVec>, chars: &BTreeS
     };
     let baseline = ((line_h as f32 - (asc + desc)) / 2.0 + asc).round();
     let letters_font = main_font;
+    // the bake's sources: the combination's fonts, then the console substitutes; the run time
+    // adds `extra`
+    let mut face = Face {
+        comb: comb.clone(),
+        extra: SUBSTITUTES.iter().map(|f| Source::new(f, 1.0, 0)).collect(),
+        size,
+        baseline,
+        cell_h: line_h,
+    };
 
     let mut rasters: Vec<(char, Raster)> = Vec::new();
     let mut missing = Vec::new();
@@ -238,29 +231,12 @@ pub fn bake(comb: &Combination, fonts: &HashMap<String, FontVec>, chars: &BTreeS
     }
     wanted.insert('?');
     for &c in &wanted {
-        let mut got = None;
         // the entries that list the character, then (last resort) every entry, then the
         // substitutes for the console's own fonts
-        let order: Vec<(String, f32, i16)> = comb
-            .candidates(c as u32)
-            .chain((0..comb.fonts.len()).rev())
-            .map(|i| {
-                let s = &comb.fonts[i];
-                (s.file.clone(), s.scale, s.baseline_shift)
-            })
-            .chain(SUBSTITUTES.iter().map(|f| (f.to_string(), 1.0, 0)))
-            .collect();
-        for (file, scale, shift) in order {
-            let Some(f) = fonts.get(&file) else {
-                continue;
-            };
-            let em = size * if scale > 0.0 { scale } else { 1.0 };
-            if let Some(r) = raster(f, c, em, baseline - shift as f32, line_h) {
-                *sources.entry(file).or_default() += 1;
-                got = Some(r);
-                break;
-            }
-        }
+        let mut got = face.raster(c, |f| fonts.get(f).cloned()).map(|(file, r)| {
+            *sources.entry(file.to_string()).or_default() += 1;
+            r
+        });
         if got.is_none()
             && let (Some((letters, round)), Some(lf)) = (button_icon(c), letters_font)
         {
@@ -345,11 +321,13 @@ pub fn bake(comb: &Combination, fonts: &HashMap<String, FontVec>, chars: &BTreeS
         .unwrap_or(0);
     font.alter_char_index = alter;
     font.default_width = font.widths.get(&alter).copied().unwrap_or_default();
+    face.extra.extend(extra);
     Baked {
         font,
         sheets,
         missing,
         sources,
+        face,
     }
 }
 
@@ -378,11 +356,16 @@ mod tests {
             ..Default::default()
         };
         let chars: BTreeSet<char> = "Hi".chars().collect();
-        let b = bake(&comb, &HashMap::new(), &chars);
+        let b = bake(&comb, &HashMap::new(), &chars, region_fonts("MessageFont"));
         assert_eq!(b.font.height, 60);
         assert_eq!(b.font.width, 40);
         assert!(b.missing.contains(&'H') && b.missing.contains(&'?'));
         assert!(b.font.cmap.is_empty());
         assert_eq!(b.sheets.len(), 1);
+        // the run-time recipe: the combination, the substitutes, then the region fonts
+        assert_eq!(b.face.cell_h, 60);
+        assert_eq!(b.face.extra[0].file, SUBSTITUTES[0]);
+        assert_eq!(b.face.extra[1].file, "DFHEI5A.bfttf");
+        assert_eq!(b.face.files().next(), Some("absent.bfttf"));
     }
 }

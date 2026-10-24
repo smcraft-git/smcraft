@@ -1415,6 +1415,7 @@ dependencies = [
  "mmk-assets",
  "mmk-formats",
  "mmk-host",
+ "mmk-ui",
  "serde_json",
  "thiserror 2.0.21",
 ]
@@ -1538,6 +1539,7 @@ dependencies = [
 name = "mmk-ui"
 version = "0.1.0"
 dependencies = [
+ "ab_glyph",
  "mmk-assets",
  "mmk-formats",
  "serde_json",

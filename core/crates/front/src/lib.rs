@@ -967,6 +967,12 @@ impl Front {
             Screen::None => {}
         }
         self.fade.draw(&mut items);
+        // the glyphs drawn for the first time this frame go onto their sheets before the host
+        // uploads the textures
+        self.smm2.cache_mut().update_glyphs();
+        if let Some(u) = &self.smm1 {
+            u.cache_mut().update_glyphs();
+        }
         Frame {
             items,
             toast: self.toast.as_ref().map(|t| t.0.clone()),

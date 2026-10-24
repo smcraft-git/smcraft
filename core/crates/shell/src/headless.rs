@@ -468,6 +468,7 @@ pub fn layout(
     }
     let size = player.size();
     let quads = player.draw_list();
+    cache.update_glyphs();
     let (w, h) = (1280, 720);
     let gpu = pollster::block_on(Gpu::new(&instance(), None, allow_bc))?;
     let mut layer = crate::ui_layer::UiLayer::new(&gpu, FORMAT);

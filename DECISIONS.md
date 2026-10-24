@@ -1551,3 +1551,23 @@ under `recomp/private|generated|build/`, and text that looks like disassembly or
 - The part's `voice` plays with `set` when a part is first put down (not while painting) [inf];
   the binary's call for it wasn't read. The common keys (`set`, `drag`, `eraser` …) sound the
   same for every part in the data, so a part without its own user takes the ground's.
+
+## 2026-10-24 — Text in any language: glyphs rasterised at run time
+- The UI import bakes only the characters of the English messages (a CJK set baked as RGBA
+  sheets would cost ~160 MB). Course, maker and comment text from TGRCode can be in any
+  language, so the pack also keeps the decrypted scalable fonts the baked fonts come from
+  (`ui/scalable/`, ~31 MB) and each baked font's recipe (`scalable` in `fonts/<Name>.json`: its
+  combination, the console substitutes, the region fonts, its size, baseline and line height).
+- A character the sheets lack is rasterised on first use with the same code and order as the
+  bake (`mmk_ui::glyphs`), so it sits on the same baseline at the same size. Its sources: the
+  combination's entries, the console substitute (UD Kakugo), then the fonts the game's
+  `_CNzh` / `_TWzh` / `_KRko` combinations add (simplified, traditional, Korean), with the scale
+  and baseline shift those files give [inf: their range modes 3 / 4 are not understood, so
+  those fonts come after the combination's own]. A font whose glyph for a character is empty
+  (MARIOMAKER's undrawn kana) counts as not having it.
+- Glyphs go onto shared 1024² RGBA sheets that are ordinary textures of the UI cache whose
+  pixels change: drawing places glyphs (behind a lock, the player draws through `&self`), the
+  front end's frame copies them into the textures (`UiCache::update_glyphs`), and renderers
+  upload a texture again when its `version` moves (shell `UiLayer::sync`; the Swift app through
+  `mmk_*_texture_revision` / `_version`). One empty sheet is always registered ahead, so a new
+  glyph never waits for a texture id; at four sheets the one drawn longest ago is emptied.

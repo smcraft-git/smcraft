@@ -104,8 +104,10 @@ pub struct UiLayer {
     textures: Vec<Option<wgpu::TextureView>>,
     /// Textures whose pixels are on their way (the web build's cache): not drawn yet.
     waiting: HashSet<u32>,
-    /// The cache's revision when `waiting` was last looked at.
+    /// The cache's revision when `waiting` and `versions` were last looked at.
     revision: u64,
+    /// The version (`TextureEntry::version`) each texture was uploaded at.
+    versions: Vec<u64>,
     white: wgpu::TextureView,
     pipelines: HashMap<u32, wgpu::RenderPipeline>,
     samplers: HashMap<u32, wgpu::Sampler>,
@@ -194,6 +196,7 @@ impl UiLayer {
             textures: Vec::new(),
             waiting: HashSet::new(),
             revision: 0,
+            versions: Vec::new(),
             white: white_tex.create_view(&wgpu::TextureViewDescriptor::default()),
             pipelines: HashMap::new(),
             samplers: HashMap::new(),
@@ -202,13 +205,13 @@ impl UiLayer {
     }
 
     /// Upload the cache's textures added since the last call (after opening a layout or font),
-    /// and those whose pixels arrived since.
+    /// those whose pixels arrived since, and again those whose pixels changed (glyph sheets).
     pub fn sync(&mut self, gpu: &Gpu, cache: &UiCache) {
         let upload = |e: &mmk_ui::TextureEntry| {
             crate::texture::plan(&e.texture, gpu.bc)
                 .map(|up| crate::render::upload(gpu, &e.name, &up))
         };
-        if cache.revision() != self.revision && !self.waiting.is_empty() {
+        if cache.revision() != self.revision {
             self.revision = cache.revision();
             let arrived: Vec<u32> = self
                 .waiting
@@ -218,16 +221,30 @@ impl UiLayer {
                 .collect();
             for id in &arrived {
                 self.waiting.remove(id);
-                self.textures[*id as usize] = upload(&cache.textures[*id as usize]);
             }
-            if !arrived.is_empty() {
-                // bind groups made meanwhile hold the white stand-in
+            let mut changed: Vec<u32> = (0..self.textures.len() as u32)
+                .filter(|&id| {
+                    let e = &cache.textures[id as usize];
+                    e.ready && e.version != self.versions[id as usize]
+                })
+                .chain(arrived.iter().copied())
+                .collect();
+            changed.sort_unstable();
+            changed.dedup();
+            for &id in &changed {
+                let e = &cache.textures[id as usize];
+                self.versions[id as usize] = e.version;
+                self.textures[id as usize] = upload(e);
+            }
+            if !changed.is_empty() {
+                // bind groups made meanwhile hold the white stand-in or the old pixels
                 self.binds.clear();
             }
         }
         while self.textures.len() < cache.textures.len() {
             let id = self.textures.len();
             let e = &cache.textures[id];
+            self.versions.push(e.version);
             if e.ready {
                 self.textures.push(upload(e));
             } else {

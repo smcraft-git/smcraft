@@ -553,7 +553,7 @@ enum GPUTexture {
     static let forceCPU = ProcessInfo.processInfo.environment["MMK_CPU_TEXTURES"] == "1"
 
     static func make(_ device: MTLDevice, _ t: MmkTextureInfo) -> MTLTexture? {
-        guard t.width > 0, t.height > 0 else { return nil }
+        guard t.width > 0, t.height > 0, t.len > 0 else { return nil }
         if t.format >= 2 && (forceCPU || !device.supportsBCTextureCompression) { return decoded(device, t) }
         let srgb = t.variant == 2
         let (format, blockBytes, blockSize): (MTLPixelFormat, Int, Int) = switch t.format {
