@@ -183,6 +183,7 @@ pub(super) struct Ctx {
     /// Keys held: each player has their own (§7.6); a key door or box needs the entering
     /// player's.
     keys: u32,
+    cursed: u32,
     /// Action conditions (no damage, no landing, …) are broken per player (§8).
     action: crate::clear::ActionState,
 }
@@ -347,6 +348,7 @@ impl World {
         swap(&mut self.donut_ride, &mut c.donut_ride);
         swap(&mut self.pu, &mut c.pu);
         swap(&mut self.keys, &mut c.keys);
+        swap(&mut self.cursed, &mut c.cursed);
         self.clear.swap_action(&mut c.action);
     }
 
@@ -378,6 +380,28 @@ impl World {
     fn take_keys(&mut self, attacker: usize, victim: usize) {
         let k = std::mem::take(self.keys_mut(victim));
         *self.keys_mut(attacker) += k;
+        let c = std::mem::take(self.cursed_mut(victim));
+        *self.cursed_mut(attacker) += c;
+    }
+
+    fn cursed_mut(&mut self, k: usize) -> &mut u32 {
+        match self.position_of(k) {
+            0 => &mut self.cursed,
+            p => &mut self.coop.ctx[p - 1].cursed,
+        }
+    }
+
+    /// Slot `k`'s cursed keys, wherever it is this moment.
+    pub(super) fn cursed_slot(&self, k: usize) -> u32 {
+        match self.position_of(k) {
+            0 => self.cursed,
+            p => self.coop.ctx[p - 1].cursed,
+        }
+    }
+
+    /// The slot in front (the one the world's own fields hold this moment).
+    pub(super) fn lead_slot(&self) -> usize {
+        self.coop.at.first().copied().unwrap_or(0)
     }
 
     /// Swap the players at positions `a` < `b` (with their characters and fields).

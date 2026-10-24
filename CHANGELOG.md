@@ -86,6 +86,7 @@ SMCraft is back in development (it was archived in October 2026).
   - Parachutes swing the right way after a shot to the left, and swing on at a wall.
 - **Enemies holding a Key** let it go when defeated; **Lakitus throw what they were given**,
   coins as a ten-coin burst.
+- **The Cursed Key** (SMB1): Phanto swoops after whoever holds it, and drifts off when they don't.
 - **The 3.0 update's clear conditions**: defeat Spikes, Pokeys, Mechakoopas or a Koopaling;
   reach the goal as Link, SMB2, Frog, Balloon, Flying Squirrel or Boomerang Mario, or wearing a
   Cannon Box, Propeller Box, Goomba Mask, Red POW Box or Bullet Bill Mask.

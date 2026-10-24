@@ -31,6 +31,7 @@ mod bosses;
 mod contents;
 pub mod coop;
 mod debug;
+mod phanto;
 mod smm1;
 mod tower;
 use smm1::Smm1Shell;
@@ -333,8 +334,12 @@ pub struct World {
     pub liquid: Option<Liquid>,
     /// Cannon countdowns (current area).
     cannon_timers: Vec<i32>,
-    /// Keys held.
+    /// Keys held, and how many of them are Cursed Keys (the SMB1 Key's 0x4 form: Phanto chases
+    /// whoever holds one, world/phanto.rs).
     pub keys: u32,
+    pub cursed: u32,
+    /// Phantos (world/phanto.rs).
+    phantos: Vec<phanto::Phanto>,
     /// Pink coins collected this attempt (area, tile) and the course's total.
     pub pink: std::collections::BTreeSet<(usize, i32, i32)>,
     pub pink_total: usize,
@@ -662,6 +667,8 @@ impl World {
             liquid: None,
             cannon_timers: Vec::new(),
             keys: 0,
+            cursed: 0,
+            phantos: Vec::new(),
             pink: Default::default(),
             pink_total,
             clown_prev: (false, false),
@@ -728,6 +735,8 @@ impl World {
         self.area_timer = 0;
         self.blink_alt = false;
         self.keys = 0;
+        self.cursed = 0;
+        self.phantos.clear();
         self.pink.clear();
         self.unlocked_doors.clear();
         self.unlocked_boxes.clear();
@@ -877,6 +886,7 @@ impl World {
         };
         self.area = to;
         self.initial = self.area_initial[to].clone();
+        self.phantos_warped();
         match self.stash.replace(leaving) {
             Some(st) => {
                 self.level = st.level;
@@ -1992,10 +2002,12 @@ impl World {
                         && self.unlocked_doors.insert((self.area, from.id >> 1))
                     {
                         self.keys -= 1; // a key opens the pair for good
+                        self.cursed = self.cursed.min(self.keys);
                     }
                     if let crate::level::WarpKind::Box { key } = from.kind {
                         if key && self.unlocked_boxes.insert((self.area, from.id >> 1)) {
                             self.keys -= 1;
+                            self.cursed = self.cursed.min(self.keys);
                         }
                         // held items don't travel: dropped where the player was
                         if let Some(id) = self.player.held.take()
@@ -2266,6 +2278,7 @@ impl World {
         self.carry_clown_riders();
         self.boss_keys();
         self.drop_keys();
+        self.step_phantos();
         self.tally_defeats();
         self.drop_shoes();
         self.despawn();
@@ -3209,6 +3222,9 @@ impl World {
                 if overlap(contact, ab) {
                     self.actors[i].mode = Mode::Dead;
                     self.keys += 1;
+                    if self.actors[i].alt {
+                        self.cursed += 1;
+                    }
                     self.events.push(Event::OneUp);
                 }
                 i += 1;
@@ -6732,6 +6748,7 @@ impl World {
         }
         self.bubble_sprites(&mut out);
         self.yoshi_sprites(&mut out);
+        self.phanto_sprites(&mut out);
         if let Some(mut s) = self.player_sprite() {
             if self.player.yoshi.is_some() {
                 // the rider sits on Yoshi's saddle [inf: drawing only; the rider is attached to
@@ -7518,7 +7535,11 @@ impl World {
                 false,
             ),
             Kind::Key => (
-                "M1_Object_key",
+                if a.alt {
+                    "M1_Object_key2"
+                } else {
+                    "M1_Object_key"
+                },
                 ["wait.0", "wait.1", "wait.2", "wait.3"][(self.tick as usize / 8) % 4],
                 16.0,
                 16.0,
@@ -8178,6 +8199,54 @@ mod tests {
                 .all(|c| !c.thrown && c.vx == 0.0 && c.vy == 0.0)
         );
         assert!(!coins.is_empty());
+    }
+
+    #[test]
+    fn a_cursed_key_brings_phanto() {
+        let mut lvl = Level::flat(100);
+        let mut k = spawn(Kind::Key, 40.0, 32.0);
+        k.alt = true;
+        lvl.spawns.push(k);
+        let mut w = World::with_level(lvl);
+        w.player.x = 40.0;
+        run(&mut w, 0, 3);
+        assert_eq!((w.keys, w.cursed), (1, 1), "a cursed key");
+        assert_eq!(w.phantos.len(), 1);
+        assert_eq!(w.phantos[0].state, phanto::State::Wait);
+        let v = w.view_rect(0.0);
+        let (x, y) = (w.phantos[0].x, w.phantos[0].y);
+        assert!(
+            x < v.0 + 40.0 || y > v.3 - 20.0,
+            "out of sight while waiting: {x} {y}"
+        );
+        run(&mut w, 0, 100);
+        assert_eq!(
+            w.phantos[0].state,
+            phanto::State::Attack,
+            "swoops after 100 frames"
+        );
+        // it comes for a player who stands still
+        let mut hurt = false;
+        for _ in 0..1200 {
+            run(&mut w, 0, 1);
+            if w.player.form != Form::Small || !w.player.alive() || w.player.invuln > 0 {
+                hurt = true;
+                break;
+            }
+        }
+        assert!(hurt, "Phanto reaches the player");
+        // no cursed key: it leaves, then waits out of sight
+        let mut w2 = World::with_level(Level::flat(100));
+        w2.cursed = 1;
+        w2.keys = 1;
+        run(&mut w2, 0, 110);
+        assert_eq!(w2.phantos[0].state, phanto::State::Attack);
+        w2.cursed = 0;
+        run(&mut w2, 0, 1);
+        assert_eq!(w2.phantos[0].state, phanto::State::Leave);
+        run(&mut w2, 0, 600);
+        assert_eq!(w2.phantos[0].state, phanto::State::Wait);
+        assert_eq!(w2.phantos[0].target, None);
     }
 
     #[test]

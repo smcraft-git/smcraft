@@ -115,13 +115,17 @@ impl World {
     pub(super) fn drop_keys(&mut self) {
         let mut keys = Vec::new();
         for a in &mut self.actors {
-            if matches!(a.holds, Some((95, _))) && !a.alive() {
+            if let Some((95, flags)) = a.holds
+                && !a.alive()
+            {
                 a.holds = None;
-                keys.push((a.x, a.y + a.height() / 2.0 - 8.0));
+                keys.push((a.x, a.y + a.height() / 2.0 - 8.0, flags & 0x4 != 0));
             }
         }
-        for (x, y) in keys {
-            self.add_actor(Actor::new(crate::actors::Kind::Key, x, y));
+        for (x, y, cursed) in keys {
+            let mut k = Actor::new(crate::actors::Kind::Key, x, y);
+            k.alt = cursed;
+            self.add_actor(k);
         }
     }
 }

@@ -482,7 +482,8 @@ pub const SUPPORTED_PARTS: &[i16] = &[
 /// other part with the flag is reported by `unsupported_features`.
 const ALT_FORMS: &[i16] = &[
     0, 1, 2, 3, 10, 11, 12, 13, 15, 19, 23, 25, 28, 32, 34, 36, 40, 41, 42, 45, 46, 47, 48, 51, 52,
-    54, 56, 61, 77, 84, 85, 96, 97, 100, 103, 104, 107, 108, 113,
+    54, 56, 61, 77, 84, 85, 96, 97, 100, 103, 104, 107, 108, 113, // the Cursed Key (SMB1)
+    95,
     // 2.0 / 3.0: the spike ball, the P Block that appears, the blue ON/OFF Trampoline; on a
     // Mechakoopa the bit does nothing [obs]
     74, 79, 111, 132, // the Super Mushroom's 0x4 form: the SMB1 Master Sword

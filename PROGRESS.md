@@ -37,12 +37,8 @@ sway, importer and pack 12, the dev cache already at v12).
   offset to ours (the same courses whose backdrops are off) [inf]; captures of the track tiles in play and of NSMBU / 3D World wings (the mesh
   planner maps `M1_Enemy_wingcommon` to `<style>_Enemy_wingcommon`), a look at Water Level mode
   and custom scroll in the recomp (`research/tools/maker-look`: touch taps / drags by script).
-- **Agent queue** (when a helper slot frees): ~~the Super Worlds 3D map~~ (agent running); the
-  Cursed Key (95 with 0x4, `KeyCurse`) and Phanto (`MapObjKamen`, v3.0.3: states registered in
-  0x71013baa90 — Wait 0x71013bb630/6d0 (100 f at an offset), WarpWait bb770/810 (60 f), Attack
-  bb990/bbbc0 (the swoop: angle words +0x628/+0x630, radius +0x634 = 128, speed 1 ↔ 3), Leave
-  bc610/bc7c0, DieWait/FallCastle; `PlayerKeyChain_CurseModel` 0x7101583a40) — the last coverage
-  blocker in a new TGRCode sample (84 / 85); SMM1 UI sounds for the SMM1-look 100 Mario: SMM1's
+- **Agent queue** (when a helper slot frees): ~~the Super Worlds 3D map~~ (agent running); ✅ the Cursed Key and Phanto
+  (2026-10-25, research 95-key.md; co-op: Phanto hurts only the player in front [inf]); SMM1 UI sounds for the SMM1-look 100 Mario: SMM1's
   `Pack/Sound.pack` holds 534 `Sound/Resource/*.bars` (BFWAV), the UI ones per layout and pane
   (`UI_<layout>_<pane>.bars`, e.g. `UI_Nwk_WorldMapExp_00_L_WorldMapKuribo_00`); `mmk audio` reads
   only SMM2's BWAV BARS so far.
