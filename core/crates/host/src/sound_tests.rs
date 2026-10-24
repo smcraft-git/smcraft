@@ -85,7 +85,12 @@ fn db() -> serde_json::Value {
             "M1_JumpStep": {"calls": [asset("jump", "Spring"), asset("high_jump", "SpringHigh")]},
             "M1_PowBlock": {"calls": [asset("pow", "Pow")]},
             "M1_Bombhei": {"calls": [asset("ignite", "Fuse"), asset("explode", "Boom")]},
-            "M1_ObjectCommon": {"calls": [asset("playCoin", "Coin"), asset("block_hit", "Bump")]},
+            "M1_ObjectCommon": {"calls": [
+                asset("playCoin", "Coin"),
+                asset("block_hit", "Bump"),
+                asset("blink_block_change", "BlinkSwap"),
+                asset("NeedleBlock_Appear", "SpikesOut")
+            ]},
             "M1_Kuribo": {"calls": [
                 {"key": "r_damage_stamp", "kind": "switch", "watch": "ScaleLevel", "children": [1, 2]},
                 {"key": "s_big", "parent": 0, "if": ["==", "Big"], "wave": "Split"},
@@ -363,6 +368,23 @@ fn a_helmet_goes_on_and_comes_off_with_its_sounds() {
     w.player.helmet = Some(2);
     r.s.after_step(&w);
     assert_eq!(r.played(), ["sfx:SpikyHelmetOn"]);
+}
+
+#[test]
+fn blinking_blocks_swap_and_spike_blocks_come_out_with_their_sounds() {
+    let mut r = rig();
+    let mut w = world();
+    w.level.blink_blocks.push((4, 3, false));
+    w.level.spike_blocks.push((6, 2, 0));
+    r.s.start_course(&w);
+    r.played();
+    w.blink_alt = true;
+    r.s.after_step(&w);
+    assert_eq!(r.played(), ["sfx:BlinkSwap"]);
+    // the shared timer at the spikes' "out" phase (178 = (238 + 180) mod 240)
+    w.area_timer = 238;
+    r.s.after_step(&w);
+    assert_eq!(r.played(), ["sfx:SpikesOut"]);
 }
 
 #[test]

@@ -161,6 +161,8 @@ pub struct Sounds {
     /// alternate) was burning.
     keys: u32,
     pink: usize,
+    /// The blinking blocks' group last heard (3D World).
+    blink_alt: bool,
     burning: [bool; 2],
     /// The worn SMM1 costume's sounds (Phase 11).
     costume: CostumeSounds,
@@ -215,6 +217,7 @@ impl Sounds {
             note_hits: 0,
             keys: 0,
             pink: 0,
+            blink_alt: false,
             burning: [false; 2],
             costume: CostumeSounds::default(),
             log: Vec::new(),
@@ -916,6 +919,7 @@ impl Sounds {
         self.actors = snapshot(world);
         self.keys = world.keys;
         self.pink = world.pink.len();
+        self.blink_alt = world.blink_alt;
         self.burning = [
             world.burner_flame(false) > 0.0,
             world.burner_flame(true) > 0.0,
@@ -1863,6 +1867,51 @@ impl Sounds {
         let on_screen = |x: f32, y: f32| {
             x > cx - 32.0 && x < cx + VIEW_W + 32.0 && y > cy - 32.0 && y < cy + VIEW_H + 32.0
         };
+        // 3D World's blinking blocks (their groups swap) and timed spike blocks (the warning,
+        // out, back in at the sim's phases of the shared 240-frame timer), from the first one on
+        // screen [inf: one sound for all; `blink_block_blink`, the warning blink, not placed]
+        let tile = |x: i32, y: i32, size: f32| {
+            (x as f32 * 16.0 + size / 2.0, y as f32 * 16.0 + size / 2.0)
+        };
+        if world.blink_alt != self.blink_alt {
+            self.blink_alt = world.blink_alt;
+            if let Some((x, y)) = world
+                .level
+                .blink_blocks
+                .iter()
+                .map(|&(x, y, _)| tile(x, y, 16.0))
+                .find(|&(x, y)| on_screen(x, y))
+            {
+                let e = Emitter {
+                    x,
+                    y,
+                    water: self.in_water(world, y),
+                };
+                self.object_sfx(world, "blink_block_change", e);
+            }
+        }
+        let spike_key = match (world.area_timer % 240 + 180) % 240 {
+            118 => Some("NeedleBlock_AppearSign"),
+            178 => Some("NeedleBlock_Appear"),
+            238 => Some("NeedleBlock_End"),
+            _ => None,
+        };
+        if let Some(key) = spike_key
+            && let Some((x, y)) = world
+                .level
+                .spike_blocks
+                .iter()
+                .filter(|&&(_, _, mode)| mode == 0)
+                .map(|&(x, y, _)| tile(x, y, 32.0))
+                .find(|&(x, y)| on_screen(x, y))
+        {
+            let e = Emitter {
+                x,
+                y,
+                water: self.in_water(world, y),
+            };
+            self.object_sfx(world, key, e);
+        }
         for (i, alt) in [false, true].into_iter().enumerate() {
             let burning = world.burner_flame(alt) > 0.0;
             if burning && !self.burning[i] {
