@@ -66,6 +66,13 @@ SMCraft is back in development (it was archived in October 2026).
   makes its big jump every third throw. A winged Spike Top can be stood on like a Para-Beetle —
   it dips under you — but its spikes still hurt. Bowser no longer jumps over a wall or a gap when
   solid ground hangs just above him; a 3D World power-up's touch box is 14 px tall, as in the game.
+- A winged Sledge Bro walks and throws like a wingless one (the game never gives it the Hammer
+  Bro's hops) but jumps higher and bobs in the air before its ground pound, and every Sledge Bro
+  hovers one frame less before it drops. Walking enemies turn at each other by the game's rule:
+  the slightest push from one ahead turns them, with their feet less than 8 px apart (3D World:
+  half a body's height of overlap); an enemy walking into a column of stacked enemies turns at
+  its member level with it. A red Koopa turns at a ledge exactly where the game's foot sensor
+  leaves the floor.
 
 - **Import once, then no dump or keys.** SMCraft reads your NSPs and `prod.keys` itself (no
   hactool, nothing extracted) and writes its own asset pack; the game runs from the pack alone.

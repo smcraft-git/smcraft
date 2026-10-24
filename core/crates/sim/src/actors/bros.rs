@@ -26,8 +26,9 @@
 //!
 //! The throw facing follows the nearest player (more than 1 px away) except while the `Throw`
 //! animation plays (0x7101096d40). Its own throw helper, which throws on a timer in Walk, is idle
-//! in the Wing context (0x7101098560: context 1 runs it only while airborne with actor +0x528
-//! bit 19, set from its +0x3a0 link, 0x710128a2d0) [obs]. Each throw is a single hammer.
+//! in the Wing context (0x7101098560: in context 1 the helper's slot 0x88, 0x7101091f30 = 1,
+//! holds it unless the helper's +0x48 bit 1 is set and actor +0x523 bit 4 clear) [obs v3.0.3].
+//! Each throw is a single hammer.
 //!
 //! The animation lengths are the models' own (`WU_Enemy_bros`: jump_st 12, jump_ed 14, throw 68;
 //! `3W_Enemy_bros`: JumpStart 15, JumpEnd 14, Attack 60), played at rate 1 (EnemyModelParams

@@ -150,6 +150,23 @@ sway, importer and pack 12, the dev cache already at v12).
   own helpers), the red Koopa's ledge reach (the table's ±4 breaks 9 traces; 3.9 stays), Bowser's
   jump-height search (BG type 0x25) [inf]. 578 / 580 traces exact; coverage 550/550 + 273/273;
   simulate 0 crashes.
+- 🔄 **Inferred-behaviour pass 5** (2026-10-25, branch `infres5`, research specs/inf-inventory.md
+  "Pass 5"): ✅ the Sledge Bro's WingWalk: there is none — MegaBros sends Fall's landing to Walk
+  (slots 0x128 / 0x130 0x71011d2710 / 0x71011d2720) and its helpers' Wing gate is off (slot 0x88
+  returns 0), so a winged one keeps its action; its wings give the 6.5 jump and a hover bob (vy
+  0.4·cos θ from 90° by 8°, Hovering exe 0x71011d2b50); the hover holds 9 frames. ✅ the walker
+  turn: the contact callback 0x71011ff860 raises +0x528 bit 27 (Walk 0x7101050c60) on a push ≥ 0.1
+  (half the overlap) against the facing, feet within 8 px (3D World: vertical push ≥ 4); a walker
+  turns on a tower member level with it; the +0x3a0 component (pass 4's "bump") has the player
+  twister receiver's slots, not a pairing. ✅ the red Koopa's ledge probe: the walkers' foot sensor
+  ±4 (big 8) with a cell edge closed (replaces 3.9; the open edge breaks 10 traces). 🔄 Bowser's
+  height search 0x7101153f00 decoded (actor-owned class-0 BG units of type 0x25 under the jump's
+  height block it; the type's maker not found), the NSMBU Turn (`lkp_walk`'s FSKA loop bit is
+  clear like all the model's, so the play mode comes from the anim controller; not read), the
+  Propeller Mushroom's Move decoded (0x710134ca70 / 0x710134c3c0; not ported). ⬜ a sliding shell
+  meeting a boss (#15), the 2D items' extra touch pixel and the Fire Flower's box id (no writer in
+  the item code 0x7101330000–0x7101420000). 578 / 580 traces exact; coverage 550/550 + 273/273;
+  simulate 0 crashes.
 - **Agent queue** (when a helper slot frees; running 2026-10-25: the maker's Water Level and
   Custom Scroll modes, physics): ✅ a Koopaling in a Clown Car (2026-10-25, branch
   `kclown`, research 120-koopalings.md "In a Koopa Clown Car": KoKoopaDefault's Clown vtable
