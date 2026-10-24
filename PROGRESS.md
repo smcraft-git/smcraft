@@ -311,8 +311,10 @@ Nextendo; `docs/nextendo-network-play.md`, spec `research/specs/network-play.md`
   of their own (a course code after the course hash in the session's application data, pool
   `WORLD_POOL`); the opener's pick is everyone's course, downloaded by code. Story Mode pool
   without. Checked: a front flow test, the local-server end-to-end test (both get the opener's)
-- ⬜ Difficulty vote and TGRCode courses by difficulty (the owner sends the code); Miis / names
-  of the other players (peers' names aren't exchanged: "Player n"); versus rating; watching mode
+- ✅ The other players' names: each sends its name with the handshake (PROBE / REPLY, the host's
+  START carries everyone's; older builds still meet, shown as "Player n"); checked on the
+  local server
+- ⬜ Difficulty vote and TGRCode courses by difficulty (the owner sends the code); Miis; versus rating; watching mode
   after one's run ends; preset messages; Play with Friends (rooms); 3–4 players across NATs (the
   front end asks for 2); a match going on without a player who left; a relay for symmetric NATs
 - ⏳ Live: Nextendo's OK and an SMCraft app registration (or the SMM2Recomp one with loopback

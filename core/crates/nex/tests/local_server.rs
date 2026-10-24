@@ -253,6 +253,7 @@ fn config(s: &LocalServer, pid: u64) -> PlayConfig {
         players: 2,
         course: 0xC0FFEE,
         pick: Vec::new(),
+        name: String::new(),
         bind: "127.0.0.1:0".parse().unwrap(),
         advertise: Some(Ipv4Addr::LOCALHOST),
         nat_check: None,
@@ -273,6 +274,7 @@ fn network_play_end_to_end() {
     // each searches with a course pick of their own: the opener's is everyone's
     let picked = |pid: u64, pick: &[u8]| PlayConfig {
         pick: pick.to_vec(),
+        name: if pid == 3_000_001 { "Ada" } else { "Bo" }.into(),
         ..config(&s, pid)
     };
     let first = picked(3_000_001, b"AB1-CD2-EF3");
@@ -287,6 +289,9 @@ fn network_play_end_to_end() {
     assert_eq!(host.gid, joiner.gid);
     assert_eq!(host.pick, b"AB1-CD2-EF3");
     assert_eq!(joiner.pick, host.pick);
+    // everyone's names, in player order, on both sides
+    assert_eq!(host.names, ["Ada", "Bo"]);
+    assert_eq!(joiner.names, host.names);
     assert_eq!((host.me, joiner.me), (0, 1));
     assert_eq!(host.peers, [joiner.socket.local_addr().unwrap()]);
     assert_eq!(joiner.peers, [host.socket.local_addr().unwrap()]);

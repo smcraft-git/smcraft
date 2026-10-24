@@ -46,6 +46,8 @@ pub struct PlayConfig {
     pub course: u64,
     /// Our course pick, if we open the session (see [`Match::pick`]).
     pub pick: Vec<u8>,
+    /// Our player name, shown to the others (at most 32 bytes travel).
+    pub name: String,
     /// Where the game's UDP socket binds (e.g. 0.0.0.0:0).
     pub bind: SocketAddr,
     /// Our LAN address in the station URL (default: the one that routes to the server).
@@ -82,6 +84,8 @@ pub struct Match {
     pub gid: u32,
     /// The course pick of the player who opened the session (the same for everyone).
     pub pick: Vec<u8>,
+    /// Every player's name by player index (empty where a peer sent none).
+    pub names: Vec<String>,
     stop: Arc<AtomicBool>,
     keepalive: Option<JoinHandle<()>>,
 }
@@ -216,6 +220,7 @@ pub fn find_match(cfg: PlayConfig) -> Result<Match, Error> {
             p(found, players as usize);
         }
     };
+    let mut names: Vec<String> = Vec::new();
     let waited = if host {
         log(&format!(
             "Network Play: opened a session, waiting for {} more player(s)",
@@ -225,17 +230,26 @@ pub fn find_match(cfg: PlayConfig) -> Result<Match, Error> {
         host_wait(
             &mut secure,
             &socket,
-            cfg.pid,
+            (cfg.pid, &cfg.name),
             gid,
             players as usize,
             deadline,
             &cfg.cancel,
             &report,
+            &mut names,
         )
     } else {
         log("Network Play: joined a session, connecting to the host");
         report(2);
-        joiner_connect(&mut secure, &socket, &cfg, &session, &me_url, deadline)
+        joiner_connect(
+            &mut secure,
+            &socket,
+            &cfg,
+            &session,
+            &me_url,
+            deadline,
+            &mut names,
+        )
     };
     let (me, peers) = match waited {
         Ok(v) => v,
@@ -284,6 +298,7 @@ pub fn find_match(cfg: PlayConfig) -> Result<Match, Error> {
         host,
         gid,
         pick,
+        names,
         stop,
         keepalive: Some(keepalive),
     })
@@ -309,6 +324,7 @@ fn joiner_connect(
     session: &MatchmakeSession,
     me_url: &StationUrl,
     deadline: Instant,
+    names: &mut Vec<String>,
 ) -> Result<(usize, Vec<SocketAddr>), Error> {
     let host_urls = secure.session_urls(session.id)?;
     // one probe request per connection id (the host's LAN and public URLs share it)
@@ -323,12 +339,13 @@ fn joiner_connect(
     joiner_wait(
         secure,
         socket,
-        cfg.pid,
+        (cfg.pid, &cfg.name),
         session.owner,
         session.id,
         &candidates,
         deadline,
         &cfg.cancel,
+        names,
     )
 }
 
@@ -337,13 +354,16 @@ fn joiner_connect(
 fn host_wait(
     secure: &mut Secure,
     socket: &UdpSocket,
-    me: u64,
+    (me, my_name): (u64, &str),
     gid: u32,
     players: usize,
     deadline: Instant,
     cancel: &Option<Arc<AtomicBool>>,
     report: &dyn Fn(usize),
+    names: &mut Vec<String>,
 ) -> Result<(usize, Vec<SocketAddr>), Error> {
+    // each joiner's name, from its PROBE / REPLY
+    let mut joiner_names: HashMap<u64, String> = HashMap::new();
     // joiner PID → (candidate addresses, confirmed address), in the order they came
     let mut order: Vec<u64> = Vec::new();
     let mut candidates: HashMap<u64, Vec<SocketAddr>> = HashMap::new();
@@ -399,6 +419,7 @@ fn host_wait(
                 }
                 let mut m = Message::new(nat::PROBE, gid, me);
                 m.nonce = probe_nonce;
+                m.name = my_name.to_string();
                 for a in addrs {
                     let _ = socket.send_to(&m.encode(), a);
                 }
@@ -413,17 +434,20 @@ fn host_wait(
                 nat::PROBE => {
                     let mut r = Message::new(nat::REPLY, gid, me);
                     r.nonce = m.nonce;
+                    r.name = my_name.to_string();
                     let _ = socket.send_to(&r.encode(), from);
                     if !order.contains(&m.from) {
                         order.push(m.from);
                     }
                     confirmed.insert(m.from, from);
+                    joiner_names.insert(m.from, m.name);
                 }
                 nat::REPLY if m.nonce == probe_nonce => {
                     if !order.contains(&m.from) {
                         order.push(m.from);
                     }
                     confirmed.insert(m.from, from);
+                    joiner_names.insert(m.from, m.name);
                 }
                 _ => {}
             }
@@ -435,12 +459,20 @@ fn host_wait(
             .take(players - 1)
             .collect();
         if ready.len() == players - 1 {
-            return start(socket, me, gid, &ready, &confirmed, deadline, cancel);
+            *names = std::iter::once(my_name.to_string())
+                .chain(
+                    ready
+                        .iter()
+                        .map(|p| joiner_names.get(p).cloned().unwrap_or_default()),
+                )
+                .collect();
+            return start(socket, me, gid, &ready, &confirmed, deadline, cancel, names);
         }
     }
 }
 
-/// Sends START to every joiner until each says READY.
+/// Sends START (with everyone's names) to every joiner until each says READY.
+#[allow(clippy::too_many_arguments)]
 fn start(
     socket: &UdpSocket,
     me: u64,
@@ -449,6 +481,7 @@ fn start(
     addrs: &HashMap<u64, SocketAddr>,
     deadline: Instant,
     cancel: &Option<Arc<AtomicBool>>,
+    names: &[String],
 ) -> Result<(usize, Vec<SocketAddr>), Error> {
     let v4 = |a: &SocketAddr| match a {
         SocketAddr::V4(v) => *v,
@@ -459,6 +492,7 @@ fn start(
         .push((me, SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0)));
     m.players
         .extend(joiners.iter().map(|p| (*p, v4(&addrs[p]))));
+    m.names = names.to_vec();
     let bytes = m.encode();
     let mut ready: Vec<u64> = Vec::new();
     let mut next = Instant::now();
@@ -496,12 +530,13 @@ fn start(
 fn joiner_wait(
     secure: &mut Secure,
     socket: &UdpSocket,
-    me: u64,
+    (me, my_name): (u64, &str),
     owner: u64,
     gid: u32,
     candidates: &[SocketAddr],
     deadline: Instant,
     cancel: &Option<Arc<AtomicBool>>,
+    names: &mut Vec<String>,
 ) -> Result<(usize, Vec<SocketAddr>), Error> {
     let probe_nonce = nonce();
     let mut next_probe = Instant::now();
@@ -517,6 +552,7 @@ fn joiner_wait(
         if Instant::now() >= next_probe {
             let mut m = Message::new(nat::PROBE, gid, me);
             m.nonce = probe_nonce;
+            m.name = my_name.to_string();
             for a in host_addr.iter().chain(candidates) {
                 let _ = socket.send_to(&m.encode(), a);
             }
@@ -530,6 +566,7 @@ fn joiner_wait(
                 nat::PROBE => {
                     let mut r = Message::new(nat::REPLY, gid, me);
                     r.nonce = m.nonce;
+                    r.name = my_name.to_string();
                     let _ = socket.send_to(&r.encode(), from);
                     host_addr = Some(from);
                 }
@@ -538,6 +575,7 @@ fn joiner_wait(
                     let Some(idx) = m.players.iter().position(|(p, _)| *p == me) else {
                         continue;
                     };
+                    *names = m.names.clone();
                     let ready = Message::new(nat::READY, gid, me).encode();
                     for _ in 0..3 {
                         let _ = socket.send_to(&ready, from);

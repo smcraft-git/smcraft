@@ -76,6 +76,8 @@ pub struct MatchInfo {
     pub gid: u32,
     /// The Course World course the session's opener picked (None: the shared pool's draw).
     pub course: Option<String>,
+    /// Every player's name by position (empty where a peer sent none).
+    pub names: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -417,12 +419,15 @@ struct Lobby {
     since: i32,
 }
 
-/// The local player's name and the others' (peers' names aren't exchanged yet: "Player n").
-fn player_name(me: usize, k: usize, name: &str) -> String {
-    if k == me {
-        name.to_string()
-    } else {
-        format!("Player {}", k + 1)
+/// Player `k`'s name: ours, else the one the peer sent with the handshake, else "Player n"
+/// (a peer from a build that sends none).
+fn player_name(m: &MatchInfo, k: usize, name: &str) -> String {
+    if k == m.me {
+        return name.to_string();
+    }
+    match m.names.get(k).filter(|n| !n.trim().is_empty()) {
+        Some(n) => n.clone(),
+        None => format!("Player {}", k + 1),
     }
 }
 
@@ -464,10 +469,7 @@ impl Lobby {
             // no Miis, no rank yet [departure]
             l.show(&format!("{card}/L_MiiBody_00"), false);
             l.show(&format!("{card}/W_Rate_00"), false);
-            l.text(
-                &format!("{card}/T_PlayerName_00"),
-                &player_name(m.me, k, name),
-            );
+            l.text(&format!("{card}/T_PlayerName_00"), &player_name(m, k, name));
             if let Some(c) = l.message(&format!("{:04}", k + 1)) {
                 l.text(&format!("{card}/T_Chara_00"), &c);
             }
@@ -531,10 +533,7 @@ impl NetCourse {
                     l.show(&info, false);
                     continue;
                 }
-                l.text(
-                    &format!("{info}/T_MiiName_00"),
-                    &player_name(m.me, k, player),
-                );
+                l.text(&format!("{info}/T_MiiName_00"), &player_name(m, k, player));
                 l.show(&format!("{info}/T_Rank_00"), false);
                 l.show(&format!("{info}/L_MiiIcon_00"), false);
                 l.show(&format!("{info}/L_MiiIcon_01"), false);
@@ -608,12 +607,9 @@ impl Results {
             l.show(&format!("{card}/L_BtlPayerInfo_00"), false);
             l.text(
                 &format!("{card}/N_PlayerName_00/T_PlayerName_00"),
-                &player_name(m.me, k, name),
+                &player_name(m, k, name),
             );
-            l.text(
-                &format!("{card}/T_PlayerName_00"),
-                &player_name(m.me, k, name),
-            );
+            l.text(&format!("{card}/T_PlayerName_00"), &player_name(m, k, name));
         }
         l.play("InPlayer", tick);
         let next = tick + l.ticks("InPlayer", 1);
@@ -1153,6 +1149,7 @@ impl NetplayFlow {
             players: 2,
             gid: 1,
             course: None,
+            names: Vec::new(),
         };
         let tick = self.tick;
         match what {
@@ -1470,6 +1467,7 @@ mod tests {
             players: 2,
             gid: 7,
             course: None,
+            names: Vec::new(),
         });
         run_until(&mut f, &mut h, "lobby", 3);
         run_until(&mut f, &mut h, "loading", 400);
@@ -1504,6 +1502,7 @@ mod tests {
             players: 2,
             gid: 8,
             course: None,
+            names: Vec::new(),
         });
         run_until(&mut f, &mut h, "playing", 500);
         h.net.link = LinkState::Lost;
@@ -1567,9 +1566,24 @@ mod tests {
             players: 2,
             gid: 7,
             course: Some("XY7-ZW8-QR9".into()),
+            names: Vec::new(),
         });
         run_until(&mut f, &mut h, "playing", 500);
         assert_eq!(h.net.played, [Source::Server("XY7-ZW8-QR9".into())]);
+    }
+
+    #[test]
+    fn the_others_show_the_names_they_sent() {
+        let m = MatchInfo {
+            me: 1,
+            players: 3,
+            gid: 1,
+            course: None,
+            names: vec!["Ada".into(), "me as they see me".into(), " ".into()],
+        };
+        assert_eq!(player_name(&m, 0, "Bo"), "Ada");
+        assert_eq!(player_name(&m, 1, "Bo"), "Bo", "our own name is ours");
+        assert_eq!(player_name(&m, 2, "Bo"), "Player 3", "nothing sent");
     }
 
     fn entry(key: &str, story: bool) -> CourseEntry {

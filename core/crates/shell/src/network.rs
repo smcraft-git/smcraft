@@ -107,6 +107,7 @@ pub fn local_config(
         players,
         course,
         pick: Vec::new(),
+        name: String::new(),
         bind,
         advertise: None,
         nat_check: None,
@@ -210,6 +211,7 @@ impl NetworkHost {
             Arc::new(|m: &str| crate::app::log(m)),
         );
         cfg.pick = r.pick.clone().unwrap_or_default().into_bytes();
+        cfg.name = self.name.clone();
         cfg.cancel = Some(cancel.clone());
         let p = progress.clone();
         cfg.progress = Some(Arc::new(move |found, wanted| {
@@ -255,6 +257,7 @@ impl NetworkHost {
                     course: String::from_utf8(m.pick.clone())
                         .ok()
                         .filter(|c| !c.is_empty()),
+                    names: m.names.clone(),
                 };
                 self.found = Some((m, info.clone()));
                 MatchState::Ready(info)

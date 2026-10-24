@@ -129,6 +129,27 @@ pub struct Message {
     pub nonce: u64,
     /// START: (PID, address as the host sees it).
     pub players: Vec<(u64, SocketAddrV4)>,
+    /// PROBE / REPLY: the sender's player name (empty from a build that sends none).
+    pub name: String,
+    /// START: every player's name, in the players' order.
+    pub names: Vec<String>,
+}
+
+/// A name as it travels: at most 32 bytes of UTF-8, cut at a character.
+fn put_name(b: &mut Vec<u8>, name: &str) {
+    let mut end = name.len().min(32);
+    while !name.is_char_boundary(end) {
+        end -= 1;
+    }
+    b.push(end as u8);
+    b.extend_from_slice(&name.as_bytes()[..end]);
+}
+
+/// A name and what follows it (None: nothing there, as from an older build).
+fn take_name(b: &[u8]) -> Option<(String, &[u8])> {
+    let n = *b.first()? as usize;
+    let s = b.get(1..1 + n)?;
+    Some((String::from_utf8_lossy(s).into_owned(), &b[1 + n..]))
 }
 
 impl Message {
@@ -139,6 +160,8 @@ impl Message {
             from,
             nonce: 0,
             players: Vec::new(),
+            name: String::new(),
+            names: Vec::new(),
         }
     }
 
@@ -148,13 +171,20 @@ impl Message {
         b.extend_from_slice(&self.gid.to_le_bytes());
         b.extend_from_slice(&self.from.to_le_bytes());
         match self.kind {
-            PROBE | REPLY => b.extend_from_slice(&self.nonce.to_le_bytes()),
+            PROBE | REPLY => {
+                b.extend_from_slice(&self.nonce.to_le_bytes());
+                put_name(&mut b, &self.name);
+            }
             START => {
                 b.push(self.players.len() as u8);
                 for (pid, a) in &self.players {
                     b.extend_from_slice(&pid.to_le_bytes());
                     b.extend_from_slice(&a.ip().octets());
                     b.extend_from_slice(&a.port().to_le_bytes());
+                }
+                b.push(self.names.len() as u8);
+                for n in &self.names {
+                    put_name(&mut b, n);
                 }
             }
             _ => {}
@@ -173,7 +203,12 @@ impl Message {
         );
         let rest = &b[18..];
         match m.kind {
-            PROBE | REPLY => m.nonce = u64::from_le_bytes(rest.get(..8)?.try_into().ok()?),
+            PROBE | REPLY => {
+                m.nonce = u64::from_le_bytes(rest.get(..8)?.try_into().ok()?);
+                if let Some((name, _)) = take_name(&rest[8..]) {
+                    m.name = name;
+                }
+            }
             START => {
                 let n = *rest.first()? as usize;
                 for e in rest.get(1..1 + 14 * n)?.chunks(14) {
@@ -182,6 +217,17 @@ impl Message {
                         u64::from_le_bytes(e[..8].try_into().ok()?),
                         SocketAddrV4::new(ip, u16::from_le_bytes([e[12], e[13]])),
                     ));
+                }
+                // the names follow (none from an older build)
+                if let Some(&k) = rest.get(1 + 14 * n) {
+                    let mut tail = &rest[2 + 14 * n..];
+                    for _ in 0..k {
+                        let Some((name, next)) = take_name(tail) else {
+                            break;
+                        };
+                        m.names.push(name);
+                        tail = next;
+                    }
                 }
             }
             READY => {}
@@ -211,7 +257,19 @@ mod tests {
             (2, "10.0.0.2:7000".parse().unwrap()),
         ];
         assert!(is_handshake(&s.encode()));
-        assert_eq!(Message::decode(&s.encode()), Some(s));
+        assert_eq!(Message::decode(&s.encode()), Some(s.clone()));
+        // names: the sender's on PROBE / REPLY, everyone's on START, cut to 32 bytes
+        let mut p = Message::new(REPLY, 7, 99);
+        p.name = "Ada".into();
+        assert_eq!(Message::decode(&p.encode()), Some(p));
+        s.names = vec!["Ada".into(), "é".repeat(20)];
+        let back = Message::decode(&s.encode()).unwrap();
+        assert_eq!(back.names[0], "Ada");
+        assert_eq!(back.names[1], "é".repeat(16), "32 bytes at most");
+        // an older build's PROBE (no name) still reads
+        let mut old = Message::new(PROBE, 7, 99).encode();
+        old.pop();
+        assert_eq!(Message::decode(&old).map(|m| m.name), Some(String::new()));
         assert_eq!(Message::decode(b"SMCP\x02"), None);
     }
 

@@ -35,6 +35,7 @@ fn main() -> Result<(), String> {
         players: 2,
         course: 0,
         pick: Vec::new(),
+        name: String::new(),
         bind: "0.0.0.0:0".parse().unwrap(),
         advertise: None,
         nat_check: None,
