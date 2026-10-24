@@ -2865,7 +2865,7 @@ impl World {
                 a.dir = if self.player.x <= bx { -1 } else { 1 };
             }
             a.chute = parachute;
-            a.block_out(by, r.down, false);
+            a.block_out(by, r.down, r.note);
             if kind.is_item() {
                 self.events.push(Event::ItemAppear);
             }
@@ -8247,6 +8247,23 @@ mod tests {
         run(&mut w2, 0, 600);
         assert_eq!(w2.phantos[0].state, phanto::State::Wait);
         assert_eq!(w2.phantos[0].target, None);
+    }
+
+    #[test]
+    fn a_note_block_lets_its_item_go_and_stays_a_note_block() {
+        let mut lvl = Level::flat(100);
+        lvl.set(3, 5, Cell::Solid);
+        lvl.blocks.push(BlockPlacement {
+            x: 3,
+            y: 5,
+            kind: BlockKind::Note,
+            contents: Some(Contents::Mushroom),
+        });
+        let mut w = World::with_level(lvl);
+        run(&mut w, input::JUMP, 30);
+        assert!(w.actors.iter().any(|a| a.kind == Kind::Mushroom));
+        let b = w.blocks.get(3, 5).unwrap();
+        assert_eq!((b.kind, b.contents), (BlockKind::Note, None));
     }
 
     #[test]
