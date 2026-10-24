@@ -113,7 +113,8 @@ sway, importer and pack 12, the dev cache already at v12).
 
 **G3 — Challenges** 🔄
 - ✅ 100 Mario Challenge (SMM2 and SMM1 presentation, rules from SMM1)
-- 🔄 Endless Challenge: rules ✅; SMM2 screens on SMM2's own rules ⬜; courses from TGRCode ✅
+- 🔄 Endless Challenge: rules ✅; SMM2 screens on SMM2's own rules ✅ (`front/src/endless_run.rs`,
+  G7's Challenge Modes); the server's runs and rankings ⬜ (TGRCode is read-only); courses from TGRCode ✅
   (`mmk_embed::pool`: the ported upstream fetcher fills a local store from TGRCode's Endless pool
   when the runs open, 10 per difficulty per launch; the runs draw from it and the library, and
   play what it holds when offline)
