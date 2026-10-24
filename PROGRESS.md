@@ -29,12 +29,26 @@ sway, importer and pack 12, the dev cache already at v12).
   TGRCode; the game's track tiles; CJK names; the Toad House minigames; SMB3 / SMW wings; boss
   jump sounds by style.
 - **GPU-slot queue** (one game instance at a time; the physics agent holds it most of the time):
-  ✅ pixel table re-rendered 2026-10-24 (2D means: SMB1 2.4 / night 1.8, SMB3 5.0 / 2.5, SMW 6.1 /
-  3.0; NSMBU 17.8 / 14.6; 3D World 29.5; SMW small Mario now drawn 16 × 32 as its quads); left in 2D:
-  the day sky (SMW 19, SMB3 10: the backdrop's placement, not a plain shift; the nights use a
-  static backdrop and match) and the day airship (SMW 17, SMB3 11), the coins' animation phase — the coins match in
-  castle courses but not in the day sky / airship ones, so those courses' clock may run at an
-  offset to ours (the same courses whose backdrops are off) [inf]; captures of the track tiles in play and of NSMBU / 3D World wings (the mesh
+  ✅ pixel table re-rendered 2026-10-25 (branch `pixels6`, k = 900; 2D means: SMB1 1.6 / night
+  1.2 (was 2.4 / 1.8), SMB3 2.7 / 1.7 (5.0 / 2.5), SMW 2.2 / 2.0 (6.1 / 3.0); NSMBU 15.0 / 9.2
+  (17.8 / 14.6); 3D World 29.0 (29.5)). Found: the 2D day backdrops scroll by their model's
+  texture animation (`<S>_DV_athletic_fts` 4096 frames a picture, SMB3 / SMW day airships
+  1024, other airships 512; `mmk bfres --curves` now prints shader-parameter tracks); the course
+  scene's animations run 63 frames ahead of the player's first update (`World::scene_frame`:
+  backdrop scroll, the coins' spin, the airship's sway — whose zero then falls on the scene's
+  first frame — and the 3D meshes); the airship's start ground is the field atlas's cloud set
+  (SMB1 / SMB3 / SMW / NSMBU; the goal ground's [?], 3D World's field is meshes); the 2D camera
+  snaps to the target's pixels (the sway moves by fractions of a world pixel); NSMBU / 3D World
+  backgrounds play their `_fts` texture-matrix tracks (importer 15 / game pack 15, re-imported:
+  NSMBU airship 33 → 21, sky 35 → 27, nights −4); the Swift app's own mesh path still draws the
+  backgrounds' materials unscrolled (its sky layers do scroll: they come with the scene's light
+  block). Left in 2D: SMB3 forest 10.3 (the forest water: the reference's is dark green over
+  black, ours blue — translucent over another colour or a tint [?]), castles ~4 (lava), SMB1
+  forest 4.4. NSMBU: the sky's grey cloud layers (`kumo_A`–`C`) and big clouds (`nyudo`) still
+  sit elsewhere than the reference's (sky 27, airship 21: bones / indirect texture?), idle
+  Mario faces the camera in the game (ours 70° turned, ~5 px high), the castle's lava is a 3D
+  surface in the game (ours the 2D strip), a global tone offset (ground ~14). 3D World: the
+  colours / tone (castle, snow, ground 32–43); captures of the track tiles in play and of NSMBU / 3D World wings (the mesh
   planner maps `M1_Enemy_wingcommon` to `<style>_Enemy_wingcommon`), a look at Water Level mode
   and custom scroll in the recomp (`research/tools/maker-look`: touch taps / drags by script).
 - ✅ **Inferred-behaviour inventory** (2026-10-25, branch `infres`, research specs/inf-inventory.md):
@@ -101,9 +115,10 @@ sway, importer and pack 12, the dev cache already at v12).
      SSD): the 3D World courses (a MoltenVK build without 3D texture compression is ready,
      `ryubuild/no3dbc`), Koopa / shell traces, WU form. Pixels (3D World mean 46.0 → 29.4;
      NSMBU day 38.5 → 17.8, night 39.9 → 14.6; NSMBU's TEV stages ✅, its background's place ✅,
-     the light-map domain ✅ (wrapped, with the light map's pow; needs re-import, pack 13), rim light ✅): specular /
-     env-map reflections, baked AO (needs an importer bump), the other sky variants,
-     3D World snow, the colour table.
+     the light-map domain ✅ (wrapped, with the light map's pow; needs re-import, pack 13), rim light ✅,
+     the backgrounds' texture-matrix scroll ✅ (pack 15, NSMBU 17.8 → 15.0, nights 14.6 → 9.2)): the
+     NSMBU sky's cloud layers' place, specular / env-map reflections, baked AO (needs an importer
+     bump), the other sky variants, 3D World snow, the colour table, 3D lava.
   2. Maker: ✅ wings / parachutes (the attribute balloon, merged 2026-10-24), ✅ over a multigrab
      selection (hold a selected part: wings / parachute go to every part that takes them, one
      undo step); a part put into a block keeps its wings / parachute / form / size as the

@@ -4,7 +4,8 @@
 //! meshes/<Model>.mmesh          every model of one game model file: skeleton, materials, shapes,
 //!                               bind-pose vertices (LOD 0 only), triangle indices
 //! anims/<Model>/index.json      { anim: { frames, loop, skeletal, visibility, textures } }
-//! anims/<Model>/<anim>.mskel    one animation: bone curves, bone visibility, texture patterns
+//! anims/<Model>/<anim>.mskel    one animation: bone curves, bone visibility, texture patterns,
+//!                               texture-matrix (`tex_srt*`) curves
 //! ```
 //! Both files are a small container: magic (4 bytes), u32 version, u32 JSON length, u32 blob
 //! length, the JSON header (padded to 8 bytes), then the binary blob. The JSON describes the
@@ -195,6 +196,47 @@ pub struct TexTrack {
     pub keys: Vec<(f32, String)>,
 }
 
+/// A material's animated texture matrix (`tex_srt<index>`: mode, scale u, scale v, rotate,
+/// translate u, translate v), from the game's shader-parameter animations (`_fts`, `_fsp`).
+/// Its own length and looping: it may share its animation's name with a skeletal one of
+/// another length (NSMBU's backdrops: bones 12000 frames, cloud scroll 16000).
+#[derive(Clone, Debug, PartialEq)]
+pub struct SrtTrack {
+    pub material: String,
+    pub index: u8,
+    pub frames: u32,
+    pub looping: bool,
+    /// Curves; `Curve::target` is the component 0–5.
+    pub curves: Vec<Curve>,
+    /// (component, value) held for the whole animation.
+    pub constants: Vec<(u8, f32)>,
+}
+
+impl SrtTrack {
+    /// The animated components at `t` frames after the start (wrapped or clamped by the
+    /// track's own length) written over `srt`.
+    pub fn apply(&self, t: f32, srt: &mut [f32; 6]) {
+        let n = self.frames as f32;
+        let f = if n <= 0.0 {
+            0.0
+        } else if self.looping {
+            t.rem_euclid(n)
+        } else {
+            t.clamp(0.0, n)
+        };
+        for &(c, v) in &self.constants {
+            if let Some(x) = srt.get_mut(c as usize) {
+                *x = v;
+            }
+        }
+        for c in &self.curves {
+            if let Some(x) = srt.get_mut(c.target as usize) {
+                *x = c.eval(f);
+            }
+        }
+    }
+}
+
 /// One animation: any combination of skeletal, visibility and texture-pattern tracks that share
 /// a name in the game file (`walk`, `walk_ftp`).
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -207,6 +249,7 @@ pub struct SkelAnim {
     pub bones: Vec<BoneTrack>,
     pub visibility: Vec<VisTrack>,
     pub textures: Vec<TexTrack>,
+    pub srt: Vec<SrtTrack>,
 }
 
 impl SkelAnim {
@@ -928,9 +971,18 @@ impl SkelAnim {
             .iter()
             .map(|t| json!({ "material": t.material, "keys": t.keys.iter().map(|(f, s)| json!([f, s])).collect::<Vec<_>>() }))
             .collect();
+        let srt: Vec<Value> = self
+            .srt
+            .iter()
+            .map(|t| {
+                json!({ "material": t.material, "index": t.index, "frames": t.frames,
+                        "loop": t.looping, "constants": t.constants,
+                        "curves": t.curves.iter().map(|c| curve_to_json(c, &mut blob)).collect::<Vec<_>>() })
+            })
+            .collect();
         let h = json!({
             "name": self.name, "frames": self.frames, "loop": self.looping, "euler": self.euler,
-            "bones": bones, "visibility": vis, "textures": tex,
+            "bones": bones, "visibility": vis, "textures": tex, "srt": srt,
         });
         container(ANIM_MAGIC, &h, &blob)
     }
@@ -986,6 +1038,31 @@ impl SkelAnim {
                     .collect(),
             })
             .collect();
+        let mut srt = Vec::new();
+        for t in arr("srt") {
+            let curves = t
+                .get("curves")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .map(|c| curve_from_json(c, &r))
+                .collect::<Result<Vec<_>, _>>()?;
+            let constants = t
+                .get("constants")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(|k| Some((k.get(0)?.as_u64()? as u8, k.get(1)?.as_f64()? as f32)))
+                .collect();
+            srt.push(SrtTrack {
+                material: s(&t, "material"),
+                index: u(&t, "index") as u8,
+                frames: u(&t, "frames") as u32,
+                looping: b(&t, "loop"),
+                curves,
+                constants,
+            });
+        }
         Ok(Self {
             name: s(&h, "name"),
             frames: u(&h, "frames") as u32,
@@ -994,6 +1071,7 @@ impl SkelAnim {
             bones,
             visibility,
             textures,
+            srt,
         })
     }
 }
@@ -1007,6 +1085,8 @@ pub struct AnimInfo {
     pub skeletal: bool,
     pub visibility: bool,
     pub textures: bool,
+    /// Has texture-matrix tracks (`SkelAnim::srt`; false in caches before importer 15).
+    pub srt: bool,
 }
 
 pub fn anim_index_to_json(list: &[AnimInfo]) -> Value {
@@ -1016,7 +1096,7 @@ pub fn anim_index_to_json(list: &[AnimInfo]) -> Value {
                 (
                     a.name.clone(),
                     json!({ "frames": a.frames, "loop": a.looping, "skeletal": a.skeletal,
-                            "visibility": a.visibility, "textures": a.textures }),
+                            "visibility": a.visibility, "textures": a.textures, "srt": a.srt }),
                 )
             })
             .collect(),
@@ -1035,6 +1115,7 @@ pub fn anim_index_from_json(v: &Value) -> Vec<AnimInfo> {
             skeletal: b(a, "skeletal"),
             visibility: b(a, "visibility"),
             textures: b(a, "textures"),
+            srt: b(a, "srt"),
         })
         .collect();
     out.sort_by(|a, b| a.name.cmp(&b.name));
@@ -1212,7 +1293,28 @@ mod tests {
                 material: "skin".into(),
                 keys: vec![(0.0, "a".into()), (6.0, "b".into())],
             }],
+            srt: vec![SrtTrack {
+                material: "skin".into(),
+                index: 0,
+                frames: 20,
+                looping: true,
+                curves: vec![linear(4, 0.0, -1.0, 20.0)],
+                constants: vec![(0, 0.0)],
+            }],
         }
+    }
+
+    /// A texture-matrix track runs on its own length: translate u −0.25 at 5 frames, again at
+    /// 25 (looping at 20, not the animation's 10).
+    #[test]
+    fn srt_track_own_length() {
+        let a = lift();
+        let mut srt = [9.0, 1.0, 1.0, 0.0, 0.0, 0.0];
+        a.srt[0].apply(5.0, &mut srt);
+        assert_eq!(srt[0], 0.0);
+        assert!((srt[4] + 0.25).abs() < 1e-6);
+        a.srt[0].apply(25.0, &mut srt);
+        assert!((srt[4] + 0.25).abs() < 1e-6);
     }
 
     #[test]
@@ -1291,6 +1393,7 @@ mod tests {
             skeletal: true,
             visibility: true,
             textures: false,
+            srt: true,
         }];
         assert_eq!(anim_index_from_json(&anim_index_to_json(&idx)), idx);
     }

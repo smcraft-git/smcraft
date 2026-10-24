@@ -12,7 +12,7 @@ use std::path::Path;
 
 use mmk_assets::mesh::{
     AnimInfo, BoneTrack, MeshBone, MeshFile, MeshMaterial, MeshModel, MeshShape, SkelAnim,
-    TexTrack, Vertex, VisTrack, anim_file_name, anim_index_to_json, bfres_rest_world,
+    SrtTrack, TexTrack, Vertex, VisTrack, anim_file_name, anim_index_to_json, bfres_rest_world,
     srt_component,
 };
 use mmk_formats::bfres::{self, Affine, Bfres, PatternTrack, Wrap, apply, invert};
@@ -455,6 +455,54 @@ pub fn convert_anims(f: &Bfres) -> Vec<SkelAnim> {
             .collect();
     }
     for a in &f.material_anims {
+        // texture-matrix tracks (`tex_srt<n>`; a byte offset 0 / 4 / … / 20 is the component),
+        // each on the material animation's own length
+        let mut srt = Vec::new();
+        for t in &a.targets {
+            for p in &t.params {
+                let Some(index) = p
+                    .name
+                    .strip_prefix("tex_srt")
+                    .and_then(|n| n.parse::<u8>().ok())
+                else {
+                    continue;
+                };
+                let curves: Vec<_> = p
+                    .curves
+                    .iter()
+                    .filter(|c| c.target % 4 == 0 && c.target <= 20)
+                    .map(|c| {
+                        let mut c = c.clone();
+                        c.target /= 4;
+                        c
+                    })
+                    .collect();
+                if curves.is_empty() {
+                    continue;
+                }
+                srt.push(SrtTrack {
+                    material: t.material.clone(),
+                    index,
+                    frames: a.frame_count,
+                    looping: a.looping,
+                    curves,
+                    constants: p
+                        .constants
+                        .iter()
+                        .filter(|c| c.0 % 4 == 0 && c.0 <= 20)
+                        .map(|c| ((c.0 / 4) as u8, c.1))
+                        .collect(),
+                });
+            }
+        }
+        if !srt.is_empty() {
+            let e = entry(&mut out, &a.name);
+            if e.frames == 0 {
+                e.frames = a.frame_count;
+                e.looping = a.looping;
+            }
+            e.srt.extend(srt);
+        }
         let mut tracks = Vec::new();
         for t in &a.targets {
             // the albedo slot's pattern (else the first)
@@ -529,6 +577,7 @@ pub fn export(f: &Bfres, model: &str, out: &Path) -> Result<MeshCounts> {
                 skeletal: !a.bones.is_empty(),
                 visibility: !a.visibility.is_empty(),
                 textures: !a.textures.is_empty(),
+                srt: !a.srt.is_empty(),
             });
         }
         write(
@@ -705,6 +754,7 @@ mod tests {
                     track: PatternTrack::Steps(vec![(0.0, 0), (5.0, 1)]),
                 }],
                 param_tracks: 0,
+                params: Vec::new(),
             }],
         };
         Bfres {
@@ -762,6 +812,51 @@ mod tests {
         let moved = apply(&p.skin[1], m.vertices[3].position);
         assert!((moved[1] - 16.0).abs() < 1e-5, "{moved:?}");
         assert_eq!(p.textures[0].as_deref(), Some("skin_Alb.1"));
+    }
+
+    /// A `_fts` texture-matrix track joins its animation on its own length (40 frames under a
+    /// 10-frame walk), translate u (byte offset 16) as component 4.
+    #[test]
+    fn texture_matrix_tracks() {
+        use mmk_formats::bfres::*;
+        let mut f = sample();
+        let curve = Curve {
+            target: 16,
+            kind: CurveKind::Linear,
+            start: 0.0,
+            end: 40.0,
+            pre_wrap: CurveWrap::Clamp,
+            post_wrap: CurveWrap::Clamp,
+            delta: -1.0,
+            frames: vec![0.0, 40.0],
+            keys: vec![[0.0, -1.0, 0.0, 0.0], [-1.0, 0.0, 0.0, 0.0]],
+        };
+        f.material_anims.push(MaterialAnim {
+            name: "Walk_fts".into(),
+            frame_count: 40,
+            looping: true,
+            textures: vec![],
+            targets: vec![MaterialAnimTarget {
+                material: "skin".into(),
+                patterns: vec![],
+                param_tracks: 1,
+                params: vec![ParamAnim {
+                    name: "tex_srt0".into(),
+                    curves: vec![curve],
+                    constants: vec![(0, 0.0)],
+                }],
+            }],
+        });
+        let anims = convert_anims(&f);
+        let a = &anims[0];
+        assert_eq!((a.name.as_str(), a.frames), ("Walk", 10));
+        let t = &a.srt[0];
+        assert_eq!((t.material.as_str(), t.index, t.frames), ("skin", 0, 40));
+        assert_eq!(t.curves[0].target, 4);
+        assert_eq!(t.constants, vec![(0, 0.0)]);
+        let mut v = [0.0, 1.0, 1.0, 0.0, 0.0, 0.0];
+        t.apply(50.0, &mut v);
+        assert!((v[4] + 0.25).abs() < 1e-6);
     }
 
     #[test]

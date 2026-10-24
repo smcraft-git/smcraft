@@ -561,6 +561,9 @@ pub enum LightSource {
 /// draws the theme's backdrop pictures from it (`mmk_host::backdrop`).
 pub const BACKDROP_MODEL: &str = "*backdrop";
 
+/// Frames the course scene runs before the player's first update (`World::scene_frame`).
+pub const SCENE_LEAD: u64 = 63;
+
 /// The start sign's layer: in front of the backdrop (0), behind everything else.
 pub const START_SIGN_LAYER: u32 = 1;
 
@@ -4760,16 +4763,26 @@ impl World {
         self.level.theme == 1 && self.level.night
     }
 
+    /// The course scene's frame: its animations (the field's animated parts, the backdrop's
+    /// scroll and patterns, the airship's sway) start with the scene, `SCENE_LEAD` frames before
+    /// the player's first update [meas: smm2recomp title-course frames at player updates 600 /
+    /// 900 — the day skies' backdrop scroll, the coins' 40-frame spin and the airship's sway all
+    /// fit a lead of 63 (the sway's zero then falls on the scene's first frame)].
+    pub fn scene_frame(&self) -> u32 {
+        (self.tick + SCENE_LEAD) as u32
+    }
+
     /// The airship theme rocks: the view rises and falls by up to 24.75 px, one swing every
-    /// 655.36 frames (an angle stepping 100 of 65536 a frame) [meas: smm2recomp frames of an SMB1
-    /// airship course every 15 frames, 300–1200: 12.375 · (1 − cos θ), θ = 2π (t − 593) / 655.36
-    /// with t the course clock; fits to under a pixel]. Drawing only: the sim's camera is
-    /// unchanged. Other themes: 0.
+    /// 655.36 frames (an angle stepping 100 of 65536 a frame from the scene's start) [meas:
+    /// smm2recomp frames of an SMB1 airship course every 15 frames, 300–1200: 12.375 · (1 − cos
+    /// θ), θ = 2π (t − 593) / 655.36 with t the course clock, i.e. θ = 2π · 100 n / 65536 with n
+    /// the scene frame; fits to under a pixel]. Drawing only: the sim's camera is unchanged.
+    /// Other themes: 0.
     pub fn view_sway(&self) -> f32 {
         if self.level.theme != 3 || self.map_view {
             return 0.0;
         }
-        let t = (self.tick as f64 - 593.0) / 655.36;
+        let t = (self.scene_frame() as u64 * 100 % 65536) as f64 / 65536.0;
         (12.375 * (1.0 - (t * std::f64::consts::TAU).dcos())) as f32
     }
 
@@ -7526,14 +7539,11 @@ impl World {
         // (a whole-course render pins the backdrop to the world so the views join up)
         let p = if self.map_view { 1.0 } else { 0.5 };
         let (cx, cy) = (self.camera_x, self.camera_y);
-        let mut ox = cx * (1.0 - p);
+        let ox = cx * (1.0 - p);
         // anchored to the sim's camera and drawn through the swaying one, the backdrop moves
-        // with the airship's sway like the field [meas]; the airship's sky drifts left a pixel a
-        // frame [meas: SMB1 airship clouds 30 px every 30 frames, at the course clock + 61 px]
+        // with the airship's sway like the field [meas]; its pictures' scroll is the host's
+        // (the model's texture animation, `mmk_host::backdrop`)
         let oy = (self.level.bottom + cy * (1.0 - p)).min(cy + 32.0);
-        if self.level.theme == 3 && !self.map_view {
-            ox -= self.tick as f32 + 61.0;
-        }
         out.push(Self::model_sprite(
             BACKDROP_MODEL,
             "",

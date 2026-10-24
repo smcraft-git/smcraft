@@ -238,8 +238,11 @@ final class Renderer: NSObject, MTKViewDelegate {
         let viewport = MTLViewport(originX: (dw - vw) / 2, originY: (dh - vh) / 2, width: vw, height: vh, znear: 0, zfar: 1)
         bgEnc.setViewport(viewport)
 
-        // world px → NDC: x' = x * sx + tx (camera snapped to whole pixels)
-        let camX = Float(snap.camera_x.rounded()), camY = Float(snap.camera_y.rounded())
+        // world px → NDC: x' = x * sx + tx (camera snapped to the drawable's pixels, as the
+        // portable renderer: the airship's sway moves the view by fractions of a world pixel)
+        let px = max(scale, 1)
+        let camX = Float((Double(snap.camera_x) * px).rounded() / px)
+        let camY = Float((Double(snap.camera_y) * px).rounded() / px)
         var xform = SIMD4<Float>(2 / snap.view_w, 2 / snap.view_h, -1 - 2 * camX / snap.view_w, -1 - 2 * camY / snap.view_h)
         if mmk_engine_view_flags(engine) & 1 != 0 {
             // underground night: the course is shown upside down

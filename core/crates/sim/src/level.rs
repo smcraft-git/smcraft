@@ -1007,6 +1007,9 @@ impl Level {
         if area_index == 0 {
             let start_h = course.header.start_y as i32;
             lvl.fill_ground(-3, 10, start_h);
+            if lvl.theme == 3 && matches!(lvl.style.as_str(), "M1" | "M3" | "MW" | "WU") {
+                lvl.cloud_start_ground(-3, 10, start_h);
+            }
             // x = 72 px [obs: Ryujinx trace, the player position in courses the game loads]
             lvl.start = (72.0, start_h as f32 * TILE);
             let goal_left = ((right - 152.0 - 8.0) / TILE).round() as i32;
@@ -1868,6 +1871,31 @@ impl Level {
                     atlas: GROUND_ATLAS_BASE + id,
                 });
             }
+        }
+    }
+
+    /// The airship's start ground is a cloud: the field atlas's cloud set (indices 121–124 /
+    /// 137–140: top, top-right, top-left, top; inside, right, left, inside) instead of the
+    /// ground [meas: smm2recomp frames of the SMB1 / SMB3 / SMW airship reference courses, each
+    /// start-ground cell matched to its atlas tile: tops 124, the right column 122 / 138, inside
+    /// 137; SMB1's set is one cloud block repeated; NSMBU's atlas has its teal cloud in the same
+    /// cells, as its frame shows]. 3D World's field is meshes (not done). The goal ground keeps
+    /// the ground [?].
+    fn cloud_start_ground(&mut self, left: i32, width: i32, height: i32) {
+        let right = left + width - 1;
+        for t in self.tiles.iter_mut() {
+            if t.x < left || t.x > right || t.y >= height {
+                continue;
+            }
+            let top = t.y == height - 1;
+            t.atlas = match (t.x == left, t.x == right, top) {
+                (true, _, true) => 123,
+                (_, true, true) => 122,
+                (_, _, true) => 124,
+                (true, _, false) => 139,
+                (_, true, false) => 138,
+                _ => 137,
+            };
         }
     }
 

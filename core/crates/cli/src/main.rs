@@ -904,6 +904,9 @@ fn dump_bfres(file: &PathBuf, member: Option<&str>, curves: bool) -> Result<Valu
                 v["texture_names"] = json!(a.textures);
                 v["targets"] = a.targets.iter().map(|t| json!({"material": t.material,
                     "param_tracks": t.param_tracks,
+                    "params": t.params.iter().map(|q| json!({"name": q.name, "constants": q.constants,
+                        "curves": q.curves.iter().map(|c| json!([c.target, format!("{:?}", c.kind), c.start, c.end,
+                            format!("{:?}/{:?}", c.pre_wrap, c.post_wrap), c.delta, c.frames, c.keys])).collect::<Vec<_>>()})).collect::<Vec<_>>(),
                     "patterns": t.patterns.iter().map(|p| json!([p.sampler, format!("{:?}", p.track)])).collect::<Vec<_>>()})).collect();
             }
             v

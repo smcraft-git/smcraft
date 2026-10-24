@@ -185,4 +185,8 @@ SMCraft is back in development (it was archived in October 2026).
   ? blocks, bricks and coins, SMB1's black daytime ghost house, night darkness, every style's
   own backdrops, the airship's sway, NSMBU's and 3D World's colours, lights, skies and fogs as
   the game's shaders make them, Mini Mario.
+- **Skies and airships that move as in SMM2**: the day skies' clouds and the airships' skies
+  drift at the game's own speeds, NSMBU's clouds and 3D World's skies scroll, the airship
+  starts on a cloud, and animated blocks and coins keep the game's timing. **Re-import the game
+  pack** (pack 15).
 - Release packages for Windows, Linux (x64, arm64), macOS, Android and the web.

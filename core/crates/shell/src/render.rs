@@ -1478,8 +1478,12 @@ impl Renderer {
         self.push(Bind::Sky, Self::full_quad());
 
         // world px → NDC: the 3D camera's projection at z = 0, else the 2D mapping (camera
-        // snapped to whole pixels)
-        let (cam_x, cam_y) = (scene.camera.0.round(), scene.camera.1.round());
+        // snapped to the target's pixels: the airship's sway moves the view by fractions of a
+        // world pixel [meas: the SMB3 airship's field 123 px lower at 1080p (5 per world px)
+        // for a sway of 24.52])
+        let scale = viewport(size.0, size.1, self.integer_scale).4.max(1.0);
+        let snap = |v: f32| (v * scale).round() / scale;
+        let (cam_x, cam_y) = (snap(scene.camera.0), snap(scene.camera.1));
         let (sx, sy) = (2.0 / VIEW_W, 2.0 / VIEW_H);
         let flip = if scene.upside_down { -1.0 } else { 1.0 };
         let field = scene.field_camera;
