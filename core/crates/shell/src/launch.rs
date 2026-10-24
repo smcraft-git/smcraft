@@ -43,12 +43,16 @@ impl FrontConfig {
 /// The game and the front end over it (no sound yet: [`start_sound`]).
 pub fn front(cfg: FrontConfig) -> Result<(Game, FrontApp), String> {
     let smm2 = Ui::open(UiKind::Smm2, &cfg.ui_dir)?;
-    let smm1 = cfg.smm1_dir.and_then(|d| Ui::open(UiKind::Smm1, &d).ok());
+    let smm1 = cfg
+        .smm1_dir
+        .as_ref()
+        .and_then(|d| Ui::open(UiKind::Smm1, d).ok());
     let source = cfg.assets_dir.as_ref().map(|d| DirSource::new(d.clone()));
     let mut game = Game::load(source.as_ref().map(|s| s as &dyn AssetSource), None)?;
     game.no_hud = true;
     let mut data = HostData::new(source);
     data.ui_dir = Some(cfg.ui_dir.clone());
+    data.smm1_dir = smm1.as_ref().and(cfg.smm1_dir);
     data.server = cfg.server;
     data.library_dirs = cfg.library_dirs;
     // the library is read on a thread while the opening plays
@@ -79,7 +83,8 @@ pub fn start_sound(app: &mut FrontApp, game: &mut Game) -> Result<(), String> {
         .source
         .as_ref()
         .and_then(|s| source::music_reader(s));
-    let a = crate::ui_sound::start(bank, music, Some(ui_dir.join("ui/sound")))?;
+    let smm1 = app.data.smm1_dir.as_ref().map(|d| d.join("ui/sound"));
+    let a = crate::ui_sound::start(bank, music, Some(ui_dir.join("ui/sound")), smm1)?;
     app.data.audio = a.game.clone();
     app.ui_audio = Some(a.ui.clone());
     app.audio_stream = Some(a);

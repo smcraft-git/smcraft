@@ -13,7 +13,7 @@ pub const STATUS: u8 = 2;
 pub const ACTIONS: u8 = 3;
 
 /// CRC32 of each condition, by list index − 1 (index 0 is "none", stored as hash 0).
-pub const HASHES: [u32; 77] = [
+pub const HASHES: [u32; 98] = [
     0x7f07acbf, 0xc77685e8, 0xcce12a46, 0xc7dad20f, 0x4b115542, 0xdf6717de, 0xe50302f7, 0xce9a707b,
     0xe47c2be8, 0xe25c5f60, 0x563755f2, 0xa3aec34a, 0x5a085610, 0x634a6671, 0xa09bb51f, 0x794c6eb3,
     0x387c22ca, 0x103bba8c, 0xfe75363e, 0x4c44da92, 0x7a128199, 0xce2e5a15, 0xcf81610a, 0x48d111e0,
@@ -24,10 +24,15 @@ pub const HASHES: [u32; 77] = [
     0x553a9590, 0x1a098d50, 0xfae86a49, 0xb4fa3d4b, 0xde0abfc6, 0xd9893249, 0x4c8772a3, 0xde56ffb5,
     0x97f8a309, 0xf55b3863, 0xc78f5040, 0xf5b932c2, 0xa3e39544, 0x1664515a, 0x08327ae6, 0x3eab9aa1,
     0x97f4cf7a, 0x3af23bde, 0xc2a80228, 0xef026a7f, 0x46219146,
+    // 78–98: the names v3.0.3's list adds (it has them in among the others; courses store the
+    // name's CRC32, so this order is ours) [obs v3.0.3 0x22a97f8]
+    0x3b8a1111, 0x671f29b5, 0x0be56f93, 0x2cc36aab, 0x86aae3fd, 0xbd35b4ac, 0x7981172f, 0x54fea275,
+    0x5559be79, 0xece74bc7, 0xc5963651, 0xd16f4c4e, 0x2c66b03e, 0xf7967ebd, 0xaa2f7449, 0x196743a3,
+    0xbf1b11c3, 0x3b49b792, 0x449eb152, 0x7bc4d388, 0xf8ad45c4,
 ];
 
 /// English label of each condition subject, by list index − 1.
-pub const LABELS: [&str; 77] = [
+pub const LABELS: [&str; 98] = [
     "Goomba",
     "Goombrat",
     "Koopa Troopa",
@@ -105,6 +110,27 @@ pub const LABELS: [&str; 77] = [
     "Bell Tree",
     "Toad (story)",
     "Stone (story)",
+    "Spike",
+    "Pokey",
+    "Mechakoopa",
+    "Larry",
+    "Iggy",
+    "Wendy",
+    "Lemmy",
+    "Roy",
+    "Morton",
+    "Ludwig",
+    "Link",
+    "SMB2 Mario",
+    "Frog Mario",
+    "Balloon Mario",
+    "Flying Squirrel Mario",
+    "Boomerang Mario",
+    "Cannon Box",
+    "Propeller Box",
+    "Goomba Mask",
+    "Bullet Bill Mask",
+    "Red POW Box",
 ];
 
 /// The hash of list index `index` (1-based; 0 = none → 0).
@@ -136,6 +162,8 @@ pub fn categories(index: u8) -> &'static [u8] {
         58..=65 | 72 => &[STATUS],
         66..=69 => &[PARTS],
         70 | 71 | 73 | 74 => &[ACTIONS],
+        78..=87 => &[PARTS],
+        88..=98 => &[STATUS],
         _ => &[],
     }
 }

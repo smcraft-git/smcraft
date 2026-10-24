@@ -156,8 +156,8 @@ fn user_json(calls: &[Call], sounds: &mut BTreeSet<String>) -> Value {
     Value::Object(out)
 }
 
-/// 16-bit PCM WAV.
-fn wav(rate: u32, channels: &[Vec<i16>]) -> Vec<u8> {
+/// 16-bit PCM WAV (also the SMM1 UI sounds', `smm1_ui_sound`).
+pub(crate) fn wav(rate: u32, channels: &[Vec<i16>]) -> Vec<u8> {
     let n = channels.iter().map(|c| c.len()).min().unwrap_or(0);
     let ch = channels.len() as u16;
     let data_len = n * channels.len() * 2;

@@ -1571,3 +1571,52 @@ under `recomp/private|generated|build/`, and text that looks like disassembly or
   upload a texture again when its `version` moves (shell `UiLayer::sync`; the Swift app through
   `mmk_*_texture_revision` / `_version`). One empty sheet is always registered ahead, so a new
   glyph never waits for a texture id; at four sheets the one drawn longest ago is emptied.
+
+## 2026-10-25 — Super World map: flat quads in the UI pack
+- The game's Super World map models (`Pack/MyWorld_Model.pack`) are flat textured quads at small
+  depths seen from straight above (every shape lies in one z plane; textures at one texel per
+  world unit), and its field is a 2D atlas laid out by code. So the map is drawn as layout
+  quads, which every front end (shell, Swift app, web) already draws, instead of through the
+  3D mesh renderers: no new renderer code on any platform, and the map sits in the UI pack
+  next to the layouts it is shown with (`ui/myworld/map.json` + textures, UI pack 7), read once
+  per Super Worlds visit (`mmk_front::swmap`).
+- The import bakes what the front end needs and nothing more: per model the rest-pose
+  vertices, triangles, material, bone; per animation the texture patterns, the bones' 2D
+  skinning matrices where they change, bone visibility. The Mush tables come along with their
+  columns named in English.
+- Draw order: backdrop, field, the ledges' cliffs, roads, then points / objects higher on the map
+  first, then the player; inside a model its own depth. The view frames the whole map's height
+  (192 units on 720 px) [inf: a view of the field grid's six rows would show the ring of ponds
+  the builder makes beyond the map].
+
+## 2026-10-25 — Super World map sound: the game pack's users, the maker's director
+- The map's music and sounds are SLink users like the course's (`MyWorldScene`, `MyWorldPlayer`,
+  `MyWorldCoursePoint`, `MyWorldGoalPoint`, `MyWorldKinokoHouse`), so they go into the game
+  pack's `audio/sound.json` with the course users (importer / pack 14), music as streams, and
+  play through the data-driven director the Course Maker already uses outside a course
+  (`Host::map_music` / `Host::map_sound`): one mixer path on every host, the groups and volumes
+  of the data, looping music. Not the UI pack: its sounds are one-shot WAV cues.
+- What plays when is the data's where it says so: the users' action triggers (an animation
+  starting → a call at a frame) are kept and resolved by animation name (`<anim>` for skeletal,
+  `<anim>_ftp` for texture patterns); the course point's switch property becomes `@point`
+  (values in icon order). The front end only says which animation starts when (spec §7.5–7.6).
+- The map's moments (a clear's reveal, a house closing, a world's cannon) are a timeline in the
+  map scene that the models' animation lengths pace; input waits meanwhile.
+
+## 2026-10-25 — SMM1 screens' sounds: SMM1's own SLink data, matched to our animations
+- SMM1's `.bars` banks are SARCs of AMTA + BFWAV that only name sounds; what plays when is SMM1's
+  SLink2DB (XLNK v0x15, big-endian, read by `mmk_formats::xlink_wiiu`). Its users are the layouts
+  and their parts (`UI_<layout>[_<part>…]`), with keys the code fires (`In`, `Out`, `Decide`,
+  `Countdown1`, `CouseInWalk100`, …) and UI states that start keys at frames
+  (`State::c1stDemoAnimB` → Peach's "Help!", `State::cState_Walk` → footsteps). The import keeps
+  both as `ui/sound/sounds.json` and the waves (and the two UI streams) as WAV.
+- The screens fire a key or a state where they play the animation it goes with: by name where
+  the data names one (states `1stDemoTelopIn` / `1stDemoAnimB` / `cState_Walk` ↔ `Telop` /
+  `AnimB` / `Walk`; keys `In` / `Out` / `Decide`), else [inf]: the card's AnimA / AnimB ↔
+  `CouseInWalk100` / `CouseInJump100`, the castle-exit Jump ↔ one `jump`, the map's Out ↔ `Go`
+  (M3_Wipe), the skip's countdown steps ↔ `Countdown3/2/1`, the cursor moving ↔ `TouchSelect`.
+- Switch conditions are checked against values the screen passes (the course style, the lives),
+  not the property names (Japanese in the data). A missing key falls back to the layout's user,
+  then the scene root's. Sounds due later wait in the scene and are dropped when it skips ahead.
+- `SoundCue::ui` says which import's `ui/sound/` a cue is from (FFI `MmkFrontSound.ui`).
+  Details and the open points: private research/specs/smm1-sound.md.

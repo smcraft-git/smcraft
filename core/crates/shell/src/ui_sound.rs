@@ -1,9 +1,12 @@
 //! The front end's UI sounds (`mmk_front::SoundCue`: WAVs of the SMM2 UI import's
-//! `ui/sound/`), mixed into the same output stream as the game's sound: a small voice list of
-//! 16-bit PCM clips with a gain and a start delay, resampled linearly to the device rate.
+//! `ui/sound/`, or the SMM1 import's for the SMM1 screens), mixed into the same output stream as
+//! the game's sound: a small voice list of 16-bit PCM clips with a gain and a start delay,
+//! resampled linearly to the device rate.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+
+use mmk_front::UiKind;
 
 /// A decoded clip: interleaved stereo at `rate` Hz.
 #[derive(Clone, Debug)]
@@ -64,6 +67,9 @@ pub fn parse_wav(b: &[u8]) -> Option<Clip> {
 /// there (yet: the web build reads them from the browser's storage after starting).
 pub type ClipReader = Box<dyn Fn(&str) -> Option<Vec<u8>> + Send + Sync>;
 
+/// A clip by import and name (both imports have e.g. a `SE_Select`).
+type ClipKey = (UiKind, String);
+
 struct Voice {
     clip: Arc<Clip>,
     pos: f64,
@@ -78,8 +84,9 @@ struct Voice {
 pub struct UiMixer {
     rate: u32,
     voices: Mutex<Vec<Voice>>,
-    clips: Mutex<HashMap<String, Option<Arc<Clip>>>>,
+    clips: Mutex<HashMap<ClipKey, Option<Arc<Clip>>>>,
     dir: Option<std::path::PathBuf>,
+    smm1_dir: Option<std::path::PathBuf>,
     reader: Option<ClipReader>,
     /// Master × effects volume.
     pub volume: f32,
@@ -93,9 +100,16 @@ impl UiMixer {
             voices: Mutex::new(Vec::new()),
             clips: Mutex::new(HashMap::new()),
             dir,
+            smm1_dir: None,
             reader: None,
             volume: 1.0,
         }
+    }
+
+    /// The SMM1 import's clips come from `dir` (`<smm1 import>/ui/sound`).
+    pub fn with_smm1(mut self, dir: Option<std::path::PathBuf>) -> Self {
+        self.smm1_dir = dir;
+        self
     }
 
     /// Clips from `reader` (asked again until it has them).
@@ -106,22 +120,27 @@ impl UiMixer {
         }
     }
 
-    fn clip(&self, name: &str) -> Option<Arc<Clip>> {
+    fn clip(&self, ui: UiKind, name: &str) -> Option<Arc<Clip>> {
         let mut clips = self.clips.lock().ok()?;
-        if let Some(c) = clips.get(name) {
+        let k = (ui, name.to_string());
+        if let Some(c) = clips.get(&k) {
             return c.clone();
         }
         if name.contains(['/', '\\']) || name.starts_with('.') {
             return None;
         }
-        let bytes = match (&self.dir, &self.reader) {
-            (Some(dir), _) => std::fs::read(dir.join(format!("{name}.wav"))).ok(),
-            // not there yet: ask again next time
-            (None, Some(read)) => Some(read(name)?),
-            (None, None) => None,
+        let dir = match ui {
+            UiKind::Smm2 => &self.dir,
+            UiKind::Smm1 => &self.smm1_dir,
+        };
+        let bytes = match (dir, &self.reader, ui) {
+            (Some(dir), _, _) => std::fs::read(dir.join(format!("{name}.wav"))).ok(),
+            // not there yet: ask again next time (the reader has the SMM2 import's only)
+            (None, Some(read), UiKind::Smm2) => Some(read(name)?),
+            _ => None,
         };
         let clip = bytes.and_then(|b| parse_wav(&b)).map(Arc::new);
-        clips.insert(name.to_string(), clip.clone());
+        clips.insert(k, clip.clone());
         clip
     }
 
@@ -133,7 +152,7 @@ impl UiMixer {
                 cue.name, cue.volume, cue.delay
             ));
         }
-        let Some(clip) = self.clip(&cue.name) else {
+        let Some(clip) = self.clip(cue.ui, &cue.name) else {
             return;
         };
         let step = clip.rate as f64 / self.rate as f64;
@@ -187,11 +206,13 @@ pub struct FrontAudio {
     pub ui: Arc<UiMixer>,
 }
 
-/// Open the default output with the game's `bank` (optional) and the UI sounds of `ui_dir`.
+/// Open the default output with the game's `bank` (optional) and the UI sounds of `ui_dir`
+/// (the SMM2 import's) and `smm1_dir` (the SMM1 import's).
 pub fn start(
     bank: Option<mmk_audio::Bank>,
     music: Option<mmk_host::audio::MusicReader>,
     ui_dir: Option<std::path::PathBuf>,
+    smm1_dir: Option<std::path::PathBuf>,
 ) -> Result<FrontAudio, String> {
     type Slot = Arc<std::sync::OnceLock<(Option<Arc<mmk_host::audio::AudioOut>>, Arc<UiMixer>)>>;
     let slot: Slot = Arc::default();
@@ -216,7 +237,7 @@ pub fn start(
         }
         Arc::new(out)
     });
-    let ui = Arc::new(UiMixer::new(ui_dir, output.rate));
+    let ui = Arc::new(UiMixer::new(ui_dir, output.rate).with_smm1(smm1_dir));
     let _ = slot.set((game.clone(), ui.clone()));
     Ok(FrontAudio {
         _stream: output.stream,
@@ -265,5 +286,34 @@ mod tests {
         assert!((out[4] - 0.25).abs() < 1e-6);
         assert_eq!(out[12], 0.0);
         assert!(m.voices.lock().unwrap().is_empty());
+    }
+
+    /// An SMM1 cue plays the SMM1 import's clip of that name, an SMM2 cue the SMM2 one's.
+    #[test]
+    fn cues_play_their_own_imports_clips() {
+        let tmp = std::env::temp_dir().join(format!("mmk-ui-mixer-{}", std::process::id()));
+        let (two, one) = (tmp.join("smm2"), tmp.join("smm1"));
+        std::fs::create_dir_all(&two).unwrap();
+        std::fs::create_dir_all(&one).unwrap();
+        std::fs::write(two.join("SE_A.wav"), wav(100, &[1000; 3])).unwrap();
+        std::fs::write(one.join("SE_A.wav"), wav(100, &[2000; 5])).unwrap();
+        let m = UiMixer::new(Some(two), 100).with_smm1(Some(one));
+        let cue = |ui| mmk_front::SoundCue {
+            name: "SE_A".into(),
+            volume: 1.0,
+            delay: 0.0,
+            ui,
+        };
+        m.play(&cue(UiKind::Smm1));
+        m.play(&cue(UiKind::Smm2));
+        let lens: Vec<usize> = m
+            .voices
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|v| v.clip.frames.len())
+            .collect();
+        assert_eq!(lens, [5, 3]);
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 }

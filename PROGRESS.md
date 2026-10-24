@@ -29,19 +29,28 @@ sway, importer and pack 12, the dev cache already at v12).
   TGRCode; the game's track tiles; CJK names; the Toad House minigames; SMB3 / SMW wings; boss
   jump sounds by style.
 - **GPU-slot queue** (one game instance at a time; the physics agent holds it most of the time):
-  re-render the pixel table (`research/tools/pixel-ref`, `ours` for all; an older run drew SMB1
-  desert night as day), captures of the track tiles in play and of NSMBU / 3D World wings (the mesh
+  ✅ pixel table re-rendered 2026-10-24 (2D means: SMB1 2.4 / night 1.8, SMB3 5.0 / 2.5, SMW 6.1 /
+  3.0; NSMBU 17.8 / 14.6; 3D World 29.5; SMW small Mario now drawn 16 × 32 as its quads); left in 2D:
+  the day sky (SMW 19, SMB3 10: the backdrop's placement, not a plain shift; the nights use a
+  static backdrop and match) and the day airship (SMW 17, SMB3 11), the coins' animation phase — the coins match in
+  castle courses but not in the day sky / airship ones, so those courses' clock may run at an
+  offset to ours (the same courses whose backdrops are off) [inf]; captures of the track tiles in play and of NSMBU / 3D World wings (the mesh
   planner maps `M1_Enemy_wingcommon` to `<style>_Enemy_wingcommon`), a look at Water Level mode
   and custom scroll in the recomp (`research/tools/maker-look`: touch taps / drags by script).
-- **Agent queue** (when a helper slot frees): ~~the Super Worlds 3D map~~ (agent running); the
-  Cursed Key (95 with 0x4, `KeyCurse`) and Phanto (`MapObjKamen`, v3.0.3: states registered in
-  0x71013baa90 — Wait 0x71013bb630/6d0 (100 f at an offset), WarpWait bb770/810 (60 f), Attack
-  bb990/bbbc0 (the swoop: angle words +0x628/+0x630, radius +0x634 = 128, speed 1 ↔ 3), Leave
-  bc610/bc7c0, DieWait/FallCastle; `PlayerKeyChain_CurseModel` 0x7101583a40) — the last coverage
-  blocker in a new TGRCode sample (84 / 85); SMM1 UI sounds for the SMM1-look 100 Mario: SMM1's
-  `Pack/Sound.pack` holds 534 `Sound/Resource/*.bars` (BFWAV), the UI ones per layout and pane
-  (`UI_<layout>_<pane>.bars`, e.g. `UI_Nwk_WorldMapExp_00_L_WorldMapKuribo_00`); `mmk audio` reads
-  only SMM2's BWAV BARS so far.
+- **Agent queue** (when a helper slot frees; running 2026-10-25: the EnemySys leftovers — the
+  Fire Clown Car's fireballs with an enemy rider, water-only entry variants, untraced Block Outs,
+  pipe / parachute leftovers): ✅ a Koopaling in a Clown Car (2026-10-25, branch
+  `kclown`, research 120-koopalings.md "In a Koopa Clown Car": KoKoopaDefault's Clown vtable
+  0x71028b6120 shared by all seven — Lemmy / Roy override only the setup; Move fires the
+  controller's timed volleys, a hit stops the car (KoopaJrStop) while he ducks in and comes back
+  in his shell for 300 frames, HP only in Move; tgr2 273/273; left: NSMBU's shell yaw spin);
+  ✅ the Super World map's music, sounds, point / goal / road states and ledge cliffs
+  (2026-10-25, branch `swmap2`, game pack 14; left: `passPoint`, the camera, ghosts are online);
+  ✅ the Cursed Key and Phanto (2026-10-25,
+  research 95-key.md; co-op: Phanto hurts only the player in front [inf]); ✅ SMM1 UI sounds for
+  the SMM1-look 100 Mario (2026-10-25, branch `smm1snd`, research smm1-sound.md: SMM1's SLink2DB
+  v0x15 decoded; the import's `ui/sound/`, SMM1 importer 4; the screens fire the data's keys and
+  states; left: pitch units, by-ear check against the game).
 - **Waiting on the owner:** the SMCraft app on Nextendo's portal (public client / PKCE, scopes
   `identity game.matchmaking`, redirect `http://127.0.0.1:47614/callback`) and its client ID; the
   game-server access key — (a) read from the player's own dump at import (recommended) or (b) one
@@ -81,9 +90,20 @@ sway, importer and pack 12, the dev cache already at v12).
      0x71011406f0 / 0x7101141e20. A coin blaster fires a TenCoin burst of 10 Coin actors, each
      preset's Shot is in actors/shot.rs; left: coins from a Lakitu (Coin Jugem `Thrown`
      0x7100847c20 is read, but after 50 frames it hands a coin over to the Wing context, whose
-     Move for an unwinged coin isn't traced), the red blaster's KillerSearch interval (770, and a
-     320-frame lock-out) and each preset's own Shot beyond Default / FlyStop / WingFly /
-     CloudShot / items); Super World enemy-icon courses, point icons by model, map ghosts; ✅ CJK course
+     Move for an unwinged coin isn't traced)); ✅ the entry contexts (branch `contexts`,
+     2026-10-25, v3.0.3 addresses throughout): Block Out per preset (actors/block_out.rs:
+     Default, RedPataPata, PataTogezo, FloatSearch, Pukupuku, Bubble, MapObj; Default vtable
+     0x71028b2190), Dokan per preset (actors/dokan.rs: parachute, winged RedPataPata /
+     PataTogezo, DokanOutBig → JamBig → JumpOutBig, Bubble launch, item facing, coin pipes as
+     TenCoin bursts; init 0x710105e400), Killer leftovers (Togezo / Met / Karon, empty shells,
+     Bubble, MapObj = Item, Hacchin = CloudShot; the red blaster's 320-frame lock-out; Bullet
+     Bill at the muzzle's height), Parachute swing direction and wall hold. Left: liquid
+     variants (Kuribo / Pukupuku / Bubble / FishBone / Hanachan / RedPataPata in water), Block
+     sideways (multiplayer) spreads and note blocks' contents, Gesso3W / Hanachan / FishBone /
+     TeresaSpread Block Outs, KutsuKuribo, Togezo's ceiling flip, the winged coin's own pipe
+     state 8, Bubble / Thwomp / Porcupuffer / Wiggler / Cheep Cheep own Parachute Falls, the
+     parachute body sway (drawn), DokanOutBig's 0.5 → 0.7 scale and other draw-only scales;
+     Super World enemy-icon courses, point icons by model, map ghosts; ✅ CJK course
      names (branch `cjk`, 2026-10-24: the
      UI pack keeps the decrypted scalable fonts (`ui/scalable/`, 31 MB) and each baked font's
      recipe; a character the sheets lack is rasterised on first use at the baked font's metrics
@@ -92,7 +112,9 @@ sway, importer and pack 12, the dev cache already at v12).
      `_KRko` combinations add them; UI importer and pack 6 — **re-import the UI pack**). Left:
      the region combinations' range modes 3 / 4 / 9 (not parsed; their fonts are tried after the
      combination's own), the web build reads all 31 MB of fonts up front.
-  4. Super Worlds' 3D map; airship sway; the colour table; NSMBU / 3D World pixels.
+  4. Super Worlds' map ✅ drawn with the game's models (branch `swmap`, UI pack 7 — **re-import
+     the UI pack**): left the ledges' cliff faces, map ghosts, the goal's appear / cannon and
+     Passable states, the map music; airship sway; the colour table; NSMBU / 3D World pixels.
   5. iPad / Android device runs; the macOS package; live Network Play once the ID and key arrive.
 
 ### Plan
@@ -345,8 +367,29 @@ sway, importer and pack 12, the dev cache already at v12).
   `AnimMyWorld` with "W1") → `MyW_Ending_00`. Progress saved per world (`superworld.<id>`).
   TGRCode: `super_worlds` / `super_world` calls (`mmk_online::world::Backend::super_world`
   decrypts the map); captures `superworld`, `-title`, `-map`, `-walk`, `-play`, `-ending`
-- ⬜ The map in 3D with the game's models (`MyWorld_Model.pack`: fields, roads, points, Mario's
-  walk / swim / climb animations from `WM_*Anime`), the map music and sounds
+- ✅ The map with the game's models (`mmk_front::swmap`, UI import stage `myworld map` →
+  `ui/myworld/map.json` + the models' textures, UI pack 7): the theme's backdrop (`MyWorld_DV_*`),
+  the field built as the game's builder does (11 × 6 positions, the 47-piece water set by land
+  neighbours, the "nothing area" set of the Main themes), road pieces by cell type (`_s` on water,
+  curves, bridges, ledges turned with their ladder up, decorations A / B / C), point models by
+  icon and theme with Wait / ToCleared / Cleared from `WM_PointPartsAnime`, pipes, Toad Houses
+  (used ones cleared), the castle / last castle / airship goal, the player walking / swimming /
+  flying / climbing by `WM_PlayerAnime` with N / S / side views. Row 0 is the map's bottom row
+  (the field builder's art; up walks to row + 1). Captures `superworld-theme<n>`,
+  `superworld-json:<file>`.
+- ✅ The map's music, sounds and moments (2026-10-25, branch `swmap2`; spec §7.4–7.8): each
+  theme's `BGM_WorldMap_<Theme>_Play` (main+0x294bb50), the `MyWorld*` SLink users in the game
+  pack (importer / pack 14) played through `Host::map_music` / `map_sound` (the maker's director:
+  keys and the data's action triggers on the models' animations, `@point` for the course point's
+  kind); a clear plays the point's ToCleared, the player's jump, then the reveal (roads hidden
+  until reached appear, points pop `Passable`, the goal rises `AppearGoalPoint`; `wayAppear`,
+  `courseAppearEffect`, castle sounds); a used Toad House's ToCleared; a world's goal: castle
+  crumbles, the cannon's prepare / launch (`nextWorld`), the next world's landing; unreached
+  points stand still; the goal model by world / water / course (0x71014437e0); the ledges'
+  cliffs from the atlas rows 6–7 [inf placement]. Captures `superworld-clear`,
+  `superworld-worldclear`. ⬜ `passPoint` (the game walks through some points: 0x7101472450's
+  stop flag not read), the map camera (the view keeps the map's height [inf]), the cliffs' row-7
+  pieces, map ghosts (online: other players' runs with name balloons)
 - ✅ Toad House minigames (`super-worlds.md` §6, read from the three sequences): each house runs
   its kind from the world data over the map — MATCH & WIN (`MyWEdit_Minigame_00`: three strips
   at 45 / 30 / 50 a frame, top and bottom left, centre right; A stops them in turn, four slots on;
@@ -456,7 +499,7 @@ Nextendo; `docs/nextendo-network-play.md`, spec `research/specs/network-play.md`
 - ✅ Frozen Coins (3.0's `FreezeCoin`, the coin's 0x4 form; found blocking 4 of 38 recent TGRCode
   courses): solid ice round a coin (`<style>_Field_anime_coin_freeze`), the player's fireballs
   thaw it into the coin [inf: which fire thaws; `p_IceCoinThawing` isn't in the imported sound
-  users]. 38 of 38 recent TGRCode courses and 550 of the 550 sample fully playable, 0 crashes (2026-10-24; the coverage check reads block, Bill Blaster and Lakitu contents)
+  users]. 38 of 38 recent TGRCode courses and 550 of the 550 sample fully playable, 0 crashes (2026-10-24; the coverage check reads block, Bill Blaster and Lakitu contents); a second TGRCode sample (new / popular / endless, 2026-10-25): 272 of 273 (left: a Koopaling in a Clown Car — their own Clown context, Move / ShellMove, not traced)
 - 🔄 Stacked parts (2026-10-24, from the game's tower manager; research objects/stacks.md): ✅
   play — columns chained as the game does (feet in the row above the lower top, x within 0.2 px
   of the bottom's; Bill Blasters / Cannons as fixed bases; 128 members at most); the base acts
@@ -809,7 +852,10 @@ Specs are private (`research/specs/`, gitignored): behaviour in prose/tables, no
   ending text, credits, costume reward); still open: the rescue scene itself (not a layout), the
   run-flow timing between screens
 - 🔄 SMM1 asset import (owner's disc dump): BFLYT/BFLAN layouts ✅, GX2 textures (BFLIM, AddrLib
-  1D/2D untiling) ✅, BFFNT fonts ✅, MSBT text (English) ✅, BFSTM/BARS audio ⬜
+  1D/2D untiling) ✅, BFFNT fonts ✅, MSBT text (English) ✅, UI sounds ✅ (2026-10-25: the banks of
+  `Pack/Sound.pack` — SARCs of AMTA + BFWAV, not BARS — and the UI streams (BFSTM) → `ui/sound/*.wav`,
+  417 sounds; the SLink2DB v0x15 (`mmk_formats::xlink_wiiu`) → `ui/sound/sounds.json`, 968 users;
+  `mmk audio` reads SMM1 waves, banks, `Sound.pack` and streams; importer 4), BGM streams ⬜
 - 🔄 Layout player (panes, text, keyframed animations) — pane tree, parts, pictures, windows,
   text with font fallback, SRT/visibility/alpha/colour/texture-pattern/texture-SRT curves ✅;
   part property overrides: picture material from the enclosing layout (course-dot numbers,
@@ -851,8 +897,14 @@ Specs are private (`research/specs/`, gitignored): behaviour in prose/tables, no
     `Play_SlidePassIconKey_00` (hold − / Tab / controller −, 3 × 32 frames, release cancels)
   - ✅ `Cmn_GameOver_00`; ending: `Play_EndingText_00` over the finished map (Easy: another
     castle; Normal; Expert/Super Expert) then `Nwk_StaffCredit_01/00/03` with the cleared courses
+  - ✅ UI sounds (2026-10-25, `mmk_front::smm1_sound`): the SLink users `UI_<layout>[_<part>]`'s
+    keys and states where the screens play their animations — the tabs' curtain, the start
+    buttons, the map demo (Telop `M3_StarsGather`, the Goombas' footsteps, Peach's "Help!", Mario's
+    jump / walk, the wipe, democancel on a skip), the card's 100 Marios (walk sound by the lives),
+    pause In / Out by the course style, the buttons' cursor and decide sounds, course clear, the
+    skip countdown and SlidePass; key ↔ animation [inf] where the data names only the key
   - 🔄 timings between screens, the rescue scene (not a layout), Mii/flag/Star/comment areas
-    (hidden: no data), per-character GAME OVER letters, UI sounds ⬜
+    (hidden: no data), per-character GAME OVER letters
 - ⬜ SMM1 → SMM2 course import design + documented losses
 - ⬜ App screens drawn with the SMM1 layouts (world map walk, intro card, clear, game over, ending)
 

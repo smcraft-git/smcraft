@@ -16,12 +16,16 @@ use std::collections::{HashMap, HashSet};
 
 use serde_json::Value;
 
-/// One sound to start: `ui/sound/<name>.wav`, at `volume`, `delay` frames (60 Hz) from now.
+use crate::layout::UiKind;
+
+/// One sound to start: `ui/sound/<name>.wav` of import `ui` (the SMM2 UI's, or the SMM1 one's:
+/// [`crate::smm1_sound`]), at `volume`, `delay` frames (60 Hz) from now.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SoundCue {
     pub name: String,
     pub volume: f32,
     pub delay: f32,
+    pub ui: UiKind,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -189,6 +193,7 @@ impl UiSounds {
                     name: sound.to_string(),
                     volume: node.get("volume").and_then(Value::as_f64).unwrap_or(1.0) as f32,
                     delay: d,
+                    ui: UiKind::Smm2,
                 });
             }
             return;

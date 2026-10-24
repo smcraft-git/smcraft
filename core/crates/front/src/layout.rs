@@ -1,4 +1,4 @@
-//! An imported UI ([`Ui`]: the layout cache, its message tables and, for SMM2, the UI sounds)
+//! An imported UI ([`Ui`]: the layout cache, its message tables and its UI sounds)
 //! and one playing layout with a small timeline ([`Layout`]): animations are scheduled on the
 //! owner's 60 Hz tick counter and bound at their frames by [`Layout::apply`] before drawing or
 //! reading pane positions. The port of the Swift app's `LayoutUI` / `UILayout`.
@@ -9,6 +9,7 @@ use std::rc::Rc;
 
 use mmk_ui::{ARG_PLACEHOLDER, LayoutPlayer, PaneInfo, PaneOverride, Quad, UiCache};
 
+use crate::smm1_sound::{Ctx, Smm1Sounds};
 use crate::sound::{SoundCue, UiSounds};
 
 /// Which import a layout comes from (a host keeps one texture set per import).
@@ -24,6 +25,7 @@ struct UiInner {
     kind: UiKind,
     cache: RefCell<UiCache>,
     sounds: Option<UiSounds>,
+    smm1_sounds: Option<Smm1Sounds>,
     cues: RefCell<Vec<SoundCue>>,
 }
 
@@ -34,22 +36,37 @@ pub struct Ui(Rc<UiInner>);
 impl Ui {
     /// `sounds`: the import's `ui/sound/sounds.json` (SMM2), if it has one.
     pub fn new(kind: UiKind, cache: UiCache, sounds: Option<UiSounds>) -> Self {
+        Self::with_sounds(kind, cache, sounds, None)
+    }
+
+    /// As [`Ui::new`], with the SMM1 import's sounds (`ui/sound/sounds.json` of `mmk
+    /// import-smm1`).
+    pub fn with_sounds(
+        kind: UiKind,
+        cache: UiCache,
+        sounds: Option<UiSounds>,
+        smm1_sounds: Option<Smm1Sounds>,
+    ) -> Self {
         Ui(Rc::new(UiInner {
             kind,
             cache: RefCell::new(cache),
             sounds,
+            smm1_sounds,
             cues: RefCell::new(Vec::new()),
         }))
     }
 
-    /// Open an import folder (reads `ui/sound/sounds.json` when present).
+    /// Open an import folder (reads `ui/sound/sounds.json` when present: SMM2's, or SMM1's for
+    /// [`UiKind::Smm1`]).
     #[cfg(not(target_arch = "wasm32"))]
     pub fn open(kind: UiKind, dir: &std::path::Path) -> Result<Self, String> {
         let cache = UiCache::open(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
-        let sounds = std::fs::read_to_string(dir.join("ui/sound/sounds.json"))
-            .ok()
-            .and_then(|s| UiSounds::from_json(&s));
-        Ok(Self::new(kind, cache, sounds))
+        let json = std::fs::read_to_string(dir.join("ui/sound/sounds.json")).ok();
+        let (sounds, smm1) = match kind {
+            UiKind::Smm2 => (json.as_deref().and_then(UiSounds::from_json), None),
+            UiKind::Smm1 => (None, json.as_deref().and_then(Smm1Sounds::from_json)),
+        };
+        Ok(Self::with_sounds(kind, cache, sounds, smm1))
     }
 
     pub fn kind(&self) -> UiKind {
@@ -97,6 +114,36 @@ impl Ui {
 
     pub fn sounds(&self) -> Option<&UiSounds> {
         self.0.sounds.as_ref()
+    }
+
+    pub fn smm1_sounds(&self) -> Option<&Smm1Sounds> {
+        self.0.smm1_sounds.as_ref()
+    }
+
+    /// The cues of SMM1 key `key` fired on `layout` (its part `part`); empty without them.
+    pub fn smm1_key(
+        &self,
+        layout: &str,
+        part: Option<&str>,
+        key: &str,
+        ctx: &[Ctx],
+    ) -> Vec<SoundCue> {
+        self.smm1_sounds()
+            .map(|s| s.key(layout, part, key, ctx))
+            .unwrap_or_default()
+    }
+
+    /// The cues of SMM1 state `state` entered by `layout` (its part `part`).
+    pub fn smm1_state(
+        &self,
+        layout: &str,
+        part: Option<&str>,
+        state: &str,
+        ctx: &[Ctx],
+    ) -> Vec<SoundCue> {
+        self.smm1_sounds()
+            .map(|s| s.state(layout, part, state, ctx))
+            .unwrap_or_default()
     }
 
     /// Queue resolved sound cues (taken by the host once per tick).

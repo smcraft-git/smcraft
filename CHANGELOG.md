@@ -22,6 +22,16 @@ SMCraft is back in development (it was archived in October 2026).
   Maker, quick level return after a miss, and SMW's goal wipe in Super Mario World courses.
 - **Network Play groundwork**: signing in to Nextendo Network and matchmaking SMCraft players
   (tested against a local server; live play waits for Nextendo).
+- **SMM1's sounds on the SMM1-look 100 Mario screens**: the difficulty tabs' curtain, the start
+  buttons, the world map's demo (the banner, the Goombas' footsteps, Peach's "Help!", Mario's jump
+  and walk, the wipe), the 100 Marios on the course card, the pause menu's style sound, course
+  clear and the skip countdown, all from your SMM1 dump's own sound data (import SMM1 again:
+  `mmk import-smm1`).
+- **Koopalings in Koopa Clown Cars**: the car chases you while the Koopaling fires volleys of
+  his magic (Lemmy his balls, Wendy her rings) from it; a stomp stops the car while he ducks in,
+  then he spins in his shell for a while (stomps bounce off) before he comes out; the third stomp
+  knocks him out of the car (NSMBU: after his flinch) and the empty car can be ridden.
+- Fix: a Koopa Clown Car whose rider is defeated floats empty and can be ridden.
 - Fix: Munchers hurt on a wall sensor's touch, as in SMM2 (a one-tile gap between Munchers is as
   tight as in the game).
 - **The Course Maker**: SMM2's own maker screens (part palette and part window, styles, themes,
@@ -33,6 +43,18 @@ SMCraft is back in development (it was archived in October 2026).
   as a new course, "based on <code> by <maker>".
 - **Super Worlds**: play a Super World (its map, lives, progress), made from your library or
   downloaded from TGRCode.
+- **Super World maps drawn like the game's**: each world's theme backdrop and land (water,
+  clouds, lava, forest, desert…), the roads with bridges, water routes and ladders, the course
+  points by their icon (ghost houses, towers, airships, enemies…) turning blue when cleared,
+  castles, pipes, Toad Houses and the player walking, swimming or climbing the map. Needs the
+  UI pack imported again.
+- **Super World maps with their music and their moments**: each theme's map music; a cleared
+  course's point turns cleared with its sound, the player jumps, and the roads it opened appear
+  (roads and the goal stay hidden until reached; points become reachable with a pop); the
+  castle rises when its road opens; a used Toad House closes; a cleared world's castle crumbles
+  and a cannon shoots the player to the next world, where he lands. Ledges stand on cliffs. The
+  goal is the airship castle when it stands on water. Needs the game pack imported again
+  (pack 14).
 - **Toad House minigames** in Super Worlds: Match & Win, Pop & Win and Catch & Win, with the
   game's own rules and prizes.
 - **SMM2's own Endless Challenge**, and **Challenge Modes**: Course World's Endless button
@@ -69,8 +91,27 @@ SMCraft is back in development (it was archived in October 2026).
   barrel (gliding for winged ones, Boos and Bloopers slowing to a stop, parachutes opening after
   the shot), three times as fast from the red blaster; each blaster keeps as many alive as the
   game allows. Fix: only coin blasters fire at random intervals.
+- **Parts come out of blocks, pipes and Bill Blasters as in SMM2** (each part's own way, from
+  the 3.0.3 game):
+  - Out of a block, an enemy hops up from inside the block and lands on top before it walks;
+    winged ones rise slowly, a winged red Koopa climbs well clear of the block, Boos and
+    Bloopers float out, a Lava Bubble leaps high, a Cheep Cheep faces you, P Switches and
+    springs pop higher; a parachute is shot up first and opens on the way down.
+  - Out of a pipe, a parachute is shot out and opens once clear; winged red Koopas fly out,
+    winged Bob-ombs and Buzzies hover at the mouth; big enemies squeeze out, get stuck for a
+    second and jump free; Lava Bubbles are launched; items face right. **Coins in pipes** now
+    come out as bursts of ten bouncing coins.
+  - From a Bill Blaster, Spinies and Buzzies stop on landing, Lava Bubbles fly on through
+    everything, P Switches and springs fly like items. The red blaster fires its next homing
+    Bullet Bill about 5 seconds after the last one is gone. Fix: Bullet Bills leave the barrel
+    at the right height (they came out 8 px low).
+  - Parachutes swing the right way after a shot to the left, and swing on at a wall.
 - **Enemies holding a Key** let it go when defeated; **Lakitus throw what they were given**,
   coins as a ten-coin burst.
+- **The Cursed Key** (SMB1): Phanto swoops after whoever holds it, and drifts off when they don't.
+- **The 3.0 update's clear conditions**: defeat Spikes, Pokeys, Mechakoopas or a Koopaling;
+  reach the goal as Link, SMB2, Frog, Balloon, Flying Squirrel or Boomerang Mario, or wearing a
+  Cannon Box, Propeller Box, Goomba Mask, Red POW Box or Bullet Bill Mask.
 - **Tracks drawn with the game's own track tiles** (straights, bends, joints, open and closed
   ends) instead of a plain line.
 - **Endless**: the map's "New High Score!" panel.

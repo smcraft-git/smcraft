@@ -188,6 +188,10 @@ ui/fonts/<Font>.json, <Font>/sheet_n.mtex   bitmap fonts (BFFNT 4.1, BNTX sheets
                                       scalable-font combinations rasterised (smm2_font)
 ui/messages/<LayoutMsg|CommonMsg|ReferenceMsg>/<Table>.json   (ReferenceMsg: GoalCondition,
                                       PartsIconName, … shared tables)
+ui/myworld/map.json, ui/textures/MyWorld_*/<name>.mtex   the Super World map's models (flat
+                                      quads, texture patterns, baked bone matrices), the map
+                                      tables (SceneDB_MyWorld, WM_*Anime) and the models'
+                                      textures (stage `myworld map`, UI pack 7)
 ui/textures/GameSkin/<style>_Lyt_Logo_00.mtex   the styles' logos (`Model/<style>_Lyt_Logo`)
 ui/sound/sounds.json, <sound>.wav     menu sounds: per layout its SLink user, button sound types
                                       and animations with sounds (`Pack/Static.pack`

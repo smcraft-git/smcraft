@@ -200,6 +200,8 @@ pub struct Block {
     /// Multi-coin brick: coins given so far and the 280-frame window (B9).
     pub coins_given: u8,
     pub coin_timer: i32,
+    /// A note block's contents go at the bump's start (`Blocks::step`).
+    pub release_now: bool,
 }
 
 impl Block {
@@ -210,6 +212,7 @@ impl Block {
             bump: None,
             coins_given: 0,
             coin_timer: 0,
+            release_now: false,
         }
     }
 
@@ -243,6 +246,8 @@ pub struct Release {
     /// The block's bounce offset before its last step: the item appears there (the block's
     /// position isn't reset yet) [obs: Ryujinx traces, a mushroom first at block y + 0.429].
     pub offset: f32,
+    /// Out of a note block (Block Out's note variant).
+    pub note: bool,
 }
 
 /// How strong the hitter is (B4: the player's per-side capability levels).
@@ -336,7 +341,20 @@ impl Blocks {
                 } else {
                     Bump::note_down()
                 });
-                HitResult::Bumped
+                // its contents go at the bump's start, once, and it stays a note block (a coin
+                // pops) [obs 0x710086d480; inf: the area-rectangle test that can hold them back
+                // for a later bump is taken as met]
+                match b.contents {
+                    Some(Contents::Coin) => {
+                        b.contents = None;
+                        HitResult::Coin
+                    }
+                    Some(_) => {
+                        b.release_now = true;
+                        HitResult::Bumped
+                    }
+                    None => HitResult::Bumped,
+                }
             }
             BlockKind::Donut | BlockKind::Cloud | BlockKind::Dotted { .. } => HitResult::Nothing,
             BlockKind::OnOff => {
@@ -353,6 +371,18 @@ impl Blocks {
         for (&(x, y), b) in self.map.iter_mut() {
             if b.coin_timer > 0 {
                 b.coin_timer -= 1;
+            }
+            if std::mem::take(&mut b.release_now)
+                && let Some(c) = b.contents.take()
+            {
+                out.push(Release {
+                    x,
+                    y,
+                    contents: c,
+                    down: b.bump.is_some_and(|bp| bp.down),
+                    offset: 0.0,
+                    note: true,
+                });
             }
             if let Some(mut bump) = b.bump {
                 if bump.fresh {
@@ -377,6 +407,7 @@ impl Blocks {
                                     contents: c,
                                     down,
                                     offset: d_before,
+                                    note: false,
                                 });
                             }
                             b.kind = BlockKind::Empty;
@@ -393,6 +424,7 @@ impl Blocks {
                                     contents: c,
                                     down,
                                     offset: d_before,
+                                    note: false,
                                 });
                             }
                         }

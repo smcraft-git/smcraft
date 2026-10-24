@@ -223,7 +223,8 @@ mod native {
         /// challenge-walk, challenge-gameover, challenge-ending, challenge-pause,
         /// challenge-clear, challenge-skip, challenge-card; superworld (the planets),
         /// superworld-title, superworld-map, superworld-walk (--cleared courses of world 1
-        /// cleared), superworld-play, superworld-minigame0 / -minigame1 / -minigame2 (a Toad
+        /// cleared), superworld-clear (the last of them just cleared), superworld-worldclear
+        /// (world 1's goal just cleared), superworld-theme<n>, superworld-play, superworld-minigame0 / -minigame1 / -minigame2 (a Toad
         /// House's Match / Pop / Catch & Win; --front-script presses A), superworld-ending (the
         /// library's test world); the Course
         /// Maker on a new course: maker, maker-parts, maker-menu, maker-save, maker-style,
@@ -455,7 +456,9 @@ mod native {
             .or_else(|| std::env::var_os("MMK_UI_SMM1").map(PathBuf::from))
             .or_else(mmk_host::paths::smm1_ui)
             .filter(|d| ui_game(d).as_deref() == Some("SMM1"));
-        let smm1 = smm1_dir.and_then(|d| Ui::open(UiKind::Smm1, &d).ok());
+        let smm1 = smm1_dir
+            .as_ref()
+            .and_then(|d| Ui::open(UiKind::Smm1, d).ok());
         let source = assets_dir.as_ref().map(|d| DirSource::new(d.clone()));
         let mut game = Game::load(source.as_ref().map(|s| s as &dyn AssetSource), None)?;
         game.no_hud = true;
@@ -468,6 +471,7 @@ mod native {
         game.session.set_options(options);
         let mut data = HostData::new(assets_dir.as_ref().map(|d| DirSource::new(d.clone())));
         data.ui_dir = Some(ui_dir.clone());
+        data.smm1_dir = smm1.as_ref().and(smm1_dir);
         data.server = args
             .server
             .clone()
@@ -641,7 +645,9 @@ mod native {
         if !mute {
             let bank = source.as_ref().and_then(|s| source::open_bank(s).ok());
             let music = source.as_ref().and_then(|s| source::music_reader(s));
-            match mmk_shell::ui_sound::start(bank, music, Some(ui_dir.join("ui/sound"))) {
+            let smm1_sound = app.data.smm1_dir.as_ref().map(|d| d.join("ui/sound"));
+            match mmk_shell::ui_sound::start(bank, music, Some(ui_dir.join("ui/sound")), smm1_sound)
+            {
                 Ok(a) => {
                     app.data.audio = a.game.clone();
                     app.ui_audio = Some(a.ui.clone());

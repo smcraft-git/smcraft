@@ -250,6 +250,7 @@ pub struct PipeGenerator {
     pub kind: Kind,
     pub big: bool,
     pub wings: bool,
+    pub parachute: bool,
     pub dir: PipeDir,
     /// Pipe entry point (outer edge of the mouth).
     pub x: f32,
@@ -481,7 +482,8 @@ pub const SUPPORTED_PARTS: &[i16] = &[
 /// other part with the flag is reported by `unsupported_features`.
 const ALT_FORMS: &[i16] = &[
     0, 1, 2, 3, 10, 11, 12, 13, 15, 19, 23, 25, 28, 32, 34, 36, 40, 41, 42, 45, 46, 47, 48, 51, 52,
-    54, 56, 61, 77, 84, 85, 96, 97, 100, 103, 104, 107, 108, 113,
+    54, 56, 61, 77, 84, 85, 96, 97, 100, 103, 104, 107, 108, 113, // the Cursed Key (SMB1)
+    95,
     // 2.0 / 3.0: the spike ball, the P Block that appears, the blue ON/OFF Trampoline; on a
     // Mechakoopa the bit does nothing [obs]
     74, 79, 111, 132, // the Super Mushroom's 0x4 form: the SMB1 Master Sword
@@ -733,8 +735,6 @@ pub fn unsupported_features(course: &Course) -> Vec<String> {
                 out.insert(format!("part {} on a track", o.id));
             } else if o.flags & 0x4 != 0 && !ALT_FORMS.contains(&o.id) {
                 out.insert(format!("alternate form of part {}", o.id));
-            } else if let Some(why) = v3::unsupported(o) {
-                out.insert(why);
             } else if o.flags & 0x2 != 0 && o.id == 13 {
                 // winged Bill Blasters fly as actors: not yet
                 out.insert(format!("wings on part {}", o.id));
@@ -1081,21 +1081,24 @@ impl Level {
                 // the Chain Chomp's stake is solid (WanwanPile has a collision body)
                 lvl.set(tx, ty, Cell::Solid);
             }
+            // a coin inside a pipe makes it a coin generator: TenCoin bursts (9-pipe.md "Coins
+            // in pipes") [obs v3.0.3 EnemyWaki update 0x71012aa1c0]
+            // inside a pipe (flag bit 0): the object sits on the pipe's entry point
+            let (ox, oy) = (o.x as f32 / 10.0, o.y as f32 / 10.0);
+            let in_pipe = (o.flags & 1 != 0)
+                .then(|| {
+                    pipe_entries
+                        .iter()
+                        .min_by(|a, b| {
+                            ((a.0 - ox).abs() + (a.1 - oy).abs())
+                                .total_cmp(&((b.0 - ox).abs() + (b.1 - oy).abs()))
+                        })
+                        .copied()
+                })
+                .flatten()
+                .filter(|e| (e.0 - ox).abs() + (e.1 - oy).abs() <= 16.0);
+            let actor = actor.or((o.id == 8 && in_pipe.is_some()).then_some(Kind::FloatCoin));
             if let Some(kind) = actor {
-                // inside a pipe (flag bit 0): the object sits on the pipe's entry point
-                let (ox, oy) = (o.x as f32 / 10.0, o.y as f32 / 10.0);
-                let in_pipe = (o.flags & 1 != 0)
-                    .then(|| {
-                        pipe_entries
-                            .iter()
-                            .min_by(|a, b| {
-                                ((a.0 - ox).abs() + (a.1 - oy).abs())
-                                    .total_cmp(&((b.0 - ox).abs() + (b.1 - oy).abs()))
-                            })
-                            .copied()
-                    })
-                    .flatten()
-                    .filter(|e| (e.0 - ox).abs() + (e.1 - oy).abs() <= 16.0);
                 if let Some((ex, ey, dir, colour)) = in_pipe {
                     if matches!(kind, Kind::Piranha { .. }) {
                         let travel =
@@ -1124,6 +1127,7 @@ impl Level {
                             kind,
                             big,
                             wings,
+                            parachute: o.flags & 0x8000 != 0,
                             dir,
                             x: ex,
                             y: ey,

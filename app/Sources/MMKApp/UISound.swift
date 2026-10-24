@@ -1,14 +1,16 @@
 import AVFoundation
 import Foundation
 
-/// Plays the SMM2 UI sounds the front end asks for (`mmk_front_sounds`: a WAV of the import's
-/// `ui/sound/`, a volume, a delay in frames). Which sound a button or animation plays is decided
-/// by `mmk-front` (core/crates/front/src/sound.rs) from the import's `sounds.json`.
+/// Plays the UI sounds the front end asks for (`mmk_front_sounds`: a WAV of the SMM2 or the SMM1
+/// import's `ui/sound/`, a volume, a delay in frames). Which sound a button or animation plays is
+/// decided by `mmk-front` (core/crates/front/src/sound.rs, smm1_sound.rs) from the import's
+/// `sounds.json`.
 @MainActor
 final class UISound {
     static let shared = UISound()
 
     private let dir: URL?
+    private let smm1Dir: URL?
     private var players: [AVAudioPlayer] = []
     private var ends: [ObjectIdentifier: TimeInterval] = [:]
     private var cache: [String: Data] = [:]
@@ -19,19 +21,21 @@ final class UISound {
 
     private init() {
         dir = AppModel.smm2UIDir?.appendingPathComponent("ui/sound", isDirectory: true)
+        smm1Dir = AppPaths.findSMM1Cache()?.appendingPathComponent("ui/sound", isDirectory: true)
     }
 
-    func play(_ sound: String, volume: Float, delayFrames: Double) {
-        guard sound != "@Blank", let dir, !Self.muted else { return }
+    func play(_ sound: String, volume: Float, delayFrames: Double, smm1: Bool = false) {
+        guard sound != "@Blank", let dir = smm1 ? smm1Dir : dir, !Self.muted else { return }
         if Self.log {
-            FileHandle.standardError.write("UISound \(sound) volume \(volume) delay \(delayFrames)\n".data(using: .utf8)!)
+            FileHandle.standardError.write("UISound \(smm1 ? "smm1/" : "")\(sound) volume \(volume) delay \(delayFrames)\n".data(using: .utf8)!)
         }
+        let key = smm1 ? "smm1/\(sound)" : sound
         let data: Data
-        if let c = cache[sound] {
+        if let c = cache[key] {
             data = c
         } else {
             guard let d = try? Data(contentsOf: dir.appendingPathComponent("\(sound).wav")) else { return }
-            cache[sound] = d
+            cache[key] = d
             data = d
         }
         guard let p = try? AVAudioPlayer(data: data) else { return }

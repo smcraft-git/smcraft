@@ -48,7 +48,7 @@ use serde_json::{Value, json};
 use crate::smm1::{font_to_json, to_mtex};
 use crate::{ImportError, Progress, Result, read, write};
 
-pub const SMM2_UI_IMPORTER_VERSION: u32 = 6;
+pub const SMM2_UI_IMPORTER_VERSION: u32 = 7;
 
 #[derive(Clone, Debug)]
 pub struct Smm2UiConfig {
@@ -155,7 +155,7 @@ pub(crate) fn collect_layouts(romfs: &Path) -> Result<Vec<LayoutSource>> {
     Ok(out.into_values().collect())
 }
 
-fn bntx_to_mtex(t: &bntx::Texture) -> Option<Mtex> {
+pub(crate) fn bntx_to_mtex(t: &bntx::Texture) -> Option<Mtex> {
     use mmk_assets::{MtexFormat as F, MtexVariant as V};
     use mmk_formats::bntx::{PixelFormat as P, Variant};
     Some(Mtex {
@@ -663,6 +663,13 @@ pub fn run_smm2_ui(cfg: &Smm2UiConfig, progress: Progress) -> Result<Smm2UiRepor
         }
     }
 
+    // --- the Super World map's models, textures and tables (`super::smm2_myworld`)
+    progress("myworld map", 0, 1);
+    let map = crate::smm2_myworld::run(&cfg.romfs, &out)?;
+    report.textures += map.textures;
+    report.skipped.extend(map.skipped.iter().cloned());
+    progress("myworld map", 1, 1);
+
     // --- the layouts' sounds (button / animation → sound, from the game's data)
     progress("ui sounds", 0, 1);
     let sound = crate::smm2_ui_sound::run(&cfg.romfs, &ui)?;
@@ -675,7 +682,7 @@ pub fn run_smm2_ui(cfg: &Smm2UiConfig, progress: Progress) -> Result<Smm2UiRepor
         "game": "SMM2",
         "build": build,
         "language": cfg.language,
-        "stages": ["identify", "layouts", "messages", "fonts", "scalable fonts", "condition icons"],
+        "stages": ["identify", "layouts", "messages", "fonts", "scalable fonts", "condition icons", "myworld map"],
         "layouts": layout_names,
         "animations": report.animations,
         "textures": report.textures,
@@ -688,6 +695,7 @@ pub fn run_smm2_ui(cfg: &Smm2UiConfig, progress: Progress) -> Result<Smm2UiRepor
         "mission_icons": mission_icons,
         "game_skin_icons": skin_icons,
         "edit_model_textures": edit_textures,
+        "myworld_map": {"models": map.models, "textures": map.textures, "tables": map.tables},
         "ui_sounds": {"layouts": sound.layouts, "users": sound.users, "sounds": sound.sounds},
         "missing_part_layouts": missing_parts,
         "skipped": report.skipped,

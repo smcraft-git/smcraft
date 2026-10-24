@@ -67,6 +67,17 @@ fn enemy(target: u32) -> Option<(&'static str, &'static str)> {
         39 => ("Bunbun", "Bunbun_00"),
         40 => ("Bunbun_01", "Bunbun_01"),
         41 => ("Killer", "Killer_00"),
+        // the update's (clear.rs 78–87)
+        78 => ("Gabon", "Gabon_00"),
+        79 => ("Sambo", "Sambo_00"),
+        80 => ("KoopaMecha", "KoopaMecha_00"),
+        81 => ("Larry", "Larry_00"),
+        82 => ("Iggy", "Iggy_00"),
+        83 => ("Wendy", "Wendy_00"),
+        84 => ("Lemmy", "Lemmy_00"),
+        85 => ("Roy", "Roy_00"),
+        86 => ("Morton", "Morton_00"),
+        87 => ("Ludwig", "Ludwig_00"),
         _ => return None,
     })
 }
@@ -117,6 +128,26 @@ fn entry(c: &Condition) -> Option<(&'static str, Option<&'static str>, Option<&'
         18 => ("PlayerMode_06", None, Some("SuperBell_00")),
         19 => ("PlayerOnItem_02", Some("KoopaCar"), Some("KoopaCar_00")),
         20 => ("PlayerMode_07", None, Some("SuperHammer_00")),
+        26 if c.target == 2 => ("PlayerOnHelmet_01", None, Some("TogeMet_00")),
+        26 => ("PlayerOnHelmet_00", None, Some("Met_01")),
+        28 => ("PlayerMode_08_00", None, Some("FireFlower_01")),
+        29 => ("PlayerMode_05", None, Some("DekaKinoko_00")),
+        // the update's forms (AtGoal::form 12–17) and wearables (AtGoal::wearing 1–5)
+        30 => match c.target {
+            12 => ("PlayerMode_09", None, Some("SuperKinoko_01")),
+            13 => ("PlayerMode_11", None, Some("FrogSuit_00")),
+            14 => ("PlayerMode_12", None, None),
+            15 => ("PlayerMode_13", None, Some("SuperDonguri_00")),
+            16 => ("PlayerMode_14", None, Some("BoomerangFlower_00")),
+            _ => ("PlayerMode_10", None, Some("KinokoUSA_00")),
+        },
+        31 => match c.target {
+            1 => ("PlayerBox_01", None, Some("BoxPropeller_00")),
+            2 => ("PlayerBox_00", None, Some("BoxKiller_00")),
+            3 => ("PlayerBox_02", None, Some("BoxKuribo_00")),
+            4 => ("PlayerBox_03", None, Some("BoxPow_00")),
+            _ => ("PlayerBox_04", None, Some("BoxKillerPlayer_00")),
+        },
         _ => return None,
     })
 }
@@ -160,6 +191,16 @@ pub fn describe(c: &Condition) -> String {
         39 => "Boom Booms",
         40 => "Pom Poms",
         41 => "Bullet Bills",
+        78 => "Spikes",
+        79 => "Pokeys",
+        80 => "Mechakoopas",
+        81 => "Larrys",
+        82 => "Iggys",
+        83 => "Wendys",
+        84 => "Lemmys",
+        85 => "Roys",
+        86 => "Mortons",
+        87 => "Ludwigs",
         _ => "enemies",
     };
     let s = match c.kind {
@@ -194,6 +235,27 @@ pub fn describe(c: &Condition) -> String {
         27 => "goal in a Dry Bones Shell".into(),
         28 => "goal as Superball Mario".into(),
         29 => "goal as Big Mario".into(),
+        30 => format!(
+            "goal as {}",
+            match c.target {
+                12 => "Link",
+                13 => "Frog Mario",
+                14 => "Balloon Mario",
+                15 => "Flying Squirrel Mario",
+                16 => "Boomerang Mario",
+                _ => "SMB2 Mario",
+            }
+        ),
+        31 => format!(
+            "goal wearing a {}",
+            match c.target {
+                1 => "Propeller Box",
+                2 => "Cannon Box",
+                3 => "Goomba Mask",
+                4 => "Red POW Box",
+                _ => "Bullet Bill Mask",
+            }
+        ),
         _ => return "⚑ condition not supported".into(),
     };
     format!("{mark} {s}")
@@ -895,6 +957,7 @@ impl CourseScreens {
             name: name.to_string(),
             volume: 1.0,
             delay: 0.0,
+            ui: crate::layout::UiKind::Smm2,
         }]);
     }
 

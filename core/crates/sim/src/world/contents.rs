@@ -49,20 +49,12 @@ impl World {
         Some((a, parachute))
     }
 
-    /// Open a released actor's parachute: an enemy pops out first and opens it when the pop
-    /// ends; an item opens it at once [inf: the order of the Block Out and Parachute contexts
-    /// was not traced].
+    /// Open a released actor's parachute at once (a broken crate's, an attached block's
+    /// contents); blocks and trees shoot theirs out first (`Actor::block_out`).
     pub(super) fn open_parachute(a: &mut Actor) {
-        if a.mode == Mode::PopOut {
-            a.chute = true;
-            return;
-        }
         a.vx = 0.0;
         a.vy = 0.0;
-        a.mode = Mode::Parachute {
-            x0: a.x,
-            phase: 0.0,
-        };
+        a.mode = Mode::parachute(false);
     }
 
     /// A vine sprouts from the block at (x, by) (centre, bottom): up from its top, or down
@@ -123,13 +115,17 @@ impl World {
     pub(super) fn drop_keys(&mut self) {
         let mut keys = Vec::new();
         for a in &mut self.actors {
-            if matches!(a.holds, Some((95, _))) && !a.alive() {
+            if let Some((95, flags)) = a.holds
+                && !a.alive()
+            {
                 a.holds = None;
-                keys.push((a.x, a.y + a.height() / 2.0 - 8.0));
+                keys.push((a.x, a.y + a.height() / 2.0 - 8.0, flags & 0x4 != 0));
             }
         }
-        for (x, y) in keys {
-            self.add_actor(Actor::new(crate::actors::Kind::Key, x, y));
+        for (x, y, cursed) in keys {
+            let mut k = Actor::new(crate::actors::Kind::Key, x, y);
+            k.alt = cursed;
+            self.add_actor(k);
         }
     }
 }

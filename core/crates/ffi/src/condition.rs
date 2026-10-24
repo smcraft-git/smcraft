@@ -85,6 +85,8 @@ pub(crate) fn goal_code(goal: Goal) -> Option<(u32, u32)> {
         Goal::KoopaCar => (19, 0),
         Goal::NoDamage => (9, 0),
         Goal::NoLanding => (10, 0),
+        Goal::Form(f) => (30, f as u32),
+        Goal::Wearing(w) => (31, w as u32),
         Goal::Unsupported(i) => (255, i as u32),
     })
 }

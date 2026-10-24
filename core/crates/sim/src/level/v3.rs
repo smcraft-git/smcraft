@@ -66,14 +66,6 @@ pub(super) fn actor_kind(o: &CourseObject, lvl: &Level) -> Option<Kind> {
     })
 }
 
-/// What the engine does not play yet on these parts.
-pub(super) fn unsupported(o: &CourseObject) -> Option<String> {
-    // a Koopaling in a Koopa Clown Car uses its own Clown context (Move / ShellMove …), not
-    // modelled
-    ((120..=126).contains(&o.id) && o.flags & 0x200 != 0)
-        .then(|| format!("Koopaling {} in a Clown Car", o.id))
-}
-
 /// Tile parts: placed into the area (P Block, Dash Block). True when `o` was one.
 pub(super) fn place_tile(lvl: &mut Level, o: &CourseObject, tx: i32, ty: i32) -> bool {
     match o.id {

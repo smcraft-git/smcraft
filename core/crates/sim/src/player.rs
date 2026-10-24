@@ -1932,6 +1932,7 @@ impl Player {
             holding_stone: false,
             holding_shell: false,
             yoshi: self.yoshi.is_some(),
+            wearing: self.pu.headdress.map_or(0, |h| h as u8 + 1),
         }
     }
 

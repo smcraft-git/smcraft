@@ -31,6 +31,7 @@ mod bosses;
 mod contents;
 pub mod coop;
 mod debug;
+mod phanto;
 mod smm1;
 mod tower;
 use smm1::Smm1Shell;
@@ -157,6 +158,13 @@ pub const P_FRAMES: i32 = 540;
 const GEN_INTERVAL: [i32; 4] = [180, 60, 240, 120];
 const GEN_FIRST: [i32; 4] = [90, 30, 90, 60];
 const GEN_RETRY: [i32; 4] = [30, 8, 41, 19];
+/// A winged coin's pipe: every 420 frames, the first after 210 (EnemyWaki create
+/// 0x71012a9f90, v3.0.3) [obs].
+const GEN_WING_COIN: i32 = 420;
+/// The red blaster's lock-out: 320 frames (0x140) after its last homing Bill is gone [obs].
+const BLASTER_LOCK: i32 = 320;
+/// How many coins a coin pipe keeps out (`spout_dokan_count` 10, Coin / Coin10) [obs].
+const GEN_COINS: usize = 10;
 
 /// A coin blaster's TenCoin: 10 coins, one every 14 frames when winged (8-coin.md) [obs].
 const COIN_BURST: u8 = 10;
@@ -174,6 +182,8 @@ struct CoinBurst {
     sent: u8,
     wait: u8,
     blaster: usize,
+    /// Sent out of a pipe (9-pipe.md "Coins in pipes"): the generator, its direction and mouth.
+    pipe: Option<(usize, PipeDir, f32, f32)>,
     /// Thrown by a Lakitu (Jugem context): 10 coins 2 a frame, or 3 at once when winged.
     lakitu: bool,
 }
@@ -296,6 +306,8 @@ pub struct World {
     next_id: u32,
     /// Bill Blaster countdowns (main timer, cooldown) for the current area.
     blaster_timers: Vec<(i32, i32)>,
+    /// The red blaster's homing-Bill lock-out countdown (+0x34), per blaster.
+    blaster_locks: Vec<i32>,
     /// Coin blasters' TenCoin bursts still sending coins out.
     coin_bursts: Vec<CoinBurst>,
     /// Course-wide ON/OFF state (true = ON / red, the start state).
@@ -323,8 +335,12 @@ pub struct World {
     pub liquid: Option<Liquid>,
     /// Cannon countdowns (current area).
     cannon_timers: Vec<i32>,
-    /// Keys held.
+    /// Keys held, and how many of them are Cursed Keys (the SMB1 Key's 0x4 form: Phanto chases
+    /// whoever holds one, world/phanto.rs).
     pub keys: u32,
+    pub cursed: u32,
+    /// Phantos (world/phanto.rs).
+    phantos: Vec<phanto::Phanto>,
     /// Pink coins collected this attempt (area, tile) and the course's total.
     pub pink: std::collections::BTreeSet<(usize, i32, i32)>,
     pub pink_total: usize,
@@ -653,6 +669,7 @@ impl World {
             big_coins: Default::default(),
             next_id: 1,
             blaster_timers: Vec::new(),
+            blaster_locks: Vec::new(),
             coin_bursts: Vec::new(),
             on_off: true,
             area_timer: 0,
@@ -668,6 +685,8 @@ impl World {
             liquid: None,
             cannon_timers: Vec::new(),
             keys: 0,
+            cursed: 0,
+            phantos: Vec::new(),
             pink: Default::default(),
             pink_total,
             clown_prev: (false, false),
@@ -743,6 +762,8 @@ impl World {
         self.area_timer = 0;
         self.blink_alt = false;
         self.keys = 0;
+        self.cursed = 0;
+        self.phantos.clear();
         self.pink.clear();
         self.unlocked_doors.clear();
         self.unlocked_boxes.clear();
@@ -858,6 +879,7 @@ impl World {
     }
 
     fn reset_generators(&mut self) {
+        self.blaster_locks = vec![0; self.level.blasters.len()];
         // a coin blaster's first countdown gets its 0–59 extra frames too (0x710069e530) [obs]
         self.blaster_timers = (0..self.level.blasters.len())
             .map(|i| {
@@ -875,12 +897,7 @@ impl World {
             .collect();
         self.coin_bursts.clear();
         self.cannon_timers = self.level.cannons.iter().map(|_| 60).collect();
-        self.gen_timers = self
-            .level
-            .generators
-            .iter()
-            .map(|g| GEN_FIRST[g.colour as usize & 3])
-            .collect();
+        self.gen_timers = self.level.generators.iter().map(Self::gen_first).collect();
     }
 
     /// Switch to the other area, keeping the state of the one being left.
@@ -897,6 +914,7 @@ impl World {
         };
         self.area = to;
         self.initial = self.area_initial[to].clone();
+        self.phantos_warped();
         match self.stash.replace(leaving) {
             Some(st) => {
                 self.level = st.level;
@@ -1241,10 +1259,19 @@ impl World {
     }
 
     /// Enemies riding a Koopa Clown Car stay on top of it (same link id, flag 0x200); the car
-    /// chases the player while it has a rider.
+    /// chases the player while it has a rider. The car places its rider (0x71006d6ca0) 24 px
+    /// above its origin (the default ride offset, which the Koopalings' Clown context keeps
+    /// [obs 0x71011b55f0: Lemmy's −24]), 16 px more per extra unit of the car's scale. A car
+    /// whose rider is gone goes back to Free (Chase exe 0x710118bc60 finds no rider → state 1)
+    /// and can be boarded. A Koopaling hit in the car stops it: while his link record's mode is
+    /// 4 (his Damage / DamagePlayAnim) the car is in KoopaJrStop (0x7101190b10 → state 8,
+    /// exe 0x710118f8b0: velocity 0) [obs]. A Koopaling whose car is destroyed (or missing)
+    /// leaves the Clown context and falls.
     fn carry_clown_riders(&mut self) {
         let spawns = &self.level.spawns;
         let mut moves = Vec::new();
+        let mut carless = Vec::new();
+        let mut ridden = vec![false; self.actors.len()];
         for (ri, r) in self.actors.iter().enumerate() {
             let Some(rs) = r.spawn else { continue };
             let Some(rspawn) = spawns.get(rs) else {
@@ -1268,16 +1295,46 @@ impl World {
             });
             if let Some(ci) = car {
                 moves.push((ri, ci));
+                ridden[ci] = true;
+            } else if r.koopaling_in_car() {
+                // only a car that is gone for good (defeated, or no such car) frees him; one
+                // not spawned yet or despawned leaves him waiting where he is
+                let gone = !spawns.iter().enumerate().any(|(k, s)| {
+                    matches!(s.kind, Kind::ClownCar { .. })
+                        && s.link == rspawn.link
+                        && !self.spawns.get(k).is_some_and(|rec| rec.killed)
+                });
+                if gone {
+                    carless.push(ri);
+                }
+            }
+        }
+        for ri in carless {
+            self.actors[ri].koopaling_leave_car();
+        }
+        for (ci, c) in self.actors.iter_mut().enumerate() {
+            if matches!(c.kind, Kind::ClownCar { .. }) && matches!(c.phase, 1 | 3) && !ridden[ci] {
+                c.phase = 0;
             }
         }
         for (ri, ci) in moves {
-            let (cx, cy) = (self.actors[ci].x, self.actors[ci].y);
-            if self.actors[ci].phase == 0 {
-                self.actors[ci].phase = 1;
+            let stop = self.actors[ri].koopaling_stops_car();
+            let car = &mut self.actors[ci];
+            match car.phase {
+                0 | 1 if stop => {
+                    car.phase = 3;
+                    car.vx = 0.0;
+                    car.vy = 0.0;
+                }
+                0 => car.phase = 1,
+                3 if !stop => car.phase = 1,
+                _ => {}
             }
+            let (cx, cy) = (car.x, car.y);
+            let ride = 24.0 + 16.0 * (if car.big { 2.0 } else { 1.0 } - 1.0);
             let r = &mut self.actors[ri];
             r.x = cx;
-            r.y = cy + 24.0;
+            r.y = cy + ride;
             r.vx = 0.0;
             r.vy = 0.0;
             r.on_ground = true;
@@ -2071,10 +2128,12 @@ impl World {
                         && self.unlocked_doors.insert((self.area, from.id >> 1))
                     {
                         self.keys -= 1; // a key opens the pair for good
+                        self.cursed = self.cursed.min(self.keys);
                     }
                     if let crate::level::WarpKind::Box { key } = from.kind {
                         if key && self.unlocked_boxes.insert((self.area, from.id >> 1)) {
                             self.keys -= 1;
+                            self.cursed = self.cursed.min(self.keys);
                         }
                         // held items don't travel: dropped where the player was
                         if let Some(id) = self.player.held.take()
@@ -2281,6 +2340,7 @@ impl World {
                     sent: 0,
                     wait: 0,
                     blaster: usize::MAX,
+                    pipe: None,
                     lakitu: true,
                 });
                 self.events.push(Event::LakituCoins);
@@ -2346,6 +2406,7 @@ impl World {
         self.carry_clown_riders();
         self.boss_keys();
         self.drop_keys();
+        self.step_phantos();
         self.tally_defeats();
         self.drop_shoes();
         self.despawn();
@@ -2567,10 +2628,10 @@ impl World {
                 }
                 Contents::Part { id, flags } => {
                     if let Some((mut a, parachute)) = self.part_out(id, flags, x, y) {
-                        a.vy = 4.5;
-                        if parachute {
-                            Self::open_parachute(&mut a);
-                        }
+                        // a tree's part bounces out as from a note block (origin class
+                        // 0x20000000: vy 2.5 + 2.0) [inf: the tree's spawn record]
+                        a.chute = parachute;
+                        a.block_out(y - 16.0, false, true);
                         self.add_actor(a);
                         self.events.push(Event::ItemAppear);
                     }
@@ -2956,7 +3017,7 @@ impl World {
         a.dir = 1;
         a.wings = wings;
         a.big = big;
-        if kind.is_item() {
+        if kind.is_item() && !parachute {
             // rise 16 px at 0.5 (down: 1.0), no gravity
             a.vy = if r.down { -1.0 } else { 0.5 };
             a.mode = Mode::Emerge {
@@ -2964,22 +3025,17 @@ impl World {
             };
             self.events.push(Event::ItemAppear);
         } else {
-            // enemies pop out: up from the block top at vy 2.5 for 6 frames
-            a.mode = Mode::PopOut;
-            a.timer = 6;
-            if r.down {
-                a.y = by - a.height();
-                a.vy = 0.0;
-            } else {
-                a.y = by + 16.0;
-                a.vy = 2.5;
+            // everything else (and a parachute) leaves in the Block context's Out
+            // (actors/block_out.rs); a Cheep Cheep faces the nearest player first
+            // [obs v3.0.3 0x7101228fa0]
+            if matches!(kind, Kind::CheepCheep { .. }) {
+                a.dir = if self.player.x <= bx { -1 } else { 1 };
             }
-        }
-        if parachute {
-            if a.mode != Mode::PopOut {
-                a.y = if r.down { by - a.height() } else { by + 16.0 };
+            a.chute = parachute;
+            a.block_out(by, r.down, r.note);
+            if kind.is_item() {
+                self.events.push(Event::ItemAppear);
             }
-            Self::open_parachute(&mut a);
         }
         self.add_actor(a);
     }
@@ -3357,6 +3413,9 @@ impl World {
                 if overlap(contact, ab) {
                     self.actors[i].mode = Mode::Dead;
                     self.keys += 1;
+                    if self.actors[i].alt {
+                        self.cursed += 1;
+                    }
                     self.events.push(Event::OneUp);
                 }
                 i += 1;
@@ -4057,10 +4116,7 @@ impl World {
             a.home_y = s.y;
             a.pipe = s.pipe;
             if s.parachute {
-                a.mode = Mode::Parachute {
-                    x0: s.x,
-                    phase: 0.0,
-                };
+                a.mode = Mode::parachute(false);
             }
             a.rng ^= (idx as u32 + 1).wrapping_mul(0x85eb_ca6b);
             if s.kind == Kind::RockyWrench {
@@ -4190,6 +4246,16 @@ impl World {
 
     /// Pipes with something inside keep producing it while on screen (EnemyWaki, 9-pipe.md):
     /// first delay / interval / retry by pipe colour, at most `spout` alive.
+    /// A pipe's first spawn once it is in view: by colour, half the interval for a winged
+    /// coin's.
+    fn gen_first(g: &crate::level::PipeGenerator) -> i32 {
+        if g.kind == Kind::FloatCoin && g.wings {
+            GEN_WING_COIN / 2
+        } else {
+            GEN_FIRST[g.colour as usize & 3]
+        }
+    }
+
     fn step_generators(&mut self) {
         let v = self.view_rect(0.0);
         for gi in 0..self.level.generators.len() {
@@ -4198,7 +4264,7 @@ impl World {
             let on_screen =
                 g.x >= v.0 - 16.0 && g.x <= v.2 + 16.0 && g.y >= v.1 - 16.0 && g.y <= v.3 + 16.0;
             if !on_screen {
-                self.gen_timers[gi] = GEN_FIRST[c];
+                self.gen_timers[gi] = Self::gen_first(&g);
                 continue;
             }
             self.gen_timers[gi] -= 1;
@@ -4212,6 +4278,7 @@ impl World {
                 .count();
             let limit = match g.kind {
                 Kind::Koopa { red: true } => 1,
+                Kind::FloatCoin => GEN_COINS,
                 _ => 10,
             };
             // something sitting in front of the mouth blocks the spawn
@@ -4229,43 +4296,35 @@ impl World {
                 self.gen_timers[gi] = GEN_RETRY[c];
                 continue;
             }
-            self.gen_timers[gi] = GEN_INTERVAL[c];
+            self.gen_timers[gi] = if g.kind == Kind::FloatCoin && g.wings {
+                GEN_WING_COIN
+            } else {
+                GEN_INTERVAL[c]
+            };
+            if g.kind == Kind::FloatCoin {
+                // a TenCoin at the mouth, facing the nearest player, sends the coins out
+                self.coin_bursts.push(CoinBurst {
+                    x: g.x,
+                    y: g.y,
+                    dir: if self.player.x <= g.x { -1 } else { 1 },
+                    fast: false,
+                    wings: g.wings,
+                    parachute: g.parachute,
+                    sent: 0,
+                    wait: 0,
+                    blaster: usize::MAX,
+                    pipe: Some((gi, g.dir, g.x, g.y)),
+                    lakitu: false,
+                });
+                continue;
+            }
             let mut a = Actor::new(g.kind, g.x, g.y);
             a.big = g.big;
             a.wings = g.wings;
+            a.chute = g.parachute;
             a.generator = Some(gi);
-            a.pipe = Some((g.dir, g.x, g.y));
-            let h = a.height();
-            let (sx, sy, tx, ty) = match g.dir {
-                PipeDir::Up => (g.x, g.y - h, g.x, g.y),
-                PipeDir::Down => (g.x, g.y + 1.0, g.x, g.y - h),
-                PipeDir::Right => (
-                    g.x - 20.0,
-                    g.y - if h > 16.0 { 14.0 } else { 8.0 },
-                    g.x + 7.9,
-                    g.y - if h > 16.0 { 14.0 } else { 8.0 },
-                ),
-                PipeDir::Left => (
-                    g.x + 20.0,
-                    g.y - if h > 16.0 { 14.0 } else { 8.0 },
-                    g.x - 7.9,
-                    g.y - if h > 16.0 { 14.0 } else { 8.0 },
-                ),
-            };
-            a.x = sx;
-            a.y = sy;
-            a.dir = match g.dir {
-                PipeDir::Left => -1,
-                PipeDir::Right => 1,
-                _ => {
-                    if self.player.x <= g.x {
-                        -1
-                    } else {
-                        1
-                    }
-                }
-            };
-            a.mode = Mode::DokanOut { tx, ty };
+            // the Dokan context places it in the mouth (actors/dokan.rs)
+            a.dokan_out(g.dir, g.x, g.y, self.player.x <= g.x);
             self.add_actor(a);
         }
     }
@@ -5560,15 +5619,34 @@ impl World {
                 self.blaster_timers[bi].0 = 60 + extra(self);
                 continue;
             }
+            let searching = b.homing && b.contents.is_none();
             let (main, cool) = &mut self.blaster_timers[bi];
             *main -= 1;
             *cool -= 1;
-            if *main > 0 || *cool > 0 {
+            let (main, cool) = (*main, *cool);
+            // the red blaster's lock-out (+0x48 mode 1, +0x34; v3.0.3 0x71011406f0 with the
+            // limiter 0x7100d88890 / 0x7100d88b60) [obs]: it counts down every frame; once
+            // the main timer is out and its last homing Bill is gone, a spent lock is set to
+            // 320, and the blaster fires when the lock gets down to 1 if the cooldown hasn't
+            // run out first
+            let lock = &mut self.blaster_locks[bi];
+            *lock = (*lock - 1).max(0);
+            let unlocked = searching && main <= 0 && *lock == 1;
+            if searching && main <= 0 && *lock == 0 {
+                let gone = !self
+                    .actors
+                    .iter()
+                    .any(|a| a.blaster == Some(bi) && a.alive());
+                if gone {
+                    *lock = BLASTER_LOCK;
+                }
+            }
+            if main > 0 || (cool > 0 && !unlocked) {
                 continue;
             }
             // a winged coin's blaster waits 380 frames (0x17c), the red blaster's homing Bullet
-            // Bill (KillerSearch) 770 (0x302) (0x710069e530) [obs; its extra 320-frame lock-out
-            // is not, its rule unread]
+            // Bill (KillerSearch) 770 (0x302) (0x710069e530) [obs]; every attempt sets it,
+            // blocked or not
             let base = if coins.is_some_and(|f| f.wings) {
                 380
             } else if b.homing && b.contents.is_none() {
@@ -5583,7 +5661,10 @@ impl World {
                 .iter()
                 .filter(|a| a.blaster == Some(bi) && a.alive())
                 .count();
-            let blocked = self.level.cell_at(mx + dir as f32 * 15.0, my).is_solid();
+            let blocked = self
+                .level
+                .cell_at(mx + dir as f32 * 15.0, my + 8.0)
+                .is_solid();
             if alive >= crate::actors::spout_limit(kind) || blocked {
                 continue;
             }
@@ -5599,6 +5680,7 @@ impl World {
                     sent: 0,
                     wait: 0,
                     blaster: bi,
+                    pipe: None,
                     lakitu: false,
                 }),
                 Some(f) => {
@@ -5613,7 +5695,10 @@ impl World {
                     self.add_actor(a);
                 }
                 None => {
-                    let mut a = Actor::new(Kind::BulletBill, mx, my - 8.0);
+                    // the Bill's origin is its feet (profile {0, 8, 8, 8}): it fills the
+                    // blaster's top tile (Killer create, v3.0.3 0x71011406f0) [obs]
+                    self.blaster_locks[bi] = 0;
+                    let mut a = Actor::new(Kind::BulletBill, mx, my);
                     a.dir = dir;
                     a.vx = dir as f32;
                     a.phase = b.homing as u8;
@@ -5657,6 +5742,19 @@ impl World {
                 }
                 a.wings = c.wings;
                 a.chute = c.parachute;
+                if let Some((gi, dir, px, py)) = c.pipe {
+                    // the Coin's Dokan context: a table launch from the mouth; a winged or
+                    // parachute coin slides out as any part [inf: their own states]
+                    a.generator = Some(gi);
+                    if c.wings || c.parachute {
+                        a.dokan_out(dir, px, py, c.dir < 0);
+                    } else {
+                        a.coin_dokan(c.sent as usize, dir, px, py);
+                    }
+                    self.add_actor(a);
+                    c.sent += 1;
+                    continue;
+                }
                 a.blaster = Some(c.blaster);
                 a.coin_shot(c.sent as usize, c.fast);
                 a.home_y = a.y;
@@ -7135,6 +7233,7 @@ impl World {
         }
         self.bubble_sprites(&mut out);
         self.yoshi_sprites(&mut out);
+        self.phanto_sprites(&mut out);
         if let Some(mut s) = self.player_sprite() {
             if self.player.yoshi.is_some() {
                 // the rider sits on Yoshi's saddle [inf: drawing only; the rider is attached to
@@ -7921,7 +8020,11 @@ impl World {
                 false,
             ),
             Kind::Key => (
-                "M1_Object_key",
+                if a.alt {
+                    "M1_Object_key2"
+                } else {
+                    "M1_Object_key"
+                },
                 ["wait.0", "wait.1", "wait.2", "wait.3"][(self.tick as usize / 8) % 4],
                 16.0,
                 16.0,
@@ -7964,6 +8067,10 @@ impl World {
         if a.kind.is_v3() {
             s.y = a.y + a.v3_draw_dy();
         }
+        if a.koopaling_in_car() {
+            // behind the car's rim (the car is drawn at layer 40)
+            s.layer = 39;
+        }
         if matches!(a.kind, Kind::Piranha { .. }) {
             // in a pipe: behind the pipe; a down-facing pipe hangs the plant upside down
             if a.pipe.is_some() {
@@ -7974,7 +8081,7 @@ impl World {
                 s.y = a.y - h;
             }
         }
-        if matches!(a.mode, Mode::DokanOut { .. }) {
+        if matches!(a.mode, Mode::DokanOut { .. }) || a.in_block() {
             s.layer = 5;
         }
         if a.mode == Mode::DieFall {
@@ -8147,9 +8254,16 @@ impl World {
         } else {
             model
         };
-        // (Mega Mario's art is 16×16 drawn through a 32×32 quad)
-        let h = if small || p.pose == Pose::Dead || form == Form::Mega {
+        // (Mega Mario's art is 16×16 drawn through a 32×32 quad); SMW's small Mario quads are
+        // 16 × 32 [obs data: MW_Player_MarioMdl, dead.0 too], SMB1's and SMB3's 16 × 16
+        let h = if form == Form::Mega {
             16.0
+        } else if small || p.pose == Pose::Dead {
+            if p.style == crate::player::Style::MW {
+                32.0
+            } else {
+                16.0
+            }
         } else {
             32.0
         };
@@ -8355,18 +8469,13 @@ mod tests {
             None,
         );
         let mut w = w;
-        for _ in 0..20 {
-            if w.actors
-                .iter()
-                .any(|a| matches!(a.mode, Mode::Parachute { .. }))
-            {
-                break;
-            }
-            run(&mut w, 0, 1);
-        }
+        // shot up out of the block (Block Out's parachute variant), opening on the way down
+        let b = w.actors.iter().find(|a| a.kind == Kind::BobOmb).unwrap();
+        assert!(matches!(b.mode, Mode::BlockOut { .. }), "{:?}", b.mode);
+        run(&mut w, 0, 40);
         let b = w.actors.iter().find(|a| a.kind == Kind::BobOmb).unwrap();
         assert!(matches!(b.mode, Mode::Parachute { .. }), "{:?}", b.mode);
-        assert!(b.y > 6.0 * TILE + 8.0, "popped clear of the block: {}", b.y);
+        assert!(b.y > 6.0 * TILE, "clear of the block: {}", b.y);
     }
 
     #[test]
@@ -8509,6 +8618,42 @@ mod tests {
     }
 
     #[test]
+    fn the_red_blaster_fires_320_frames_after_its_homing_bill_is_gone() {
+        let mut w = blaster_world(None, true);
+        let mut n = 0;
+        while !w.actors.iter().any(|a| a.kind == Kind::BulletBill) && n < 400 {
+            run(&mut w, 0, 1);
+            n += 1;
+        }
+        // the Bill fills the blaster's top tile
+        let b = w.level.blasters[0];
+        let bill = w
+            .actors
+            .iter()
+            .find(|a| a.kind == Kind::BulletBill)
+            .unwrap();
+        assert_eq!(bill.y, b.y + b.h as f32 * TILE - 16.0);
+        run(&mut w, 0, 100);
+        for a in &mut w.actors {
+            if a.kind == Kind::BulletBill {
+                a.mode = Mode::Dead;
+            }
+        }
+        let mut n = 0;
+        while !w
+            .actors
+            .iter()
+            .any(|a| a.kind == Kind::BulletBill && a.alive())
+            && n < 800
+        {
+            run(&mut w, 0, 1);
+            n += 1;
+        }
+        // set to 320 the frame it is gone, fired when it is down to 1 (not 770 − 100 later)
+        assert!((318..=322).contains(&n), "{n}");
+    }
+
+    #[test]
     fn lakitu_throws_coins_as_a_burst_that_stops_after_its_arc() {
         let mut lvl = Level::flat(100);
         lvl.spawns.push(spawn(Kind::Lakitu, 200.0, 160.0));
@@ -8543,6 +8688,71 @@ mod tests {
                 .all(|c| !c.thrown && c.vx == 0.0 && c.vy == 0.0)
         );
         assert!(!coins.is_empty());
+    }
+
+    #[test]
+    fn a_cursed_key_brings_phanto() {
+        let mut lvl = Level::flat(100);
+        let mut k = spawn(Kind::Key, 40.0, 32.0);
+        k.alt = true;
+        lvl.spawns.push(k);
+        let mut w = World::with_level(lvl);
+        w.player.x = 40.0;
+        run(&mut w, 0, 3);
+        assert_eq!((w.keys, w.cursed), (1, 1), "a cursed key");
+        assert_eq!(w.phantos.len(), 1);
+        assert_eq!(w.phantos[0].state, phanto::State::Wait);
+        let v = w.view_rect(0.0);
+        let (x, y) = (w.phantos[0].x, w.phantos[0].y);
+        assert!(
+            x < v.0 + 40.0 || y > v.3 - 20.0,
+            "out of sight while waiting: {x} {y}"
+        );
+        run(&mut w, 0, 100);
+        assert_eq!(
+            w.phantos[0].state,
+            phanto::State::Attack,
+            "swoops after 100 frames"
+        );
+        // it comes for a player who stands still
+        let mut hurt = false;
+        for _ in 0..1200 {
+            run(&mut w, 0, 1);
+            if w.player.form != Form::Small || !w.player.alive() || w.player.invuln > 0 {
+                hurt = true;
+                break;
+            }
+        }
+        assert!(hurt, "Phanto reaches the player");
+        // no cursed key: it leaves, then waits out of sight
+        let mut w2 = World::with_level(Level::flat(100));
+        w2.cursed = 1;
+        w2.keys = 1;
+        run(&mut w2, 0, 110);
+        assert_eq!(w2.phantos[0].state, phanto::State::Attack);
+        w2.cursed = 0;
+        run(&mut w2, 0, 1);
+        assert_eq!(w2.phantos[0].state, phanto::State::Leave);
+        run(&mut w2, 0, 600);
+        assert_eq!(w2.phantos[0].state, phanto::State::Wait);
+        assert_eq!(w2.phantos[0].target, None);
+    }
+
+    #[test]
+    fn a_note_block_lets_its_item_go_and_stays_a_note_block() {
+        let mut lvl = Level::flat(100);
+        lvl.set(3, 5, Cell::Solid);
+        lvl.blocks.push(BlockPlacement {
+            x: 3,
+            y: 5,
+            kind: BlockKind::Note,
+            contents: Some(Contents::Mushroom),
+        });
+        let mut w = World::with_level(lvl);
+        run(&mut w, input::JUMP, 30);
+        assert!(w.actors.iter().any(|a| a.kind == Kind::Mushroom));
+        let b = w.blocks.get(3, 5).unwrap();
+        assert_eq!((b.kind, b.contents), (BlockKind::Note, None));
     }
 
     #[test]
@@ -8882,6 +9092,37 @@ mod tests {
     }
 
     #[test]
+    fn a_coin_pipe_sends_out_bursts_of_ten() {
+        let mut lvl = Level::flat(60);
+        lvl.add_pipe(14, 2, 2, PipeDir::Up);
+        lvl.generators.push(crate::level::PipeGenerator {
+            kind: Kind::FloatCoin,
+            big: false,
+            wings: false,
+            parachute: false,
+            dir: PipeDir::Up,
+            x: 240.0,
+            y: 64.0,
+            colour: 0,
+        });
+        let mut w = World::with_level(lvl);
+        w.player.x = 40.0;
+        let coins = |w: &World| {
+            w.actors
+                .iter()
+                .filter(|a| a.kind == Kind::FloatCoin)
+                .count()
+        };
+        run(&mut w, 0, 89);
+        assert_eq!(coins(&w), 0);
+        // the first after 90 frames, two coins a frame
+        run(&mut w, 0, 8);
+        assert_eq!(coins(&w), 10);
+        run(&mut w, 0, 200);
+        assert_eq!(coins(&w), 10, "no new burst while ten are out");
+    }
+
+    #[test]
     fn pipe_generator_spawns_every_180_frames() {
         let mut lvl = Level::flat(60);
         lvl.add_pipe(14, 2, 2, PipeDir::Up);
@@ -8889,6 +9130,7 @@ mod tests {
             kind: Kind::Goomba,
             big: false,
             wings: false,
+            parachute: false,
             dir: PipeDir::Up,
             x: 240.0,
             y: 64.0,

@@ -37,8 +37,8 @@ World record:
 
 | Offset | Size | Contents |
 |---|---|---|
-| +0x00 | 1 | theme: 0 ground, 1 underground, 2 desert, 3 snow, 4 sky, 5 forest, 6 volcano, 7 space |
-| +0x01 | 84 | 28 cells × 3 bytes, cell i at x = i mod 7, y = i div 7 (row 0 at the top) |
+| +0x00 | 1 | theme: 0 ground, 1 underground, 2 desert, 3 forest, 4 snow, 5 sky, 6 volcano, 7 space |
+| +0x01 | 84 | 28 cells × 3 bytes, cell i at x = i mod 7, y = i div 7 (row 0 is the map's bottom row; the game draws row y + 1 above row y) |
 | +0x55 | 36 | 6 point slots × 6 bytes |
 | +0x79 | 3 | warp pipe A: x, y, present |
 | +0x7C | 3 | warp pipe B: x, y, present |

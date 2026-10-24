@@ -46,10 +46,10 @@ pub const MAX_LIVES: u32 = 99;
 
 impl SuperWorld {
     /// A test world from up to 40 library courses, five to a world (the fifth is the goal), on
-    /// one fixed map shape per world: start (a Toad House below it: Pop & Win), three courses
-    /// along the top row with a Toad House below the second (Match & Win), down the right side,
-    /// the fourth course and the goal along the third row; a pipe at the bottom right leads to
-    /// an island with a Catch & Win Toad House. None without courses.
+    /// one fixed map shape per world (row 0 is the bottom row): start (a Toad House above it:
+    /// Pop & Win), three courses along the bottom row with a Toad House above the second (Match
+    /// & Win), up the right side, the fourth course and the goal along the third row; a pipe at
+    /// the top right leads to an island with a Catch & Win Toad House. None without courses.
     pub fn test_world(courses: &[SwCourse]) -> Option<Self> {
         if courses.is_empty() {
             return None;
@@ -151,7 +151,7 @@ fn test_layout(theme: u8, courses: usize, first_slot: u8) -> World {
             flag: 0,
         };
     };
-    set(0, 0, 0, road::CORNER); // E+S: down to the third Toad House
+    set(0, 0, 0, road::CORNER); // E+S: up to the third Toad House
     set(0, 1, 0, road::END);
     set(1, 0, 2, road::STRAIGHT);
     set(2, 0, 2, road::STRAIGHT);
@@ -161,7 +161,7 @@ fn test_layout(theme: u8, courses: usize, first_slot: u8) -> World {
     set(6, 0, 2, road::CORNER);
     set(3, 1, 0, road::END);
     set(6, 1, 0, road::STRAIGHT);
-    set(6, 2, 1, road::TEE); // W+N+S: down to pipe A
+    set(6, 2, 1, road::TEE); // W+N+S: up to pipe A
     set(6, 3, 0, road::END);
     set(5, 2, 2, road::STRAIGHT);
     set(4, 2, 2, road::STRAIGHT);
@@ -604,7 +604,7 @@ mod tests {
         assert_ne!(reachable(w, 0b0111) & bit(1, 3), 0);
         assert_eq!(route(w, 0b0111, 0, 3, EAST), vec![(1, 3), (2, 3)]);
         assert!(route(w, 0, 0, 0, NORTH).is_empty());
-        // the start's third Toad House, just below it
+        // the start's third Toad House, just above it
         assert_eq!(route(w, 0, 0, 0, SOUTH), vec![(0, 1)]);
     }
 

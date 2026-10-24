@@ -7,22 +7,13 @@
 //! checked when the goal is touched) and action conditions (reach the goal without taking damage /
 //! landing: violated for the rest of the attempt by the first offence).
 
-/// Index in the game's condition list (1-based; 0 none), from the header's CRC32.
+/// Index in the game's condition list (1-based), from the header's CRC32 (the formats crate's
+/// table: v1.0.0's 77 names, then the 21 v3.0.3 adds); None for 0 or an unknown hash.
 pub fn index_of(hash: u32) -> Option<u8> {
-    const HASHES: [u32; 77] = [
-        0x7f07acbf, 0xc77685e8, 0xcce12a46, 0xc7dad20f, 0x4b115542, 0xdf6717de, 0xe50302f7,
-        0xce9a707b, 0xe47c2be8, 0xe25c5f60, 0x563755f2, 0xa3aec34a, 0x5a085610, 0x634a6671,
-        0xa09bb51f, 0x794c6eb3, 0x387c22ca, 0x103bba8c, 0xfe75363e, 0x4c44da92, 0x7a128199,
-        0xce2e5a15, 0xcf81610a, 0x48d111e0, 0x7f88648a, 0x501c7c00, 0x756120ee, 0xffe76309,
-        0xf571d608, 0x66c2b75e, 0xf0f35cba, 0xe3f62c75, 0x4067ab4e, 0x3f50b513, 0x3f4124e8,
-        0x467afb58, 0x4b980b7f, 0xca315249, 0x3c164eb1, 0x6daa9a3f, 0x405dce65, 0xed1023ea,
-        0x62b74a93, 0x2a8e77bb, 0xc73be7ec, 0x7c8612d5, 0x35a5af47, 0xbb926013, 0x3a2f3996,
-        0x7ddb5d7f, 0xb7402052, 0x6a1ce415, 0x66477be4, 0x48b4157b, 0x63f3d532, 0xe6f2eebe,
-        0x553a9590, 0x1a098d50, 0xfae86a49, 0xb4fa3d4b, 0xde0abfc6, 0xd9893249, 0x4c8772a3,
-        0xde56ffb5, 0x97f8a309, 0xf55b3863, 0xc78f5040, 0xf5b932c2, 0xa3e39544, 0x1664515a,
-        0x08327ae6, 0x3eab9aa1, 0x97f4cf7a, 0x3af23bde, 0xc2a80228, 0xef026a7f, 0x46219146,
-    ];
-    HASHES.iter().position(|&h| h == hash).map(|i| i as u8 + 1)
+    if hash == 0 {
+        return None;
+    }
+    mmk_formats::smm2::clear::index(hash)
 }
 
 /// Enemy classes of the defeat conditions (list indices 1–41). Only the ones the engine has.
@@ -57,6 +48,12 @@ pub mod enemy {
     pub const BOOM_BOOM: u8 = 39;
     pub const POM_POM: u8 = 40;
     pub const BULLET_BILL: u8 = 41;
+    /// The update's (v3.0.3 list, our 78–87).
+    pub const SPIKE: u8 = 78;
+    pub const POKEY: u8 = 79;
+    pub const MECHAKOOPA: u8 = 80;
+    /// Larry, Iggy, Wendy, Lemmy, Roy, Morton, Ludwig.
+    pub const KOOPALINGS: [u8; 7] = [81, 82, 83, 84, 85, 86, 87];
 }
 
 /// The player's state when touching the goal (status conditions).
@@ -78,6 +75,9 @@ pub struct AtGoal {
     /// Carrying a Koopa shell.
     pub holding_shell: bool,
     pub yoshi: bool,
+    /// Wearing a wearable: 0 none, else its kind + 1 (0 Propeller Box, 1 Cannon Box, 2 Goomba
+    /// Mask, 3 Red POW Box, 4 Bullet Bill Mask).
+    pub wearing: u8,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -125,6 +125,10 @@ pub enum Goal {
     /// Reach the goal without taking damage / without landing after leaving the ground.
     NoDamage,
     NoLanding,
+    /// Reach the goal in an update power-up's form (`AtGoal::form`: 12 Link … 17 SMB2).
+    Form(u8),
+    /// Reach the goal wearing a wearable (`AtGoal::wearing`).
+    Wearing(u8),
     /// A condition the engine cannot track yet (list index).
     Unsupported(u8),
 }
@@ -175,6 +179,7 @@ impl ClearCondition {
                 68 if n > 0 => Goal::Coins(30),
                 69 if n > 0 => Goal::Coins(50),
                 75 if n > 0 => Goal::BellTrees,
+                78..=87 if n > 0 => Goal::Defeat(i),
                 // the escort Toad: kind 0, no tracking (the Toad itself fails the run)
                 76 => Goal::None,
                 _ => Goal::Unsupported(i),
@@ -200,6 +205,19 @@ impl ClearCondition {
                 61 => Goal::Helmet(2),
                 65 => Goal::DryBonesShell,
                 77 => Goal::HoldingStone,
+                // Link, SMB2, Frog, Balloon, Squirrel, Boomerang
+                88 => Goal::Form(12),
+                89 => Goal::Form(17),
+                90 => Goal::Form(13),
+                91 => Goal::Form(14),
+                92 => Goal::Form(15),
+                93 => Goal::Form(16),
+                // Cannon Box, Propeller Box, Goomba Mask, Bullet Bill Mask, Red POW Box
+                94 => Goal::Wearing(2),
+                95 => Goal::Wearing(1),
+                96 => Goal::Wearing(3),
+                97 => Goal::Wearing(5),
+                98 => Goal::Wearing(4),
                 _ => Goal::Unsupported(i),
             },
             (3, Some(70)) => Goal::NoDamage,
@@ -313,6 +331,7 @@ impl ClearCondition {
             holding_stone,
             holding_shell,
             yoshi,
+            wearing,
         } = at;
         match self.goal {
             Goal::None => true,
@@ -341,6 +360,8 @@ impl ClearCondition {
             Goal::HoldingStone => holding_stone,
             Goal::HoldingShell => holding_shell,
             Goal::Yoshi => yoshi,
+            Goal::Form(f) => form == f,
+            Goal::Wearing(w) => wearing == w,
             Goal::NoDamage | Goal::NoLanding | Goal::NoClaw | Goal::NoWater => !self.violated,
             Goal::Unsupported(_) => false,
         }
@@ -382,6 +403,30 @@ mod tests {
             "helmet"
         );
         assert_eq!(ClearCondition::none().goal, Goal::None);
+    }
+
+    #[test]
+    fn the_updates_conditions_resolve() {
+        // v3.0.3's list: defeat Spikes / Ludwigs, goal as Frog Mario, wearing a Goomba Mask
+        let c = ClearCondition::from_header(1, 0x3b8a1111, 3);
+        assert_eq!((c.goal, c.n), (Goal::Defeat(enemy::SPIKE), 3));
+        assert_eq!(
+            ClearCondition::from_header(1, 0xece74bc7, 1).goal,
+            Goal::Defeat(enemy::KOOPALINGS[6])
+        );
+        let frog = ClearCondition::from_header(2, 0x2c66b03e, 0);
+        assert_eq!(frog.goal, Goal::Form(13));
+        assert!(frog.met(AtGoal {
+            form: 13,
+            ..Default::default()
+        }));
+        let mask = ClearCondition::from_header(2, 0x449eb152, 0);
+        assert_eq!(mask.goal, Goal::Wearing(3));
+        assert!(!mask.met(AtGoal::default()));
+        assert!(mask.met(AtGoal {
+            wearing: 3,
+            ..Default::default()
+        }));
     }
 
     #[test]
