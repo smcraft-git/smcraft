@@ -278,6 +278,7 @@ maker (someone else's course saves as a new one, "based on <code> by <maker>").
 | G | main area / sub-area |
 | M (held) + drag / C | multigrab a rectangle (then carry it, erase it) / copy it to the cursor |
 | Esc / P / Start | main menu (Back to Title, Coursebot, Story Mode, Course World) |
+| co-op button (left column) | Co-op Making with a second controller (or `MMK_KEYBOARD_SPLIT=1`: the keyboard's right half): player 2's stick / d-pad moves the green glove, jump places / picks up, run erases, Start (split keyboard: ') opens their part menu (left / right a part, up / down a category, jump takes it, run cancels) |
 
 Captures: `mmk-play --front-screen maker` (and `maker-parts`, `maker-menu`, `maker-save`,
 `maker-style`, `maker-theme`, `maker-timer`, `maker-autoscroll`, `maker-mission`, `maker-play`;

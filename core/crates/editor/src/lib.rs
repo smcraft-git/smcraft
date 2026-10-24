@@ -93,6 +93,8 @@ pub struct Editor {
     pub smm1_overlap_pipes: bool,
     undo: Vec<Vec<u8>>,
     redo: Vec<Vec<u8>>,
+    /// No undo history is kept ([`Editor::set_history`]).
+    history_off: bool,
 }
 
 impl Editor {
@@ -123,6 +125,7 @@ impl Editor {
             smm1_overlap_pipes: false,
             undo: Vec::new(),
             redo: Vec::new(),
+            history_off: false,
         }
     }
 
@@ -174,6 +177,9 @@ impl Editor {
 
     /// Remember the current state before an edit (call once per user action).
     pub fn checkpoint(&mut self) {
+        if self.history_off {
+            return;
+        }
         if let Ok(b) = self.course.to_bytes() {
             self.undo.push(b);
             if self.undo.len() > UNDO_DEPTH {
@@ -220,7 +226,23 @@ impl Editor {
 
     /// Drop the last checkpoint without restoring it (the action changed nothing).
     pub fn discard_checkpoint(&mut self) {
+        if self.history_off {
+            return;
+        }
         self.undo.pop();
+    }
+
+    /// Undo history on / off: co-op making records none (each of its history calls is skipped
+    /// while the edit mode is co-op, 0x710103b2f0 / 0x7101034bd0 / 0x7101036430 / 0x7101033a20
+    /// [obs v3.0.3]); while off, checkpoints are neither taken nor dropped.
+    pub fn set_history(&mut self, on: bool) {
+        self.history_off = !on;
+    }
+
+    /// Forget every undo and redo step (entering co-op making, 0x710103e490 [obs v3.0.3]).
+    pub fn clear_history(&mut self) {
+        self.undo.clear();
+        self.redo.clear();
     }
 
     pub fn can_undo(&self) -> bool {
@@ -636,6 +658,29 @@ mod tests {
             Some(autotile::GROUND_ID[0b0111_1100]),
             "now the top"
         );
+    }
+
+    /// Co-op making keeps no history: checkpoints are neither taken nor dropped, so nothing
+    /// can be undone, and the steps from before are gone.
+    #[test]
+    fn no_history_while_it_is_off() {
+        let mut e = Editor::new("M1");
+        e.checkpoint();
+        e.place(4, 10, 5).unwrap();
+        e.clear_history();
+        e.set_history(false);
+        e.checkpoint();
+        e.place(4, 11, 5).unwrap();
+        e.discard_checkpoint();
+        e.checkpoint();
+        assert!(!e.can_undo());
+        assert!(!e.undo());
+        assert_eq!(e.area().objects.items.len(), 2);
+        e.set_history(true);
+        e.checkpoint();
+        e.place(4, 12, 5).unwrap();
+        assert!(e.undo());
+        assert_eq!(e.area().objects.items.len(), 2);
     }
 
     #[test]

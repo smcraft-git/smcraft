@@ -412,6 +412,9 @@ void mmk_front_set_course_world(MmkFront *front, const char *source, const char 
 // as one); in a co-op course pad k is player k + 1 when there are as many pads as players,
 // else the device is player 1 and pad k player k + 2. One player: MmkFrontInput.buttons.
 void mmk_front_set_controls(MmkFront *front, uint32_t own, const uint32_t *pads, size_t count);
+// Co-op making: which of mmk_front_set_controls' pads is player 2's (-1: none / co-op making
+// off). Leave that controller out of MmkFrontInput.menu: the front end reads it as player 2's.
+int32_t mmk_front_coop_pad(const MmkFront *front);
 void mmk_front_tick(MmkFront *front, const MmkFrontInput *input);
 // valid until the next mmk_front_frame
 size_t mmk_front_frame(MmkFront *front, const MmkFrontItem **out);

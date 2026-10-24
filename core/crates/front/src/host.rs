@@ -611,4 +611,5 @@ pub mod buttons {
     pub const DOWN: u32 = 8;
     pub const JUMP: u32 = 16;
     pub const RUN: u32 = 32;
+    pub const START: u32 = 64;
 }

@@ -366,20 +366,36 @@ impl App {
         // local multiplayer: pads by player (input::assign_pads); in the menus every pad works
         let each = self.pads.poll_each();
         let in_play = self.front.as_mut().is_none_or(|f| f.front.in_play());
-        let players = self
-            .game
-            .session
-            .players()
-            .max(self.game.session.world.players());
+        // co-op making: two players' controllers in the maker (player 2's to the front end)
+        let coop = self.front.as_ref().is_some_and(|f| f.front.coop_making());
+        let players = if coop {
+            2
+        } else {
+            self.game
+                .session
+                .players()
+                .max(self.game.session.world.players())
+        };
         // the keyboard split in two (co-op on one keyboard): its right half is player 2
-        let split = self.keyboard_split && in_play && players >= 2;
+        let split = self.keyboard_split && (in_play || coop) && players >= 2;
         let (left, right) = self.keys.halves();
         let (p1, extra) = if split {
             (0, crate::input::assign_split(right, &each, players))
         } else {
             crate::input::assign_pads(&each, players)
         };
-        let pads = if in_play {
+        // (on a split keyboard player 2's part menu is ' : the right half has no Start)
+        let pad2 = if coop {
+            extra.first().copied().unwrap_or(0)
+                | if split && self.keys.held(winit::keyboard::KeyCode::Quote) {
+                    mmk_sim::input::START
+                } else {
+                    0
+                }
+        } else {
+            0
+        };
+        let pads = if in_play || coop {
             p1
         } else {
             each.iter().fold(0, |a, b| a | b)
@@ -421,7 +437,12 @@ impl App {
             | crate::web::pump_ui(self.front.as_deref_mut());
         #[cfg(not(target_arch = "wasm32"))]
         let loading = false;
-        if self.front_advance(if loading { 0.0 } else { dt }, play_keys, pads) {
+        if self.front_advance(
+            if loading { 0.0 } else { dt },
+            play_keys,
+            pads,
+            (pad2, split),
+        ) {
             // the front end ran its ticks (and the course's)
         } else if self.game.editing {
             // arrows / WASD scroll the maker view
@@ -475,11 +496,20 @@ impl App {
     }
 
     /// Advance the front end when it runs (true: it did).
-    fn front_advance(&mut self, dt: f64, play_keys: u32, pads: u32) -> bool {
+    /// `coop`: co-op making's player 2's controller, and whether the keyboard is split (its
+    /// right half is player 2's then, not the menus').
+    fn front_advance(&mut self, dt: f64, play_keys: u32, pads: u32, coop: (u32, bool)) -> bool {
         match &mut self.front {
             Some(f) => {
                 let shoulders = self.pads.shoulders;
-                f.advance(dt, &self.keys, play_keys, pads, shoulders, &mut self.game);
+                f.advance(
+                    dt,
+                    &self.keys,
+                    play_keys,
+                    (pads, shoulders),
+                    coop,
+                    &mut self.game,
+                );
                 true
             }
             None => false,

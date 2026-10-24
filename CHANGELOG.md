@@ -169,6 +169,15 @@ SMCraft is back in development (it was archived in October 2026).
   opening its upper-left end opened the other one in play). A door or warp box whose partner's
   tile is taken can't be put there (it went to the next free column). The part balloon opens on
   the side of the part SMM2 chooses.
+- **Course Maker: Co-op Making**: the left column's co-op button asks "Start making
+  cooperatively?" and, with a second controller, gives player 2 a green glove of their own:
+  they move, put down, pick up and erase with their own part, chosen from the small part menu by
+  their glove (its button opens it; left / right step through the parts in SMM2's order, up /
+  down change category). A part one player holds can't be taken or erased by the other; the view
+  follows whoever moves and keeps the other glove on screen; test play is for both players. As
+  in SMM2 there is no Undodog while making together. Works in the app (game controllers), the
+  desktop and web builds (a second pad, or the right half of a split keyboard). Import the SMM2
+  UI again for player 2's green glove (until then it is the red one tinted).
 - **SMM2's colours on its screens**: buttons, banners and text now show the colours SMM2 shows
   (the yellow OK and menu buttons were orange), and windows with flipped frames are whole again
   (the tips' window lost its bottom edge). Import the SMM2 UI again for the maker's new pictures

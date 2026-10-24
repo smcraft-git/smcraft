@@ -51,10 +51,16 @@ pub struct FrontApp {
 /// app: arrows / WASD move, Return / Z / Space confirm, Esc / P / Backspace go back (a key that
 /// does both confirms); pads: the d-pad, jump confirms, run and Start go back. Skip: − or Tab.
 /// L / R: Q / E or the pads' shoulders, ZL / ZR: 1 / 3 or their triggers (`shoulders`:
-/// [`crate::input::SHOULDER_L`] …).
-pub fn menu_input(keys: &Keyboard, pad: u32, shoulders: u32) -> FrontInput {
+/// [`crate::input::SHOULDER_L`] …). `left_only`: the keyboard's right half is player 2's (co-op
+/// making on a split keyboard) and moves no menu.
+pub fn menu_input(keys: &Keyboard, pad: u32, shoulders: u32, left_only: bool) -> FrontInput {
     use mmk_sim::input as b;
-    let k = |codes: &[KeyCode]| codes.iter().any(|&c| keys.held(c));
+    let k = |codes: &[KeyCode]| {
+        codes.iter().any(|&c| {
+            keys.held(c)
+                && !(left_only && crate::input::half_button(c).is_some_and(|(right, _)| right))
+        })
+    };
     let mut m = Buttons::NONE;
     let mut add = |on: bool, x: Buttons| {
         if on {
@@ -120,6 +126,7 @@ pub fn menu_input(keys: &Keyboard, pad: u32, shoulders: u32) -> FrontInput {
         pointer_down: false,
         pointer_alt: false,
         keys: maker_keys(keys, ctrl),
+        pad2: 0,
     }
 }
 
@@ -188,21 +195,23 @@ impl FrontApp {
         }
     }
 
-    /// Host time `dt` with the keyboard and pads (`shoulders`: their shoulder buttons): the
-    /// ticks it is worth. `play_keys`: the keyboard's engine buttons for player 1 (all of them,
-    /// or its left half with the keyboard split in co-op).
+    /// Host time `dt` with the keyboard and pads (`pads`: their buttons and shoulder buttons):
+    /// the ticks it is worth. `play_keys`: the keyboard's engine buttons for player 1 (all of
+    /// them, or its left half with the keyboard split in co-op). `coop`: co-op making's player
+    /// 2's controller ([`FrontInput::pad2`]) and whether the keyboard is split.
     pub fn advance(
         &mut self,
         dt: f64,
         keys: &Keyboard,
         play_keys: u32,
-        pad: u32,
-        shoulders: u32,
+        (pad, shoulders): (u32, u32),
+        (pad2, split): (u32, bool),
         game: &mut Game,
     ) {
         let n = self.step.advance(dt);
         let game_buttons = play_keys | pad;
-        let mut input = menu_input(keys, pad, shoulders);
+        let mut input = menu_input(keys, pad, shoulders, split);
+        input.pad2 = pad2;
         input.pointer = self.pointer;
         input.pointer_down = self.pointer_down;
         input.pointer_alt = self.pointer_alt;
