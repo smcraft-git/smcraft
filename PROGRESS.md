@@ -220,6 +220,22 @@ sway, importer and pack 12, the dev cache already at v12).
   sends kind 10 / 5 to its reaction component on its +0x534 bits 19 / 20 (not followed). ✅ #17:
   the Bob-omb blast is the shell attack. 598 / 598 traces exact (merged with physics8); coverage 550/550 + 273/273;
   simulate 0 crashes.
+- 🔄 **Inferred-behaviour pass 7** (2026-10-25, branch `infres7`, research specs/inf-inventory.md
+  "Pass 7"): ✅ the projectile budget ported (`actors/budget.rs`): one 100-unit manager per area
+  (built in the area ctor 0x7100e439d4 with a 200-entry ring; request 0x7100de9960, release
+  0x7100de9a60, promotion in the area update 0x7100e443c0, release on deletion 0x71008d8530); a
+  reservation is kept between throws, so it caps the throwers acting at once; its +0x8 term is
+  only zeroed (ctor, reset 0x7100e4b8c8). Wired: Hammer / Sledge Bro timed throws, the winged
+  Bro's WingWalk (released at its exit), Rocky Wrench, Magikoopa, the Fire clown car's charge
+  (released at the Chase exit). ✅ placed Super Leaf / Cape Feather / Propeller start in their
+  Move (base context 0x7101298b90 → Basic enter 0x71013466f0 with no event → Move), through
+  terrain. ✅ Bowser (SMB1 / SMB3 action 0x71028e44b8): LittleJump vy 0.7 / 0.35 under a
+  Trampoline within the hop's reach (0x7101158ff0), no middle jump under one within its reach
+  (0x710115ab40); water reaches; the jump counters per style (SMW 0x7101157fa0 / 0x7101158030,
+  NSMBU 0x7101152cb0 / 0x7101152d40). 🔄 #15: the shell's "blocker" branch is dead (nothing sets
+  its +0x534 bits 19 / 20); the general branch not followed. 🔄 decoded, not ported: the Spike
+  Top's RotationCliff (#24), Bowser Jr's shell-slide wall analysis (#37), the SMW / NSMBU Bowser
+  decision tails. 598 / 598 traces exact; coverage 550/550 + 273/273; simulate 0 crashes.
 - **Agent queue** (when a helper slot frees; running 2026-10-25: the maker's Water Level and
   Custom Scroll modes, physics): ✅ a Koopaling in a Clown Car (2026-10-25, branch
   `kclown`, research 120-koopalings.md "In a Koopa Clown Car": KoKoopaDefault's Clown vtable

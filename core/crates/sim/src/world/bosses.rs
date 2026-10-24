@@ -115,11 +115,14 @@ impl World {
 /// A sliding shell meeting a boss: the boss takes a Shell hit (attack 6) and the shell is spent
 /// [inf: it is knocked away. The Default Shell context's hit slots (0x68 / 0x88) are empty
 /// (0x71005e4f10 / 0x71005e4f50), so the shell's fate is what its own collider callback
-/// (0x71011ff860 v3.0.3) hands its reaction component (+0x6b8, 0x710123bd20): with its own
-/// collider in the shell-attack category (6) it sends kind 10 / 5 when its +0x534 bits 19 / 20
-/// are set (LAB_7101202450), else the other's reaction kind; what the shell's reaction does
-/// with a boss's was not followed]. Returns None when neither is a boss hit by a sliding shell; otherwise the score to
-/// award, if the boss was defeated.
+/// (0x71011ff860 v3.0.3) hands its reaction component (+0x6b8, 0x710123bd20 → 0x710123aca0:
+/// a reaction other than 4 / 7 sends the actor its context 4 with the message). Its dedicated
+/// "shell against a blocker" branch (LAB_7101202450: own collider attack +0x78 = 6, the
+/// other's +0x80 bit 7 set and category +0x74 ≠ 10 → reaction 5) needs the shell's own +0x534
+/// bit 19 or 20, which nothing in v3.0.3 sets (one clear, 0x710113db94, and no other store to
+/// +0x534 / +0x536 / +0x530 makes them) [obs v3.0.3], so it is dead; the general branch after
+/// it (LAB_7101201db4) was not followed]. Returns None when neither is a boss hit by a sliding
+/// shell; otherwise the score to award, if the boss was defeated.
 pub(super) fn boss_shell_hit(a: &mut Actor, b: &mut Actor) -> Option<Option<(u32, f32, f32)>> {
     let (shell, boss) = if a.mode == Mode::ShellSlide && b.kind.is_boss() {
         (a, b)

@@ -1317,8 +1317,8 @@ impl Actor {
     /// either with one within the middle jump's reach (the decision 0x7101152520's slot 0x368,
     /// 0x710115ab40) [obs v3.0.3]. SMW and NSMBU have their own branch slots: SMW's middle
     /// branch (0x7101157dd0) picks MiddleJump, LittleJump, MiddleJump (with +0xc1) or Fire at
-    /// random (Fire with such a Trampoline), its big branch (0x7101157c70) BeforeBigJump or
-    /// HipDrop; NSMBU's (0x7101152ab0) BeforeJump, Fire or JumpFire (Fire with a Trampoline),
+    /// random (Fire with such a Trampoline), its big branch (0x7101157c70) BigJump or
+    /// FireFalling; NSMBU's (0x7101152ab0) BeforeJump, Fire or JumpFire (Fire with a Trampoline),
     /// its big one (0x7101152970) BeforeBigJump or SpreadFire [obs v3.0.3; not ported: the
     /// engine has none of those states and runs the SMB1 / SMB3 decision for both].
     fn bowser_counters(&mut self, st: usize) {
