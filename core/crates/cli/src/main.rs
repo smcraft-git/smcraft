@@ -2189,7 +2189,7 @@ fn gallery(
                 .place(part, x, 2)
                 .map_err(|e| format!("part {part}: {e:?}"))?;
             if alt {
-                ed.toggle_flags(i, 0x4);
+                let _ = ed.next_form(i);
             }
             x += w as i32 + 2;
             placed += 1;

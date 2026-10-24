@@ -25,8 +25,9 @@ pub const NO_PARACHUTE: u32 = 0x200 | 0x400 | 0x1000 | 0x1_0000 | 0x2_0000;
 /// One choice of the balloon.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Attr {
-    /// The part's own form (`false`) or its alternate form (`true`).
-    Form(bool),
+    /// Form k of the part: 0 its own, 1… the others (a red Koopa, a fast conveyor, a key
+    /// door, a 30- or 50-coin, a pipe's colour …; `parts::with_form` stores it).
+    Form(u8),
     /// Make it big (`true`) or small again (`false`).
     Big(bool),
     /// Put wings on (`true`) or take them off (`false`).
@@ -36,10 +37,10 @@ pub enum Attr {
 }
 
 impl Attr {
-    /// The flags a part with `flags` has once this choice is made.
-    pub fn apply_to(self, flags: u32) -> u32 {
+    /// The flags part `part` with `flags` has once this choice is made.
+    pub fn apply_to(self, part: i16, flags: u32) -> u32 {
         match self {
-            Attr::Form(alt) => set(flags, ALT, alt),
+            Attr::Form(k) => parts::with_form(part, flags, k),
             Attr::Big(big) => (flags & !0x6000) | if big { 0x4000 } else { 0 },
             Attr::Wings(on) => set(flags, WINGS, on),
             Attr::Parachute(on) => set(flags, PARACHUTE, on),
@@ -81,6 +82,7 @@ impl Editor {
             return Vec::new();
         };
         let caps = parts::caps(o.id);
+        let style = self.course.header.game_style.as_str_lossy();
         let mut out = Vec::new();
         let mut offer = |attr: Attr, checked: bool| {
             let enabled = checked || self.attr_allowed(index, attr).is_ok();
@@ -90,10 +92,14 @@ impl Editor {
                 enabled,
             });
         };
-        if parts::forms(o.id) >= 2 {
-            let alt = o.flags & ALT != 0;
-            offer(Attr::Form(false), !alt);
-            offer(Attr::Form(true), alt);
+        // the forms, the current one checked (radio buttons, ids 0–9 / 0x10–0x28 of the
+        // game's list, maker spec C10)
+        let forms = parts::forms_in(o.id, &style);
+        if forms >= 2 {
+            let now = parts::form_of(o);
+            for k in 0..forms {
+                offer(Attr::Form(k), k == now);
+            }
         }
         if caps.big {
             offer(Attr::Big(!o.is_big()), false);
@@ -113,9 +119,10 @@ impl Editor {
             return Err(EditError::Missing);
         };
         let caps = parts::caps(o.id);
+        let style = self.course.header.game_style.as_str_lossy();
         match attr {
-            Attr::Form(_) if parts::forms(o.id) < 2 => {
-                return Err(EditError::NotAllowed("this part has one form"));
+            Attr::Form(k) if k >= parts::forms_in(o.id, &style) => {
+                return Err(EditError::NotAllowed("this part has no such form"));
             }
             Attr::Big(_) if !caps.big => {
                 return Err(EditError::NotAllowed("can't be made big"));
@@ -138,7 +145,7 @@ impl Editor {
             return Ok(());
         }
         let mut n = o.clone();
-        n.flags = attr.apply_to(o.flags);
+        n.flags = attr.apply_to(o.id, o.flags);
         if rules::counter(&n) != rules::counter(o) {
             self.check_limits(&n, 1)?;
         }
@@ -150,7 +157,7 @@ impl Editor {
     pub fn apply_attr(&mut self, index: usize, attr: Attr) -> Result<bool, EditError> {
         self.attr_allowed(index, attr)?;
         let o = self.object(index).ok_or(EditError::Missing)?;
-        let flags = attr.apply_to(o.flags);
+        let flags = attr.apply_to(o.id, o.flags);
         if flags == o.flags {
             return Ok(false);
         }
@@ -158,8 +165,30 @@ impl Editor {
             self.toggle_big(index)?;
             return Ok(true);
         }
+        // a door's or warp box's partner takes the same form: a pair is one kind [corp: all
+        // 468 door pairs match, both boxes of a pair carry the key flag]
+        if let Attr::Form(k) = attr
+            && let Some(j) = self.partner(index)
+            && let Some(p) = self.object(j)
+        {
+            let pf = parts::with_form(p.id, p.flags, k);
+            self.set_flags(j, pf);
+        }
         self.set_flags(index, flags);
         Ok(true)
+    }
+
+    /// The part's next form (after the last, its own again): what a tap on a placed part
+    /// does [inf]. Ok(true) when it changed.
+    pub fn next_form(&mut self, index: usize) -> Result<bool, EditError> {
+        let o = self.object(index).ok_or(EditError::Missing)?;
+        let style = self.course.header.game_style.as_str_lossy();
+        let n = parts::forms_in(o.id, &style);
+        if n < 2 {
+            return Ok(false);
+        }
+        let k = (parts::form_of(o) + 1) % n;
+        self.apply_attr(index, Attr::Form(k))
     }
 
     /// The balloon over a multigrab selection, the held part first: its forms and size, then
@@ -324,8 +353,8 @@ mod tests {
         assert_eq!(
             a,
             [
-                Attr::Form(false),
-                Attr::Form(true),
+                Attr::Form(0),
+                Attr::Form(1),
                 Attr::Big(true),
                 Attr::Wings(true),
                 Attr::Parachute(true)
@@ -366,10 +395,53 @@ mod tests {
     }
 
     #[test]
+    fn forms_beyond_the_alternate_bit() {
+        let mut e = flat("M1");
+        // a conveyor's fast form is the 2-bit field, as the engine plays it
+        let belt = e.place(53, 10, 4).unwrap();
+        let a: Vec<Attr> = e.attr_options(belt).iter().map(|o| o.attr).collect();
+        assert_eq!(a, [Attr::Form(0), Attr::Form(1)]);
+        assert_eq!(e.apply_attr(belt, Attr::Form(1)), Ok(true));
+        let f = e.object(belt).unwrap().flags;
+        assert_eq!(((f >> 18) & 3, f & ALT), (1, 0));
+        // three forms: the big coin's 10, 30 and 50
+        let coin = e.place(70, 20, 4).unwrap();
+        let forms: Vec<Attr> = e.attr_options(coin).iter().map(|o| o.attr).collect();
+        assert_eq!(&forms[..3], [Attr::Form(0), Attr::Form(1), Attr::Form(2)]);
+        assert_eq!(e.next_form(coin), Ok(true));
+        assert_eq!(e.next_form(coin), Ok(true));
+        assert_eq!(parts::form_of(e.object(coin).unwrap()), 2);
+        assert_eq!(e.next_form(coin), Ok(true));
+        assert_eq!(parts::form_of(e.object(coin).unwrap()), 0, "round again");
+        // a door pair is one kind
+        let (d, p) = e
+            .place_doors((30, 2), (34, 2), crate::links::DoorKind::Normal)
+            .unwrap();
+        assert_eq!(e.apply_attr(d, Attr::Form(2)), Ok(true));
+        assert_eq!(
+            parts::form_of(e.object(p).unwrap()),
+            2,
+            "the partner is a key door"
+        );
+        // the Master Sword is SMB1's alone
+        let m = e.place(20, 40, 4).unwrap();
+        assert!(e.attr_options(m).iter().any(|o| o.attr == Attr::Form(1)));
+        let mut w = flat("MW");
+        let m = w.place(20, 40, 4).unwrap();
+        assert!(w.attr_options(m).iter().all(|o| o.attr != Attr::Form(1)));
+        let back = crate::test_util::round_trip(&e);
+        let lvl = mmk_sim::level::Level::from_course(&back, 0);
+        assert!(
+            lvl.conveyors.iter().any(|c| c.0 == 10 && c.3.abs() == 2.0),
+            "fast"
+        );
+    }
+
+    #[test]
     fn big_and_forms_through_the_balloon() {
         let mut e = flat("M1");
         let k = e.place(1, 10, 2).unwrap();
-        assert_eq!(e.apply_attr(k, Attr::Form(true)), Ok(true));
+        assert_eq!(e.apply_attr(k, Attr::Form(1)), Ok(true));
         assert_eq!(e.object(k).unwrap().flags & ALT, ALT);
         assert_eq!(e.apply_attr(k, Attr::Big(true)), Ok(true));
         let k = e.object_at(10, 2).unwrap();

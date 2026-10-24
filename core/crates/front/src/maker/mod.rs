@@ -1787,11 +1787,8 @@ impl MakerFlow {
             return;
         }
         if dx == 0 && dy == 0 && held < attr::HOLD {
-            // a press without a move: the part's alternate form, as a tap on a part does
-            // [inf]
-            let before = o.flags;
-            self.editor.toggle_flags(index, 0x4);
-            if self.editor.object(index).is_some_and(|n| n.flags != before) {
+            // a press without a move: the part's next form, as a tap on a part does [inf]
+            if let Ok(true) = self.editor.next_form(index) {
                 self.changed();
                 self.sound(o.id, "p_AttributeChange");
             } else {

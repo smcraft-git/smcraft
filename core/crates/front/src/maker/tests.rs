@@ -820,6 +820,45 @@ fn hold_on_part(m: &mut MakerFlow, host: &mut MockHost, saves: &mut Saves, ticks
 }
 
 #[test]
+fn the_balloon_offers_every_form_and_a_tap_steps_through_them() {
+    use mmk_editor::attr::Attr;
+    let (mut host, mut saves) = (MockHost::default(), Saves::default());
+    let mut m = maker(&mut host, &mut saves, MakerStart::New("M1".into()));
+    // a conveyor: its own speed and the fast one (the 2-bit field, as the engine plays it)
+    let belt = m.editor.place(53, 12, 3).unwrap();
+    m.cur = (12, 3);
+    hold_on_part(&mut m, &mut host, &mut saves, attr::HOLD);
+    assert_eq!(
+        m.attr_options_shown().unwrap(),
+        [Attr::Form(0), Attr::Form(1)]
+    );
+    run(&mut m, &mut host, &mut saves, idle());
+    // the first new choice is selected: confirm
+    run(&mut m, &mut host, &mut saves, press(Buttons::CONFIRM));
+    run(&mut m, &mut host, &mut saves, idle());
+    let f = m.editor.object(belt).unwrap().flags;
+    assert_eq!(((f >> 18) & 3, f & 0x4), (1, 0), "fast, not the 0x4 bit");
+    // a 10-coin's three values: a tap steps 10 → 30 → 50 → 10
+    let coin = m.editor.place(70, 20, 3).unwrap();
+    m.cur = (20, 3);
+    let mut seen = Vec::new();
+    for _ in 0..3 {
+        run(&mut m, &mut host, &mut saves, press(Buttons::CONFIRM));
+        run(&mut m, &mut host, &mut saves, idle());
+        let o = m.editor.object(coin).unwrap();
+        seen.push(mmk_editor::parts::form_of(o));
+    }
+    assert_eq!(seen, [1, 2, 0]);
+    assert!(
+        host.edit_sounds
+            .iter()
+            .any(|(_, k)| k == "p_AttributeChange"),
+        "{:?}",
+        host.edit_sounds
+    );
+}
+
+#[test]
 fn holding_a_part_still_opens_its_balloon_and_wings_and_a_parachute_go_on() {
     let (mut host, mut saves) = (MockHost::default(), Saves::default());
     let mut m = maker(&mut host, &mut saves, MakerStart::New("M1".into()));
@@ -837,8 +876,8 @@ fn holding_a_part_still_opens_its_balloon_and_wings_and_a_parachute_go_on() {
     assert_eq!(
         shown,
         [
-            Attr::Form(false),
-            Attr::Form(true),
+            Attr::Form(0),
+            Attr::Form(1),
             Attr::Big(true),
             Attr::Wings(true),
             Attr::Parachute(true)
@@ -975,7 +1014,7 @@ fn holding_a_part_of_a_selection_gives_the_whole_selection_wings() {
     let k = shown.iter().position(|a| *a == Attr::Wings(true)).unwrap();
     let first = shown
         .iter()
-        .position(|a| !matches!(a, Attr::Form(false)))
+        .position(|a| !matches!(a, Attr::Form(0)))
         .unwrap();
     for _ in first..k {
         run(&mut m, &mut host, &mut saves, press(Buttons::RIGHT));
