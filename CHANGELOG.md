@@ -101,6 +101,14 @@ SMCraft is back in development (it was archived in October 2026).
   square for its speed). Both modes draw SMM2's own lines, handles, birds and path marks, and
   sound as in SMM2. Any course can be opened in the maker: someone else's course saves and uploads
   as a new course, "based on <code> by <maker>".
+- **Course Maker: the Clear Pipe** (3D World): press and drag to draw it, round bends to the
+  side, back to shorten it, from either mouth to draw it on; carry it by its middle, erase it
+  whole; drawn with 3D World's own glass pipe. **Every form in the part balloon**: a Fast
+  Conveyor, a 30- or 50-Coin, a P or Key Door, pipe colours, semisolid looks (a tap steps through
+  them; a fast conveyor made in the maker now plays fast). **Tracks** draw as in SMM2: nothing on a
+  press, a piece per step as you drag, on from an end (open ends stay open), back to take pieces
+  away. A door or warp box brings its partner a tile to the right. Riders and parachutes stay out
+  of stacks.
 - **SMM2's colours on its screens**: buttons, banners and text now show the colours SMM2 shows
   (the yellow OK and menu buttons were orange), and windows with flipped frames are whole again
   (the tips' window lost its bottom edge). Import the SMM2 UI again for the maker's new pictures

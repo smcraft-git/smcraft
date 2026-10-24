@@ -377,8 +377,13 @@ sway, importer and pack 12, the dev cache already at v12).
     on) toggles it, kept as `maker.trail`. ⬜ 3D World's model player (no 2D art: no pictures),
     what Mario holds / rides in the picture, the maker following Mario to the area he ended in
   - ✅ water level and custom autoscroll with its nodes (2026-10-25, see the research queue) ·
-    ⬜ the part variants balloon (Fast Conveyor …), tracks / doors' partners placed
-    by hand, the trash can, co-op making
+    ✅ the part variants (2026-10-25, branch `makerparts`; maker spec C10): the balloon offers
+    every form, stored where the game keeps it — the 0x4 bit, or (flags >> 18) & 3 for the pipe's
+    colour, semisolid / mushroom looks, (slope) conveyor speed, door kind, big coin value, spike
+    block mode, Mechakoopa kind (0x71003d2600, 0x7100d80df0) — a tap steps to the next form, a
+    door / warp box pair changes together, SMB1-only and 3D-World-only alternates by style ·
+    ✅ a door / warp box brings its partner a tile to the right (0x7100ec9c00) · ⬜ the trash
+    can, co-op making, the palette's variant chooser `Edit_PartsMenu_00`
   - ✅ the vertical scroll bar for vertical sub-areas (`N_SlideBarV_00`: its handle by the view's
     height, pressed / dragged to scroll; captures `maker-vertical`, `maker-subarea`)
   - ✅ the sub-area's orientation window (`Edit_SubAreaWindow_00`: Horizontal / Vertical) when
@@ -386,12 +391,23 @@ sway, importer and pack 12, the dev cache already at v12).
   - ✅ more parts in the part window (2026-10-24): Spike, Pokey, Piranha Creeper, Mechakoopa, the
     seven Koopalings, P Block, Dash Block, the SMB2 Mushroom (SMB1), the wearables and the
     ON/OFF Trampoline (3D World); each checked placeable in every style that offers it (a test)
-    and playable · ⬜ the Clear Pipe (its own placement); Lakitu's Cloud isn't a part of its own (no name
+    and playable · ✅ the Clear Pipe (2026-10-25, branch `makerparts`; maker spec C14): drawn
+    from a corner (a 2-tile pipe 24 px out in the drag's quarter, turning with it, taken back
+    within 16 px; 0x7100fa9090), its end on / back (a bend at a time) / round a bend toward
+    the cursor, from either mouth (0x7100ec1e90), carried by its middle, erased whole, 100 an
+    area, nothing in its tiles; records encoded byte for byte (all 208 sample pipes); drawn
+    with `3W_Object_dokan_tomei` (unit / top / curve00, turned) in the maker and play; capture
+    `maker-clearpipe --style 3W` · ⬜ the Clear Pipe's palette icon (no 2D art: the icon
+    renderer has no meshes), its collision and the ride through it in play (the sim draws it
+    only), junctions, multigrab of clear pipes; Lakitu's Cloud isn't a part of its own (no name
     in the game's part list: it comes with Lakitu, parts go into it)
   - ✅ tracks (2026-10-24): the Track part in Gizmos; a press lays a horizontal piece, dragging
     draws on from its end, 2 tiles a piece, 8 ways [inf: the gesture]; a part that rides tracks
     put down on one is attached (flag 0x400); a press on an end opens / closes it; erasing,
-    undo as for parts · ⬜ bends drawn by the game's own rules, ✅ the track art in play (2026-10-24: a cell's
+    undo as for parts · ✅ drawn by the game's rules (2026-10-25: a press lays nothing, a
+    straight / 45° piece per step — no bends while drawing, 0x710231bb60 — on from a free end
+    keeping its open state, back over the end's piece takes it away; 0x7100fafe40,
+    0x7100fb0200), ✅ the track art in play (2026-10-24: a cell's
     template code is its field-atlas tile, `Tracks::art`; left: junction cells (0x2xx codes) keep a
     line, 3D World's tracks are models, and the maker's own track drawing)
   - ✅ pipes turned and stretched by their mouth (the cursor round the base: the longer axis
@@ -407,8 +423,10 @@ sway, importer and pack 12, the dev cache already at v12).
     maker `Director` of their own. ✅ `move` per tile while carrying [inf: when], the start /
     goal drags (`<S>_EditGroundStart` / `GroundGoal`: drag, move, set) and stretching (the part's user), wings / parachutes
     (`voice_getWing`, `lose_wing`, `p_EquipPara`, `p_RemovePara`), the multigrab frame's
-    `cursor` per tile [inf: when] · ⬜ `Tower_stack` (stacking, research C11), a listen
-    on hardware against SMM2
+    `cursor` per tile [inf: when] · ✅ `Tower_stack` and stacking (a part dropped on a
+    stackable one; 2026-10-25: only parts that ride nothing and face the default way, the
+    drop handler's 0xE038601 test, 0x7100f5ad90) · ⬜ what a column does when a member is
+    erased (not read), a listen on hardware against SMM2
 - 🔄 Edit any course: the open row of the Course World / Coursebot lists has "Make" (the co-op
   button's slot, the Coursebot's word, the glove icon) → the maker; someone else's course (a
   code whose maker isn't the signed-in player) saves as a new Coursebot course with "based on
