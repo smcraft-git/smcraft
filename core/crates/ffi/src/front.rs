@@ -906,6 +906,10 @@ impl Host for FfiHost {
             .collect()
     }
 
+    fn costume_categories(&mut self) -> Vec<(u16, u8)> {
+        self.assets().cache.costume_categories()
+    }
+
     fn set_course_world(&mut self, source: &str) -> bool {
         self.course_world = Some(source.to_string());
         self.rebuild_backend();
