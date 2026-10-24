@@ -38,6 +38,15 @@ SMCraft is back in development (it was archived in October 2026).
 - Bowser chasing you jumps walls in his way (a big jump for a tall one) and jumps across gaps,
   aiming to land on the far side, instead of only turning round at ledges. A Yoshi's Egg hatches
   40 frames after it first lands on screen (it was 30 frames after appearing).
+- **Boos and Para-Beetles as in SMM2**: a winged Boo stops and beats its wings for a moment
+  before every chase (at the start and each time you turn away from it), then sets off at full
+  speed; every Boo starts out looking down and swings round at once when you pass under it. You
+  can ride a Para-Beetle (a winged Buzzy Beetle): it dips under you, then climbs, and flies on
+  from its new height once you jump off. A winged Lava Bubble flies diagonally and bounces off
+  walls, floors and ceilings like a ball.
+- Swinging Claws hold Mario by his hands as the game does, and jumping off one is an ordinary
+  standing jump that keeps the swing's motion. A Twister also lifts a swimming Mario, more
+  gently than on land.
 
 - **Import once, then no dump or keys.** SMCraft reads your NSPs and `prod.keys` itself (no
   hactool, nothing extracted) and writes its own asset pack; the game runs from the pack alone.
