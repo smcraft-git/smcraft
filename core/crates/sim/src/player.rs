@@ -36,6 +36,10 @@ const AIR_DIR: [f32; 6] = [0.09, 0.08, 0.03, 0.029, 0.021, 0.021];
 const AIR_DIR_RUN: [f32; 6] = [0.09, 0.08, 0.06, 0.029, 0.021, 0.021];
 const AIR_DIR_STAR: [f32; 6] = [0.12, 0.11, 0.04, 0.039, 0.027, 0.027];
 const AIR_DIR_RUN_STAR: [f32; 6] = [0.12, 0.11, 0.078, 0.039, 0.027, 0.027];
+/// The raccoon's tail wag (TailSlowFall) moves through the air tables of "special mode A"
+/// (player-physics.md §2.4): toward ±2.0 with a direction held, else toward 0 [obs: trace].
+const AIR_TAIL_DIR: [f32; 6] = [0.09, 0.08, 0.06, 0.01, 0.01, 0.01];
+const AIR_TAIL: [f32; 6] = [0.04, 0.02, 0.02, 0.01, 0.01, 0.01];
 
 // Slopes, by steepness index 0..4 (§5.2)
 const SLOPE_TARGET_DOWN: [f32; 5] = [1.0, 1.25, 1.25, 1.44, 1.62];
@@ -175,6 +179,12 @@ pub fn change_shows_old(timer: i32) -> bool {
 // Death (DownPose 0x71009e13e0 / DownFall 0x71009e1ea0): 45-frame pose, then a hop at 3.2 with
 // gravity −0.16; the restart request comes 140 frames into the fall.
 pub const DOWN_POSE_FRAMES: i32 = 45;
+/// The raccoon's TailSlowFall wag cycle (frames).
+const TAIL_WAG_FRAMES: i32 = 18;
+/// Slip on flat ground ends once the speed is below this (v3 0x71015ddb40: 1.1) [obs].
+const SLIDE_END: f32 = 1.1;
+/// A player whose feet are this far below the view's bottom has fallen into a pit.
+pub const PIT_BELOW: f32 = 56.0;
 pub const DOWN_VY: f32 = 3.2;
 pub const DOWN_GRAVITY: f32 = -0.16;
 pub const DOWN_FALL_FRAMES: i32 = 140;
@@ -385,6 +395,11 @@ pub struct Player {
     pub low_gravity: bool,
     /// Desert-night wind level w (−1…1): the position moves w px per frame (themes.md §2).
     pub wind: f32,
+    /// Feet below this y is a pit death: the view's bottom − 56 (set by the world each frame;
+    /// the off-screen check after the edge push, local-coop.md §4.5 [obs]).
+    pub pit_y: f32,
+    /// This death was a pit fall: no hop, the player stays where it fell.
+    pub pit_death: bool,
     /// Moving solid the head bonked this frame (POW blocks react).
     pub head_solid: Option<u32>,
     /// The moving solid a wall sensor ran into this frame (pushed out of it), if any.
@@ -430,7 +445,11 @@ pub struct Player {
     /// Raccoon / cape: attack (tail swing, cape spin) frames left; flap and slow-fall frames.
     pub attack: i32,
     pub flap: i32,
+    /// TailSlowFall: the frame of the current 18-frame wag cycle + 1 (0 = not wagging), whether
+    /// a press during it asked for another cycle, and whether this is the first cycle.
     pub slow_fall: i32,
+    wag_again: bool,
+    wag_first: bool,
     /// Wall slide: the wall's side (−1 / +1, 0 = not sliding) and frames of stick held away.
     pub wall_slide: i32,
     wall_release: i32,
@@ -517,6 +536,8 @@ pub struct Player {
     slope_prev: Option<(usize, i32)>,
     slide_float: u8,
     slide_hop: bool,
+    /// Slip's "slip_to_stoop" phase on flat ground: frames left before it hands over to Crouch.
+    slide_stoop: i32,
     /// Walked off a ledge last frame: this frame (Walk handing over to Fall) adds no gravity.
     fell_off: bool,
     /// 3D World long jump (BroadJump, state 14: begin 0x71009d3020, exec 0x71009d3330) and the
@@ -579,6 +600,8 @@ impl Player {
             in_water: false,
             low_gravity: false,
             wind: 0.0,
+            pit_y: -PIT_BELOW,
+            pit_death: false,
             head_solid: None,
             wall_solid: None,
             was_in_water: false,
@@ -608,6 +631,8 @@ impl Player {
             attack: 0,
             flap: 0,
             slow_fall: 0,
+            wag_again: false,
+            wag_first: false,
             wall_slide: 0,
             wall_release: 0,
             jump_count: 0,
@@ -652,6 +677,7 @@ impl Player {
             slope_prev: None,
             slide_float: 0,
             slide_hop: false,
+            slide_stoop: 0,
             fell_off: false,
             broad: false,
             broad_land: 0,
@@ -863,6 +889,10 @@ impl Player {
         self.control = Control::DownPose {
             timer: DOWN_POSE_FRAMES,
         };
+        self.pit_death = false;
+        // DownPose begin (v3 0x71015b4850) lifts the player 2 px and stops it [obs; Ryujinx
+        // trace: a pit death at y −56.54 shows −54.54]
+        self.y += 2.0;
         self.vx = 0.0;
         self.vy = 0.0;
         self.star = 0;
@@ -967,7 +997,9 @@ impl Player {
             }
             Control::DownPose { timer } => {
                 self.control = if timer <= 1 {
-                    self.vy = DOWN_VY;
+                    if !self.pit_death {
+                        self.vy = DOWN_VY;
+                    }
                     Control::DownFall {
                         timer: DOWN_FALL_FRAMES,
                     }
@@ -977,8 +1009,10 @@ impl Player {
                 false
             }
             Control::DownFall { timer } => {
-                self.vy = (self.vy + DOWN_GRAVITY).max(FALL_CAP);
-                self.y += self.vy;
+                if !self.pit_death {
+                    self.vy = (self.vy + DOWN_GRAVITY).max(FALL_CAP);
+                    self.y += self.vy;
+                }
                 if timer > 0 {
                     self.control = Control::DownFall { timer: timer - 1 };
                 }
@@ -1170,6 +1204,27 @@ impl Player {
         if dir != 0 {
             self.facing = dir;
         }
+        if self.slow_fall > 0 {
+            let t = self.thresholds();
+            let (target, table) = if dir != 0 {
+                (2.0 * dir as f32, &AIR_TAIL_DIR)
+            } else {
+                (0.0, &AIR_TAIL)
+            };
+            let face = if self.vx == 0.0 {
+                if dir != 0 { dir } else { self.facing }
+            } else {
+                self.vx.signum() as i32
+            };
+            let b = if dir != 0 && dir != face {
+                0
+            } else {
+                band(self.vx, face, t)
+            };
+            self.vx = approach(self.vx, target, table[b]);
+            self.air_move = (target, table[b]);
+            return;
+        }
         if dir == 0 {
             // no direction: accel 0 → momentum preserved
             self.air_move = (0.0, 0.0);
@@ -1327,7 +1382,9 @@ impl Player {
         if self.attack > 0 {
             self.attack -= 1;
         }
-        self.step_meters(inp, pressed, jump);
+        // a press the tail uses is spent; one that does nothing is retried 3 frames later, the
+        // tail included [obs: trace, a press while rising wags 3 frames later once falling]
+        let tail_used = self.step_meters(inp, pressed || (retry && !self.landed), jump);
         self.prev_run = run;
         let Some(inp) = self.pu_before(inp, pressed, spin_pressed, level) else {
             return;
@@ -1353,6 +1410,7 @@ impl Player {
             let ready = self.style == Style::M3 || self.duck || self.crouch;
             if on_slope && inp.held(input::DOWN) && self.held.is_none() && ready {
                 self.sliding = true;
+                self.slide_stoop = 0;
                 self.crouch = false;
             }
         }
@@ -1458,7 +1516,7 @@ impl Player {
                     self.slide_float = 8;
                     self.slide_hop = true;
                 } else if self.sliding {
-                    self.slide(level);
+                    self.slide(inp, level);
                 } else if self.cape == CapeState::Slide {
                     self.cape_slide(level);
                 } else if self.landed && self.broad {
@@ -1553,7 +1611,9 @@ impl Player {
                     }
                     self.in_jump = true;
                     self.crouch_jump = self.duck || self.crouch;
-                    self.vy = JUMP_BASE + jump_bonus(self.vx.abs());
+                    // the launch speed comes from the speed before this frame's move (Jump
+                    // begin runs before the air routine) [obs: trace, 2.78 → 2.801 jumps +0.24]
+                    self.vy = JUMP_BASE + jump_bonus(before.0.abs());
                     self.vy = self.pu_launch(self.vy);
                     if self.jump_count == 2 || self.dashing() {
                         self.vy *= 1.05;
@@ -1565,6 +1625,16 @@ impl Player {
                     }
                     if self.low_gravity {
                         self.vy = (self.vy * 0.7).min(2.7);
+                    }
+                    if self.form == Form::Cape
+                        && self.cape_meter == 30
+                        && self.cape == CapeState::None
+                        && !self.in_water
+                    {
+                        // a full cape meter turns the take-off frame itself into MantFlyingUp
+                        // (the Jump exec sees vy > 1 at once): the launch speed, no gravity
+                        // [obs: trace, SMW: vy 3.928 on the take-off frame, counter 1]
+                        self.cape = CapeState::Rise(73);
                     }
                     self.on_ground = false;
                     self.skid = SkidPhase::None;
@@ -1617,7 +1687,7 @@ impl Player {
             }
             self.step_cape(inp, jump, vy_before, vx_before, face_before);
         }
-        if pressed && !jumped {
+        if pressed && !jumped && !tail_used {
             self.jump_retry = 3;
         }
         if self.chain_window > 0 {
@@ -1656,8 +1726,22 @@ impl Player {
                 self.flap -= 1;
                 self.vy = 1.5;
             } else if self.slow_fall > 0 {
-                self.slow_fall -= 1;
-                self.vy = self.vy.max(-1.0);
+                // TailSlowFall [obs: Ryujinx trace, SMB3]: an 18-frame wag; the fall is held at
+                // −1.0 for its first 15 frames (a repeated wag: frames 1–14, its first frame is
+                // the old wag's end); a press during a wag queues one more when it ends
+                let k = self.slow_fall - 1;
+                if (self.wag_first && k <= 14) || (!self.wag_first && (1..=14).contains(&k)) {
+                    self.vy = self.vy.max(-1.0);
+                }
+                self.slow_fall += 1;
+                if self.slow_fall > TAIL_WAG_FRAMES {
+                    if std::mem::take(&mut self.wag_again) {
+                        self.slow_fall = 1;
+                        self.wag_first = false;
+                    } else {
+                        self.slow_fall = 0;
+                    }
+                }
             } else if self.form == Form::Cape
                 && self.cape == CapeState::None
                 && jump
@@ -1784,8 +1868,11 @@ impl Player {
         if !(self.style == Style::M1 && !self.on_ground && !self.in_water) {
             self.drawn_facing = self.facing;
         }
-        if self.y < -2.0 * TILE {
-            self.kill(); // fell into a pit
+        if self.y < self.pit_y {
+            // fell into a pit: in single play DownPose holds until the miss sequence restarts
+            // the course; no hop [obs: Ryujinx trace, 60 frames of DownPose and no DownFall]
+            self.kill();
+            self.pit_death = true;
         }
     }
 
@@ -1828,7 +1915,7 @@ impl Player {
     /// Slip: downhill toward 4.0 px/f with the slide accel of the slope class (table
     /// 0x7101d09700: gentle, class 2, 0.05; steep, class 3, 0.07) [obs]; on flat ground it
     /// slows by 0.09 and ends at rest.
-    fn slide(&mut self, level: &Level) {
+    fn slide(&mut self, inp: Input, level: &Level) {
         // slide rates by steepness (0x7101d09700 / 0x7101d09714): one row while moving
         // downhill, the other while still moving uphill [obs: Ryujinx trace, 0.045 uphill on
         // the gentle slope]
@@ -1845,9 +1932,37 @@ impl Player {
             });
         match slope {
             Some((down, acc)) => self.vx = approach(self.vx, 4.0 * down, acc),
+            None if self.slide_stoop > 0 => {
+                // slip_to_stoop: the ground routine with no input (0.05 below 1.5), then Crouch
+                // takes over once the animation ends (its last frame still moves at 0.05)
+                self.vx = approach(self.vx, 0.0, 0.05);
+                self.slide_stoop -= 1;
+                if self.slide_stoop == 0 {
+                    self.sliding = false;
+                }
+            }
             None => {
+                // on flat ground the slide slows at 0.09; the end check (v3 0x71015ddb40) runs
+                // after this frame's move is chosen, on the speed it starts the frame with
+                // [obs; Ryujinx traces SMB3 / SMW / NSMBU]
+                let before = self.vx;
                 self.vx = approach(self.vx, 0.0, 0.09);
-                if self.vx == 0.0 {
+                if before.abs() < SLIDE_END {
+                    if !inp.held(input::DOWN) && self.can_stand(level) {
+                        // Down let go: the slide stops dead ("sliped", 0x71015ddd90)
+                        self.vx = 0.0;
+                        self.sliding = false;
+                    } else if self.style == Style::MW {
+                        self.sliding = false; // SMW crouches at once
+                    } else {
+                        // the animation's length: SMB3 1, NSMBU 10 [obs: traces]; 3D World's
+                        // SquatStart taken as NSMBU's until traced [inf]
+                        self.slide_stoop = match self.style {
+                            Style::M3 => 1,
+                            _ => 10,
+                        };
+                    }
+                } else if self.vx == 0.0 {
                     self.sliding = false;
                 }
             }
@@ -2123,7 +2238,8 @@ impl Player {
     /// held (630 = full, 63 frames), holds 30 frames, then drains 4/frame. A jump with a full
     /// meter opens a 240-frame flight window; in the air each jump press flaps while the window
     /// is open, else (falling) slows the fall.
-    fn step_meters(&mut self, inp: Input, pressed: bool, _jump: bool) {
+    fn step_meters(&mut self, inp: Input, pressed: bool, _jump: bool) -> bool {
+        let mut used = false;
         let running =
             self.on_ground && inp.held(input::RUN) && inp.dir_x() != 0 && self.vx.abs() >= 2.1;
         if running {
@@ -2145,8 +2261,14 @@ impl Player {
         if pressed && !self.on_ground && self.form == Form::Raccoon {
             if self.flight > 0 {
                 self.flap = 18;
+            } else if self.slow_fall > 0 {
+                // queued, and still retried 3 frames later (a ground jump if it has landed)
+                self.wag_again = true;
             } else if self.vy < 0.0 {
-                self.slow_fall = 15;
+                self.slow_fall = 1;
+                self.wag_first = true;
+                self.wag_again = false;
+                used = true;
             }
             self.attack = self.attack.max(8);
         }
@@ -2160,6 +2282,7 @@ impl Player {
                 self.cape_meter = 0;
             }
         }
+        used
     }
 
     /// SMW cape flight [obs]. A jump rising faster than 1.0 with a full cape meter (Jump exec
@@ -2208,10 +2331,20 @@ impl Player {
                             lift: 0.0,
                         }
                     } else {
+                        // Fall takes over within this frame and runs its gravity on the new
+                        // speed [obs: trace, 0.208 → −0.092 → −0.342]
+                        let held = jump || inp.held(input::SPIN);
+                        let g = if held {
+                            GRAVITY_HELD[vy_band(self.vy)]
+                        } else {
+                            GRAVITY_RELEASED[vy_band(self.vy)]
+                        };
+                        self.vy = (self.vy + g).max(FALL_CAP);
                         CapeState::None
                     };
                 } else {
-                    self.vy = JUMP_BASE + jump_bonus(self.vx.abs());
+                    // the speed bonus from the speed the frame starts with [obs: trace]
+                    self.vy = JUMP_BASE + jump_bonus(vx0.abs());
                     self.cape = CapeState::Rise(t);
                 }
             }
@@ -2306,14 +2439,18 @@ impl Player {
         if on_slope {
             self.cape = CapeState::None;
             self.sliding = true;
+            self.slide_stoop = 0;
+            return;
+        }
+        if self.vx == 0.0 {
+            // stopped last frame: MantSlide hands over to Walk, which doesn't move this frame
+            // [obs: trace]
+            self.cape = CapeState::None;
             return;
         }
         let decel = if self.on_ice { 0.02 } else { 0.06 };
         self.vx = approach(self.vx.clamp(-3.25, 3.25), 0.0, decel);
         self.pose = Pose::Slide;
-        if self.vx == 0.0 {
-            self.cape = CapeState::None;
-        }
     }
 
     fn vine_at(level: &Level, x: f32, y: f32) -> Option<(f32, f32, f32)> {
@@ -2663,7 +2800,11 @@ impl Player {
             match landed {
                 Some(top) => {
                     self.y = top;
-                    self.vy = 0.0;
+                    // touching down from a cape glide the frame keeps the glide's fall speed
+                    // (MantFlying still runs it) [obs: trace]
+                    if self.on_ground || !matches!(self.cape, CapeState::Fly { .. }) {
+                        self.vy = 0.0;
+                    }
                     self.on_ground = true;
                     self.slope =
                         on_slope.map(|sl| (sl.steepness(), if sl.rising { 1 } else { -1 }));
