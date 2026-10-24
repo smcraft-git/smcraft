@@ -60,7 +60,9 @@ enum Cmd {
     /// RGBA8 only; block-compressed textures are listed but not written.
     Textures { file: PathBuf, out: PathBuf },
     /// List the sounds in a BARS, a BWAV, or a SARC pack of BARS (wrappers removed): one JSON line
-    /// per sound. With --name and --wav, decode that sound to a 16-bit WAV for inspection.
+    /// per sound. SMM1's files too: a BFWAV, a BFSTM, a bank (SARC of BFWAV + AMTA) or
+    /// `Pack/Sound.pack` (a SARC of banks). With --name and --wav, decode that sound to a 16-bit
+    /// WAV for inspection.
     Audio {
         file: PathBuf,
         #[arg(long)]
@@ -591,16 +593,36 @@ fn audio_cmd(
     } else {
         blobs.push((file.display().to_string(), data));
     }
+    // SMM1's Sound.pack: a SARC of banks, each a SARC of BFWAV + AMTA
+    let mut nested = Vec::new();
+    for (container, blob) in &blobs {
+        if !blob.starts_with(b"SARC") && !blob.starts_with(b"Yaz0") {
+            continue;
+        }
+        let Ok(sarc) =
+            mmk_formats::archive::unwrap(blob.clone()).and_then(mmk_formats::archive::Sarc::parse)
+        else {
+            continue;
+        };
+        for (n, d) in sarc.files() {
+            nested.push((format!("{container}/{n}"), d.to_vec()));
+        }
+    }
+    blobs.extend(nested);
     let describe = |container: &str, sound: &str, w: &Bwav| {
         let c = &w.channels[0];
         json!({ "container": container, "name": sound, "channels": w.channels.len(),
             "codec": format!("{:?}", c.codec), "rate": c.sample_rate, "samples": c.samples,
             "samples_here": c.samples_here, "loop": w.loop_range(), "prefetch": w.prefetch })
     };
-    // Wii U waves (SMM1): converted to BWAV first
+    // Wii U waves and streams (SMM1): converted to BWAV first
     for (_, blob) in blobs.iter_mut() {
         if blob.starts_with(b"FWAV") {
             *blob = audio::Fwav::parse(blob)
+                .map_err(|e| e.to_string())?
+                .to_bwav();
+        } else if blob.starts_with(b"FSTM") {
+            *blob = audio::fstm::parse(blob)
                 .map_err(|e| e.to_string())?
                 .to_bwav();
         }
@@ -1307,13 +1329,16 @@ fn main() -> ExitCode {
                         eprintln!("skipped: {s}");
                     }
                     println!(
-                        "imported SMM1 {} UI: {} layouts, {} animations, {} textures, {} fonts, {} message files; {} costumes ({} frames, {} sounds) ({} skipped) into {}",
+                        "imported SMM1 {} UI: {} layouts, {} animations, {} textures, {} fonts, {} message files, {} UI sounds of {} SLink users ({} streams); {} costumes ({} frames, {} sounds) ({} skipped) into {}",
                         r.build,
                         r.layouts,
                         r.animations,
                         r.textures,
                         r.fonts,
                         r.messages,
+                        r.ui_sounds,
+                        r.ui_sound_users,
+                        r.ui_sound_streams,
                         r.costumes,
                         r.costume_textures,
                         r.costume_sounds,

@@ -10,6 +10,7 @@
 //! ui/fonts/<Font>.json                  metrics, glyph widths, character map
 //! ui/fonts/<Font>/sheet_<n>.mtex        glyph sheets
 //! ui/messages/<Archive>/<Group>/<File>.json   MSBT tables (see mmk_formats::msbt)
+//! ui/sound/sounds.json, ui/sound/<sound>.wav  the layouts' sounds (see `smm1_ui_sound`)
 //! ```
 //! Layout archives are found as loose `Layout/*.szs` files and as `Layout/*.szs` members of
 //! `Pack/*.pack`. A file in the update replaces the base file with the same path.
@@ -28,8 +29,9 @@ use serde_json::{Value, json};
 
 use crate::{ImportError, Progress, Result, read, write};
 
-/// 2: costume stage (`costumes/`, module `smm1_costumes`).
-pub const SMM1_IMPORTER_VERSION: u32 = 3;
+/// 2: costume stage (`costumes/`, module `smm1_costumes`). 4: UI sounds (`ui/sound/`, module
+/// `smm1_ui_sound`).
+pub const SMM1_IMPORTER_VERSION: u32 = 4;
 
 #[derive(Clone, Debug)]
 pub struct Smm1Config {
@@ -56,6 +58,10 @@ pub struct Smm1Report {
     pub costumes: usize,
     pub costume_textures: usize,
     pub costume_sounds: usize,
+    /// UI sounds (`ui/sound/`): SLink users with sounds, sounds written (of them streams).
+    pub ui_sound_users: usize,
+    pub ui_sounds: usize,
+    pub ui_sound_streams: usize,
     /// Files that could not be converted (path: reason).
     pub skipped: Vec<String>,
 }
@@ -95,6 +101,15 @@ impl Overlay {
             let sarc = Sarc::parse(archive::unwrap(data).ok()?).ok()?;
             archive::unwrap(sarc.get(name)?.to_vec()).ok()
         })
+    }
+
+    /// Every root's copy of `rel`, update first.
+    pub(crate) fn files(&self, rel: &str) -> Vec<PathBuf> {
+        self.roots
+            .iter()
+            .map(|r| r.join(rel))
+            .filter(|p| p.is_file())
+            .collect()
     }
 
     /// File names in `dir` across all roots (update wins), sorted.
@@ -414,6 +429,15 @@ pub fn run_smm1(cfg: &Smm1Config, progress: Progress) -> Result<Smm1Report> {
         }
     }
 
+    // --- the layouts' sounds
+    let s = crate::smm1_ui_sound::import_ui_sounds(&ov, &ui, progress)?;
+    report.ui_sound_users = s.users;
+    report.ui_sounds = s.sounds;
+    report.ui_sound_streams = s.streams;
+    report
+        .skipped
+        .extend(s.skipped.into_iter().map(|s| format!("ui sounds: {s}")));
+
     // --- costumes (Mystery Mushroom art and sounds)
     let c = crate::smm1_costumes::import_costumes(&ov, &out, &cfg.language, progress)?;
     report.costumes = c.costumes;
@@ -431,8 +455,9 @@ pub fn run_smm1(cfg: &Smm1Config, progress: Progress) -> Result<Smm1Report> {
         "base_title_version": base_version,
         "update_title_version": update_version,
         "language": cfg.language,
-        "stages": ["identify", "layouts", "fonts", "messages", "costumes"],
+        "stages": ["identify", "layouts", "fonts", "messages", "ui sounds", "costumes"],
         "costumes": report.costumes,
+        "ui_sounds": report.ui_sounds,
         "layouts": layout_names,
         "animations": report.animations,
         "textures": report.textures,

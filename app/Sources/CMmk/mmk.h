@@ -378,10 +378,12 @@ typedef struct {
 } MmkFrontItem;                                                        // 32 bytes
 
 typedef struct {
-    const char *name;           // <smm2 ui>/ui/sound/<name>.wav
+    const char *name;           // <ui import>/ui/sound/<name>.wav
     float volume;
     float delay;                // frames
-} MmkFrontSound;                                                       // 16 bytes
+    uint32_t ui;                // 0 the SMM2 UI import, 1 the SMM1 one
+    uint32_t _pad;
+} MmkFrontSound;                                                       // 24 bytes
 
 enum { MMK_FRONT_COURSE_SHOWN = 1, MMK_FRONT_COURSE_DONE = 2, MMK_FRONT_PLAYING = 4, MMK_FRONT_NO_SCREEN = 8,
        MMK_FRONT_TYPING = 16 };

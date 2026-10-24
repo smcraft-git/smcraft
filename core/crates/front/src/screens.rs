@@ -957,6 +957,7 @@ impl CourseScreens {
             name: name.to_string(),
             volume: 1.0,
             delay: 0.0,
+            ui: crate::layout::UiKind::Smm2,
         }]);
     }
 

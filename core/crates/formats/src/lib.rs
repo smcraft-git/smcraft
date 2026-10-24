@@ -33,5 +33,6 @@ pub mod smm2;
 pub mod vfxb;
 pub mod xlink;
 pub mod xlink_triggers;
+pub mod xlink_wiiu;
 
 pub use error::{Error, Result};

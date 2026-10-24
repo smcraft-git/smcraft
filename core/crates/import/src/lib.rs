@@ -48,6 +48,7 @@ pub mod sprites;
 pub const IMPORTER_VERSION: u32 = 13;
 pub mod smm1;
 pub mod smm1_costumes;
+pub mod smm1_ui_sound;
 pub use smm1::{Smm1Config, Smm1Report, run_smm1};
 pub mod smm2_font;
 pub mod smm2_ui;
