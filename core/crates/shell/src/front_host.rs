@@ -956,11 +956,11 @@ impl Host for ShellHost<'_> {
     fn course_data(&mut self, source: &Source) -> Result<Vec<u8>, String> {
         let bytes = match source {
             Source::Library(id) => self.data.course_bytes(id)?,
+            // Course World's source: TGRCode (decrypted with the pack's key table) or the
+            // course server, as playing it does
             Source::Server(code) => {
-                let server = self.data.server.clone().ok_or("no course server")?;
-                mmk_online::Client::new(server)
-                    .download(code)
-                    .map_err(|e| e.to_string())?
+                let key_table = self.data.key_table();
+                self.data.backend.download(code, || key_table)?
             }
         };
         front_course::decode(&bytes, || source::key_table(self.data.src())).map(|(_, d, _)| d)

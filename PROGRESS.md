@@ -207,7 +207,7 @@ sway, importer and pack 12, the dev cache already at v12).
     `p_RemovePara` / `scaleChange` / `p_AttributeChange` + the balloon's UI keys. Wings drawn
     on winged actors in the maker's view, its icons and play (`Enemy_wingcommon`, flapping
     while they move); parachutes were drawn already. One undo step per choice.
-    ⬜ multigrab selections (the game applies the choice to every selected part), the "what is
+    ✅ multigrab selections (2026-10-24), contents keep their flags · ⬜ the "what is
     inside" balloon with its dummy wings / parachute, wings on the NSMBU / 3D World models
     (their own textures; SMB1 art stands in), parts that drop wings / parachute with their
     other form (vtables not resolved), winged Bill Blasters in play
@@ -228,7 +228,9 @@ sway, importer and pack 12, the dev cache already at v12).
 - 🔄 Edit any course: the open row of the Course World / Coursebot lists has "Make" (the co-op
   button's slot, the Coursebot's word, the glove icon) → the maker; someone else's course (a
   code whose maker isn't the signed-in player) saves as a new Coursebot course with "based on
-  <code> by <maker>" in its description, and so uploads ✅ · TGRCode courses ⬜
+  <code> by <maker>" in its description, and so uploads ✅ · TGRCode courses ✅ (the hosts'
+  `course_data` downloads through Course World's backend, as play does; checked: a live TGRCode
+  course downloaded, decrypted and parsed through it)
 - ✅ Coursebot screens `Lcl_CourseList_00` / `Lcl_CourseListContents_00` /
   `Lcl_CourseInfoWindow_00`: 120 My Courses slots with names and pictures (the start view drawn
   from the engine's sprites), Downloaded Courses (the library's others), the course window (Make,

@@ -942,11 +942,11 @@ impl Host for FfiHost {
     fn course_data(&mut self, source: &Source) -> Result<Vec<u8>, String> {
         let bytes = match source {
             Source::Library(path) => std::fs::read(path).map_err(|e| format!("{path}: {e}"))?,
+            // Course World's source: TGRCode (decrypted with the pack's key table) or the
+            // course server, as playing it does
             Source::Server(code) => {
-                let server = self.server.clone().ok_or("no course server")?;
-                mmk_online::Client::new(server)
-                    .download(code)
-                    .map_err(|e| e.to_string())?
+                let key_table = self.key_table();
+                self.backend.download(code, || key_table)?
             }
         };
         crate::decode_course_data(&bytes, Some(self.assets())).map(|(d, _)| d)
