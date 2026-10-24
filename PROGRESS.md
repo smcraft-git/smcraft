@@ -33,8 +33,13 @@ sway, importer and pack 12, the dev cache already at v12).
   desert night as day), captures of the track tiles in play and of NSMBU / 3D World wings (the mesh
   planner maps `M1_Enemy_wingcommon` to `<style>_Enemy_wingcommon`), a look at Water Level mode
   and custom scroll in the recomp (`research/tools/maker-look`: touch taps / drags by script).
-- **Agent queue** (when a helper slot frees): the Super Worlds 3D map (MyWorld models, point
-  icons, ghosts); SMM1 UI sounds (Wii U BFSAR / BFWAV import) for the SMM1-look 100 Mario.
+- **Agent queue** (when a helper slot frees): ~~the Super Worlds 3D map~~ (agent running); the
+  Cursed Key (95 with 0x4, `KeyCurse`) and Phanto (`MapObjKamen`, v3.0.3: states registered in
+  0x71013baa90 — Wait 0x71013bb630/6d0 (100 f at an offset), WarpWait bb770/810 (60 f), Attack
+  bb990/bbbc0 (the swoop: angle words +0x628/+0x630, radius +0x634 = 128, speed 1 ↔ 3), Leave
+  bc610/bc7c0, DieWait/FallCastle; `PlayerKeyChain_CurseModel` 0x7101583a40) — the last coverage
+  blocker in a new TGRCode sample (84 / 85); SMM1 UI sounds (Wii U BFSAR / BFWAV import) for the
+  SMM1-look 100 Mario.
 - **Waiting on the owner:** the SMCraft app on Nextendo's portal (public client / PKCE, scopes
   `identity game.matchmaking`, redirect `http://127.0.0.1:47614/callback`) and its client ID; the
   game-server access key — (a) read from the player's own dump at import (recommended) or (b) one
