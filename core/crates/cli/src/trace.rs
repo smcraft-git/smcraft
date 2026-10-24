@@ -153,7 +153,7 @@ pub fn run_all(course: &[u8], script: &[Input], start: &Start) -> Result<(String
 // Physics test courses
 
 pub const STYLES: [&str; 5] = ["M1", "M3", "MW", "WU", "3W"];
-pub const KINDS: [&str; 26] = [
+pub const KINDS: [&str; 27] = [
     "flat",
     "wall",
     "slope",
@@ -180,10 +180,11 @@ pub const KINDS: [&str; 26] = [
     "mushstart",
     "cpipev",
     "cpiped",
+    "slopejoins",
 ];
 
 /// Kinds made in SMB1 only (the terrain they test is the same in every style).
-const M1_ONLY: [&str; 2] = ["slopejoin", "mushstart"];
+const M1_ONLY: [&str; 3] = ["slopejoin", "mushstart", "slopejoins"];
 /// Kinds made in 3D World only (clear pipes are a 3D World part).
 const W3_ONLY: [&str; 4] = ["cpipe", "cpipeg", "cpipev", "cpiped"];
 
@@ -226,7 +227,7 @@ pub fn build_course(name: &str) -> Result<Vec<u8>, String> {
     };
     // floor height in tiles: the game rejects a 3D World course with start height 1
     // (slopejoin: the start height of the course it copies)
-    let base: i32 = if style == "3W" || kind == "slopejoin" {
+    let base: i32 = if style == "3W" || kind == "slopejoin" || kind == "slopejoins" {
         2
     } else {
         1
@@ -531,6 +532,58 @@ pub fn build_course(name: &str) -> Result<Vec<u8>, String> {
             let slot = e.clear_pipes().last().map(|p| p.0).ok_or("no pipe")?;
             e.draw_clear_pipe(slot, mmk_editor::clearpipe::PipeEnd::End, (8, 10))
                 .map_err(err)?;
+        }
+        "slopejoins" => {
+            // steep slopes beside ground as `slopejoin`'s gentle ones (an open pit under each, the
+            // 5-high floor reached by a steep ramp): rising 3×2 at x 16 with ground above the low
+            // cap and under it; rising 5×4 at x 28 (the same); falling 3×2 at x 44 (the low cap
+            // on the right, ground above it and under it); rising 3×2 at x 56 with no ground above
+            // the cap (the control)
+            let rise = mmk_editor::DEFAULT_FLAGS;
+            let fall = mmk_editor::DEFAULT_FLAGS | (1 << 20);
+            let pit = |e: &mut Editor, x0: i32, x1: i32, below: i32| {
+                for x in x0..=x1 {
+                    for y in 0..below {
+                        e.erase_ground(x, y);
+                    }
+                }
+            };
+            floor(&mut e, 0, len - 1)?;
+            for x in 12..len - 11 {
+                for y in 2..=4 {
+                    e.paint_ground(x, y).map_err(err)?;
+                }
+            }
+            pit(&mut e, 7, 11, 2);
+            for x in 7..=11 {
+                e.paint_ground(x, 0).map_err(err)?;
+            }
+            e.place_sized(88, 7, 1, 5, 4, rise).map_err(err)?;
+            for (x, w, h, rising, above) in [
+                (16, 3, 2, true, true),
+                (28, 5, 4, true, true),
+                (44, 3, 2, false, true),
+                (56, 3, 2, true, false),
+            ] {
+                let cap = if rising { x } else { x + w - 1 };
+                pit(&mut e, x, x + w - 1, 5);
+                for y in 0..=2 {
+                    e.paint_ground(cap, y).map_err(err)?;
+                }
+                if above {
+                    e.paint_ground(cap, 4).map_err(err)?;
+                }
+                e.place_sized(88, x, 3, w as u8, h as u8, if rising { rise } else { fall })
+                    .map_err(err)?;
+                if h > 2 {
+                    // the 5×4's top runs on 2 tiles higher: a step down back to the floor
+                    for xx in x + w..x + w + 3 {
+                        for y in 5..3 + h {
+                            e.paint_ground(xx, y).map_err(err)?;
+                        }
+                    }
+                }
+            }
         }
         "cpiped" => {
             // a clear pipe from a downward mouth 3 tiles over the floor at x 7–8 (in with Up held

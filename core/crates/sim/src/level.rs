@@ -1752,32 +1752,34 @@ impl Level {
                         }
                     }
                     lvl.draw_slope(&slope);
-                    // a ground tile on the low end cap joins the gentle slope's first step to the
-                    // ground: its two diagonal cells beside that tile are full solids, the
-                    // diagonal starts a step later [obs: Ryujinx traces W_3049200 frame 374 and
-                    // X_slopejoin (4×2 and 6×3, rising and falling; the step's collider is
-                    // 0x10100a11, type 0x11 sub 10); the slope's cell attribute is replaced
-                    // when the art layer has a non-slope piece there (v3.0.3 0x7100db8df0), the
-                    // auto-tiler's choice. Ground only under the cap, or under the high cap,
-                    // changes nothing; steep slopes not traced [?]]
+                    // a ground tile on the low end cap joins the slope's first step to the
+                    // ground: its diagonal cells beside that tile (a gentle slope's two, a steep
+                    // one's one) are full solids, the diagonal starts a step later [obs: Ryujinx
+                    // traces W_3049200 frame 374, X_slopejoin (gentle 4×2 and 6×3, rising and
+                    // falling) and X_slopejoins (steep 3×2 and 5×4, rising and falling); the
+                    // step's collider is type 0x11 / 0x12 sub 10); the slope's cell attribute is
+                    // replaced when the art layer has a non-slope piece there (v3.0.3
+                    // 0x7100db8df0, steep v1.0.0 0x7100392fd0), the auto-tiler's choice. Ground
+                    // only under the cap, or under the high cap, changes nothing]
                     let cap_x = if rising { tx } else { tx + w - 1 };
-                    let joined = o.id == 87
+                    let step = if o.id == 87 { 2 } else { 1 };
+                    let joined = matches!(o.id, 87 | 88)
                         && hgt >= 2
-                        && w >= 4
+                        && w >= step + 2
                         && area
                             .ground
                             .iter()
                             .any(|g| g.x as i32 == cap_x && g.y as i32 == ty + 1);
                     if joined {
-                        let pair = if rising { tx + 1 } else { tx + w - 3 };
-                        for x in pair..pair + 2 {
+                        let first = if rising { tx + 1 } else { tx + w - 1 - step };
+                        for x in first..first + step {
                             lvl.set(x, ty + 1, Cell::Solid);
                         }
                         if hgt > 2 {
                             lvl.slopes.push(Slope {
-                                left: if rising { tx + 2 } else { tx },
+                                left: if rising { tx + step } else { tx },
                                 bottom: ty + 1,
-                                width: w - 2,
+                                width: w - step,
                                 height: hgt - 1,
                                 ..slope
                             });
