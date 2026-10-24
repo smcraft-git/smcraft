@@ -482,6 +482,13 @@ pub trait Host {
     }
     /// Move the maker's still view: its bottom-left at (`x`, `y`) world px.
     fn edit_camera(&mut self, _x: f32, _y: f32) {}
+    /// Course Maker music: `Some((style, theme))` plays the maker's track of that style and
+    /// theme (`BGM_<Theme>_Edit` of `CourseSceneBGM_<style>`; kept playing if it already is),
+    /// None stops the music (test play, leaving the maker).
+    fn edit_music(&mut self, _track: Option<(&str, u8)>) {}
+    /// A Course Maker sound: SLink user `user` (a part's `<style>_Edit<Part>`) plays `key`
+    /// (`set`, `drag`, `eraser`, `invalid`, `partsMax`, `Block_in` …) in course style `style`.
+    fn edit_sound(&mut self, _style: &str, _user: &str, _key: &str) {}
     /// Course Maker test play: load raw course data `course` into the engine to play, the player
     /// starting in area `area` at `start` (world px, feet; None: the course's start).
     fn test_play(

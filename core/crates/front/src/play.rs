@@ -1147,6 +1147,9 @@ pub(crate) mod tests {
         pub saved: Vec<(Option<String>, Vec<u8>)>,
         pub tests: Vec<(usize, Option<[f32; 2]>)>,
         pub courses: HashMap<String, Vec<u8>>,
+        /// Course Maker music asked for (None: stop) and edit sounds played (user, key).
+        pub music: Vec<Option<(String, u8)>>,
+        pub edit_sounds: Vec<(String, String)>,
     }
 
     impl Host for MockHost {
@@ -1224,6 +1227,12 @@ pub(crate) mod tests {
         fn edit_show(&mut self, _: &[u8], _: usize) -> bool {
             self.shows += 1;
             true
+        }
+        fn edit_music(&mut self, track: Option<(&str, u8)>) {
+            self.music.push(track.map(|(s, t)| (s.to_string(), t)));
+        }
+        fn edit_sound(&mut self, _style: &str, user: &str, key: &str) {
+            self.edit_sounds.push((user.to_string(), key.to_string()));
         }
         fn test_play(
             &mut self,

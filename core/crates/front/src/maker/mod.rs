@@ -257,6 +257,10 @@ pub struct MakerFlow {
     /// The host draws the course.
     pub shown: bool,
     test: Option<Test>,
+    /// Edit sounds to play this tick: (course object id, key) (research/specs/maker.md C9).
+    pub sounds: Vec<(i16, &'static str)>,
+    /// The music last asked of the host (None: nothing asked yet, so ask).
+    music_sent: Option<Option<(String, u8)>>,
     /// The maker's Mario: where test play starts (None: the course start); area.
     pub mario: Option<(usize, [f32; 2])>,
     /// Part pictures by (style, part): the UI cache texture name, None when the host had none.
@@ -335,6 +339,8 @@ impl MakerFlow {
             dirty: true,
             shown: false,
             test: None,
+            sounds: Vec::new(),
+            music_sent: None,
             mario: None,
             icons: Default::default(),
             textures: view::TEXTURES
@@ -648,6 +654,7 @@ impl MakerFlow {
             self.place_slider();
             self.show(cx.host);
         }
+        self.play_sounds(cx.host);
         self.held = input.ui.held;
         self.down_was = input.down;
         self.alt_was = input.alt;
@@ -688,10 +695,11 @@ impl MakerFlow {
                 Ok(()) => {
                     self.selection = Some(Rect::new(self.cur.0, self.cur.1, r.w, r.h));
                     self.changed();
+                    self.sound(7, "set");
                 }
                 Err(e) => {
                     self.editor.discard_checkpoint();
-                    refuse(cx, &self.ui, &e);
+                    self.refuse(cx, 7, &e);
                 }
             }
         }
@@ -792,6 +800,7 @@ impl MakerFlow {
             None if place_pressed && multi => {
                 self.selection = None;
                 self.drag = Some(Drag::Select { from: self.cur });
+                self.sound(7, "frame");
             }
             None if self
                 .selection
@@ -803,12 +812,14 @@ impl MakerFlow {
                     self.editor.checkpoint();
                     if self.editor.delete_rect(r) > 0 {
                         self.changed();
+                        self.sound(7, "eraser");
                     } else {
                         self.editor.discard_checkpoint();
                     }
                     self.selection = None;
                 } else {
                     self.drag = Some(Drag::MoveSelection { grab: self.cur });
+                    self.sound(7, "drag");
                 }
             }
             None => {
@@ -881,10 +892,11 @@ impl MakerFlow {
                             Ok(()) => {
                                 self.selection = Some(Rect::new(r.x + dx, r.y + dy, r.w, r.h));
                                 self.changed();
+                                self.sound(7, "set");
                             }
                             Err(e) => {
                                 self.editor.discard_checkpoint();
-                                refuse(cx, &self.ui, &e);
+                                self.refuse(cx, 7, &e);
                             }
                         }
                     }
@@ -1022,6 +1034,48 @@ impl MakerFlow {
         self.update_timer();
     }
 
+    /// Part `part` makes edit sound `key` this tick.
+    fn sound(&mut self, part: i16, key: &'static str) {
+        self.sounds.push((part, key));
+    }
+
+    /// The tick's edit sounds, and the music the maker wants: its track of the style and the
+    /// area's theme while editing (a theme or style switch changes it), none in test play
+    /// (research/specs/maker.md C9).
+    fn play_sounds(&mut self, host: &mut dyn Host) {
+        let style = self.style();
+        for (part, key) in std::mem::take(&mut self.sounds) {
+            let user = format!("{style}_Edit{}", catalog::edit_user(part));
+            host.edit_sound(&style, &user, key);
+        }
+        let want = (self.mode != Mode::Test).then(|| (style, self.editor.theme().0));
+        if self.music_sent.as_ref() != Some(&want) {
+            host.edit_music(want.as_ref().map(|(s, t)| (s.as_str(), *t)));
+            self.music_sent = Some(want);
+        }
+    }
+
+    /// The maker is left (another screen comes): its music stops; it starts again when the
+    /// maker comes back.
+    pub fn leave(&mut self, host: &mut dyn Host) {
+        if self.music_sent.as_ref().is_some_and(|m| m.is_some()) {
+            host.edit_music(None);
+        }
+        self.music_sent = None;
+    }
+
+    /// A refused edit: the toast for a full course or a part at its limit, and the refusal's
+    /// sound.
+    fn refuse(&mut self, cx: &mut crate::Cx, part: i16, e: &EditError) {
+        refuse(cx, &self.ui, e);
+        let key = if matches!(e, EditError::Limit(_) | EditError::Full) {
+            "partsMax"
+        } else {
+            "invalid"
+        };
+        self.sound(part, key);
+    }
+
     fn undo(&mut self) {
         if self.editor.undo() {
             self.changed();
@@ -1069,9 +1123,11 @@ impl MakerFlow {
                 return;
             }
             if let Tool::Part(p) = self.tool()
-                && self.put_into(i, p)
+                && let Some(key) = self.put_into(i, p)
             {
                 self.changed();
+                let into = self.editor.object(i).map_or(7, |o| o.id);
+                self.sound(into, key);
                 self.drag = Some(Drag::Place {
                     last: self.cur,
                     changed: true,
@@ -1082,6 +1138,8 @@ impl MakerFlow {
                 index: i,
                 from: (tx, ty),
             });
+            let id = self.editor.object(i).map_or(7, |o| o.id);
+            self.sound(id, "drag");
             return;
         }
         self.editor.checkpoint();
@@ -1115,15 +1173,28 @@ impl MakerFlow {
             *changed |= ok;
         }
         match r {
-            Ok(()) => self.changed(),
-            Err(e) if first => refuse(cx, &self.ui, &e),
+            Ok(()) => {
+                self.changed();
+                self.sound(tool.part(), "set");
+                // the part's voice as it lands [inf: the database's `voice` of each part]
+                if first {
+                    self.sound(tool.part(), "voice");
+                }
+            }
+            Err(e) if first => self.refuse(cx, tool.part(), &e),
             Err(_) => {}
         }
     }
 
     fn erase_here(&mut self) {
         let (tx, ty) = self.cur;
+        let part = self
+            .editor
+            .object_at(tx, ty)
+            .and_then(|i| self.editor.object(i))
+            .map_or(7, |o| o.id);
         if self.editor.erase(tx, ty) {
+            self.sound(part, "eraser");
             if let Some(Drag::Erase { changed }) = &mut self.drag {
                 *changed = true;
             }
@@ -1161,10 +1232,12 @@ impl MakerFlow {
             .editor
             .object_at(self.cur.0, self.cur.1)
             .filter(|&t| t != index)
-            && self.put_into(t, o.id)
+            && let Some(key) = self.put_into(t, o.id)
         {
+            let into = self.editor.object(t).map_or(7, |x| x.id);
             self.editor.erase_object(index);
             self.changed();
+            self.sound(into, key);
             return;
         }
         if dx == 0 && dy == 0 {
@@ -1174,38 +1247,47 @@ impl MakerFlow {
             self.editor.toggle_flags(index, 0x4);
             if self.editor.object(index).is_some_and(|n| n.flags != before) {
                 self.changed();
+                self.sound(o.id, "p_AttributeChange");
             } else {
                 self.editor.discard_checkpoint();
+                self.sound(o.id, "set");
             }
             return;
         }
         let r = mmk_editor::parts::footprint(&o);
         match self.editor.move_rect(r, dx, dy) {
-            Ok(()) => self.changed(),
+            Ok(()) => {
+                self.changed();
+                self.sound(o.id, "set");
+            }
             Err(e) => {
                 self.editor.discard_checkpoint();
-                refuse(cx, &self.ui, &e);
+                self.refuse(cx, o.id, &e);
             }
         }
     }
 
     /// Part `part` goes into (or onto) the placed part `i`: a container's contents (blocks,
     /// Bill Blasters, Lakitu, trees, checkpoints, a pipe's), or a Super Mushroom makes it big
-    /// [inf: as dropping an item on a part does in the game]. True if something changed.
-    fn put_into(&mut self, i: usize, part: i16) -> bool {
-        let Some(o) = self.editor.object(i).cloned() else {
-            return false;
-        };
+    /// [inf: as dropping an item on a part does in the game]. The edit sound key if something
+    /// changed (`Block_in`, `Dokan_in` …, `scaleChange`).
+    fn put_into(&mut self, i: usize, part: i16) -> Option<&'static str> {
+        let o = self.editor.object(i).cloned()?;
+        let key = catalog::put_in_key(o.id, part);
         if o.id == 9 {
-            return self.editor.put_in_pipe(i, part).is_ok();
+            return self.editor.put_in_pipe(i, part).is_ok().then_some(key);
         }
         if o.child_id != part && mmk_editor::rules::check_child(o.id, part).is_ok() {
-            return self.editor.try_set_child(i, part, DEFAULT_FLAGS).is_ok();
+            return self
+                .editor
+                .try_set_child(i, part, DEFAULT_FLAGS)
+                .is_ok()
+                .then_some(key);
         }
         if part == 20 && mmk_editor::parts::caps(o.id).big && !o.is_big() {
-            return self.editor.toggle_big(i).is_ok();
+            return self.editor.toggle_big(i).is_ok().then_some("scaleChange");
         }
-        false
+        None
     }
 
     /// The rectangle the multigrab shows: the one being drawn, else the selection (moved with
@@ -1506,6 +1588,11 @@ impl MakerFlow {
             Some((a, p)) => (a, Some(p)),
             None => (0, None),
         };
+        // the maker's music stops before the test play's own starts
+        if self.music_sent.as_ref().is_some_and(|m| m.is_some()) {
+            cx.host.edit_music(None);
+            self.music_sent = Some(None);
+        }
         if let Err(e) = cx.host.test_play(&bytes, area, at) {
             cx.toast(&e);
             return;

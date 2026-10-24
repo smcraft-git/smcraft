@@ -121,7 +121,19 @@ impl Game {
     /// The front end's maker: show `course` still, area `area` (the player hidden outside the
     /// main area).
     pub fn show_edit(&mut self, course: Course, area: usize) {
-        self.set_course(Some(course));
+        // no course director: the maker plays its own music and sounds (`Host::edit_music`);
+        // the sound output stays for the test play
+        let audio = self.session.audio.clone();
+        if !self.edit_view
+            && let Some(a) = &audio
+        {
+            // back from a test play: its sounds stop
+            a.send(mmk_audio::Command::StopAll);
+        }
+        self.session = Session::new(Some(course));
+        self.session.audio = audio;
+        self.resolver.reset();
+        self.planner.reset();
         self.edit_view = true;
         let w = &mut self.session.world;
         w.show_area(area);

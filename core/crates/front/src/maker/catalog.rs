@@ -243,6 +243,153 @@ pub fn labels(x: &Entry, style: &str) -> [String; 2] {
     [format!("{style}_{}", x.label), x.label.to_string()]
 }
 
+/// The Course Maker's sound user of course object `part`: `<style>_Edit<this>` (the parts'
+/// edit sounds, research/specs/maker.md C9). Matched from the database's user names to the
+/// object ids [inf for the less obvious ones: one-way wall, arrow sign, dotted-line and
+/// blinking blocks]; a part without its own user takes the ground's (the editor's common keys
+/// — `set`, `drag`, `eraser`, `invalid`, `partsMax`, `Block_in` … — sound the same for every
+/// part, only the voices differ).
+pub fn edit_user(part: i16) -> &'static str {
+    match part {
+        0 => "Kuribo",
+        1 => "Nokonoko",
+        2 => "Pakkun",
+        3 => "HammerBros",
+        4 => "RengaBlock",
+        5 => "HatenaBlock",
+        6 => "HardBlock",
+        8 => "Coin",
+        9 | 93 => "Dokan",
+        10 => "JumpStep",
+        11 => "Lift",
+        12 => "Dossun",
+        13 => "KillerHoudai",
+        14 => "GroundMushroom",
+        15 => "Bombhei",
+        16 | 71 => "GroundBox",
+        17 => "Bridge",
+        18 => "PSwitch",
+        19 => "PowBlock",
+        20 => "SuperKinoko",
+        21 => "ChikuwaBlock",
+        22 => "KumoBlock",
+        23 => "OnpuBlock",
+        24 => "FireBar",
+        25 => "Togezo",
+        26 => "GroundGoal",
+        27 => "GoalPole",
+        28 => "Met",
+        29 => "ClearBlock",
+        30 => "Jugem",
+        31 => "JugemCloud",
+        32 => "MagnumKiller",
+        33 => "1upKinoko",
+        34 => "FireFlower",
+        35 => "SuperStar",
+        36 => "YouganLift",
+        37 => "GroundStart",
+        38 => "StartSignBoard",
+        39 => "Kameck",
+        40 => "Togemet",
+        41 => "Teresa",
+        42 => "KoopaClown",
+        43 | 110 => "Toge",
+        44 => "SpecialItem",
+        45 => "KutsuKuribo",
+        46 => "Karon",
+        47 => "SenkanHoudai",
+        48 => "Gesso",
+        49 => "CastleBridge",
+        50 => "Hopper",
+        51 => "Pyonchu",
+        52 => "Hanachan",
+        53 | 94 => "BeltConveyor",
+        54 => "Burner",
+        55 => "Door",
+        56 => "Pukupuku",
+        57 => "BlackPakkun",
+        58 => "Poo",
+        59 => "Rail",
+        60 => "Bubble",
+        61 => "Wanwan",
+        62 => "Koopa",
+        63 => "IceBlock",
+        64 => "Tsuta",
+        65 => "Hacchin",
+        66 => "AirSignBoard",
+        67 => "HalfHitWall",
+        68 => "Saw",
+        69 => "Player",
+        70 => "Coin10",
+        72 => "KoopaCar",
+        74 => "Gabon",
+        76 => "Tornado",
+        77 => "Bunbun",
+        78 => "Sambo",
+        79 => "PBlock",
+        80 => "DashBlock",
+        81 => "KinokoFunny",
+        82 => "Marumaru",
+        83 => "TogeKonbo",
+        84 => "SnakeBlock",
+        85 => "OrbitBlock",
+        86 => "UganFish",
+        89 => "AutoScrollCamera",
+        90 => "CheckpointFlag",
+        91 => "Seesaw",
+        92 => "PinkCoin",
+        95 => "Key",
+        96 => "Arihei",
+        97 => "WarpBox",
+        98 => "KoopaJr",
+        99 => "OnOffSwitch",
+        100 | 108 => "RedBluePanel",
+        101 => "LavaEditor",
+        102 => "Choropoo",
+        103 => "FishBone",
+        104 => "SunAndMoon",
+        105 => "SwingCrane",
+        106 => "BellTree",
+        107 => "NobinobiPakkun",
+        111 => "MechaKoopa",
+        112 => "WoodBox",
+        113 => "KinokoTrampoline",
+        114 => "Fugumannen",
+        116 => "SuperHammer",
+        117 => "Donketsu",
+        119 => "BikkuriBlock",
+        120 => "Lemmy",
+        121 => "Morton",
+        122 => "Larry",
+        123 => "Wendy",
+        124 => "Iggy",
+        125 => "Roy",
+        126 => "Ludwig",
+        127 => "HeaddressHoudai",
+        128 => "HeaddressPropeller",
+        129 => "HeaddressKuribo",
+        130 => "HeaddressKiller",
+        131 => "HeaddressRedPow",
+        132 => "OnOffTrampoline",
+        _ => "Ground",
+    }
+}
+
+/// The edit sound key of part `item` going into placed part `into` (research/specs/maker.md
+/// C9): into a pipe, a Bill Blaster, a Lakitu, a Clown Car, a Lakitu's Cloud, else a block
+/// (and the other containers); a key into a part has its own.
+pub fn put_in_key(into: i16, item: i16) -> &'static str {
+    match (into, item) {
+        (9, _) => "Dokan_in",
+        (_, 95) => "Key_In",
+        (13 | 32, _) => "Killer_in",
+        (30, _) => "Jugem_in",
+        (42, _) => "Clown_in",
+        (31, _) => "Cloud_in",
+        _ => "Block_in",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -262,6 +409,14 @@ mod tests {
         }
         for t in DEFAULT_PALETTE {
             assert!(entry(t).is_some(), "{t:?}");
+        }
+        // every catalog part has its own edit sound user (ground and slopes: the ground's)
+        for x in ENTRIES {
+            let p = x.tool.part();
+            assert!(
+                matches!(p, 7 | 87 | 88) || edit_user(p) != "Ground",
+                "{x:?}"
+            );
         }
         let p = pages(&of(Category::Enemies, "M1"), 13);
         assert!(p.len() >= 2 && p.iter().all(|q| q.len() <= 13));

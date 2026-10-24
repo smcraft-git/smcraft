@@ -727,3 +727,64 @@ fn multigrab_selects_moves_copies_and_erases() {
     assert!((30..33).all(|x| m.editor.object_at(x, 4).is_none()));
     assert!(m.editor.object_at(21, 6).is_some(), "the first group stays");
 }
+
+#[test]
+fn the_maker_plays_its_music_and_the_parts_sounds() {
+    let (mut host, mut saves) = (MockHost::default(), Saves::default());
+    let mut m = maker(&mut host, &mut saves, MakerStart::New("M1".into()));
+    run(&mut m, &mut host, &mut saves, idle());
+    run(&mut m, &mut host, &mut saves, idle());
+    let edit = |s: &str, t: u8| Some((s.to_string(), t));
+    assert_eq!(
+        host.music,
+        [edit("M1", 0)],
+        "the style's edit track, asked once"
+    );
+    let sounds = |host: &mut MockHost| -> Vec<String> {
+        host.edit_sounds
+            .drain(..)
+            .map(|(u, k)| format!("{u}:{k}"))
+            .collect()
+    };
+    // a Goomba goes down
+    m.slot = m.palette.iter().position(|&t| t == Tool::Part(0)).unwrap();
+    m.cur = (12, 3);
+    run(&mut m, &mut host, &mut saves, press(Buttons::CONFIRM));
+    run(&mut m, &mut host, &mut saves, idle());
+    assert_eq!(
+        sounds(&mut host),
+        ["M1_EditKuribo:set", "M1_EditKuribo:voice"]
+    );
+    // picked up, then dropped two tiles on
+    run(&mut m, &mut host, &mut saves, press(Buttons::CONFIRM));
+    assert_eq!(sounds(&mut host), ["M1_EditKuribo:drag"]);
+    m.cur = (14, 3);
+    run(&mut m, &mut host, &mut saves, idle());
+    assert_eq!(sounds(&mut host), ["M1_EditKuribo:set"]);
+    // a Super Mushroom on it makes it big
+    m.slot = m.palette.iter().position(|&t| t == Tool::Part(20)).unwrap();
+    run(&mut m, &mut host, &mut saves, press(Buttons::CONFIRM));
+    run(&mut m, &mut host, &mut saves, idle());
+    assert_eq!(sounds(&mut host), ["M1_EditKuribo:scaleChange"]);
+    // erased
+    run(&mut m, &mut host, &mut saves, press(Buttons::BACK));
+    run(&mut m, &mut host, &mut saves, idle());
+    assert_eq!(sounds(&mut host), ["M1_EditKuribo:eraser"]);
+    // a theme switch changes the track
+    m.editor.set_theme(2);
+    run(&mut m, &mut host, &mut saves, idle());
+    assert_eq!(host.music.last(), Some(&edit("M1", 2)));
+    // test play stops it (before the course's own music starts); back, it plays again
+    run(&mut m, &mut host, &mut saves, keys(keys::PLAY_HERE));
+    assert!(m.testing());
+    assert_eq!(host.music.last(), Some(&None));
+    let mut i = idle();
+    i.play = true;
+    run(&mut m, &mut host, &mut saves, i);
+    assert!(!m.testing());
+    assert_eq!(host.music.last(), Some(&edit("M1", 2)));
+    // leaving the maker stops it
+    let n = host.music.len();
+    with(&mut host, &mut saves, |cx| m.leave(cx.host));
+    assert_eq!(host.music[n..], [None]);
+}
