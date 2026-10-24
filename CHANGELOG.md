@@ -49,13 +49,17 @@ SMCraft is back in development (it was archived in October 2026).
   condition; the Course Maker's music and part sounds (moving, stacking, wings, the start and
   goal).
 - **Course Maker**: wings and parachutes (hold a part still for its balloon, on a whole
-  selection too), stacking enemies, TGRCode courses open in the maker, the Swift app's maker
-  keys.
+  selection too), stacking enemies, tracks, pipes turned by their mouth, the parts the part
+  window lacked (Spike, Pokey, Piranha Creeper, Mechakoopa, the Koopalings, P Block, Dash
+  Block, the SMB2 Mushroom, the wearables, the ON/OFF Trampoline), TGRCode courses open in the
+  maker, the Swift app's maker keys.
+- **Android**: Bluetooth controllers' buttons.
 - **Stacked enemies** move together as in the game.
 - **Endless**: the map's "New High Score!" panel.
 - **Physics**: 352 player traces recorded in the game match frame by frame (walls, water,
   slopes, items, the raccoon tail and SMW cape, enemies).
 - **Pictures closer to the game**: the start sign, the 2D styles' drop shadow, animated
   ? blocks, bricks and coins, SMB1's black daytime ghost house, night darkness, every style's
-  own backdrops, the airship's sway, 3D World's sky, lighting and fogs, Mini Mario.
+  own backdrops, the airship's sway, NSMBU's and 3D World's colours, lights, skies and fogs as
+  the game's shaders make them, Mini Mario.
 - Release packages for Windows, Linux (x64, arm64), macOS, Android and the web.
