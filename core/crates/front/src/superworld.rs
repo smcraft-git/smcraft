@@ -5,11 +5,13 @@
 //!   TGRCode's picked-up Super Worlds when Course World is on TGRCode (the `super_worlds` /
 //!   `super_world` online calls; the host decrypts the map with the pack's world-map table);
 //! - the title `MyWEdit_WorldPlayTitle_00` (New Game, Continue when a play is saved);
-//! - the map: the 7 × 4 grid of the current world drawn flat (land, water, roads, the points,
-//!   pipes and Toad Houses, Mario's icon) under the game's HUD `MyWEdit_PlayScene_00` (WORLD n,
-//!   lives, coins) with the course-name balloon `MyWEdit_CourseBalloon_00` and the "Play" prompt
-//!   `MyWEdit_PlayBalloonPos_00`. The game draws its maps in 3D (`MyWorld_Model.pack`); the flat
-//!   map and its colours are ours [departure];
+//! - the map: the 7 × 4 grid of the current world drawn with the game's map models
+//!   ([`crate::swmap`]: the theme's backdrop and field, the road pieces, the point models by icon
+//!   and state, pipes, Toad Houses, the walking player) under the game's HUD
+//!   `MyWEdit_PlayScene_00` (WORLD n, lives, coins) with the course-name balloon
+//!   `MyWEdit_CourseBalloon_00` and the "Play" prompt `MyWEdit_PlayBalloonPos_00`. An import
+//!   without the map models gets a flat map in our colours [departure]. Row 0 of a world is
+//!   its bottom row (spec §7);
 //! - a course: [`CoursePlay`] with the world's lives (the card's lives line, a death retries the
 //!   course with one life less, the last one ends in the game over screen);
 //! - the end: `MyW_Ending_00` after the last world's goal.
@@ -23,6 +25,8 @@
 use mmk_modes::superworld::{
     self as sw, ClearResult, EAST, NORTH, Progress, SOUTH, Spot, SuperWorld, SwCourse, WEST,
 };
+use std::rc::Rc;
+
 use mmk_ui::Quad;
 use serde_json::json;
 
@@ -35,6 +39,7 @@ use crate::play::{CoursePlay, PlayEvent, PlayInput, RunLink};
 use crate::screens::{CardInfo, CourseScreens};
 use crate::smm1::RunCardInfo;
 use crate::sound::Event;
+use crate::swmap::{self, MapArt, MapView};
 use crate::{Cx, DrawItem, Go, push_layout};
 
 const PLANETS: &str = "Nwk_MyWTitle_00";
@@ -175,15 +180,12 @@ const PALETTE: [(Rgba, Rgba, Rgba, Rgba); 8] = [
     ),
 ];
 
-/// Cell size of the drawn map (layout units) and the grid's centre.
-const CELL: f32 = 128.0;
-const GRID_CENTER: [f32; 2] = [0.0, -40.0];
+/// Cell size of the drawn map (layout units).
+const CELL: f32 = swmap::CELL * swmap::SCALE;
 
+/// Layout position of cell (x, y)'s middle (row 0 at the bottom).
 fn cell_center(x: f32, y: f32) -> [f32; 2] {
-    [
-        GRID_CENTER[0] + (x - 3.0) * CELL,
-        GRID_CENTER[1] - (y - 1.5) * CELL,
-    ]
+    swmap::to_layout(swmap::cell_world(x, y))
 }
 
 // MARK: the run (lives, clears) as a course sees it
@@ -195,6 +197,8 @@ struct SwRun {
     course: Option<(usize, usize)>,
     /// Set by a clear; applied when the course screen closes.
     cleared: Option<usize>,
+    /// The course order index cleared last, until the map has shown its point turn cleared.
+    fresh_clear: Option<usize>,
     mode_line: String,
 }
 
@@ -629,7 +633,15 @@ struct MapScene {
     walk: Vec<(i32, i32)>,
     walk_from: (f32, f32),
     walk_start: i32,
+    /// The last direction walked (dx, dy; y up) and the tick the player stopped.
+    facing: (i32, i32),
+    stopped: i32,
     mario_tex: Option<u32>,
+    /// The game's map models (None: the flat map).
+    art: Option<Rc<MapArt>>,
+    character: usize,
+    /// A course cleared just before: its point plays ToCleared from the map's start.
+    fresh_clear: Option<usize>,
 }
 
 enum MapEvent {
@@ -640,7 +652,7 @@ enum MapEvent {
 }
 
 impl MapScene {
-    fn new(ui: &Ui) -> Self {
+    fn new(ui: &Ui, art: Option<Rc<MapArt>>, character: usize, fresh_clear: Option<usize>) -> Self {
         let mut hud = ui.layout(HUD);
         if let Some(h) = &mut hud {
             h.play("In", 0);
@@ -673,7 +685,12 @@ impl MapScene {
             walk: Vec::new(),
             walk_from: (0.0, 0.0),
             walk_start: 0,
+            facing: (0, -1),
+            stopped: 0,
             mario_tex,
+            art,
+            character,
+            fresh_clear,
         }
     }
 
@@ -704,22 +721,27 @@ impl MapScene {
             return Some(MapEvent::Quit);
         };
         if let Some(&(nx, ny)) = self.walk.first() {
+            self.facing = (nx - p.x as i32, ny - p.y as i32);
             if self.tick - self.walk_start >= WALK_TICKS {
                 self.walk_from = (nx as f32, ny as f32);
                 (p.x, p.y) = (nx as u8, ny as u8);
                 self.walk.remove(0);
                 self.walk_start = self.tick;
+                if self.walk.is_empty() {
+                    self.stopped = self.tick;
+                }
             }
             return None;
         }
+        // up the screen is the world's row + 1 (`SOUTH` in the data's naming; spec §7)
         let dir = if pressed.has(Buttons::RIGHT) {
             Some(EAST)
         } else if pressed.has(Buttons::LEFT) {
             Some(WEST)
         } else if pressed.has(Buttons::UP) {
-            Some(NORTH)
-        } else if pressed.has(Buttons::DOWN) {
             Some(SOUTH)
+        } else if pressed.has(Buttons::DOWN) {
+            Some(NORTH)
         } else {
             None
         };
@@ -727,6 +749,7 @@ impl MapScene {
             let cleared = p.clears.get(p.world).copied().unwrap_or(0);
             let route = sw::route(w, cleared, p.x as i32, p.y as i32, d);
             if !route.is_empty() {
+                self.facing = (route[0].0 - p.x as i32, route[0].1 - p.y as i32);
                 self.walk = route;
                 self.walk_from = (p.x as f32, p.y as f32);
                 self.walk_start = self.tick;
@@ -757,6 +780,35 @@ impl MapScene {
         let Some(w) = p.world_map(world) else {
             return;
         };
+        if let Some(art) = self.art.clone() {
+            let (mx, my) = self.mario_at(p);
+            let view = MapView {
+                tick: self.tick,
+                player: [mx, my],
+                walking: self.walk.first().map(|_| self.facing),
+                facing: self.facing,
+                since: self.tick - self.stopped,
+                character: self.character,
+                just_cleared: self.fresh_clear.map(|o| (o, 0)).into_iter().collect(),
+            };
+            out.push(DrawItem::Layout {
+                ui: self.ui.kind(),
+                size: [1280.0, 720.0],
+                quads: art.draw(&self.ui, world, p, &view),
+            });
+        } else {
+            self.draw_flat(out, w, p);
+        }
+        self.draw_overlays(out, world, p, prompts);
+    }
+
+    /// The map in our colours (an import without the map models) [departure].
+    fn draw_flat(
+        &mut self,
+        out: &mut Vec<DrawItem>,
+        w: &mmk_formats::smm2::world::World,
+        p: &Progress,
+    ) {
         let theme = (w.theme as usize).min(PALETTE.len() - 1);
         let (land, empty, road, sky) = PALETTE[theme];
         let mut q = vec![solid([0.0, 0.0], [1280.0, 720.0], sky)];
@@ -798,8 +850,8 @@ impl MapScene {
                 for (d, dx, dy) in [
                     (EAST, 1.0, 0.0),
                     (WEST, -1.0, 0.0),
-                    (SOUTH, 0.0, -1.0),
-                    (NORTH, 0.0, 1.0),
+                    (SOUTH, 0.0, 1.0),
+                    (NORTH, 0.0, -1.0),
                 ] {
                     if links & d != 0 {
                         let half = CELL / 4.0;
@@ -903,6 +955,19 @@ impl MapScene {
             size: [1280.0, 720.0],
             quads: q,
         });
+    }
+
+    /// The course's name above it, the prompt and the HUD.
+    fn draw_overlays(
+        &mut self,
+        out: &mut Vec<DrawItem>,
+        world: &SuperWorld,
+        p: &Progress,
+        prompts: bool,
+    ) {
+        let Some(w) = p.world_map(world) else {
+            return;
+        };
         // the course's name above it, and the prompt, when Mario stands on a course
         let here = (!self.walking() && prompts).then(|| sw::spot(w, p.x as i32, p.y as i32));
         let course = match here {
@@ -912,7 +977,7 @@ impl MapScene {
         let c = cell_center(p.x as f32, p.y as f32);
         if let (Some(course), Some(b)) = (course, &mut self.name_balloon) {
             // above the point; below it on the top row (under the HUD) [inf]
-            let below = p.y == 0;
+            let below = p.y as usize + 1 == mmk_formats::smm2::world::GRID_H;
             b.hold("Direction", if below { 1.0 } else { 0.0 });
             let dy = if below { -150.0 } else { 70.0 };
             b.set_translate("N_Pos_00", [c[0], c[1] + dy]);
@@ -1015,6 +1080,10 @@ pub struct SuperWorldFlow {
     /// Players of this run (Play Together: 2–4).
     players: u32,
     leaving: bool,
+    /// The game's map models (loaded once; None: the flat map).
+    art: Option<Rc<MapArt>>,
+    /// The player's character (the map's player model).
+    character: usize,
     /// Captures: menu presses at global UI ticks.
     pub script: Script,
 }
@@ -1062,6 +1131,12 @@ impl SuperWorldFlow {
             run: None,
             players: 1,
             leaving: false,
+            art: MapArt::load(ui).map(Rc::new),
+            character: cx
+                .host
+                .load_value("player.character")
+                .and_then(|s| s.trim().parse().ok())
+                .unwrap_or(0usize),
             script: Script::default(),
         };
         f.picks = f.local_pick().into_iter().collect();
@@ -1083,6 +1158,17 @@ impl SuperWorldFlow {
             courses: w.course_count(),
             planet: 0,
         })
+    }
+
+    /// The map scene of the run (the course cleared last turns cleared on it).
+    fn map_scene(&mut self) -> Box<MapScene> {
+        let fresh = self.run.as_mut().and_then(|r| r.fresh_clear.take());
+        Box::new(MapScene::new(
+            &self.ui,
+            self.art.clone(),
+            self.character,
+            fresh,
+        ))
     }
 
     fn show_planets(&mut self, selection: usize) {
@@ -1107,6 +1193,7 @@ impl SuperWorldFlow {
             progress,
             course: None,
             cleared: None,
+            fresh_clear: None,
         });
         if let Some(t) = TitleScene::new(&self.ui, maker.as_deref(), can_continue) {
             self.stage = Stage::Title(Box::new(t));
@@ -1151,7 +1238,7 @@ impl SuperWorldFlow {
                     self.open_world(cx, w);
                 }
             }
-            SuperWorldGo::Map => self.stage = Stage::Map(Box::new(MapScene::new(&self.ui))),
+            SuperWorldGo::Map => self.stage = Stage::Map(self.map_scene()),
             SuperWorldGo::Play => self.play(cx),
             SuperWorldGo::Ending => {
                 let c = cx
@@ -1175,13 +1262,13 @@ impl SuperWorldFlow {
             return;
         };
         let Some((order, _)) = run.progress.course_here(&run.world) else {
-            self.stage = Stage::Map(Box::new(MapScene::new(&self.ui)));
+            self.stage = Stage::Map(self.map_scene());
             return;
         };
         let w = run.progress.world;
         let Some(course) = run.world.course(w, order).cloned() else {
             cx.toast("This course isn't in the Super World any more.");
-            self.stage = Stage::Map(Box::new(MapScene::new(&self.ui)));
+            self.stage = Stage::Map(self.map_scene());
             return;
         };
         let source = if course.online {
@@ -1223,7 +1310,7 @@ impl SuperWorldFlow {
             }
             Err(e) => {
                 cx.toast(&format!("Couldn't start {}: {e}", course.name));
-                self.stage = Stage::Map(Box::new(MapScene::new(&self.ui)));
+                self.stage = Stage::Map(self.map_scene());
             }
         }
     }
@@ -1236,7 +1323,7 @@ impl SuperWorldFlow {
         let mut next = SuperWorldGo::Map;
         if let Some(order) = run.cleared.take() {
             match run.progress.clear(&run.world, order) {
-                ClearResult::Map => {}
+                ClearResult::Map => run.fresh_clear = Some(order),
                 ClearResult::WorldClear => {
                     cx.toast(&format!(
                         "{} {}!",
@@ -1471,14 +1558,39 @@ impl SuperWorldFlow {
             Stage::Map(m) => m,
             other => {
                 self.stage = other;
-                Box::new(MapScene::new(&self.ui))
+                self.map_scene()
             }
         };
         self.stage = Stage::Minigame(map, Box::new(g));
     }
 
+    /// Captures: a Super World from `v` (the hosts' `super_world` answer) on its map, world
+    /// `cleared / 10`, its first `cleared % 10` courses cleared, Mario at the start.
+    pub fn debug_open_json(&mut self, cx: &mut Cx, v: &serde_json::Value, cleared: usize) -> bool {
+        let Ok(w) = SuperWorld::from_json(v) else {
+            return false;
+        };
+        self.open_world(cx, w);
+        let Some(run) = self.run.as_mut() else {
+            return false;
+        };
+        run.progress = Progress::new(&run.world);
+        let world = (cleared / 10).min(run.world.world_count().saturating_sub(1));
+        for wi in 0..world {
+            run.progress.clears[wi] = 0xff;
+        }
+        run.progress.world = world;
+        if let Some(p) = run.world.map.worlds.get(world).and_then(|w| w.start()) {
+            (run.progress.x, run.progress.y) = (p.x, p.y);
+        }
+        run.progress.clears[world] = ((1u32 << (cleared % 10).min(8)) - 1) as u8;
+        self.stage = Stage::Map(self.map_scene());
+        true
+    }
+
     /// Captures: open the library's test world at `what` ("title", "map", "walk": the map with
-    /// `cleared` courses of world 1 cleared and Mario on the next, "play": its first course,
+    /// `cleared` courses of world 1 cleared and Mario on the next, "theme<n>": that map in theme
+    /// n, "play": its first course,
     /// "minigame0" / "minigame1" / "minigame2": Match / Pop / Catch & Win in its Toad House,
     /// "ending").
     pub fn debug_open(&mut self, cx: &mut Cx, what: &str, cleared: usize) -> bool {
@@ -1505,8 +1617,20 @@ impl SuperWorldFlow {
                 (run.progress.x, run.progress.y) = (p.x, p.y);
             }
         }
+        // "theme<n>": the map with world 1 in theme n (captures of every theme)
+        if let Some(t) = what
+            .strip_prefix("theme")
+            .and_then(|n| n.parse::<u8>().ok())
+        {
+            let run = self.run.as_mut().expect("opened");
+            if let Some(w) = run.world.map.worlds.first_mut() {
+                w.theme = t.min(7);
+            }
+            self.stage = Stage::Map(self.map_scene());
+            return true;
+        }
         match what {
-            "map" | "walk" => self.stage = Stage::Map(Box::new(MapScene::new(&self.ui))),
+            "map" | "walk" => self.stage = Stage::Map(self.map_scene()),
             "play" => {
                 let run = self.run.as_mut().expect("opened");
                 if let Some(wm) = run.progress.world_map(&run.world)
@@ -1530,7 +1654,7 @@ impl SuperWorldFlow {
                     (run.progress.x, run.progress.y) = (t.x, t.y);
                     run.progress.enter_toad_house(k);
                 }
-                self.stage = Stage::Map(Box::new(MapScene::new(&self.ui)));
+                self.stage = Stage::Map(self.map_scene());
                 self.start_minigame(cx, kind);
             }
             _ => return false,
@@ -1669,8 +1793,8 @@ mod tests {
         };
         assert!(f.capture(&mut host, "superworld-map", 0, 0));
         let lives = flow(&mut f).progress().unwrap().1.lives;
-        // the house below the start: Pop & Win
-        press(&mut f, &mut host, Buttons::DOWN);
+        // the house above the start (row 1; row 0 is the bottom one): Pop & Win
+        press(&mut f, &mut host, Buttons::UP);
         idle(&mut f, &mut host, 20);
         assert_eq!(flow(&mut f).progress().unwrap().1.y, 1);
         press(&mut f, &mut host, Buttons::CONFIRM);

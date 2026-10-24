@@ -50,6 +50,7 @@ pub mod smm1;
 pub mod smm1_costumes;
 pub use smm1::{Smm1Config, Smm1Report, run_smm1};
 pub mod smm2_font;
+pub mod smm2_myworld;
 pub mod smm2_ui;
 pub mod smm2_ui_sound;
 pub use smm2_ui::{Smm2UiConfig, Smm2UiReport, run_smm2_ui};

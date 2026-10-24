@@ -125,7 +125,9 @@ const REC_POINTS: usize = REC_CELLS + CELLS * 3;
 const REC_PIPES: usize = REC_POINTS + POINTS * 6;
 const REC_TOADS: usize = REC_PIPES + 6;
 
-/// Road directions (bit masks): x+1, x−1, y+1 (down the screen), y−1.
+/// Road directions (bit masks, the game's mask bits): x+1, x−1, y+1, y−1. The names are the
+/// data's; the game draws row y + 1 above row y (the world's y points up, row 0 is the bottom
+/// row: research spec super-worlds.md §7), so `SOUTH` leads up the screen.
 pub const EAST: u8 = 1;
 pub const WEST: u8 = 2;
 pub const SOUTH: u8 = 4;
@@ -145,14 +147,16 @@ pub fn opposite(d: u8) -> u8 {
     }
 }
 
-/// The scene skins, in theme-value order.
+/// The scene skins, in theme-value order [obs v3.0.3: the field textures registered by theme,
+/// the map BGM table main+0x294bb50, the point variants by theme in 0x710143d170; SceneDB lists
+/// its rows in another order].
 pub const THEMES: [&str; 8] = [
     "plain",
     "underground",
     "desert",
+    "woods",
     "snow",
     "athletic",
-    "woods",
     "magma",
     "night",
 ];

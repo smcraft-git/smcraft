@@ -37,6 +37,7 @@ pub mod search;
 pub mod smm1;
 pub mod sound;
 pub mod superworld;
+pub mod swmap;
 #[cfg(test)]
 pub(crate) mod testing;
 #[cfg(test)]
@@ -1145,6 +1146,25 @@ impl Front {
             }
             // Super Worlds over the library's test world: the planets, its title, the map
             // (`cleared` courses of world 1 cleared, Mario on the next), its first course, the end
+            // a Super World from a file (`superworld-json:<path>`: the hosts' `super_world`
+            // answer, its map as hex), on its map
+            s if s.starts_with("superworld-json:") => {
+                let Some(v) = std::fs::read_to_string(&s["superworld-json:".len()..])
+                    .ok()
+                    .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
+                else {
+                    return false;
+                };
+                self.show_super_worlds(host);
+                let (mut cx, scr) = self.cx(host);
+                let Screen::SuperWorld(f) = scr else {
+                    return false;
+                };
+                if !f.debug_open_json(&mut cx, &v, cleared) {
+                    return false;
+                }
+                self.run_now(host);
+            }
             s if s.starts_with("superworld") => {
                 self.show_super_worlds(host);
                 if s != "superworld" {
