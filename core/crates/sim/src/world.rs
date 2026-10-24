@@ -3411,14 +3411,12 @@ impl World {
                     }
                     continue;
                 }
-                // a tower's riders don't bump walkers: an enemy's bump component (actor +0x3a0,
-                // made by its vfunc 0x3f0 0x710128d860, vtable 0x71029144d8) is enabled only in
-                // the EnemySys contexts 0, 1, 2, 6, 8, 10, 12, 16 (and 17 / 18), not in the Tower
-                // context 3 (slots 0 / 0x10, 0x7101284ad0 / 0x7101284b70), and a partner in it
-                // is what raises the turn flag +0x528 bit 19 (0x710128a2d0) [obs v3.0.3]; that a
-                // walker meeting a rider doesn't turn either (the pairing needing both enabled)
-                // [inf]
-                let walkers = a.kind.is_walker() && b.kind.is_walker() && !a.stacked && !b.stacked;
+                // a tower's members and walkers: the walker's turn flag (+0x528 bit 27, which
+                // its Walk exe 0x7101050c60 reads with the wall hit) is set by its own collider's
+                // contact callback (0x71011ff860) from the two colliders' boxes alone, so a
+                // walker turns on a column's member level with its feet (below) like on any
+                // walker [obs v3.0.3]; a member itself doesn't (its Tower action has no Walk)
+                let walkers = a.kind.is_walker() && b.kind.is_walker() && !(a.stacked && b.stacked);
                 let a_slide = a.mode == Mode::ShellSlide;
                 let b_slide = b.mode == Mode::ShellSlide;
                 match (a_slide, b_slide) {
@@ -3437,31 +3435,42 @@ impl World {
                         scores.push((Self::chain_score(s.chain), v.x, v.y + 24.0));
                         s.chain += 1;
                     }
-                    // a moving walker (|vx| > 0.001) overlapping another enemy by 0.1 px or
-                    // more on its front side raises its touch flag, read by its next update
-                    // (Walk turns, Turn stops), when the contact's vertical push (half the
-                    // overlap: the collider pair test 0x7100e28af0 / box test 0x7100e28e20
-                    // push each by half the overlap on both axes [obs v3.0.3]) is 4 or more
-                    // [obs: Ryujinx trace W_3051605: a packed row of Goombas; one falling 8.1 px
-                    // into another's height turns it, one 6.75 px in doesn't]; not with one
-                    // tilted on an incline's diagonal (its box turned with it: the collider
-                    // box follows the model's rotation while +0x52c bit 3, 0x7101208390 [obs
-                    // v3.0.3]; that a walker on an incline has it [inf]) [obs: W_3051605, a
-                    // Goomba walking up a staircase into one standing on it never turns]
+                    // a walker's turn flag (+0x528 bit 27, read by its next update: Walk turns,
+                    // Turn stops) is raised by its contact callback 0x71011ff860 when it moves
+                    // (|vx| > 0.001), the other lies ahead (centre distance ≥ 0.01 across, the
+                    // contact's push, half the overlap, ≥ 0.1 against its facing: the box test
+                    // 0x7100e28e20) and they are level: outside 3D World their feet (collider
+                    // bottoms) less than 8 px apart, in 3D World (same layer) the vertical push
+                    // 4 or more [obs v3.0.3; Ryujinx trace W_3051605 (M1): a packed row of
+                    // Goombas; one falling 8.1 px into another's height turns it, one 6.75 px in
+                    // doesn't]; not with one tilted on an incline's diagonal (its box turned with
+                    // it: the collider box follows the model's rotation while +0x52c bit 3,
+                    // 0x7101208390 [obs v3.0.3]; that a walker on an incline has it [inf]) [obs:
+                    // W_3051605, a Goomba walking up a staircase into one standing on it never
+                    // turns]. [inf] two walkers exactly on top of each other moving the same way
+                    // (centres within 0.01: one turns, bits 27 + 30, an 8-frame hold), the
+                    // feet-to-tops swap of +0x52c bit 7, and the 3D World layer test
                     (false, false) if walkers => {
                         let (ab, bb) = (a.bbox(), b.bbox());
                         let ox = ab.2.min(bb.2) - ab.0.max(bb.0);
+                        let w3 = level_ref.style == "3W";
                         let dx = b.x - a.x;
                         let flag = |w: &Actor,
                                     wb: (f32, f32, f32, f32),
                                     ob: (f32, f32, f32, f32),
                                     d: f32| {
+                            let level = if w3 {
+                                (wb.3.min(ob.3) - wb.1.max(ob.1)) * 0.5 >= 4.0
+                            } else {
+                                (wb.1 - ob.1).abs() < 8.0
+                            };
                             w.mode == Mode::Normal
+                                && !w.stacked
                                 && w.vx.abs() > 0.001
-                                && ox >= 0.1
+                                && ox * 0.5 >= 0.1
                                 && d.abs() >= 0.01
                                 && d * w.dir as f32 > 0.0
-                                && wb.3.min(ob.3) - wb.1.max(ob.1) >= 8.0
+                                && level
                         };
                         let tilted = |w: &Actor| {
                             w.on_ground
@@ -10066,6 +10075,42 @@ mod tests {
         w.player.attack = 17; // frame 2: in front
         w.tail_attack();
         assert!(!w.actors[1].alive());
+    }
+
+    /// Whether a Goomba walking right at x 100 gets its turn flag from a still one ahead at
+    /// (100 + dx, 32 + dy).
+    fn walker_turns(style: &str, dx: f32, dy: f32) -> bool {
+        let mut level = Level::flat(40);
+        level.style = style.to_string();
+        let mut w = World::with_level(level);
+        let mut a = Actor::new(Kind::Goomba, 100.0, 32.0);
+        a.on_ground = true;
+        a.dir = 1;
+        a.vx = 0.5;
+        let mut b = Actor::new(Kind::Goomba, 100.0 + dx, 32.0 + dy);
+        b.dir = 1;
+        b.vx = 0.0;
+        w.add_actor(a);
+        w.add_actor(b);
+        let id = w.actors[0].id;
+        w.actor_interactions();
+        w.touch_pairs.iter().any(|&(t, _)| t == id)
+    }
+
+    #[test]
+    fn a_walker_turns_on_a_push_of_a_tenth_with_its_feet_within_8_px() {
+        // the push is half the overlap: 0.3 px of overlap turns it, 0.15 (a push of 0.075) doesn't
+        assert!(walker_turns("M1", 15.7, 0.0));
+        assert!(!walker_turns("M1", 15.85, 0.0));
+        // outside 3D World the feet must be less than 8 px apart (here the boxes are 16 tall)
+        assert!(walker_turns("M1", 15.0, 7.9));
+        assert!(!walker_turns("M1", 15.0, 8.0));
+        assert!(!walker_turns("M1", 15.0, -8.0));
+        // 3D World: the vertical push (half the overlap) 4 or more
+        assert!(walker_turns("3W", 15.0, 8.0));
+        assert!(!walker_turns("3W", 15.0, 8.1));
+        // an enemy behind it doesn't
+        assert!(!walker_turns("M1", -15.0, 0.0));
     }
 
     #[test]
