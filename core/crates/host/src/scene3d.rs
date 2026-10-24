@@ -41,6 +41,10 @@ pub struct SceneRow {
     pub proj_offset_y: f32,
     pub proj_move_y: f32,
     pub cam_move_y: f32,
+    /// Where the background model sits (`DV_pos_x` / `DV_pos_y`, vertical areas `DV_V_pos_*`;
+    /// NSMBU only: (1920, 0), vertical (384, 0)) [inf: measured, the model moved by it lines up
+    /// with the reference frames — NSMBU ground MAE 40.5 → 14.3 —, the camera unchanged].
+    pub pos: [f32; 2],
     /// NSMBU edge-light colour (rim), RGB.
     pub edge_light: Option<[f32; 3]>,
 }
@@ -80,6 +84,10 @@ pub fn scene_row(
         proj_offset_y: f(&format!("{v}ProjOffsetY")).unwrap_or(0.0),
         proj_move_y: f(&format!("{v}ProjMoveY")).unwrap_or(1.0),
         cam_move_y: f(&format!("{v}CamMoveY")).unwrap_or(0.0),
+        pos: [
+            f(&format!("{v}pos_x")).unwrap_or(0.0),
+            f(&format!("{v}pos_y")).unwrap_or(0.0),
+        ],
         edge_light: match (
             f("EdgeLightColor_R"),
             f("EdgeLightColor_G"),
@@ -530,6 +538,7 @@ mod tests {
             proj_offset_y: -0.25,
             proj_move_y: 0.0,
             cam_move_y: 0.0,
+            pos: [0.0; 2],
             edge_light: None,
         };
         let c = background_camera(&row, (0.0, 0.0));

@@ -1648,12 +1648,15 @@ impl MeshPlanner {
                 .map(|r| crate::scene3d::background_camera(r, cam));
             if let (Some((mesh, model, anim)), Some(_)) = (t.background, &background) {
                 has_background = true;
+                let pos = t.row.as_ref().map_or([0.0; 2], |r| r.pos);
                 self.background.push(MmkMeshDraw {
                     mesh,
                     model,
                     anim,
                     time: tick,
-                    transform: [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0],
+                    transform: [
+                        1.0, 0.0, 0.0, pos[0], 0.0, 1.0, 0.0, pos[1], 0.0, 0.0, 1.0, 0.0,
+                    ],
                     layer: 0,
                     order: 0,
                     flags: 0,

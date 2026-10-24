@@ -33,7 +33,7 @@ sway, importer and pack 12, the dev cache already at v12).
      boots again from /private/tmp copies — a macOS privacy prompt hung it on ~/Documents and the
      SSD): the 3D World courses (a MoltenVK build without 3D texture compression is ready,
      `ryubuild/no3dbc`), Koopa / shell traces, WU form. Pixels (3D World mean 46.0 → 32.8;
-     NSMBU day 38.5 → 27.5, night 39.9 → 21.5; NSMBU's TEV stages ✅): the light-map lookup domain, specular /
+     NSMBU day 38.5 → 18.7, night 39.9 → 19.7; NSMBU's TEV stages ✅, its background's place ✅): the light-map lookup domain, specular /
      env-map reflections, rim light, baked AO (needs an importer bump), the other sky variants,
      3D World snow, the colour table.
   2. Maker: ✅ wings / parachutes (the attribute balloon, merged 2026-10-24), ✅ over a multigrab
@@ -380,8 +380,8 @@ Nextendo; `docs/nextendo-network-play.md`, spec `research/specs/network-play.md`
   | SMB3 night | 1.8 / 1.6% | 2.1 / 4.3% | 4.5 / 5.0% | 5.0 / 5.4% | 0.6 / 0.8% | 0.7 / 0.9% | 1.3 / 1.1% | 1.8 / 1.7% | 1.7 / 1.5% | 5.5 / 5.1% | 2.5 |
   | SMW | 2.5 / 1.9% | 2.4 / 2.3% | 4.7 / 5.7% | 17.0 / 19.9% | 3.1 / 3.5% | 1.4 / 1.1% | 2.6 / 2.0% | 2.6 / 1.9% | 19.2 / 21.4% | 5.3 / 4.7% | 6.1 |
   | SMW night | 2.4 / 2.5% | 2.9 / 5.2% | 5.0 / 6.2% | 5.6 / 5.8% | 1.1 / 1.6% | 0.6 / 0.9% | 2.2 / 2.5% | 2.6 / 2.6% | 2.3 / 2.1% | 4.9 / 6.0% | 3.0 |
-  | NSMBU | 40.5 / 68% | 12.6 / 28% | 24.1 / 49% | 36.2 / 69% | 38.5 / 71% | 15.1 / 32% | 21.5 / 43% | 22.8 / 52% | 38.0 / 67% | 25.8 / 60% | 27.5 |
-  | NSMBU night | 24.0 / 45% | 23.9 / 43% | 29.3 / 57% | 17.5 / 54% | 3.9 / 11% | 3.0 / 6% | 23.0 / 42% | 28.7 / 55% | 22.9 / 42% | 38.6 / 61% | 21.5 |
+  | NSMBU | 14.3 / 34% | 9.9 / 17% | 15.8 / 30% | 36.7 / 71% | 25.3 / 55% | 10.5 / 17% | 9.2 / 18% | 13.0 / 39% | 35.5 / 64% | 16.8 / 35% | 18.7 |
+  | NSMBU night | 21.4 / 36% | 21.3 / 34% | 26.7 / 49% | 18.0 / 58% | 3.0 / 8% | 2.6 / 4% | 20.5 / 34% | 26.9 / 51% | 20.4 / 34% | 36.0 / 52% | 19.7 |
 
   NSMBU colour combiner (branch tev-wu, 2026-10-24; the uber shader's TEV stages read from the
   game's programs, research/specs/render-3d.md): two registers from `tev_color0` / `tev_color1`,
@@ -391,7 +391,9 @@ Nextendo; `docs/nextendo-network-play.md`, spec `research/specs/network-play.md`
   39.9 → 27.5, night 39.7 → 21.5 (table above; airship 71.2 → 36.2, sky 68.9 → 38.0, night
   airship 79.9 → 17.5). The castle walls' warm tint dropped (their program lights the plain
   albedo) → 3D World 33.0 → 32.8 (ground 33.3, underground 19.2, castle 31.5, airship 29.6,
-  water 35.6, ghost 22.2, snow 74.2, desert 24.6, sky 16.9, forest 41.1).
+  water 35.6, ghost 22.2, snow 74.2, desert 24.6, sky 16.9, forest 41.1). The background model
+  placed at SceneDB's `DV_pos_x` / `DV_pos_y` (NSMBU: 1920, 0; vertical areas `DV_V_pos_*`) →
+  NSMBU day 27.5 → 18.7 (ground 40.5 → 14.3), night 21.5 → 19.7 (table above).
   3D World light pass (branch light3w, the uber shader read from its own programs,
   research/specs/render-3d.md): the sky material as the game computes it and g3d's "Maya"
   texture SRT → ground 38.6, underground 34.3, castle 75.9, airship 26.5, water 32.8, ghost
