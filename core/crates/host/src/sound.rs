@@ -1742,12 +1742,27 @@ impl Sounds {
                         Kind::Bowser { .. } | Kind::BowserJr { .. } | Kind::BoomBoom { .. }
                     ) && s.mode == Mode::Normal
                     {
-                        // a boss's jumps and landings (where its style has them: NSMBU's
-                        // Bowser); the small / large jump by take-off speed [inf]
+                        // a boss's jumps and landings where its style has them (NSMBU's
+                        // Bowser, Bowser Jr. and Boom Boom, 3D World's Bowser; the 2D styles'
+                        // bosses jump silently) [obs data]; the small / large jump by take-off
+                        // speed [inf]
+                        let large = s.vy > 4.0;
+                        let jump = match (self.style.as_str(), s.kind) {
+                            ("WU", Kind::Bowser { .. }) => {
+                                Some(if large { "jump_l" } else { "jump_s" })
+                            }
+                            ("3W", Kind::Bowser { .. }) => {
+                                Some(if large { "JumpLarge" } else { "JumpSmall" })
+                            }
+                            ("WU", _) => Some("jump"),
+                            _ => None,
+                        };
+                        let lands = self.style == "WU";
                         if prev.on_ground && !s.on_ground && s.vy > 0.0 {
-                            let key = if s.vy > 4.0 { "jump_l" } else { "jump_s" };
-                            todo.push((s.kind, key, PropList::default(), s.x, s.y));
-                        } else if !prev.on_ground && s.on_ground && prev.vy < -1.0 {
+                            if let Some(key) = jump {
+                                todo.push((s.kind, key, PropList::default(), s.x, s.y));
+                            }
+                        } else if lands && !prev.on_ground && s.on_ground && prev.vy < -1.0 {
                             // (a real fall: not settling onto the ground as it appears)
                             todo.push((s.kind, "landing", PropList::default(), s.x, s.y));
                         }
