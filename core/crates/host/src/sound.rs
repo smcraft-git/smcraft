@@ -1553,6 +1553,11 @@ impl Sounds {
                             s.x,
                             s.y,
                         ));
+                    } else if matches!(s.mode, Mode::Parachute { .. }) {
+                        // a parachute opens as it comes into play
+                        let size = if s.big { "Big" } else { "Normal" };
+                        let p = PropList::default().with("ScaleLevel", size);
+                        todo.push((s.kind, "Para_Open", p, s.x, s.y));
                     } else if s.kind == Kind::Key {
                         // a key appeared (a defeated enemy's, the last pink coin's)
                         todo.push((s.kind, "key_appear", PropList::default(), s.x, s.y));
