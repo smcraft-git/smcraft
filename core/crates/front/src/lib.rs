@@ -1031,8 +1031,9 @@ impl Front {
     /// courseworld-leaderboards, courseworld-course-page / -comments / -post / -maker / -play /
     /// -pause / -clear of the list's first server course), challenge, challenge-map,
     /// challenge-walk, challenge-gameover, challenge-ending (`difficulty`, `cleared` for the
-    /// walk), superworld, superworld-title / -map / -walk / -play / -ending (the library's test
-    /// world; `cleared` for the map). Returns false for an unknown name.
+    /// walk), superworld, superworld-title / -map / -walk / -play / -enemy / -retreat / -pipe /
+    /// -ending (the library's test world; `cleared` for the map). Returns false for an unknown
+    /// name.
     pub fn capture(
         &mut self,
         host: &mut dyn Host,

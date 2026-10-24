@@ -48,8 +48,17 @@ const HUD: &str = "MyWEdit_PlayScene_00";
 const ENDING: &str = "MyW_Ending_00";
 /// Planet buttons on the screen.
 const PLANET_SLOTS: usize = 10;
-/// Ticks Mario takes for one cell of road.
-const WALK_TICKS: i32 = 10;
+/// The player's walk, world units a frame (a cell is 48) [obs v3.0.3 0x7101472450: 1.5; 0.75
+/// while the route under him is a ladder (0x71014796f0 → route 3)].
+const WALK_SPEED: f32 = 1.5;
+const CLIMB_SPEED: f32 = 0.75;
+/// Back from an enemy course left uncleared: straight to the stop the walk began at, 2 a frame
+/// [obs v3.0.3 0x7101470e30: a course result 1–3 on an enemy point → player state 10,
+/// 0x7101473ba0 / 0x7101473ce0].
+const RETREAT_SPEED: f32 = 2.0;
+/// An uncleared enemy course starts when the player comes this close to it (world units) —
+/// walking down the screen, only when he reaches it [obs v3.0.3 0x7101472450].
+const CONTACT_RANGE: f32 = 10.0;
 
 /// A planet to pick: the library's test world or a Super World on TGRCode.
 #[derive(Clone, Debug, PartialEq)]
@@ -200,6 +209,8 @@ struct SwRun {
     /// What the map shows when it opens next: a course's point turning cleared, or the world
     /// just finished (its goal, its cannon).
     fresh: Option<Fresh>,
+    /// The course was an enemy walked into: the stop the walk began at.
+    contact_from: Option<(u8, u8)>,
     mode_line: String,
 }
 
@@ -630,10 +641,19 @@ struct MapScene {
     name_balloon: Option<Layout>,
     prompt: Option<Layout>,
     tick: i32,
-    /// The cells left to walk and the tick the current one started.
+    /// The cells left to walk, the cell the current step left and how far along it the player
+    /// is (world units).
     walk: Vec<(i32, i32)>,
     walk_from: (f32, f32),
-    walk_start: i32,
+    walk_done: f32,
+    /// The stop the walk began at.
+    walk_origin: (u8, u8),
+    hop: Hop,
+    retreat: Option<Retreat>,
+    /// An entry waiting for the player's `coursein` animation: the tick and the event.
+    pending: Option<(i32, MapEvent)>,
+    /// The camera's shift: going down (a course-in began) or back up, and the tick it began.
+    camera: Option<(bool, i32)>,
     /// The last direction walked (dx, dy; y up) and the tick the player stopped.
     facing: (i32, i32),
     stopped: i32,
@@ -664,6 +684,14 @@ enum Fresh {
     /// The world's goal cleared: the world as it was (its goal cleared), shown until the cannon
     /// shoots the player to the next one.
     World(Progress),
+    /// An enemy course left uncleared: the player walks back from its cell (to where he
+    /// stands now).
+    Retreat((u8, u8)),
+}
+
+/// Toad House `k` of the current world was used.
+fn house_used(p: &Progress, k: usize) -> bool {
+    p.toads.get(p.world).is_some_and(|t| t & (1 << k) != 0)
 }
 
 /// A map sound for the host ([`crate::Host::map_sound`]).
@@ -681,11 +709,122 @@ const REVEAL_WAIT: i32 = 20;
 /// Frames the player flies from the cannon before the next world shows [inf].
 const CANNON_FLIGHT: i32 = 40;
 
+#[derive(Clone, Copy, Debug, PartialEq)]
 enum MapEvent {
-    Play,
+    /// Play the course under the player; walked into an enemy course: the stop the walk began
+    /// at (where he goes back to if the course isn't cleared).
+    Play(Option<(u8, u8)>),
     Pipe,
     ToadHouse(usize),
     Quit,
+}
+
+/// The player's hop onto and off a pipe: he stands 12 units up on one [obs v3.0.3
+/// 0x7101472450 / 0x710147a4b0, the player's +0x518 height, +0x51c speed, +0x520 phase].
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+struct Hop {
+    /// 0 on the ground, 1 rising, 2 falling onto the pipe, 3 falling off it, 4 on the pipe.
+    phase: u8,
+    height: f32,
+    speed: f32,
+    /// Hopping up or down the screen (else across).
+    vertical: bool,
+}
+
+/// A pipe's top (world units above the cell).
+const PIPE_TOP: f32 = 12.0;
+
+impl Hop {
+    /// Onto a pipe (`phase` 1) or off it (3): 2.7 up or down the screen, 2.5 across [obs
+    /// DAT_7102318974 = 2.7, 0x40200000 = 2.5].
+    fn start(vertical: bool, phase: u8) -> Self {
+        Self {
+            phase,
+            height: if phase == 3 { PIPE_TOP } else { 0.0 },
+            speed: if vertical { 2.7 } else { 2.5 },
+            vertical,
+        }
+    }
+
+    fn on_pipe() -> Self {
+        Self {
+            phase: 4,
+            height: PIPE_TOP,
+            ..Self::default()
+        }
+    }
+
+    fn airborne(&self) -> bool {
+        (1..=3).contains(&self.phase)
+    }
+
+    /// The hop starts this close to a pipe (world units): 20 up or down, 10 across.
+    fn reach(vertical: bool) -> f32 {
+        if vertical { 20.0 } else { 10.0 }
+    }
+
+    /// The walk while in the air: 1.3 a frame up or down, 0.7 across [obs 0x710231a068].
+    fn walk_speed(&self) -> f32 {
+        if self.vertical { 1.3 } else { 0.7 }
+    }
+
+    /// One frame: rising straight to the top, then falling (0.5 a frame² up or down, 0.7
+    /// across, at most 5 a frame) onto the pipe or the ground.
+    fn step(&mut self) {
+        let gravity = if self.vertical { 0.5 } else { 0.7 };
+        match self.phase {
+            1 => {
+                self.height += self.speed;
+                if self.height >= PIPE_TOP {
+                    self.phase = 2;
+                }
+            }
+            2 | 3 => {
+                self.height += self.speed;
+                self.speed = (self.speed - gravity).max(-5.0);
+                let floor = if self.phase == 2 { PIPE_TOP } else { 0.0 };
+                if self.height <= floor {
+                    self.height = floor;
+                    self.phase = if self.phase == 2 { 4 } else { 0 };
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// The walk back from an enemy course left uncleared: from its cell to the stop the walk
+/// began at, in a straight line.
+#[derive(Clone, Copy, Debug)]
+struct Retreat {
+    from: (f32, f32),
+    to: (f32, f32),
+    /// World units gone.
+    done: f32,
+}
+
+impl Retreat {
+    fn length(&self) -> f32 {
+        let (dx, dy) = (self.to.0 - self.from.0, self.to.1 - self.from.1);
+        (dx * dx + dy * dy).sqrt() * swmap::CELL
+    }
+
+    fn at(&self) -> (f32, f32) {
+        let t = (self.done / self.length().max(1.0)).min(1.0);
+        (
+            self.from.0 + (self.to.0 - self.from.0) * t,
+            self.from.1 + (self.to.1 - self.from.1) * t,
+        )
+    }
+}
+
+/// A walk step from `from` to `to` climbs a ladder: up or down onto or off a ledge.
+fn climbing(w: &mmk_formats::smm2::world::World, from: (i32, i32), to: (i32, i32)) -> bool {
+    let ledge = |(x, y): (i32, i32)| {
+        w.cell(x, y)
+            .is_some_and(|c| c.kind == mmk_formats::smm2::world::road::LEDGE)
+    };
+    from.0 == to.0 && (ledge(from) || ledge(to))
 }
 
 impl MapScene {
@@ -721,7 +860,12 @@ impl MapScene {
             tick: 0,
             walk: Vec::new(),
             walk_from: (0.0, 0.0),
-            walk_start: 0,
+            walk_done: 0.0,
+            walk_origin: (0, 0),
+            hop: Hop::default(),
+            retreat: None,
+            pending: None,
+            camera: None,
             facing: (0, -1),
             stopped: 0,
             mario_tex,
@@ -737,7 +881,7 @@ impl MapScene {
     }
 
     fn walking(&self) -> bool {
-        !self.walk.is_empty()
+        !self.walk.is_empty() || self.retreat.is_some()
     }
 
     /// The progress the map shows (the finished world during its outro).
@@ -823,6 +967,18 @@ impl MapScene {
         let Some(fresh) = self.fresh.take() else {
             return;
         };
+        if let Fresh::Retreat((ex, ey)) = fresh {
+            self.retreat = Some(Retreat {
+                from: (ex as f32, ey as f32),
+                to: (p.x as f32, p.y as f32),
+                done: 0.0,
+            });
+            self.facing = (
+                (p.x as i32 - ex as i32).signum(),
+                (p.y as i32 - ey as i32).signum(),
+            );
+            return;
+        }
         if self.art.is_none() {
             return;
         }
@@ -848,6 +1004,7 @@ impl MapScene {
                 self.outro = Some(old);
                 self.busy_until = fire;
             }
+            Fresh::Retreat(_) => {}
         }
     }
 
@@ -898,10 +1055,13 @@ impl MapScene {
 
     /// Mario's drawn position (cells).
     fn mario_at(&self, p: &Progress) -> (f32, f32) {
+        if let Some(r) = &self.retreat {
+            return r.at();
+        }
         let Some(&(nx, ny)) = self.walk.first() else {
             return (p.x as f32, p.y as f32);
         };
-        let t = ((self.tick - self.walk_start) as f32 / WALK_TICKS as f32).clamp(0.0, 1.0);
+        let t = (self.walk_done / swmap::CELL).clamp(0.0, 1.0);
         let (fx, fy) = self.walk_from;
         (fx + (nx as f32 - fx) * t, fy + (ny as f32 - fy) * t)
     }
@@ -920,21 +1080,40 @@ impl MapScene {
         let Some(w) = p.world_map(world) else {
             return Some(MapEvent::Quit);
         };
+        self.hop.step();
+        if let Some((at, ev)) = self.pending {
+            if self.tick < at {
+                return None;
+            }
+            self.pending = None;
+            // into a Toad House: the camera comes back up under its minigame
+            if matches!(ev, MapEvent::ToadHouse(_)) {
+                self.camera = Some((false, self.tick));
+            }
+            if matches!(ev, MapEvent::Play(_)) {
+                // [obs 0x7101474e50 / 0x7101474f00: the player's `courseIn` as the course is
+                // entered]
+                self.cue_at(self.tick, swmap::USER_PLAYER, "courseIn", false, None);
+            }
+            return Some(ev);
+        }
         if self.tick < self.busy_until {
             return None;
         }
-        if let Some(&(nx, ny)) = self.walk.first() {
-            self.facing = (nx - p.x as i32, ny - p.y as i32);
-            if self.tick - self.walk_start >= WALK_TICKS {
-                self.walk_from = (nx as f32, ny as f32);
-                (p.x, p.y) = (nx as u8, ny as u8);
-                self.walk.remove(0);
-                self.walk_start = self.tick;
-                if self.walk.is_empty() {
-                    self.stopped = self.tick;
-                }
+        if let Some(r) = &mut self.retreat {
+            r.done += RETREAT_SPEED;
+            if r.done >= r.length() {
+                self.retreat = None;
+                self.stopped = self.tick;
             }
             return None;
+        }
+        if !self.walk.is_empty() {
+            return self.step_walk(w, p);
+        }
+        // standing on a pipe: on its top
+        if self.hop.phase == 0 && matches!(sw::spot(w, p.x as i32, p.y as i32), Spot::Pipe(_)) {
+            self.hop = Hop::on_pipe();
         }
         // up the screen is the world's row + 1 (`SOUTH` in the data's naming; spec §7)
         let dir = if pressed.has(Buttons::RIGHT) {
@@ -953,28 +1132,46 @@ impl MapScene {
             let route = sw::route(w, cleared, p.x as i32, p.y as i32, d);
             if !route.is_empty() {
                 self.facing = (route[0].0 - p.x as i32, route[0].1 - p.y as i32);
+                // off a pipe: the hop down [obs 0x710147a4b0: leaving a pipe node]
+                if matches!(sw::spot(w, p.x as i32, p.y as i32), Spot::Pipe(_)) {
+                    self.hop = Hop::start(self.facing.1 != 0, 3);
+                }
                 self.walk = route;
                 self.walk_from = (p.x as f32, p.y as f32);
-                self.walk_start = self.tick;
+                self.walk_done = 0.0;
+                self.walk_origin = (p.x, p.y);
             }
             return None;
         }
         if pressed.has(Buttons::CONFIRM) {
             let t = self.tick;
+            // a course or a Toad House: the player's `coursein` first [obs 0x71014746f0 /
+            // 0x71014747b0: player state 0x10 plays it, then enters]; only one not cleared or
+            // used [obs 0x7101471980]
+            let course_in = |me: &mut Self, ev: MapEvent| {
+                let here = w.cell(p.x as i32, p.y as i32);
+                let frames = me.art.clone().map_or(0, |art| {
+                    let anim = art.player_anim(me.character, w.theme.min(7), here, "coursein");
+                    me.cue_at(t, swmap::USER_PLAYER, &anim, true, None);
+                    art.anim_frames(swmap::player_model(me.character), &anim)
+                });
+                me.demo.player_anim = Some(("coursein", t));
+                me.pending = Some((t + frames, ev));
+                me.camera = Some((true, t));
+                None
+            };
             return match sw::spot(w, p.x as i32, p.y as i32) {
-                Spot::Course { .. } => {
-                    // [obs 0x7101474c70: the player's `courseIn` as the course is entered]
-                    self.cue_at(t, swmap::USER_PLAYER, "courseIn", false, None);
-                    Some(MapEvent::Play)
+                Spot::Course { .. } if p.enterable_course(world).is_some() => {
+                    course_in(self, MapEvent::Play(None))
                 }
                 Spot::Pipe(_) => {
                     // into the pipe: what the player's `dokan_in` starts (`mw_DokanIn`)
                     self.cue_at(t, swmap::USER_PLAYER, "dokan_in", true, None);
                     Some(MapEvent::Pipe)
                 }
-                Spot::ToadHouse(k) => {
+                Spot::ToadHouse(k) if !house_used(p, k) => {
                     self.house = Some(k);
-                    Some(MapEvent::ToadHouse(k))
+                    course_in(self, MapEvent::ToadHouse(k))
                 }
                 _ => None,
             };
@@ -982,6 +1179,65 @@ impl MapScene {
         if pressed.has(Buttons::BACK) {
             self.ui.sound_back(HUD, "normal");
             return Some(MapEvent::Quit);
+        }
+        None
+    }
+
+    /// One frame of a walk: the step on, the hop onto a pipe, an enemy course met, the stop
+    /// [obs v3.0.3 0x7101472450, the walk state].
+    fn step_walk(
+        &mut self,
+        w: &mmk_formats::smm2::world::World,
+        p: &mut Progress,
+    ) -> Option<MapEvent> {
+        let &(nx, ny) = self.walk.first()?;
+        let from = (self.walk_from.0 as i32, self.walk_from.1 as i32);
+        self.facing = (nx - from.0, ny - from.1);
+        let last = self.walk.len() == 1;
+        let vertical = self.facing.1 != 0;
+        let cleared = p.clears.get(p.world).copied().unwrap_or(0);
+        let speed = if self.hop.airborne() {
+            self.hop.walk_speed()
+        } else if climbing(w, from, (nx, ny)) {
+            CLIMB_SPEED
+        } else {
+            WALK_SPEED
+        };
+        self.walk_done = (self.walk_done + speed).min(swmap::CELL);
+        let left = swmap::CELL - self.walk_done;
+        let pipe = matches!(sw::spot(w, nx, ny), Spot::Pipe(_));
+        if last && pipe && self.hop.phase == 0 && left < Hop::reach(vertical) {
+            self.hop = Hop::start(vertical, 1);
+        }
+        // an uncleared enemy course met: it starts there and then (walking down the screen —
+        // the data's NORTH —, only on reaching it)
+        let contact = last
+            .then(|| sw::contact_course(w, cleared, nx, ny))
+            .flatten();
+        let down = self.facing.1 < 0;
+        let met = contact.is_some() && (left <= 0.0 || (!down && left < CONTACT_RANGE));
+        if left > 0.0 && !met {
+            return None;
+        }
+        // on a pipe: the hop lands first
+        if pipe && self.hop.airborne() {
+            return None;
+        }
+        self.walk_from = (nx as f32, ny as f32);
+        self.walk_done = 0.0;
+        (p.x, p.y) = (nx as u8, ny as u8);
+        self.walk.remove(0);
+        if !self.walk.is_empty() {
+            return None;
+        }
+        self.stopped = self.tick;
+        if met {
+            self.cue_at(self.tick, swmap::USER_PLAYER, "courseIn", false, None);
+            return Some(MapEvent::Play(Some(self.walk_origin)));
+        }
+        // a course, the goal or a Toad House: the stop's sound [obs 0x7101472450]
+        if sw::plays_pass_point(w, nx, ny) {
+            self.cue_at(self.tick, swmap::USER_PLAYER, "passPoint", false, None);
         }
         None
     }
@@ -1073,7 +1329,11 @@ impl MapScene {
             let view = MapView {
                 tick: self.tick,
                 player: [mx, my],
-                walking: self.walk.first().map(|_| self.facing),
+                walking: self.walking().then_some(self.facing),
+                lift: self.hop.height,
+                camera_dy: self
+                    .camera
+                    .map_or(0.0, |(down, t)| swmap::camera_shift(down, self.tick - t)),
                 facing: self.facing,
                 since: self.tick - self.stopped,
                 character: self.character,
@@ -1258,7 +1518,15 @@ impl MapScene {
             return;
         };
         // the course's name above it, and the prompt, when Mario stands on a course
-        let here = (!self.walking() && prompts).then(|| sw::spot(w, p.x as i32, p.y as i32));
+        // only a course not cleared, a Toad House not used, a pipe [obs v3.0.3 0x710147a6a0:
+        // the balloons on arriving]
+        let here = (!self.walking() && prompts)
+            .then(|| sw::spot(w, p.x as i32, p.y as i32))
+            .filter(|s| match *s {
+                Spot::Course { .. } => p.enterable_course(world).is_some(),
+                Spot::ToadHouse(k) => !house_used(p, k),
+                _ => true,
+            });
         let course = match here {
             Some(Spot::Course { order, .. }) => world.course(p.world, order),
             _ => None,
@@ -1486,6 +1754,7 @@ impl SuperWorldFlow {
             course: None,
             cleared: None,
             fresh: None,
+            contact_from: None,
         });
         if let Some(t) = TitleScene::new(&self.ui, maker.as_deref(), can_continue) {
             self.stage = Stage::Title(Box::new(t));
@@ -1647,7 +1916,13 @@ impl SuperWorldFlow {
             }
         } else if run.progress.lives == 0 {
             run.progress.game_over(&run.world);
+        } else if let Some(to) = run.contact_from {
+            // an enemy course left uncleared: back to where the walk began [obs v3.0.3
+            // 0x7101470e30]
+            run.fresh = Some(Fresh::Retreat((run.progress.x, run.progress.y)));
+            (run.progress.x, run.progress.y) = to;
         }
+        run.contact_from = None;
         run.course = None;
         run.persist(cx);
         self.leaving = true;
@@ -1751,7 +2026,8 @@ impl SuperWorldFlow {
                     return None;
                 }
                 match ev {
-                    Some(MapEvent::Play) => {
+                    Some(MapEvent::Play(from)) => {
+                        run.contact_from = from;
                         run.persist(cx);
                         self.leaving = true;
                         cx.fade_to(FadeKind::Black, Go::SuperWorld(SuperWorldGo::Play));
@@ -1921,7 +2197,9 @@ impl SuperWorldFlow {
     /// just cleared (the cannon to world 2), "theme<n>": that map in theme n, "play": its first
     /// course,
     /// "minigame0" / "minigame1" / "minigame2": Match / Pop / Catch & Win in its Toad House,
-    /// "ending").
+    /// "enemy": three courses cleared and Mario at the fork beside the fourth, an enemy that
+    /// starts when he walks into it, "retreat": Mario walking back from that enemy's course
+    /// left uncleared, "pipe": Mario on the pipe up the right side, "ending").
     pub fn debug_open(&mut self, cx: &mut Cx, what: &str, cleared: usize) -> bool {
         let Some(w) = self.local_world() else {
             return false;
@@ -2001,6 +2279,18 @@ impl SuperWorldFlow {
                 self.play(cx);
             }
             "ending" => self.go(cx, SuperWorldGo::Ending),
+            "enemy" | "retreat" | "pipe" => {
+                let run = self.run.as_mut().expect("opened");
+                run.progress.clears[0] = 0;
+                for k in 0..3.min(run.world.courses[0].len().saturating_sub(1)) {
+                    run.progress.clear(&run.world, k);
+                }
+                (run.progress.x, run.progress.y) = if what == "pipe" { (6, 3) } else { (6, 2) };
+                if what == "retreat" {
+                    run.fresh = Some(Fresh::Retreat((5, 2)));
+                }
+                self.stage = Stage::Map(self.map_scene());
+            }
             "minigame0" | "minigame1" | "minigame2" => {
                 let kind = mmk_modes::minigame::Kind::from_byte(what.as_bytes()[8] - b'0');
                 let run = self.run.as_mut().expect("opened");
@@ -2104,14 +2394,14 @@ mod tests {
         assert_eq!(flow(&mut f).stage_name(), "map");
         // an uncleared course can't be passed; walk to the first one and play it
         press(&mut f, &mut host, Buttons::RIGHT);
-        idle(&mut f, &mut host, 20);
+        idle(&mut f, &mut host, 40);
         let (_, p) = flow(&mut f).progress().unwrap();
         assert_eq!((p.x, p.y), (1, 0));
         press(&mut f, &mut host, Buttons::RIGHT);
-        idle(&mut f, &mut host, 20);
+        idle(&mut f, &mut host, 40);
         assert_eq!(flow(&mut f).progress().unwrap().1.x, 1);
         press(&mut f, &mut host, Buttons::CONFIRM);
-        idle(&mut f, &mut host, 5);
+        idle(&mut f, &mut host, 60);
         assert_eq!(flow(&mut f).stage_name(), "playing");
         assert_eq!(
             host.loaded.last(),
@@ -2141,7 +2431,7 @@ mod tests {
         // player can't walk
         host.status = Default::default();
         press(&mut f, &mut host, Buttons::RIGHT);
-        idle(&mut f, &mut host, 20);
+        idle(&mut f, &mut host, 40);
         assert_eq!(flow(&mut f).progress().unwrap().1.x, 1);
         idle(&mut f, &mut host, 200);
         assert_eq!(host.map_music.last(), Some(&Some(0)));
@@ -2151,8 +2441,140 @@ mod tests {
         assert!(keys.contains(&"wayAppear"), "{keys:?}");
         // now the way on is open
         press(&mut f, &mut host, Buttons::RIGHT);
-        idle(&mut f, &mut host, 40);
+        idle(&mut f, &mut host, 80);
         assert_eq!(flow(&mut f).progress().unwrap().1.x, 3);
+    }
+
+    #[test]
+    fn an_enemy_course_starts_on_contact_and_a_loss_walks_back() {
+        let mut host = MockHost {
+            library: library(7),
+            ..Default::default()
+        };
+        let Some(mut f) = front(&mut host) else {
+            return;
+        };
+        assert!(f.capture(&mut host, "superworld-enemy", 0, 0));
+        assert_eq!(flow(&mut f).progress().unwrap().1.clears[0], 0b111);
+        // west into the Goomba: no confirm, the course starts as he meets it, before he
+        // reaches its middle
+        press(&mut f, &mut host, Buttons::LEFT);
+        let mut met = None;
+        for i in 0..40 {
+            idle(&mut f, &mut host, 1);
+            if flow(&mut f).stage_name() != "map"
+                || flow(&mut f).run.as_ref().unwrap().contact_from.is_some()
+            {
+                met = Some(i);
+                break;
+            }
+        }
+        let met = met.expect("the enemy's course started");
+        assert!(
+            met + 2 < (48.0 / WALK_SPEED) as usize,
+            "met {met} frames in"
+        );
+        idle(&mut f, &mut host, 10);
+        assert_eq!(flow(&mut f).stage_name(), "playing");
+        assert_eq!(
+            host.loaded.last(),
+            Some(&Source::Library("/lib/3.course".into()))
+        );
+        let keys: Vec<&str> = host.map_sounds.iter().map(|(_, k)| k.as_str()).collect();
+        assert!(keys.contains(&"courseIn"), "{keys:?}");
+        // left without a clear: back on the map, walking back to the fork he came from
+        f.with_cx(&mut host, |cx, s| {
+            if let Screen::SuperWorld(s) = s {
+                s.course_ended(cx);
+            }
+        });
+        idle(&mut f, &mut host, 10);
+        assert_eq!(flow(&mut f).stage_name(), "map");
+        let (_, p) = flow(&mut f).progress().unwrap();
+        assert_eq!((p.x, p.y, p.clears[0]), (6, 2, 0b111));
+        assert_eq!(saved(&host)["x"], 6);
+        let Stage::Map(m) = &flow(&mut f).stage else {
+            panic!("on the map")
+        };
+        assert!(m.retreat.is_some(), "walking back");
+        idle(&mut f, &mut host, 30);
+        let Stage::Map(m) = &flow(&mut f).stage else {
+            panic!("on the map")
+        };
+        assert!(m.retreat.is_none(), "48 units at 2 a frame");
+    }
+
+    #[test]
+    fn stops_play_pass_point_and_a_cleared_course_stays_shut() {
+        let mut host = MockHost {
+            library: library(7),
+            ..Default::default()
+        };
+        let Some(mut f) = front(&mut host) else {
+            return;
+        };
+        assert!(f.capture(&mut host, "superworld-map", 0, 0));
+        press(&mut f, &mut host, Buttons::RIGHT);
+        idle(&mut f, &mut host, 40);
+        let keys: Vec<&str> = host.map_sounds.iter().map(|(_, k)| k.as_str()).collect();
+        assert_eq!(keys.iter().filter(|k| **k == "passPoint").count(), 1);
+        // the same course, cleared: a stop like any, but confirm doesn't enter it
+        flow(&mut f).run.as_mut().unwrap().progress.clears[0] = 1;
+        press(&mut f, &mut host, Buttons::CONFIRM);
+        idle(&mut f, &mut host, 60);
+        assert_eq!(flow(&mut f).stage_name(), "map");
+        // on to the fork: the road between isn't a stop and plays nothing
+        host.map_sounds.clear();
+        press(&mut f, &mut host, Buttons::RIGHT);
+        idle(&mut f, &mut host, 80);
+        assert_eq!(flow(&mut f).progress().unwrap().1.x, 3);
+        let keys: Vec<&str> = host.map_sounds.iter().map(|(_, k)| k.as_str()).collect();
+        assert_eq!(keys, ["passPoint"], "the second course is a stop");
+    }
+
+    #[test]
+    fn the_player_hops_onto_and_off_a_pipe() {
+        let mut h = Hop::start(false, 1);
+        let mut top = 0.0f32;
+        for _ in 0..60 {
+            h.step();
+            top = top.max(h.height);
+        }
+        assert_eq!((h.phase, h.height), (4, PIPE_TOP));
+        assert!(top > PIPE_TOP, "an arc over the pipe's top");
+        let mut h = Hop::start(true, 3);
+        for _ in 0..60 {
+            h.step();
+        }
+        assert_eq!((h.phase, h.height), (0, 0.0));
+        let mut host = MockHost {
+            library: library(7),
+            ..Default::default()
+        };
+        let Some(mut f) = front(&mut host) else {
+            return;
+        };
+        assert!(f.capture(&mut host, "superworld-pipe", 0, 0));
+        idle(&mut f, &mut host, 2);
+        let Stage::Map(m) = &flow(&mut f).stage else {
+            panic!("on the map")
+        };
+        assert_eq!(m.hop.height, PIPE_TOP, "standing on the pipe");
+        // down off it to the fork, back up onto it
+        press(&mut f, &mut host, Buttons::DOWN);
+        idle(&mut f, &mut host, 50);
+        assert_eq!(flow(&mut f).progress().unwrap().1.y, 2);
+        let Stage::Map(m) = &flow(&mut f).stage else {
+            panic!("on the map")
+        };
+        assert_eq!(m.hop.height, 0.0);
+        press(&mut f, &mut host, Buttons::UP);
+        idle(&mut f, &mut host, 80);
+        assert_eq!(flow(&mut f).progress().unwrap().1.y, 3);
+        let Stage::Map(m) = &flow(&mut f).stage else {
+            panic!("on the map")
+        };
+        assert_eq!((m.hop.phase, m.hop.height), (4, PIPE_TOP));
     }
 
     #[test]
@@ -2168,9 +2590,10 @@ mod tests {
         let lives = flow(&mut f).progress().unwrap().1.lives;
         // the house above the start (row 1; row 0 is the bottom one): Pop & Win
         press(&mut f, &mut host, Buttons::UP);
-        idle(&mut f, &mut host, 20);
+        idle(&mut f, &mut host, 40);
         assert_eq!(flow(&mut f).progress().unwrap().1.y, 1);
         press(&mut f, &mut host, Buttons::CONFIRM);
+        idle(&mut f, &mut host, 60);
         assert_eq!(flow(&mut f).stage_name(), "minigame");
         assert_eq!(
             flow(&mut f).minigame().map(|g| g.kind),
@@ -2212,9 +2635,9 @@ mod tests {
         press(&mut f, &mut host, Buttons::CONFIRM);
         idle(&mut f, &mut host, 40);
         press(&mut f, &mut host, Buttons::RIGHT);
-        idle(&mut f, &mut host, 20);
+        idle(&mut f, &mut host, 40);
         press(&mut f, &mut host, Buttons::CONFIRM);
-        idle(&mut f, &mut host, 5);
+        idle(&mut f, &mut host, 60);
         assert_eq!(flow(&mut f).stage_name(), "playing");
         assert_eq!(host.players.last(), Some(&2), "both controllers play");
     }

@@ -48,8 +48,9 @@ impl SuperWorld {
     /// A test world from up to 40 library courses, five to a world (the fifth is the goal), on
     /// one fixed map shape per world (row 0 is the bottom row): start (a Toad House above it:
     /// Pop & Win), three courses along the bottom row with a Toad House above the second (Match
-    /// & Win), up the right side, the fourth course and the goal along the third row; a pipe at
-    /// the top right leads to an island with a Catch & Win Toad House. None without courses.
+    /// & Win), up the right side, the fourth course (an enemy: walking into it starts it) and
+    /// the goal along the third row; a pipe at the top right leads to an island with a Catch &
+    /// Win Toad House. None without courses.
     pub fn test_world(courses: &[SwCourse]) -> Option<Self> {
         if courses.is_empty() {
             return None;
@@ -187,6 +188,11 @@ fn test_layout(theme: u8, courses: usize, first_slot: u8) -> World {
     for (i, &(x, y)) in spots.iter().take(regular).enumerate() {
         w.points[1 + i] = point(PointKind::Course, x, y, Some(first_slot + i as u8));
     }
+    // the fourth course is one of the map's enemies (a different one in each world), started
+    // by walking into it
+    if let Some(p) = &mut w.points[4] {
+        p.icon = 8 + theme % 8;
+    }
     w.points[5] = point(PointKind::Goal, 3, 2, Some(first_slot + regular as u8));
     w.toad_houses[0] = Some(ToadHouse {
         x: 3,
@@ -308,9 +314,36 @@ fn bit(x: i32, y: i32) -> u32 {
     1u32 << (y as usize * GRID_W + x as usize)
 }
 
+fn in_grid(x: i32, y: i32) -> bool {
+    (0..GRID_W as i32).contains(&x) && (0..GRID_H as i32).contains(&y)
+}
+
+/// The directions out of (x, y) that lead to a reached cell (`reach`: [`reachable`]).
+fn reached_links(w: &World, reach: u32, x: i32, y: i32) -> u8 {
+    let l = w.links(x, y);
+    DIRECTIONS
+        .iter()
+        .filter(|&&(d, dx, dy)| {
+            l & d != 0 && in_grid(x + dx, y + dy) && reach & bit(x + dx, y + dy) != 0
+        })
+        .fold(0, |m, &(d, _, _)| m | d)
+}
+
+/// The walk goes on through (x, y) instead of stopping there [obs v3.0.3 0x710147b9a0: the
+/// route node's flag +0x8c, read by the walk 0x7101472450 as +0x144c]: a curve piece always
+/// (a point on it too), and a plain road cell (no point, pipe or Toad House) with exactly two
+/// reached neighbours; every point, pipe and Toad House stops the walk, cleared or not.
+pub fn walks_through(w: &World, reach: u32, x: i32, y: i32) -> bool {
+    if w.cell(x, y).is_some_and(|c| c.kind == road::CURVE) {
+        return true;
+    }
+    spot(w, x, y) == Spot::Road && reached_links(w, reach, x, y).count_ones() == 2
+}
+
 /// Where Mario stops walking from (x, y) in direction `d`: the cells walked through, ending at
-/// the next point, pipe, Toad House, fork or dead end (an empty route: he can't go that way).
-/// Walking away from an uncleared course only goes back the way into it.
+/// the next point, pipe, Toad House, fork or dead end ([`walks_through`]; an empty route: he
+/// can't go that way). Every step leads to a reached cell, so walking away from an uncleared
+/// course only goes back the way into it.
 pub fn route(w: &World, cleared: u8, x: i32, y: i32, d: u8) -> Vec<(i32, i32)> {
     let reach = reachable(w, cleared);
     let mut out = Vec::new();
@@ -321,19 +354,54 @@ pub fn route(w: &World, cleared: u8, x: i32, y: i32, d: u8) -> Vec<(i32, i32)> {
         }
         let (_, dx, dy) = DIRECTIONS.iter().copied().find(|t| t.0 == dir).unwrap();
         let (nx, ny) = (cx + dx, cy + dy);
-        if reach & bit(nx, ny) == 0 {
+        if !in_grid(nx, ny) || reach & bit(nx, ny) == 0 {
             break;
         }
         out.push((nx, ny));
-        let l = w.links(nx, ny);
+        if !walks_through(w, reach, nx, ny) {
+            break;
+        }
+        // the one way on: a curve's other arm, a road's other reached neighbour
         let back = world::opposite(dir);
-        let onward = l & !back;
-        if spot(w, nx, ny) != Spot::Road || onward.count_ones() != 1 {
+        let onward = if w.cell(nx, ny).is_some_and(|c| c.kind == road::CURVE) {
+            w.links(nx, ny) & !back
+        } else {
+            reached_links(w, reach, nx, ny) & !back
+        };
+        if onward.count_ones() != 1 {
             break;
         }
         (cx, cy, dir) = (nx, ny, onward);
     }
     out
+}
+
+/// The course icons of the map's enemies (8–15: Goomba, Koopa, Piranha Plant, Cheep Cheep,
+/// Chain Chomp, Hammer Bro, Pokey, Poison Mushroom) [obs v3.0.3 0x7101472450: the walk tests
+/// the point's icon (node +0x88, the icon's low nibble from the build list 0x710146bbe0) with
+/// `& ~7 == 8`; the kind names in icon order at 0x710143f150].
+pub fn enemy_icon(icon: u8) -> bool {
+    (8..=15).contains(&(icon & 0xf))
+}
+
+/// An uncleared enemy course at (x, y) (its order index): walking into it starts it, without
+/// the confirm button or the player's course-in jump [obs v3.0.3 0x7101472450: target kind 1
+/// (a course, not the goal), enemy icon, not cleared (node +0x8d) → player state 0x11, whose
+/// update 0x7101474a10 enters the course; the A press path is state 0x10 with the `coursein`
+/// animation first, 0x71014746f0 / 0x71014747b0].
+pub fn contact_course(w: &World, cleared: u8, x: i32, y: i32) -> Option<usize> {
+    let p = w.point_at(x, y)?;
+    let Spot::Course { order, goal: false } = spot(w, x, y) else {
+        return None;
+    };
+    (enemy_icon(p.icon) && cleared & (1 << order) == 0).then_some(order)
+}
+
+/// Stopping at (x, y) plays the player's `passPoint`: a course point, the goal or a Toad House
+/// (route node kinds 1, 3, 4 — not the start, a pipe or a road) [obs v3.0.3 0x7101472450: the
+/// mask 0x1a on the node kind when the walk ends there, after the enemy-course and pipe cases].
+pub fn plays_pass_point(w: &World, x: i32, y: i32) -> bool {
+    matches!(spot(w, x, y), Spot::Course { .. } | Spot::ToadHouse(_))
 }
 
 // MARK: progress
@@ -402,6 +470,16 @@ impl Progress {
             Spot::Course { order, goal } => Some((order, goal)),
             _ => None,
         }
+    }
+
+    /// The course under Mario that the confirm button enters: one with a course that isn't
+    /// cleared yet — a cleared course can't be played again [obs v3.0.3 0x7101471980: on A the
+    /// standing player goes to the course-in state 0x10 only when the node is not cleared
+    /// (+0x144d) and has a course (+0x1440 ≠ −1)].
+    pub fn enterable_course(&self, sw: &SuperWorld) -> Option<(usize, bool)> {
+        let (order, goal) = self.course_here(sw)?;
+        (!self.cleared(self.world, order) && sw.course(self.world, order).is_some())
+            .then_some((order, goal))
     }
 
     /// The course under Mario was cleared.
@@ -606,6 +684,79 @@ mod tests {
         assert!(route(w, 0, 0, 0, NORTH).is_empty());
         // the start's third Toad House, just above it
         assert_eq!(route(w, 0, 0, 0, SOUTH), vec![(0, 1)]);
+    }
+
+    #[test]
+    fn the_walk_passes_curves_and_two_way_roads_and_stops_at_every_point() {
+        let sw = SuperWorld::test_world(&courses(5)).unwrap();
+        let w = &sw.map.worlds[0];
+        let reach = reachable(w, 0b1111);
+        // a straight road and a corner go on; a fork, a point, a pipe, a house stop
+        assert!(walks_through(w, reach, 2, 0));
+        assert!(walks_through(w, reach, 6, 0));
+        assert!(!walks_through(w, reach, 6, 2), "a fork");
+        for (x, y) in [(1, 0), (3, 1), (6, 3), (0, 0), (3, 2)] {
+            assert!(!walks_through(w, reach, x, y), "({x}, {y}) stops");
+        }
+        // a curve piece is walked through even with a point on it
+        let mut w2 = w.clone();
+        *w2.cell_mut(6, 0) = Cell {
+            rotation: 2,
+            kind: road::CURVE,
+            flag: 0,
+        };
+        w2.points[3] = Some(Point {
+            kind: PointKind::Course,
+            icon: 0,
+            x: 6,
+            y: 0,
+            course: Some(2),
+            flags: 0,
+        });
+        let reach2 = reachable(&w2, 0b1111);
+        assert!(walks_through(&w2, reach2, 6, 0));
+        assert_eq!(
+            route(&w2, 0b1111, 4, 0, EAST),
+            vec![(5, 0), (6, 0), (6, 1), (6, 2)]
+        );
+        // stopping on a course, the goal or a Toad House plays passPoint; not the start or a
+        // pipe
+        assert!(plays_pass_point(w, 1, 0));
+        assert!(plays_pass_point(w, 3, 2));
+        assert!(plays_pass_point(w, 3, 1));
+        assert!(!plays_pass_point(w, 0, 0));
+        assert!(!plays_pass_point(w, 6, 3));
+    }
+
+    #[test]
+    fn enemy_courses_start_on_contact_until_cleared() {
+        let sw = SuperWorld::test_world(&courses(10)).unwrap();
+        for (k, w) in sw.map.worlds.iter().enumerate() {
+            let enemy = w.point_at(5, 2).unwrap();
+            assert_eq!(enemy.icon, 8 + k as u8);
+            assert!(enemy_icon(enemy.icon));
+        }
+        let w = &sw.map.worlds[0];
+        assert!(!enemy_icon(w.point_at(1, 0).unwrap().icon));
+        assert!(enemy_icon(0x1f) && !enemy_icon(7) && !enemy_icon(0x10));
+        assert_eq!(contact_course(w, 0b0111, 5, 2), Some(3));
+        assert_eq!(
+            contact_course(w, 0b1111, 5, 2),
+            None,
+            "cleared: a stop like any"
+        );
+        assert_eq!(contact_course(w, 0, 1, 0), None, "not an enemy");
+        // the goal never starts on contact, whatever its icon
+        let mut w2 = w.clone();
+        w2.points[5].as_mut().unwrap().icon = 9;
+        assert_eq!(contact_course(&w2, 0, 3, 2), None);
+        // confirm enters a course only until it is cleared
+        let mut p = Progress::new(&sw);
+        (p.x, p.y) = (1, 0);
+        assert_eq!(p.enterable_course(&sw), Some((0, false)));
+        p.clears[0] = 1;
+        assert_eq!(p.enterable_course(&sw), None);
+        assert_eq!(p.course_here(&sw), Some((0, false)));
     }
 
     #[test]

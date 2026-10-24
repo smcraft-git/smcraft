@@ -34,14 +34,24 @@ pub const FULL_LAND: u8 = 47;
 pub const NO_PIECE: u8 = 0xff;
 /// The "nothing area" set follows the water set in the atlas [obs: table value + 0x30].
 pub const MAIN_SET: u8 = 48;
-/// The view: the whole map's height (4 cells; its width, 7 cells, nearly fills 16:9) over its
-/// middle, onto 1280 × 720 [inf: the field builder makes every position beyond the map a pond
-/// (its neighbours out of the map count as land, 0x71014519a0), a ring the game cannot mean to
-/// show; a 16:9 view of the field grid's six rows would show it all round. The map camera
-/// itself was not found (spec §7.7)].
-pub const VIEW_H: f32 = 192.0;
+/// The map camera: a fixed orthographic view of 460.8 × 259.2 world units (16:9) over (168,
+/// 110) — the map's middle across, 14 above it (room under the HUD) —, onto 1280 × 720; no
+/// following, zoom or lead [obs v3.0.3 0x710170b610: the map scene's update hands the game
+/// camera 0x7101332290 the size 460.8 × 259.2 and the place (168, 110 + a shift + a quake),
+/// and records the view as x −62.4 … 398.4, y ± 129.6; 0x710132ee70 makes the projection
+/// from them].
+pub const VIEW_W: f32 = 460.8;
+pub const VIEW_H: f32 = 259.2;
+pub const VIEW_CENTER: [f32; 2] = [168.0, 110.0];
 pub const SCALE: f32 = 720.0 / VIEW_H;
-/// The map's middle (world units).
+/// The camera's shift while a course is entered with the button (and while a world opens):
+/// 16 down, eased in over 15 frames, and back up the same way after [obs 0x710170b610: the
+/// view's +0x38 between 0 and −16 over 15 frames, demo states 1 / 2 (`cOpening`,
+/// `cCourseIn_Normal`); inf: the ease is drawn linear, its curve (0x7102c04a48) not read].
+pub const COURSE_IN_SHIFT: f32 = -16.0;
+pub const SHIFT_FRAMES: i32 = 15;
+/// The map's middle (world units): where the backdrop stands [obs 0x710170b610: the DV model at
+/// (168, 96)].
 pub const MAP_CENTER: [f32; 2] = [GRID_W as f32 * CELL / 2.0, GRID_H as f32 * CELL / 2.0];
 
 /// The scene skins in theme order [obs: the field textures registered by theme at
@@ -54,12 +64,22 @@ pub fn cell_world(x: f32, y: f32) -> [f32; 2] {
     [x * CELL + CELL / 2.0, y * CELL + CELL / 2.0]
 }
 
-/// World → layout units (1280 × 720, origin centre, y up).
+/// World → layout units (1280 × 720, origin centre, y up) through the map camera.
 pub fn to_layout(p: [f32; 2]) -> [f32; 2] {
     [
-        (p[0] - MAP_CENTER[0]) * SCALE,
-        (p[1] - MAP_CENTER[1]) * SCALE,
+        (p[0] - VIEW_CENTER[0]) * SCALE,
+        (p[1] - VIEW_CENTER[1]) * SCALE,
     ]
+}
+
+/// The camera's shift `since` frames after a course-in began (`entering`) or ended.
+pub fn camera_shift(entering: bool, since: i32) -> f32 {
+    let t = (since as f32 / SHIFT_FRAMES as f32).clamp(0.0, 1.0);
+    if entering {
+        COURSE_IN_SHIFT * t
+    } else {
+        COURSE_IN_SHIFT * (1.0 - t)
+    }
 }
 
 // MARK: the field
@@ -957,6 +977,10 @@ pub struct MapView {
     pub tick: i32,
     /// The player's cell position (fractional while walking).
     pub player: [f32; 2],
+    /// How far above the ground the player is (world units: 12 on a pipe, a hop's arc).
+    pub lift: f32,
+    /// The camera's shift down (world units, ≤ 0: [`camera_shift`]).
+    pub camera_dy: f32,
     /// The walking direction (dx, dy; y up), None standing.
     pub walking: Option<(i32, i32)>,
     /// The last direction walked (which way the player faces standing).
@@ -1228,7 +1252,17 @@ impl MapArt {
             self.emit_player(ui, w, theme, view, &mut out);
         }
         out.sort_by_key(|d| d.key);
-        out.into_iter().map(|d| d.quad).collect()
+        // the camera lower: everything higher on the screen
+        let dy = -view.camera_dy * SCALE;
+        out.into_iter()
+            .map(|d| {
+                let mut q = d.quad;
+                for c in &mut q.pos {
+                    c[1] += dy;
+                }
+                q
+            })
+            .collect()
     }
 
     /// The point at (x, y): its model, state, the tick its animation started and whether it
@@ -1374,6 +1408,7 @@ impl MapArt {
         .find(|n| self.has_anim(model, n))
         .unwrap_or(name);
         let at = cell_world(px, py);
+        let at = [at[0], at[1] + view.lift];
         self.emit(
             ui,
             &Instance {
@@ -1549,16 +1584,26 @@ mod tests {
 
     #[test]
     fn world_to_layout() {
-        // the map's middle is the screen's; a cell is 180 layout units
-        assert_eq!(to_layout(MAP_CENTER), [0.0, 0.0]);
+        // the camera's middle is the screen's; a cell is 48 × 1280 / 460.8 layout units
+        assert_eq!(to_layout(VIEW_CENTER), [0.0, 0.0]);
         let a = to_layout(cell_world(0.0, 0.0));
         let b = to_layout(cell_world(1.0, 1.0));
-        assert!((b[0] - a[0] - 180.0).abs() < 1e-3 && (b[1] - a[1] - 180.0).abs() < 1e-3);
-        // row 0 is the bottom one; the map's height fills the screen's
+        let cell = CELL * 1280.0 / VIEW_W;
+        assert!((b[0] - a[0] - cell).abs() < 1e-3 && (b[1] - a[1] - cell).abs() < 1e-3);
+        assert!((SCALE - 1280.0 / VIEW_W).abs() < 1e-4, "16:9");
+        // row 0 is the bottom one; the map sits centred across, 14 units low on the screen,
+        // with the field's ring round it in view
         assert!(a[1] < 0.0);
-        let low = to_layout([0.0, 0.0]);
-        let high = to_layout([0.0, GRID_H as f32 * CELL]);
-        assert!((low[1] + 360.0).abs() < 1e-3 && (high[1] - 360.0).abs() < 1e-3);
+        let left = to_layout([0.0, 0.0]);
+        let right = to_layout([GRID_W as f32 * CELL, GRID_H as f32 * CELL]);
+        assert!((left[0] + right[0]).abs() < 1e-3);
+        assert!((left[1] + 110.0 * SCALE).abs() < 1e-3 && right[1] < 360.0);
+        assert!(to_layout([-62.4, 0.0])[0] + 640.0 < 1e-2);
+        // the course-in shift eases in over 15 frames and back
+        assert_eq!(camera_shift(true, 0), 0.0);
+        assert_eq!(camera_shift(true, 15), -16.0);
+        assert_eq!(camera_shift(false, 15), 0.0);
+        assert!((camera_shift(false, 5) + 16.0 * 2.0 / 3.0).abs() < 1e-4);
     }
 
     #[test]
