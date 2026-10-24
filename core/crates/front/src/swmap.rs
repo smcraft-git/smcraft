@@ -231,12 +231,85 @@ pub struct Field {
     pub main: [[u8; FIELD_W]; FIELD_H],
 }
 
-/// The field counts (x, y) as land: a land cell, or the point a ledge's ladder climbs to
-/// [inf: the ledge actor reaches into it, and the builder asks its flags +0xbd4 / +0xbd5 there].
-fn is_land(w: &World, x: i32, y: i32) -> bool {
-    let ladder_top =
-        w.cell(x, y - 1).is_some_and(|c| c.kind == road::LEDGE) && w.links(x, y - 1) & SOUTH != 0;
-    w.cell(x, y).is_some_and(land_cell) || ladder_top
+/// Per ledge cell, whether land stands at the cell above it (`upper`) and at its own (`own`)
+/// [obs v3.0.3 0x7101445230: the ledge actor's +0xbd4 / +0xbd5].
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct LedgeLand {
+    pub upper: bool,
+    pub own: bool,
+}
+
+/// The ledges' land flags [obs v3.0.3 0x7101445230]. A ledge covers its own cell and the one
+/// above it. It sorts what stands beside it into land — a road piece (not a bridge or a water
+/// route), out of the map or an empty cell in a "Main" theme (`sub` false), a ledge whose flag
+/// for that cell is set — or not; its upper flag is land up-left or up-right of it, its own
+/// flag land below, left, right or above it (its own upper cell included). The game sets them
+/// once per ledge in build order; SMCraft takes them to their fixed point [inf: the order].
+pub fn ledge_land(w: &World, sub: bool) -> [[Option<LedgeLand>; GRID_W]; GRID_H] {
+    let ledge = |x: i32, y: i32| w.cell(x, y).is_some_and(|c| c.kind == road::LEDGE);
+    let mut flags = [[None; GRID_W]; GRID_H];
+    for (y, row) in flags.iter_mut().enumerate() {
+        for (x, f) in row.iter_mut().enumerate() {
+            if ledge(x as i32, y as i32) {
+                *f = Some(LedgeLand::default());
+            }
+        }
+    }
+    let get = |flags: &[[Option<LedgeLand>; GRID_W]; GRID_H], x: i32, y: i32| {
+        w.cell(x, y)
+            .and_then(|_| flags[y as usize][x as usize])
+            .unwrap_or_default()
+    };
+    // land at (x, y) as a ledge's neighbour sees it
+    let land = |flags: &[[Option<LedgeLand>; GRID_W]; GRID_H], x: i32, y: i32| {
+        let Some(c) = w.cell(x, y) else {
+            return !sub;
+        };
+        if ledge(x, y) {
+            return get(flags, x, y).own;
+        }
+        if ledge(x, y - 1) {
+            return get(flags, x, y - 1).upper;
+        }
+        match c.kind {
+            road::NONE => !sub && !w.occupied(x, y),
+            road::BRIDGE => false,
+            _ => c.flag & 0xf == 0,
+        }
+    };
+    loop {
+        let mut changed = false;
+        for y in 0..GRID_H as i32 {
+            for x in 0..GRID_W as i32 {
+                let Some(old) = flags[y as usize][x as usize] else {
+                    continue;
+                };
+                // the upper flag first: the own one reads it through the cell above
+                let upper = old.upper || land(&flags, x + 1, y + 1) || land(&flags, x - 1, y + 1);
+                flags[y as usize][x as usize] = Some(LedgeLand { upper, ..old });
+                let own = old.own
+                    || [(0, -1), (1, 0), (-1, 0), (0, 1)]
+                        .iter()
+                        .any(|&(dx, dy)| land(&flags, x + dx, y + dy));
+                let next = LedgeLand { upper, own };
+                flags[y as usize][x as usize] = Some(next);
+                changed |= next != old;
+            }
+        }
+        if !changed {
+            return flags;
+        }
+    }
+}
+
+/// The field counts (x, y) as land: a land cell; a ledge's own cell or the cell above it by
+/// its flags [obs v3.0.3 0x7101445a70: a ledge answers +0xbd5 at its own place, +0xbd4 above].
+fn is_land(w: &World, ledges: &[[Option<LedgeLand>; GRID_W]; GRID_H], x: i32, y: i32) -> bool {
+    let flag = |x: i32, y: i32| w.cell(x, y).and_then(|_| ledges[y as usize][x as usize]);
+    if let Some(f) = flag(x, y) {
+        return f.own;
+    }
+    flag(x, y - 1).is_some_and(|f| f.upper) || w.cell(x, y).is_some_and(land_cell)
 }
 
 /// Build the field of world `w` (`sub`: the theme's empty area is water, SceneDB
@@ -251,8 +324,9 @@ fn is_land(w: &World, x: i32, y: i32) -> bool {
 pub fn field(w: &World, sub: bool) -> Field {
     let table = piece_table();
     let cell = |x: i32, y: i32| w.cell(x, y);
-    // the cell a ledge's ladder climbs to stands on land too
-    let land = |x: i32, y: i32| is_land(w, x, y);
+    // a ledge's cells by its flags
+    let ledges = ledge_land(w, sub);
+    let land = |x: i32, y: i32| is_land(w, &ledges, x, y);
     let outside = |x: i32, y: i32| cell(x, y).is_none();
     let has_piece = |x: i32, y: i32| cell(x, y).is_some_and(|c| c.kind != road::NONE);
     let mut f = Field {
@@ -301,10 +375,13 @@ pub fn field(w: &World, sub: bool) -> Field {
 
 /// Field atlas pieces of the ledges' cliffs, rows 6–7, each set a single piece then a left,
 /// middle and right one [obs: the atlases]: the plateau's top, the cliff face over land, the
-/// face meeting water (then a water and a land tile; row 7: clouds, bushes, water blobs).
+/// face meeting water (then a water and a land tile). Row 7 (+16: clouds, bushes, water blobs)
+/// is the same set for the "B" ledges [obs v3.0.3 0x7101444b20: + 0x10 when the cell's flag & 3
+/// is 1].
 pub const CLIFF_TOP: u8 = 96;
 pub const CLIFF_FACE: u8 = 100;
 pub const CLIFF_FACE_WATER: u8 = 104;
+pub const CLIFF_ROW_B: u8 = 16;
 
 /// One cliff piece: the atlas piece and the cell it covers (the world's x, y).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -314,37 +391,58 @@ pub struct CliffPiece {
     pub y: i32,
 }
 
-/// The cliffs of the ledges: per ledge the face over its own cell and the plateau's top over
-/// the cell its ladder climbs to, single, or left / middle / right in a row of ledges; the face
-/// meets the water where its cell's lower neighbour is water in a "Sub" theme [obs: the atlas
-/// rows; 0x7101445230 (the ledge actor) sorts each ledge's neighbours left and right into roads
-/// and ledges joined in a row; inf: which cell each piece covers — the ledge actor's drawing
-/// was not read].
+/// The cliffs of the ledges, as the ledge actor draws them [obs v3.0.3 0x7101444b20, with the
+/// flags of [`ledge_land`]]: per ledge, full land under its own cell when that is land, the face
+/// over it (over land, else meeting the water), full land over the cell above when that is
+/// land, and the plateau's top there; single, or the left / middle / right piece of a row by
+/// the ledges of the same kind beside it on its row; the "B" ledges (flag & 3 = 1) from row 7.
 pub fn cliffs(w: &World, sub: bool) -> Vec<CliffPiece> {
-    let ledge = |x: i32, y: i32| w.cell(x, y).is_some_and(|c| c.kind == road::LEDGE);
+    let flags = ledge_land(w, sub);
+    let kind = |x: i32, y: i32| {
+        w.cell(x, y)
+            .filter(|c| c.kind == road::LEDGE)
+            .map(|c| c.flag & 3 == 1)
+    };
     let mut out = Vec::new();
     for y in 0..GRID_H as i32 {
         for x in 0..GRID_W as i32 {
-            if !ledge(x, y) {
+            let (Some(b), Some(land)) = (kind(x, y), flags[y as usize][x as usize]) else {
                 continue;
-            }
-            let at = match (ledge(x - 1, y), ledge(x + 1, y)) {
+            };
+            let joined = |dx: i32| kind(x + dx, y) == Some(b);
+            let at = match (joined(-1), joined(1)) {
                 (false, false) => 0,
                 (false, true) => 1,
                 (true, true) => 2,
                 (true, false) => 3,
             };
-            let water = sub
-                && !is_land(w, x, y - 1)
-                && w.cell(x, y - 1).is_none_or(|c| c.kind != road::LEDGE);
-            let face = if water { CLIFF_FACE_WATER } else { CLIFF_FACE };
+            let row = if b { CLIFF_ROW_B } else { 0 };
+            if land.own {
+                out.push(CliffPiece {
+                    piece: FULL_LAND,
+                    x,
+                    y,
+                });
+            }
+            let face = if land.own {
+                CLIFF_FACE
+            } else {
+                CLIFF_FACE_WATER
+            };
             out.push(CliffPiece {
-                piece: face + at,
+                piece: face + at + row,
                 x,
                 y,
             });
+            if land.upper {
+                out.push(CliffPiece {
+                    piece: FULL_LAND,
+                    x,
+                    y: y + 1,
+                });
+            }
             out.push(CliffPiece {
-                piece: CLIFF_TOP + at,
+                piece: CLIFF_TOP + at + row,
                 x,
                 y: y + 1,
             });
@@ -444,9 +542,11 @@ pub fn cell_model(c: &Cell, skin: &str) -> Option<String> {
         road::END | road::STRAIGHT | road::CORNER | road::TEE => format!("MyWorld_Road_{skin}{s}"),
         road::CURVE => format!("MyWorld_Road_Curve_{skin}{s}"),
         road::BRIDGE => format!("MyWorld_Road_Bridge_{skin}"),
+        // the ledge's kind: its flag & 3 (bits 11–12 of the build code) [obs v3.0.3
+        // 0x7101445230 / 0x7101444b20; inf: kind 1 is the 2fB model]
         road::LEDGE => format!(
             "MyWorld_Road_2f{}_{skin}",
-            if c.flag == 1 { "B" } else { "A" }
+            if c.flag & 3 == 1 { "B" } else { "A" }
         ),
         _ => return None,
     })
@@ -1494,9 +1594,45 @@ mod tests {
             course: None,
             flags: 0,
         });
+        // alone in the water a ledge and the point above it stand in the water; a road beside
+        // it makes its cell land, one up-right of it the cell above
         let fl = field(&l, true);
-        assert_eq!((fl.water[2][5], fl.water[3][5]), (FULL_LAND, FULL_LAND));
-        assert_ne!(fl.water[4][5], FULL_LAND);
+        assert_ne!(fl.water[2][5], FULL_LAND);
+        assert_ne!(fl.water[3][5], FULL_LAND);
+        *l.cell_mut(2, 1) = cell(road::STRAIGHT, 2, 0);
+        let fl = field(&l, true);
+        assert_eq!(
+            fl.water[2][5], FULL_LAND,
+            "a road beside it: its cell is land"
+        );
+        assert_ne!(fl.water[3][5], FULL_LAND, "the cell above isn't");
+        let flags = ledge_land(&l, true);
+        assert_eq!(
+            flags[1][3],
+            Some(LedgeLand {
+                upper: false,
+                own: true
+            })
+        );
+        *l.cell_mut(4, 2) = cell(road::END, 2, 0);
+        assert_eq!(
+            ledge_land(&l, true)[1][3],
+            Some(LedgeLand {
+                upper: true,
+                own: true
+            })
+        );
+        assert_eq!(field(&l, true).water[3][5], FULL_LAND);
+        // in a "Main" theme the empty cells round it are land
+        *l.cell_mut(2, 1) = Cell::default();
+        *l.cell_mut(4, 2) = Cell::default();
+        assert_eq!(
+            ledge_land(&l, false)[1][3],
+            Some(LedgeLand {
+                upper: true,
+                own: true
+            })
+        );
         // a "Main" theme: land everywhere but the water route
         let g = field(&w, false);
         assert_eq!(g.water[3][6], FULL_LAND);
@@ -1645,7 +1781,11 @@ mod tests {
         }
         *w.cell_mut(6, 2) = cell(road::LEDGE, 2, 0);
         let c = cliffs(&w, false);
-        let at = |x: i32, y: i32| c.iter().find(|p| (p.x, p.y) == (x, y)).map(|p| p.piece);
+        let at = |x: i32, y: i32| {
+            c.iter()
+                .find(|p| (p.x, p.y) == (x, y) && p.piece != FULL_LAND)
+                .map(|p| p.piece)
+        };
         // a row of three: left, middle, right faces, the plateau's top above them
         assert_eq!(
             (at(2, 1), at(3, 1), at(4, 1)),
@@ -1656,12 +1796,27 @@ mod tests {
             )
         );
         assert_eq!(at(3, 2), Some(CLIFF_TOP + 2));
-        // alone; with water below it in a "Sub" theme the face meets the water
+        // land under them in a "Main" theme
+        assert!(c.iter().any(|p| (p.x, p.y, p.piece) == (3, 1, FULL_LAND)));
+        assert!(c.iter().any(|p| (p.x, p.y, p.piece) == (3, 2, FULL_LAND)));
+        // alone; with no land round it in a "Sub" theme the face meets the water
         assert_eq!(at(6, 2), Some(CLIFF_FACE));
         let s = cliffs(&w, true);
         assert!(
             s.iter()
                 .any(|p| (p.x, p.y, p.piece) == (6, 2, CLIFF_FACE_WATER))
         );
+        assert!(!s.iter().any(|p| p.piece == FULL_LAND));
+        // a "B" ledge (flag 1) beside them takes row 7's pieces and doesn't join the row
+        *w.cell_mut(5, 1) = cell(road::LEDGE, 2, 1);
+        let c = cliffs(&w, false);
+        let at = |x: i32, y: i32| {
+            c.iter()
+                .find(|p| (p.x, p.y) == (x, y) && p.piece != FULL_LAND)
+                .map(|p| p.piece)
+        };
+        assert_eq!(at(5, 1), Some(CLIFF_FACE + CLIFF_ROW_B));
+        assert_eq!(at(5, 2), Some(CLIFF_TOP + CLIFF_ROW_B));
+        assert_eq!(at(4, 1), Some(CLIFF_FACE + 3));
     }
 }

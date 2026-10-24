@@ -617,8 +617,12 @@ sway, importer and pack 12, the dev cache already at v12).
   crumbles, the cannon's prepare / launch (`nextWorld`), the next world's landing; unreached
   points stand still; the goal model by world / water / course (0x71014437e0); the ledges'
   cliffs from the atlas rows 6–7 [inf placement]. Captures `superworld-clear`,
-  `superworld-worldclear`. ⬜ the cliffs' row-7 pieces, map ghosts (online: other players' runs
-  with name balloons)
+  `superworld-worldclear`. ✅ the ledges' cliffs as the game draws them (2026-10-25, branch
+  `swmap3`, spec §7.3: the ledge's land flags 0x7101445230 — land above / at its own cell from
+  roads, the map's edge and empty cells in Main themes, joined ledges —, its draw 0x7101444b20:
+  full land under them, face over land or meeting water, top, joined by same-kind ledges; the
+  "B" ledges (flag & 3 = 1) from row 7; the field's land asks the same flags). ⬜ map ghosts
+  (online: other players' runs with name balloons)
 - ✅ The walk and the camera (2026-10-25, branch `swmap3`; spec §7.7, §7.9, read from v3.0.3):
   the route graph's walk-through flag (0x710147b9a0: curves always, roads with exactly two
   reached neighbours; every point, pipe and Toad House stops) — `passPoint` is the stop's sound

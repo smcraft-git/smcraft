@@ -205,6 +205,9 @@ SMCraft is back in development (it was archived in October 2026).
   into them, and if he comes back without clearing it he walks back to where he set off from.
   The map is seen through the game's camera (the whole map with the land round it, the view
   dipping as a course is entered).
+- Super World ledges stand on the game's cliffs: land under them only where the land reaches
+  (a ladder out of the sea stands in the water), cloud, bush and water-blob cliffs for the
+  second kind of ledge.
 - **SMM2's own Endless Challenge**, and **Challenge Modes**: Course World's Endless button
   switches between it and the 100 Mario Challenge with ZL / ZR.
 - **Play Together (local co-op)** for up to four players with SMM2's rules: bubbles, shared
