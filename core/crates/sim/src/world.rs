@@ -2066,6 +2066,13 @@ impl World {
             .liquid
             .is_some_and(|l| l.water() && l.covers(self.player.y + 8.0))
             || (self.level.theme == 2 && self.level.night); // castle night: swim in the air
+        // alone: the view's top edge holds the feet 96 px over it (80 in water / castle night;
+        // local-coop.md §4.5); co-op does it in view_edges
+        self.player.top_y = if self.players() > 1 || self.player.control != Control::Normal {
+            f32::INFINITY
+        } else {
+            self.camera_y + VIEW_H + if self.player.in_water { 80.0 } else { 96.0 }
+        };
         self.jump_pressed_now = jump_held && !self.prev_jump_tramp;
         self.prev_jump_tramp = jump_held;
         if main_pass {

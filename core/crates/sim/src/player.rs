@@ -451,10 +451,23 @@ pub struct Player {
     pub sliding: bool,
     /// In a spin jump (until landing).
     pub spinning: bool,
-    /// SMB3 P-meter (0…630) and its hold timer; flight window after a full-meter jump.
+    /// SMB3 P-meter (+0x2864, 0…630) and its hold timer (+0x2868); flight window after a
+    /// full-meter jump (+0x2860) and the grounded drain delay inside it (+0x286c).
     pub p_meter: i32,
     p_hold: i32,
     pub flight: i32,
+    p_ground: i32,
+    /// Raccoon: in TailFlying (state 73), a press during a flap queued (+0x489 bit 3), the
+    /// tail's air mode since the first flap or wag of this air time (+0x488 bit 15).
+    tail_flying: bool,
+    flap_again: bool,
+    /// Raccoon: frames left of TailAttack (state 75, 18: its `tail_attack` animation), on the
+    /// ground or in the air.
+    tail_state: i32,
+    tail_air: bool,
+    /// Feet limit: the view's top + 96 (the view's edge push, local-coop.md §4.5), set by the
+    /// world each frame (no limit: +∞).
+    pub top_y: f32,
     /// SMW cape flight and the cape run meter (0…30: frames running at ≥ 2.1 px/f); a cape
     /// dive landed this frame (the world shakes as for a POW); the head hit something last
     /// frame.
@@ -651,6 +664,12 @@ impl Player {
             p_meter: 0,
             p_hold: 0,
             flight: 0,
+            p_ground: 0,
+            tail_flying: false,
+            tail_state: 0,
+            flap_again: false,
+            tail_air: false,
+            top_y: f32::INFINITY,
             cape: CapeState::None,
             cape_meter: 0,
             cape_quake: false,
@@ -1259,23 +1278,20 @@ impl Player {
         if dir != 0 {
             self.facing = dir;
         }
-        if self.slow_fall > 0 {
+        // the tail's air mode ("special mode A", +0x488 bit 15: from the first flap or wag of
+        // an air time to the landing) [obs v3.0.3 0x71015d34e0; Ryujinx traces M3_form leaf_*]:
+        // toward ±2.0 with a direction held; without one the speed is kept, only above 2.0
+        // eased back to 2.0; bands by the facing; no hard cap
+        if self.tail_air || self.slow_fall > 0 {
             let t = self.thresholds();
             let (target, table) = if dir != 0 {
                 (2.0 * dir as f32, &AIR_TAIL_DIR)
+            } else if self.vx.abs() > 2.0 {
+                (if self.vx <= 0.0 { -2.0 } else { 2.0 }, &AIR_TAIL)
             } else {
-                (0.0, &AIR_TAIL)
+                (self.vx, &AIR_TAIL)
             };
-            let face = if self.vx == 0.0 {
-                if dir != 0 { dir } else { self.facing }
-            } else {
-                self.vx.signum() as i32
-            };
-            let b = if dir != 0 && dir != face {
-                0
-            } else {
-                band(self.vx, face, t)
-            };
+            let b = band(self.vx, self.facing, t);
             self.vx = approach(self.vx, target, table[b]);
             self.air_move = (target, table[b]);
             return;
@@ -1369,6 +1385,11 @@ impl Player {
         if self.fire_pose > 0 {
             self.fire_pose -= 1;
         }
+        // TailAttack runs on the ground from the frame after touchdown (no airborne landing
+        // frame: it isn't Jump / Fall) [obs: Ryujinx trace M3_form leaf_tail_air]
+        if self.tail_state > 0 && self.landed {
+            self.landed = false;
+        }
         let jump = inp.held(input::JUMP);
         let pressed = jump && !self.prev_jump;
         self.prev_jump = jump;
@@ -1435,6 +1456,9 @@ impl Player {
             // the raccoon's tail_attack animation is 18 frames (TailAttack 0x7100a034e0 ends
             // with it); the cat's scratch is ClimbAttack (0x7100a1c170 / 0x7100a1c230), which
             // ends with its 17-frame animation and leaves normal movement alone [obs]
+            if self.form == Form::Raccoon {
+                self.tail_state = 18;
+            }
             self.attack = match self.form {
                 Form::Raccoon => 18,
                 Form::Cat => CAT_SCRATCH_FRAMES,
@@ -1452,12 +1476,18 @@ impl Player {
                 self.vx = 2.5 * self.facing as f32;
             }
         }
+        // (TailAttack is no walking state for the P-meter)
+        if self.form != Form::Raccoon || self.in_water {
+            self.tail_state = 0;
+        }
+        let tail_attack = self.tail_state > 0;
+        self.tail_state = self.tail_state.saturating_sub(1);
         if self.attack > 0 {
             self.attack -= 1;
         }
         // a press the tail uses is spent; one that does nothing is retried 3 frames later, the
         // tail included [obs: trace, a press while rising wags 3 frames later once falling]
-        let tail_used = self.step_meters(inp, pressed || (retry && !self.landed), jump);
+        let tail_used = self.step_meters(inp, pressed || (retry && !self.landed), tail_attack);
         self.prev_run = run;
         let Some(inp) = self.pu_before(inp, pressed, spin_pressed, level) else {
             return;
@@ -1665,6 +1695,7 @@ impl Player {
                     self.skid = SkidPhase::None;
                 } else if jump_now {
                     jumped = true;
+                    self.tail_state = 0;
                     if walking {
                         (self.vx, self.facing) = before;
                         self.air(inp);
@@ -2387,49 +2418,135 @@ impl Player {
         }
     }
 
-    /// P-meter (SMB3) / cape meter (SMW), raccoon flaps (player-physics.md §2.5, §5.4): the
-    /// meter fills 10/frame while running on the ground at ≥ 2.1 px/f with run and a direction
-    /// held (630 = full, 63 frames), holds 30 frames, then drains 4/frame. A jump with a full
-    /// meter opens a 240-frame flight window; in the air each jump press flaps while the window
-    /// is open, else (falling) slows the fall.
-    fn step_meters(&mut self, inp: Input, pressed: bool, _jump: bool) -> bool {
+    /// P-meter (SMB3) / cape meter (SMW), raccoon flaps (player-physics.md §2.5, §5.4).
+    /// The raccoon's air press (0x71015dc650) [obs v3.0.3]: with a full meter and the flight
+    /// window open it flaps (TailFlying) only while vy < 0.75, else it is left for the retry;
+    /// without the window, falling, it wags (TailSlowFall). TailFlying (enter 0x71015dc7f0, exec
+    /// 0x71015dca60): an 18-frame flap timer (+0x2870) holds vy 1.5 with no gravity in any
+    /// state (the integrator 0x71015d3cc0); a press during a flap queues the next one, taken when
+    /// the timer runs out, else Fall; the window closing ends it (Fall), and its exit then
+    /// empties the meter. Then the meter itself (0x71015dc180, SMB3 only, after the state's
+    /// exec, on the speed the frame starts with): the window counts down; outside it, running
+    /// on the ground at ≥ 2.1 px/f with Run and a direction held adds 10 (to 630) and sets the
+    /// hold to 30, anything else counts the hold down twice a frame (15 frames) and then drains
+    /// 4 a frame, the hold dropped in the air; inside the window a grounded player not running
+    /// drains after 5 frames, and the window shuts once the meter isn't full. A jump begin with
+    /// a full meter opens the window (240, 0x71015c8330, any form) [obs: Ryujinx traces
+    /// M3_form leaf_*].
+    fn step_meters(&mut self, inp: Input, pressed: bool, tail_attack: bool) -> bool {
         let mut used = false;
-        let running =
-            self.on_ground && inp.held(input::RUN) && inp.dir_x() != 0 && self.vx.abs() >= 2.1;
-        if running {
-            self.p_meter = (self.p_meter + 10).min(630);
-            self.p_hold = 30;
-        } else if self.on_ground || self.flight == 0 {
-            if self.p_hold > 0 {
-                self.p_hold -= 1;
-            } else {
-                self.p_meter = (self.p_meter - 4).max(0);
+        // the meter's ground test is the walking states' flag (+0x488 bit 12: Walk, Crouch,
+        // Landing, set by their enter, 0x71015a0b30 …): not on a take-off frame, in a skid,
+        // a slip or the ground tail attack [obs: Ryujinx traces M3_* (meter +0x2864)]
+        let jumping = pressed && self.on_ground && !self.landed;
+        let grounded = self.on_ground && !jumping;
+        // (a skid starting this frame counts: Walk's exec turns into Turn before the meter)
+        let dir = inp.dir_x();
+        let skid_starts =
+            dir != 0 && dir != self.facing && self.vx.abs() >= SKID_ENTER && !self.keep_facing;
+        let walking = grounded
+            && !tail_attack
+            && self.skid == SkidPhase::None
+            && !skid_starts
+            && !self.sliding;
+        let running = walking && inp.held(input::RUN) && dir != 0 && self.vx.abs() >= 2.1;
+        // (the tail's air mode still moves the landing frame [obs: leaf_pmeter])
+        if (self.on_ground && !self.landed) || self.in_water || self.form != Form::Raccoon {
+            self.tail_flying = false;
+            self.flap_again = false;
+            self.tail_air = false;
+        }
+        if self.tail_flying {
+            let next = self.flight > 0 && self.flap == 0 && std::mem::take(&mut self.flap_again);
+            if next {
+                self.flap = 18;
+            } else if self.flight == 0 || self.flap == 0 {
+                self.tail_flying = false;
+                if self.flight == 0 {
+                    self.p_meter = 0;
+                }
             }
         }
-        if self.flight > 0 {
-            self.flight -= 1;
-        }
-        if pressed && self.on_ground && self.p_meter >= 630 && self.form == Form::Raccoon {
-            self.flight = 240;
-        }
         if pressed && !self.on_ground && self.form == Form::Raccoon {
-            if self.flight > 0 {
-                self.flap = 18;
+            if self.tail_flying {
+                self.flap_again = true;
+                used = true;
+            } else if self.p_meter == 630 && self.flight > 0 {
+                if self.vy < 0.75 {
+                    self.tail_state = 0;
+                    self.tail_flying = true;
+                    self.tail_air = true;
+                    self.flap = 18;
+                    used = true;
+                }
             } else if self.slow_fall > 0 {
                 // queued, and still retried 3 frames later (a ground jump if it has landed)
                 self.wag_again = true;
             } else if self.vy < 0.0 {
+                self.tail_state = 0;
                 self.slow_fall = 1;
                 self.wag_first = true;
                 self.wag_again = false;
+                self.tail_air = true;
                 used = true;
             }
             self.attack = self.attack.max(8);
+        }
+        if self.style == Style::M3 {
+            if jumping && self.p_meter == 630 {
+                self.flight = 240;
+            }
+            if self.flight > 0 {
+                self.flight -= 1;
+            }
+            if self.p_hold > 0 {
+                self.p_hold -= 1;
+            }
+            let drain = |m: &mut i32| *m = (*m - 4).max(0);
+            if self.flight == 0 {
+                if running {
+                    self.p_meter = (self.p_meter + 10).min(630);
+                    self.p_hold = 30;
+                } else if !grounded
+                    && self.p_meter == 630
+                    && !self.tail_flying
+                    && self.slow_fall == 0
+                {
+                    // a full meter is kept in Jump / Fall (+0x488 bit 13) [obs: M3_flat
+                    // ledge_run, running off a ledge; not in TailFlying: leaf_fly_tap]
+                } else {
+                    if self.p_hold == 0 || {
+                        self.p_hold -= 1;
+                        self.p_hold == 0
+                    } {
+                        drain(&mut self.p_meter);
+                    }
+                    if !walking {
+                        self.p_hold = 0;
+                    }
+                }
+            } else {
+                if !grounded {
+                    self.p_ground = 0;
+                } else if running {
+                    self.p_ground = 5;
+                } else if self.p_ground == 0 || {
+                    self.p_ground -= 1;
+                    self.p_ground == 0
+                } {
+                    drain(&mut self.p_meter);
+                }
+                if self.p_meter != 630 {
+                    self.flight = 0;
+                }
+            }
         }
         // SMW cape meter (0x71009f5d10) [obs]: +1 a frame running on the ground with Run and a
         // direction held at ≥ 2.1 px/f, up to 30; anything else empties it, except that a full
         // meter is kept in the air
         if self.style == Style::MW {
+            let running =
+                self.on_ground && inp.held(input::RUN) && dir != 0 && self.vx.abs() >= 2.1;
             if running {
                 self.cape_meter = (self.cape_meter + 1).min(30);
             } else if !(self.cape_meter == 30 && !self.on_ground) {
@@ -3058,6 +3175,13 @@ impl Player {
                     self.slope = None;
                 }
             }
+        }
+        // the view's top holds the feet (the edge push after the collision); an upward speed
+        // is zeroed [obs v1.0.0 0x7100985ef0; Ryujinx trace M3_form leaf_fly_tap: a raccoon
+        // flight stops at feet 328.0 = view top 232 + 96 with vy 0]
+        if self.y > self.top_y {
+            self.y = self.top_y;
+            self.vy = self.vy.min(0.0);
         }
     }
 }

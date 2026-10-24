@@ -109,7 +109,8 @@ pub fn run_all(course: &[u8], script: &[Input], start: &Start) -> Result<(String
     let first_id = w.actors.first().map_or(u32::MAX, |a| a.id);
     w.reset_camera();
     let mut csv = String::from(
-        "frame,x,y,vx,vy,facing,ground,pose,form,input,ax,ay,avx,avy,adir,akind,camx,camy\n",
+        "frame,x,y,vx,vy,facing,ground,pose,form,input,ax,ay,avx,avy,adir,akind,camx,camy,meter,\
+         flight\n",
     );
     let mut all = String::from("frame,id,kind,x,y,vx,vy,dir\n");
     for (i, inp) in script.iter().enumerate() {
@@ -144,7 +145,10 @@ pub fn run_all(course: &[u8], script: &[Input], start: &Start) -> Result<(String
             )),
             None => csv.push_str(",,,,,,"),
         }
-        csv.push_str(&format!(",{},{}\n", w.camera_x, w.camera_y));
+        csv.push_str(&format!(
+            ",{},{},{},{}\n",
+            w.camera_x, w.camera_y, w.player.p_meter, w.player.flight
+        ));
     }
     Ok((csv, all))
 }
@@ -153,7 +157,7 @@ pub fn run_all(course: &[u8], script: &[Input], start: &Start) -> Result<(String
 // Physics test courses
 
 pub const STYLES: [&str; 5] = ["M1", "M3", "MW", "WU", "3W"];
-pub const KINDS: [&str; 29] = [
+pub const KINDS: [&str; 31] = [
     "flat",
     "wall",
     "slope",
@@ -183,6 +187,8 @@ pub const KINDS: [&str; 29] = [
     "slopejoins",
     "seesaw",
     "seesawp",
+    "formw",
+    "formt",
 ];
 
 /// Kinds made in SMB1 only (the terrain they test is the same in every style).
@@ -191,11 +197,14 @@ const M1_ONLY: [&str; 3] = ["slopejoin", "mushstart", "slopejoins"];
 /// engine).
 const WU_ONLY: [&str; 2] = ["seesaw", "seesawp"];
 /// Kinds made in 3D World only (clear pipes are a 3D World part).
-const W3_ONLY: [&str; 4] = ["cpipe", "cpipeg", "cpipev", "cpiped"];
+const W3_ONLY: [&str; 6] = ["cpipe", "cpipeg", "cpipev", "cpiped", "formw", "formt"];
 
 /// Where the items / form courses keep their power-up: the ? block's tile column and its row
 /// above the floor (the capture walks there first; no test script gets that far).
 pub const POWER_BLOCK: (i32, i32) = (140, 4);
+
+/// The formw / formt courses' floor power-up column (the capture walks over it first).
+pub const FLOOR_ITEM: i32 = 10;
 
 /// All test course names: `<style>_<kind>`.
 pub fn course_names() -> Vec<String> {
@@ -452,6 +461,24 @@ pub fn build_course(name: &str) -> Result<Vec<u8>, String> {
             for y in 1..=2 {
                 e.paint_ground(bx - 4, up(y)).map_err(err)?;
                 e.paint_ground(bx + 4, up(y)).map_err(err)?;
+            }
+        }
+        "formw" | "formt" => {
+            // the Cat's walls: the Super Bell on the floor at x FLOOR_ITEM (it stays where it
+            // lands [obs: emulator]; a walk right collects it), then
+            // - formw: a 12-tall wall at x 24 (climbs, climb falls, wall jumps, re-attaching);
+            // - formt: a 4-tall wall at x 24 (climbed over the top) and a 2-tall one at x 34
+            floor(&mut e, 0, len - 1)?;
+            e.place(44, FLOOR_ITEM, up(1)).map_err(err)?;
+            let walls: &[(i32, i32)] = if kind == "formw" {
+                &[(24, 12)]
+            } else {
+                &[(24, 4), (34, 2)]
+            };
+            for &(x, h) in walls {
+                for y in 1..=h {
+                    e.paint_ground(x, up(y)).map_err(err)?;
+                }
             }
         }
         "wall" => {
