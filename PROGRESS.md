@@ -477,8 +477,8 @@ Nextendo; `docs/nextendo-network-play.md`, spec `research/specs/network-play.md`
   menus), the surface dropped and remade across background / foreground. Checked in the Android
   Emulator (API 35, arm64) with an asset pack pushed by `build-android.sh --push`: opening, title,
   Play menu, Course World, the library list, a course page and play by touch. Open: the import on
-  the device (G1's NSP importer + a file picker), a real phone, Bluetooth controllers (winit key
-  events), the 3D World sky drawn in stripes in the emulator, sound not checked (emulator audio off)
+  the device (G1's NSP importer + a file picker), a real phone, Bluetooth controllers' buttons and D-pad as the keyboard's keys ✅ (`input::android_pad_key`;
+  compiles for the target, not tried on a device; the sticks need motion events winit doesn't pass), the 3D World sky drawn in stripes in the emulator, sound not checked (emulator audio off)
 - ⏳ Release packages for every platform (the game only; the player imports their own dump):
   `release.yml` builds Windows, Linux x64 / arm64, macOS, Android and the web on a `v*` tag;
   waiting for the owner's OK to tag the first one (CHANGELOG "Unreleased" is ready)
