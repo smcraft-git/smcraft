@@ -23,7 +23,18 @@ sway, importer and pack 12, the dev cache already at v12).
   Lanky Mario's sounds; co-op per-player keys, carrying, the ground-pound knock, per-player action
   conditions and the 180-frame warp wait; enemies' defeat sounds by cause and many update
   power-up / 3D World sounds; Network Play on a TGRCode course the session's opener picks; the
-  Endless map's "New High Score!" panel.
+  Endless map's "New High Score!" panel. Evening of 2026-10-24: blocks, trees and flags release any
+  part (dressed), vines grow, Bill Blasters and Lakitus fire / throw any part (coin bursts too),
+  enemies drop held Keys, Koopalings ride tracks — coverage 550 / 550 of the sample, 38 / 38 recent
+  TGRCode; the game's track tiles; CJK names; the Toad House minigames; SMB3 / SMW wings; boss
+  jump sounds by style.
+- **GPU-slot queue** (one game instance at a time; the physics agent holds it most of the time):
+  re-render the pixel table (`research/tools/pixel-ref`, `ours` for all; an older run drew SMB1
+  desert night as day), captures of the track tiles in play and of NSMBU / 3D World wings (the mesh
+  planner maps `M1_Enemy_wingcommon` to `<style>_Enemy_wingcommon`), a look at Water Level mode
+  and custom scroll in the recomp (`research/tools/maker-look`: touch taps / drags by script).
+- **Agent queue** (when a helper slot frees): the Super Worlds 3D map (MyWorld models, point
+  icons, ghosts); SMM1 UI sounds (Wii U BFSAR / BFWAV import) for the SMM1-look 100 Mario.
 - **Waiting on the owner:** the SMCraft app on Nextendo's portal (public client / PKCE, scopes
   `identity game.matchmaking`, redirect `http://127.0.0.1:47614/callback`) and its client ID; the
   game-server access key — (a) read from the player's own dump at import (recommended) or (b) one
