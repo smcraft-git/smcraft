@@ -6,6 +6,7 @@ use mmk_formats::smm2::Course;
 use mmk_front::CourseEntry;
 use mmk_front::CourseStatus;
 use mmk_front::host::Condition;
+use mmk_front::host::CourseMeta;
 use mmk_sim::world::Event;
 
 use crate::game::Game;
@@ -85,6 +86,25 @@ pub fn entry(
         key,
         modified,
         meta: Default::default(),
+    }
+}
+
+/// A Course World listing's statistics as library metadata (the runs rate a course by its
+/// clear rate), for the 100 Mario / Endless courses the web build holds.
+pub fn meta_of_listing(l: &mmk_online::Listing) -> CourseMeta {
+    let n = |v: u64| Some(v as i64);
+    CourseMeta {
+        clear_rate: (l.attempts > 0).then(|| l.clears as f64 * 100.0 / l.attempts as f64),
+        bucket: None,
+        maker: Some(l.maker.clone()).filter(|s| !s.is_empty()),
+        code: Some(l.code.clone()),
+        world_record_ms: (l.record_ms > 0).then_some(l.record_ms as i64),
+        plays: n(l.plays),
+        likes: n(l.likes),
+        clears: n(l.clears),
+        attempts: n(l.attempts),
+        uploaded: (l.uploaded > 0).then_some(l.uploaded as i64),
+        tags: Vec::new(),
     }
 }
 
@@ -200,5 +220,38 @@ mod tests {
         v.sort_by(|a, b| natural(a, b));
         assert_eq!(v, ["C1", "c2", "c10"]);
         assert_eq!(fnv1a64(b""), 0xcbf2_9ce4_8422_2325);
+    }
+
+    #[test]
+    fn a_listings_clear_rate_rates_it_for_the_runs() {
+        let mut l = mmk_online::Listing {
+            code: "N24-N99-PNF".into(),
+            name: "Pool".into(),
+            maker: "Ada".into(),
+            style: "M1".into(),
+            theme: 0,
+            plays: 9,
+            clears: 1,
+            likes: 0,
+            boos: 0,
+            difficulty: 0,
+            maker_id: String::new(),
+            record_ms: 0,
+            record_holder: String::new(),
+            record_verified: false,
+            first_clear: String::new(),
+            description: String::new(),
+            uploaded: 0,
+            attempts: 4,
+        };
+        let m = meta_of_listing(&l);
+        assert_eq!((m.clear_rate, m.difficulty_value()), (Some(25.0), 75));
+        assert_eq!(
+            (m.code.as_deref(), m.maker.as_deref()),
+            (Some("N24-N99-PNF"), Some("Ada"))
+        );
+        assert_eq!((m.world_record_ms, m.uploaded), (None, None));
+        l.attempts = 0;
+        assert_eq!(meta_of_listing(&l).clear_rate, None);
     }
 }

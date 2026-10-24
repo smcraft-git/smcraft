@@ -189,10 +189,19 @@ impl FrontApp {
     }
 
     /// Host time `dt` with the keyboard and pads (`shoulders`: their shoulder buttons): the
-    /// ticks it is worth.
-    pub fn advance(&mut self, dt: f64, keys: &Keyboard, pad: u32, shoulders: u32, game: &mut Game) {
+    /// ticks it is worth. `play_keys`: the keyboard's engine buttons for player 1 (all of them,
+    /// or its left half with the keyboard split in co-op).
+    pub fn advance(
+        &mut self,
+        dt: f64,
+        keys: &Keyboard,
+        play_keys: u32,
+        pad: u32,
+        shoulders: u32,
+        game: &mut Game,
+    ) {
         let n = self.step.advance(dt);
-        let game_buttons = crate::input::combine(keys, pad).buttons;
+        let game_buttons = play_keys | pad;
         let mut input = menu_input(keys, pad, shoulders);
         input.pointer = self.pointer;
         input.pointer_down = self.pointer_down;
@@ -220,6 +229,22 @@ impl FrontApp {
                 .extend(text.unwrap_or_default().chars().filter(|c| !c.is_control())),
         }
         true
+    }
+
+    /// Text pasted while the front end has a text field open: typed into it (control
+    /// characters left out). False when no field is open.
+    pub fn type_text(&mut self, text: &str) -> bool {
+        if !self.front.typing() {
+            return false;
+        }
+        self.typed.extend(text.chars().filter(|c| !c.is_control()));
+        true
+    }
+
+    /// The graphics device was lost: the UI layers' textures and pipelines went with it (they
+    /// are made again from the UI caches on the next draw).
+    pub fn graphics_lost(&mut self) {
+        self.layers.clear();
     }
 
     /// A click at window pixel `at` in a `size` window.

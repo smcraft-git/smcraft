@@ -9,7 +9,8 @@ publish.workspace = true
 [features]
 default = ["http"]
 # the HTTP clients (the course server's, TGRCode's) and Nextendo; without it (the web build,
-# which fetches through the page) TGRCode's client takes its answers from a `tgrcode::Fetch`
+# which fetches through the page) the course server's client sends through a `Transport` and
+# TGRCode's takes its answers from a `tgrcode::Fetch`
 http = ["dep:mmk-nex", "dep:ureq"]
 
 [dependencies]

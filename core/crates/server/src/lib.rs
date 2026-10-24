@@ -5,7 +5,7 @@
 //!
 //! | method | path | does |
 //! |---|---|---|
-//! | POST | `/api/courses` (body: course data; header `X-Maker`) | upload → `{code, …}` |
+//! | POST | `/api/courses` (body: course data; `?maker=` or header `X-Maker`) | upload → `{code, …}` |
 //! | GET | `/api/courses?q=&style=&sort=new\|popular\|hard&limit=&offset=` | search |
 //! | GET | `/api/courses/<code>` | metadata |
 //! | GET | `/api/courses/<code>/data` | course data (bytes) |
@@ -1295,10 +1295,17 @@ pub fn handle(
             json(200, json!({ "server": "mmk-server", "version": 1 }))
         }
         ("POST", ["api", "courses"]) => {
-            let maker = headers
-                .iter()
-                .find(|(k, _)| k.eq_ignore_ascii_case("x-maker"))
-                .map(|(_, v)| v.as_str())
+            // the uploader's name: the `maker` query parameter (any text: browsers only send
+            // header values of plain ASCII), else `X-Maker`
+            let maker = q
+                .get("maker")
+                .map(String::as_str)
+                .or_else(|| {
+                    headers
+                        .iter()
+                        .find(|(k, _)| k.eq_ignore_ascii_case("x-maker"))
+                        .map(|(_, v)| v.as_str())
+                })
                 .unwrap_or("anonymous");
             if account.as_ref().is_some_and(|a| a.banned) {
                 return err(403, "banned");
@@ -1427,7 +1434,8 @@ impl Default for ServeOptions {
 }
 
 /// CORS headers for browsers (any origin: the API is public and uses bearer tokens, not
-/// cookies).
+/// cookies). A page on a public site may call a server on this machine or the local network
+/// (Chromium's Private Network Access asks first). Every answer has them, the 429 too.
 fn cors(
     resp: tiny_http::Response<std::io::Cursor<Vec<u8>>>,
 ) -> tiny_http::Response<std::io::Cursor<Vec<u8>>> {
@@ -1441,6 +1449,7 @@ fn cors(
             "Access-Control-Allow-Headers",
             "Authorization, Content-Type, X-Maker",
         ))
+        .with_header(h("Access-Control-Allow-Private-Network", "true"))
         .with_header(h("Access-Control-Max-Age", "86400"))
 }
 
@@ -1642,6 +1651,57 @@ mod tests {
         ));
         let _ = fs::remove_dir_all(&d);
         d
+    }
+
+    /// A browser page of any site can call the API: the preflight (also Private Network
+    /// Access's, for a server on this machine) and every answer carry the CORS headers.
+    #[test]
+    fn browsers_may_call_it() {
+        use std::io::{Read, Write};
+        let store = std::sync::Arc::new(Store::open(tmp("cors")).unwrap());
+        let port = serve_background(store, "127.0.0.1:0", ServeOptions::default()).unwrap();
+        let ask = |req: &str| -> String {
+            let mut s = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+            s.set_read_timeout(Some(std::time::Duration::from_secs(5)))
+                .unwrap();
+            s.write_all(req.as_bytes()).unwrap();
+            let mut out = String::new();
+            let _ = s.read_to_string(&mut out);
+            out.to_ascii_lowercase()
+        };
+        let pre = ask(
+            "OPTIONS /api/courses HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\
+             Origin: https://example.org\r\nAccess-Control-Request-Method: POST\r\n\
+             Access-Control-Request-Headers: authorization, content-type\r\n\
+             Access-Control-Request-Private-Network: true\r\n\r\n",
+        );
+        assert!(pre.starts_with("http/1.1 204"), "{pre}");
+        for h in [
+            "access-control-allow-origin: *",
+            "access-control-allow-private-network: true",
+            "access-control-allow-headers: authorization, content-type, x-maker",
+        ] {
+            assert!(pre.contains(h), "{h} in {pre}");
+        }
+        let get = ask("GET /api/health HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n");
+        assert!(get.contains("access-control-allow-origin: *"), "{get}");
+    }
+
+    /// The uploader's name as a query parameter: any text (a header can only carry ASCII).
+    #[test]
+    fn the_makers_name_may_come_in_the_query() {
+        let store = Store::open(tmp("maker-query")).unwrap();
+        let data = Course::blank("M1").to_bytes().unwrap();
+        let (st, _, body) = handle(
+            &store,
+            "POST",
+            "/api/courses?maker=%E3%83%9E%E3%83%AA%E3%82%AA+2",
+            &[("X-Maker".into(), "ignored".into())],
+            &data,
+        );
+        assert_eq!(st, 201);
+        let meta: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(meta["maker"], "マリオ 2");
     }
 
     /// A failed accept (iOS reclaiming a suspended app's listening socket) doesn't stop the

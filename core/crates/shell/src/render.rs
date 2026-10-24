@@ -8,6 +8,7 @@
 //! night drawn upside down) with the play field's meshes between them, then the HUD on top.
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use mmk_assets::Cache;
 use mmk_host::DrawSprite;
@@ -27,6 +28,9 @@ pub struct Gpu {
     pub bc: bool,
     pub info: wgpu::AdapterInfo,
     pub adapter: wgpu::Adapter,
+    /// The device was lost (a driver reset, the browser's GPU process gone): everything made
+    /// with it is gone, and the graphics are made again (`app`).
+    pub lost: Arc<AtomicBool>,
 }
 
 impl Gpu {
@@ -69,15 +73,33 @@ impl Gpu {
             })
             .await
             .map_err(|e| format!("graphics device: {e}"))?;
-        device.set_device_lost_callback(|reason, msg| {
+        let lost = Arc::new(AtomicBool::new(false));
+        let flag = lost.clone();
+        device.set_device_lost_callback(move |reason, msg| {
             crate::app::log(&format!("graphics device lost ({reason:?}): {msg}"));
+            // (dropping the device destroys it: not a loss)
+            if reason == wgpu::DeviceLostReason::Unknown {
+                flag.store(true, Ordering::Relaxed);
+            }
         });
+        // a browser: errors (those of a lost device's last frames among them) are logged, not
+        // panicked on, so the page lives to make its graphics again
+        #[cfg(target_arch = "wasm32")]
+        {
+            let errors = Arc::new(std::sync::atomic::AtomicU32::new(0));
+            device.on_uncaptured_error(Arc::new(move |e: wgpu::Error| {
+                if errors.fetch_add(1, Ordering::Relaxed) < 10 {
+                    crate::app::log(&format!("graphics error: {e}"));
+                }
+            }));
+        }
         Ok(Self {
             device,
             queue,
             bc,
             info,
             adapter,
+            lost,
         })
     }
 }

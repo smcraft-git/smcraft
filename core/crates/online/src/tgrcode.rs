@@ -949,6 +949,7 @@ mod tests {
 
     /// The live service, politely (one request at a time, a few in all). Run by hand:
     /// `cargo test -p mmk-online live_tgrcode -- --ignored` (offline: it says so and passes).
+    #[cfg(feature = "http")]
     #[test]
     #[ignore]
     fn live_tgrcode() {

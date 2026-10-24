@@ -213,13 +213,22 @@ globalThis.mmkStorage = {
   removeSave: (p) => save(() => removeFile(p, SAVE_ROOT)),
 };
 
-// Course World on TGRCode: its API answers any page (CORS), so the game fetches it from here.
+// Course World on TGRCode and the own course server (`mmk server`): both answer any page
+// (CORS), so the game fetches them from here. `request` rejects on a network error (a server
+// that can't be reached, or plain HTTP from an https:// page to anything but localhost).
 globalThis.mmkNet = {
   get: async (url) => {
     const r = await fetch(url);
     return { status: r.status, bytes: new Uint8Array(await r.arrayBuffer()) };
   },
+  request: async (method, url, headers, body) => {
+    const r = await fetch(url, { method, headers, body: body ?? undefined });
+    return { status: r.status, bytes: new Uint8Array(await r.arrayBuffer()) };
+  },
 };
+
+// What the game can't show on its canvas (a lost graphics device).
+globalThis.mmkNotice = (text) => status(text);
 
 // ---- import ----------------------------------------------------------------------------------
 
@@ -555,6 +564,75 @@ const unlock = () => {
 addEventListener("pointerdown", unlock, { capture: true });
 addEventListener("keydown", unlock, { capture: true });
 
+// pasted text goes into the menus' open text field (a course server token, a name)
+addEventListener("paste", (e) => {
+  const text = e.clipboardData?.getData("text");
+  if (text) {
+    e.preventDefault();
+    mmk.type_text(text);
+  }
+});
+
+// ---- settings: the own course server, the keyboard split -----------------------------------
+// ?server=URL (or the "Course server…" button, kept in localStorage) is the open-source course
+// server (`mmk server`, e.g. http://127.0.0.1:8640): Course World's source when the Mods page
+// says "Course server" (or nothing), and where the Coursebot uploads. ?split=1 (or the button)
+// splits the keyboard in two for local co-op.
+
+const settings = {
+  get: (k) => {
+    try {
+      return localStorage.getItem(k);
+    } catch {
+      return null;
+    }
+  },
+  set: (k, v) => {
+    try {
+      if (v === null) localStorage.removeItem(k);
+      else localStorage.setItem(k, v);
+    } catch {}
+  },
+};
+
+function courseServer() {
+  return new URLSearchParams(location.search).get("server") ?? settings.get("mmk-server") ?? "";
+}
+
+function setServer(url) {
+  let host = null;
+  try {
+    host = url ? new URL(url).host : null;
+  } catch {}
+  mmk.set_server(host ? url : undefined);
+  $("server").textContent = host ? `Course server: ${host}` : "Course server…";
+}
+
+function setSplit(on) {
+  mmk.set_keyboard_split(on);
+  $("split").textContent = on ? "Keyboard: 2 players" : "Keyboard: 1 player";
+  $("split").setAttribute("aria-pressed", String(on));
+}
+
+$("server").onclick = () =>
+  guard(() => {
+    const url = prompt("Your course server (mmk server), empty for none:", courseServer() || "http://127.0.0.1:8640");
+    if (url === null) return;
+    const clean = url.trim().replace(/\/+$/, "");
+    if (clean && !/^https?:\/\//.test(clean)) throw new Error("the course server's address starts with http:// or https://");
+    settings.set("mmk-server", clean || null);
+    setServer(clean);
+    status(clean ? `Course server ${clean} (Course World uses it when the Mods page says Course server).` : "No course server.");
+  });
+$("split").onclick = () => {
+  const on = settings.get("mmk-keyboard-split") !== "1";
+  settings.set("mmk-keyboard-split", on ? "1" : null);
+  setSplit(on);
+  ui.canvas.focus();
+};
+setServer(courseServer());
+setSplit(new URLSearchParams(location.search).get("split") === "1" || settings.get("mmk-keyboard-split") === "1");
+
 $("import").onclick = () => $("folder").click();
 $("folder").onchange = (e) => guard(() => importFolder(e.target.files));
 $("open").onclick = () => $("file").click();
@@ -594,20 +672,26 @@ function netJoin(relay, room, player, players) {
 
 $("online").onclick = () =>
   guard(() => {
-    const relay = prompt("Relay (the course server's WebSocket):", localStorage.getItem("mmk-relay") || "ws://localhost:8641");
+    // the course server's relay listens on its HTTP port + 1
+    const server = courseServer();
+    let guess = "ws://localhost:8641";
+    try {
+      const u = new URL(server);
+      const port = Number(u.port || (u.protocol === "https:" ? 443 : 80)) + 1;
+      guess = `${u.protocol === "https:" ? "wss" : "ws"}://${u.hostname}:${port}`;
+    } catch {}
+    const relay = prompt("Relay (the course server's WebSocket):", settings.get("mmk-relay") || guess);
     if (!relay) return;
     const room = prompt("Room name (1–16 characters, the same for everyone):", "SMCRAFT");
     if (!room) return;
     const players = Number(prompt("How many players (2–4)?", "2")) || 2;
     const player = Number(prompt(`Which player are you (1–${players})?`, "1")) || 1;
-    try {
-      localStorage.setItem("mmk-relay", relay);
-    } catch {}
+    settings.set("mmk-relay", relay);
     netJoin(relay, room, player, players);
   });
 
 // for scripted checks (and the console)
-globalThis.mmkPage = { importFolder, openData, openFront, playBuiltin, play, readFile, removeData, netJoin, UI_ROOT };
+globalThis.mmkPage = { importFolder, openData, openFront, playBuiltin, play, readFile, removeData, netJoin, setServer, setSplit, UI_ROOT };
 
 await guard(openData);
 // ?relay=ws://host:8641&room=NAME&player=1&players=2 joins at once (after ?course=builtin name)

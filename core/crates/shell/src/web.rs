@@ -10,8 +10,9 @@
 //!   index, sprites, sounds, key tables, data tables, 3D environments and particle effects are
 //!   read when the data is opened ([`open_assets`]); texture pixels are read when a sprite first
 //!   needs them ([`pump_textures`]), NSMBU / 3D World models when a game first asks for them
-//!   ([`pump_meshes`]), and a course's music when the course starts ([`play_course`]), so memory
-//!   holds what is being played, not the 1.9 GB cache.
+//!   ([`pump_meshes`]; their files' bytes are dropped past [`MODEL_BYTES`] once parsed), and a
+//!   course's music when the course starts ([`play_course`]), so memory holds what is being
+//!   played, not the 1.9 GB cache.
 //! - **The SMM2 menus** (`mmk-front`, as `mmk-play` runs them natively) start when the page has
 //!   an SMM2 UI import (`mmk import-smm2-ui`) in its storage ([`open_front`]). The UI cache reads
 //!   through an in-memory file source: the import's layouts, fonts' metrics and message tables
@@ -21,11 +22,15 @@
 //!   its own); its sounds are read in the background. Courses the page plays then play through
 //!   the front end's screens. The player's own files (the Coursebot's courses, Course World
 //!   downloads) are kept apart (`mmkStorage.readSave` …, OPFS `mmk-save/`), and Course World is
-//!   TGRCode's, fetched by the page ([`crate::web_tgr`]).
+//!   TGRCode's ([`crate::web_tgr`]) or the own course server's ([`set_server`],
+//!   [`crate::web_server`]), fetched by the page.
 //! - **Sound** goes out through cpal's WebAudio backend, which browsers only let start after a
 //!   user gesture: the page calls [`unlock_audio`] from its first pointer or key event.
 //! - **Gamepads** come from the Gamepad API through gilrs (`input`), keys and clicks from the
-//!   canvas.
+//!   canvas; local co-op takes one player per pad, or two on the keyboard
+//!   ([`set_keyboard_split`]).
+//! - **A lost graphics device** (a driver reset, the GPU process gone) is made again on the same
+//!   canvas (`app`); if that fails the page shows why ([`notice`]).
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -80,6 +85,15 @@ extern "C" {
     fn storage_read_save(path: &str) -> Result<js_sys::Promise, JsValue>;
     #[wasm_bindgen(catch, js_namespace = mmkStorage, js_name = listSave)]
     fn storage_list_save(dir: &str) -> Result<js_sys::Promise, JsValue>;
+    /// `mmkNotice(text)`: show `text` in the page's status line (what the canvas can't show).
+    #[wasm_bindgen(catch, js_name = mmkNotice)]
+    fn page_notice(text: &str) -> Result<(), JsValue>;
+}
+
+/// Show `text` in the page's status line (and the console).
+pub fn notice(text: &str) {
+    log(text);
+    let _ = page_notice(text);
 }
 
 fn bytes_of(v: JsValue) -> Option<Vec<u8>> {
@@ -106,12 +120,12 @@ async fn read_ui(path: &str) -> Option<Vec<u8>> {
 }
 
 /// The bytes of `path` in the player's own files.
-async fn read_save(path: &str) -> Option<Vec<u8>> {
+pub async fn read_save(path: &str) -> Option<Vec<u8>> {
     bytes_of(JsFuture::from(storage_read_save(path).ok()?).await.ok()?)
 }
 
 /// The files directly in `dir` of the player's own files.
-async fn list_save(dir: &str) -> Vec<String> {
+pub async fn list_save(dir: &str) -> Vec<String> {
     match storage_list_save(dir) {
         Ok(p) => JsFuture::from(p).await.map(strings_of).unwrap_or_default(),
         Err(_) => Vec::new(),
@@ -161,6 +175,10 @@ struct Web {
     ui_clips_read: bool,
     /// Course files the page opened (numbering their library ids).
     opened: u32,
+    /// The own course server's URL (the page's setting; [`set_server`]).
+    server: Option<String>,
+    /// The runs' pool kept by earlier visits was read back.
+    pool_restored: bool,
 }
 
 thread_local! {
@@ -239,6 +257,8 @@ pub fn start() {
             ui_clips: Arc::default(),
             ui_clips_read: false,
             opened: 0,
+            server: None,
+            pool_restored: false,
         })
     });
     event_loop.spawn_app(app);
@@ -502,6 +522,11 @@ pub fn unlock_audio() -> Result<(), JsValue> {
     })?
 }
 
+/// The models' file bytes kept at most once the games parsed them (they keep what they parsed;
+/// one 3D World backdrop file is 35 MB, all of them 480 MB): a phone's browser tab has little
+/// memory.
+const MODEL_BYTES: usize = 64 << 20;
+
 /// Files read when the game data is opened (the rest is read on demand).
 const INDEX_FILES: &[&str] = &[
     "manifest.json",
@@ -561,7 +586,8 @@ pub async fn open_assets() -> Result<JsValue, JsValue> {
         }
     }
     // models: only when the stored data has them (copies made before they were kept have not)
-    let mesh_files = (!list("meshes").await.is_empty()).then(|| Arc::new(HandedFiles::default()));
+    let mesh_files =
+        (!list("meshes").await.is_empty()).then(|| Arc::new(HandedFiles::with_cap(MODEL_BYTES)));
     let fx = read("effects/effects.json")
         .await
         .map(|b| mmk_host::effects::EffectLibrary::from_bytes(&b))
@@ -873,7 +899,17 @@ pub async fn open_front(opening: bool) -> Result<JsValue, JsValue> {
             }
         }
     }
-    let mut data = HostData::new(title, library.clone());
+    let (server, restore) = with_web(|w| {
+        (
+            w.server.clone(),
+            !std::mem::replace(&mut w.pool_restored, true),
+        )
+    })?;
+    if restore {
+        // the runs' TGRCode courses kept by earlier visits (read in the background)
+        wasm_bindgen_futures::spawn_local(crate::web_pool::restore());
+    }
+    let mut data = HostData::new(title, library.clone(), server);
     data.audio = with_web(|w| w.speaker.lock().ok().and_then(|s| s.clone()))?;
     data.keys = keys;
     data.world_keys = assets.as_ref().and_then(|a| a.world_keys.clone());
@@ -920,6 +956,52 @@ pub async fn open_front(opening: bool) -> Result<JsValue, JsValue> {
         serde_json::json!({ "build": build, "layouts": layouts, "title": titles, "ms": ms });
     log(&format!("front end: browser storage, {summary}"));
     Ok(JsValue::from_str(&summary.to_string()))
+}
+
+/// The own course server (`mmk server`; its base URL, e.g. `http://127.0.0.1:8640`; None or
+/// empty: none): Course World's source when the Mods page's setting is the server or unset, and
+/// where the Coursebot uploads. Set it before [`open_front`]; later it applies at once.
+#[wasm_bindgen]
+pub fn set_server(url: Option<String>) -> Result<(), JsValue> {
+    let url = url.map(|u| u.trim().to_string()).filter(|u| !u.is_empty());
+    let front = with_web(|w| {
+        w.server = url.clone();
+        w.front
+    })?;
+    if front {
+        send(move |app| {
+            if let Some(f) = app.front.as_mut() {
+                f.data.set_server(url);
+            }
+        })?;
+    }
+    Ok(())
+}
+
+/// Local co-op on one keyboard: with two or more players in a course, its left half (WASD,
+/// Z / Space jump, X / left Shift run) is player 1 and its right half (arrows, / or Numpad 0
+/// jump, . or right Shift run) player 2; pads are the players after them. The keyboard counts as
+/// two controllers for Play Together then.
+#[wasm_bindgen]
+pub fn set_keyboard_split(on: bool) -> Result<(), JsValue> {
+    send(move |app| app.keyboard_split = on)
+}
+
+/// Text pasted into the page: typed into the front end's open text field (a course server
+/// account's token, a name); nothing when no field is open.
+#[wasm_bindgen]
+pub fn type_text(text: String) -> Result<(), JsValue> {
+    send(move |app| {
+        if let Some(f) = app.front.as_mut() {
+            f.type_text(&text);
+        }
+    })
+}
+
+/// Scripted checks: act as if the graphics device was lost (the game makes its graphics again).
+#[wasm_bindgen]
+pub fn lose_graphics() -> Result<(), JsValue> {
+    send(|app| app.lose_graphics())
 }
 
 /// Stop the menus (the page removed the UI import): back to the plain game.

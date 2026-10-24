@@ -770,21 +770,51 @@ pub struct LoadedMesh {
 /// Mesh and animation files handed over by a host that reads them asynchronously (a browser
 /// reads its storage so): a store made with [`MeshStore::handed`] asks for its files here and
 /// finds them once the host provided them. Share one between the stores of one cache.
+///
+/// A store keeps what it parsed, so a file's bytes are only needed until each store took them;
+/// [`HandedFiles::with_cap`] keeps at most that many bytes, dropping the files taken longest ago
+/// first (a store that asks for one again later has it read again). A file not taken yet is
+/// never dropped.
 #[derive(Default)]
 pub struct HandedFiles {
-    /// Provided files by path relative to the cache root (None: not in the cache).
-    got: Mutex<HashMap<String, Option<Arc<Vec<u8>>>>>,
-    /// Asked for since the last [`HandedFiles::take_requests`], and ever asked for.
+    /// Provided files by path relative to the cache root.
+    got: Mutex<HashMap<String, Handed>>,
+    /// Asked for since the last [`HandedFiles::take_requests`], and ever asked for (and not
+    /// dropped since).
     wanted: Mutex<Vec<String>>,
     asked: Mutex<HashSet<String>>,
+    /// The most bytes kept (0: no limit).
+    cap: usize,
+    /// Counts takes, to know which file was taken longest ago.
+    clock: std::sync::atomic::AtomicU64,
+}
+
+/// A provided file.
+struct Handed {
+    /// None: not in the cache.
+    bytes: Option<Arc<Vec<u8>>>,
+    /// The clock at its last take (None: not taken yet).
+    taken: Option<u64>,
 }
 
 impl HandedFiles {
+    /// Files kept up to `cap` bytes in all (see the type).
+    pub fn with_cap(cap: usize) -> Self {
+        Self {
+            cap,
+            ..Default::default()
+        }
+    }
+
     /// File `rel`: Ok(its bytes, or None when the cache has none); Err while the host hasn't
     /// provided it (it is asked for).
     fn get(&self, rel: &str) -> Result<Option<Arc<Vec<u8>>>, ()> {
-        if let Some(b) = self.got.lock().map_err(|_| ())?.get(rel) {
-            return Ok(b.clone());
+        if let Some(h) = self.got.lock().map_err(|_| ())?.get_mut(rel) {
+            let t = self
+                .clock
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            h.taken = Some(t);
+            return Ok(h.bytes.clone());
         }
         if self.asked.lock().map_err(|_| ())?.insert(rel.to_string())
             && let Ok(mut w) = self.wanted.lock()
@@ -802,11 +832,45 @@ impl HandedFiles {
             .unwrap_or_default()
     }
 
-    /// Hand over file `rel` (None: the cache has no such file).
+    /// Hand over file `rel` (None: the cache has no such file). Past the cap, the files taken
+    /// longest ago are dropped.
     pub fn provide(&self, rel: &str, bytes: Option<Vec<u8>>) {
-        if let Ok(mut g) = self.got.lock() {
-            g.insert(rel.to_string(), bytes.map(Arc::new));
+        let Ok(mut g) = self.got.lock() else { return };
+        g.insert(
+            rel.to_string(),
+            Handed {
+                bytes: bytes.map(Arc::new),
+                taken: None,
+            },
+        );
+        if self.cap == 0 {
+            return;
         }
+        let size = |h: &Handed| h.bytes.as_ref().map_or(0, |b| b.len());
+        let mut total: usize = g.values().map(size).sum();
+        while total > self.cap {
+            let oldest = g
+                .iter()
+                .filter(|(_, h)| h.bytes.is_some())
+                .filter_map(|(k, h)| Some((h.taken?, k.clone())))
+                .min();
+            let Some((_, k)) = oldest else { break };
+            if let Some(h) = g.remove(&k) {
+                total -= size(&h);
+            }
+            if let Ok(mut a) = self.asked.lock() {
+                a.remove(&k);
+            }
+        }
+    }
+
+    /// The bytes of the files kept now.
+    pub fn kept_bytes(&self) -> usize {
+        self.got.lock().map_or(0, |g| {
+            g.values()
+                .map(|h| h.bytes.as_ref().map_or(0, |b| b.len()))
+                .sum()
+        })
     }
 }
 
@@ -1882,6 +1946,38 @@ mod tests {
         files.provide("anims/M3_Kuribo/index.json", Some(b"[]".to_vec()));
         assert!(store.index("M3_Kuribo").is_empty());
         assert!(store.anim_index.contains_key("M3_Kuribo"));
+    }
+
+    /// With a cap, the files taken longest ago go first (asked for again by the next store that
+    /// wants one); files no store took yet stay, whatever the cap.
+    #[test]
+    fn handed_files_keep_at_most_their_cap() {
+        let files = HandedFiles::with_cap(250);
+        for name in ["a", "b", "c"] {
+            assert!(files.get(name).is_err());
+        }
+        assert_eq!(files.take_requests(), ["a", "b", "c"]);
+        files.provide("a", Some(vec![0; 100]));
+        files.provide("b", Some(vec![0; 100]));
+        assert!(files.get("b").unwrap().is_some());
+        assert!(files.get("a").unwrap().is_some());
+        // 300 bytes: "b" was taken longest ago
+        files.provide("c", Some(vec![0; 100]));
+        assert_eq!(files.kept_bytes(), 200);
+        assert!(files.get("b").is_err(), "dropped: asked for again");
+        assert_eq!(files.take_requests(), ["b"]);
+        assert!(files.get("a").unwrap().is_some());
+        // nothing taken but "a": the new files stay over the cap
+        files.provide("b", Some(vec![0; 100]));
+        files.provide("d", Some(vec![0; 100]));
+        assert!(files.get("c").unwrap().is_some());
+        assert!(files.kept_bytes() <= 300);
+        // no cap: everything stays
+        let all = HandedFiles::default();
+        all.provide("x", Some(vec![0; 1000]));
+        assert!(all.get("x").unwrap().is_some());
+        all.provide("y", Some(vec![0; 1000]));
+        assert_eq!(all.kept_bytes(), 2000);
     }
 
     #[test]

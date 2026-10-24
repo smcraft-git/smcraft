@@ -2,6 +2,47 @@
 
 Newest first. Each entry: what was decided, why, and what would change it.
 
+## 2026-10-25 — The web build at parity: the course server from the page, the runs' pool, co-op, a lost device
+**Decision:**
+- **The course server's client takes a transport.** `mmk_online::Client` sends every request
+  through a `Transport` (`Request` → status and body): HTTP natively (feature `http`), the page's
+  `fetch` in a browser (`web_server`), answered by the same run-again loop as TGRCode's (a call
+  runs, the request it lacked is fetched, it runs again). One client, one `call` table
+  (`call_with`), so the web host makes the native host's calls: lists, thumbnails, downloads,
+  account register / `me`, votes, comments, rankings, replays, ghosts, uploads. Refusals carry
+  the server's own `error` text on every platform (the HTTP agent no longer treats a status as
+  an error). The server URL is the page's setting (`?server=`, "Course server…"), and Course
+  World's source is picked from it and the Mods setting exactly as natively.
+- **The maker's name travels in the query** (`POST /api/courses?maker=`): browsers (and HTTP
+  libraries) only send header values of plain ASCII, so a Japanese name failed everywhere.
+  `X-Maker` is still sent when the name is ASCII (older servers).
+- **CORS: Private Network Access.** A page on a public site calling a server on this machine or
+  the local network gets Chromium's private-network preflight; the server allows it. Plain
+  `http://` from an `https://` page is still blocked by browsers (localhost aside): that needs an
+  `https://` server, which docs/self-hosting.md covers.
+- **The runs' courses** (`web_pool`, the counterpart of `mmk_embed::pool`): TGRCode's Endless
+  draws, 10 per difficulty and visit, fetched behind every request a player waits for (a third
+  priority in `web_tgr`), kept in OPFS `mmk-save/pool/` (100 at most); with Course World on the
+  own server, its `/api/pool` (40, for the visit). [departure from the native host, which has no
+  server pool for the runs: the browser has no TGRCode alternative when the player picked their
+  own server, and the endpoint exists for exactly this.]
+- **Co-op as natively** (`assign_pads`, `Host::controllers` / `set_players`), plus an optional
+  keyboard split (left half player 1, right half player 2; the keyboard then counts as two
+  controllers), since a browser player often has no second pad. Off by default (the arrows and
+  WASD both play player 1 otherwise); natively `MMK_KEYBOARD_SPLIT=1`.
+- **A lost graphics device is made again** on the same window (renderer and UI layers rebuilt
+  from the caches, which keep their pixels), up to 3 times, then the page's status line says so;
+  in a browser, WebGPU errors are logged instead of panicking (the default handler's panic was
+  what ended the game).
+- **Model file bytes are capped** (`HandedFiles::with_cap`, 64 MB on the web): a store keeps
+  what it parsed, so the bytes are dropped least-recently-taken first, never before a store
+  took them; a later store asks again.
+**Why:** the 2026-10-25 browser check left these as the web build's gaps. Keeping the native
+client and the native host's call shapes means one behaviour to test (the run-again loop is
+tested natively against the server's own handler).
+**Would change:** wasm threads (a blocking client on a worker instead of the run-again loop);
+a browser memory budget that calls for dropping parsed meshes or texture pixels too.
+
 ## 2026-10-25 — The web build: Course World on TGRCode from the page, the maker's host, models and saves
 **Decision:** the browser's front-end host (`web_front`) does what the native one does, through
 the page:
