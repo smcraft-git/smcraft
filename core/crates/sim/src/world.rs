@@ -393,6 +393,9 @@ pub struct World {
     /// Items taken by their own update, collected (the player's form change) after a frame:
     /// (kind, x, y, SMM1 subtype, frames left).
     pending_collect: Vec<(Kind, f32, f32, u8, u8)>,
+    /// The player's form change ended in this frame's update: the world moves on, the player's
+    /// own update having run.
+    change_done: bool,
     /// Walker contacts of last frame's enemy pass (walker id, other id): the touch flags, set
     /// at the next update for others still there after the player's update (a stomp then
     /// ends a contact) [obs: Ryujinx trace W_3051605, a Goomba beside one stomped that frame
@@ -740,6 +743,7 @@ impl World {
             run_held: false,
             throw_wait: None,
             pending_collect: Vec::new(),
+            change_done: false,
             touch_pairs: Vec::new(),
             spring_ride: None,
             turn_rolling: Vec::new(),
@@ -1973,10 +1977,16 @@ impl World {
             }
             return;
         }
-        // grow/shrink: everything else waits
+        // grow/shrink: everything else waits, up to the frame the change ends in the player's
+        // update: the world moves on that frame [obs: Ryujinx trace X_mushstart (out-probe):
+        // the other mushrooms move again a frame before the grown player does]
+        self.change_done = false;
         if matches!(self.player.control, Control::Change { .. }) {
             self.player.step(input, &self.level);
-            return;
+            if matches!(self.player.control, Control::Change { .. }) {
+                return;
+            }
+            self.change_done = true;
         }
         if self.transit.is_some() {
             self.step_transit();
@@ -2054,6 +2064,8 @@ impl World {
             self.drive_koopa_car(input);
         } else if self.clear_pipe_player() {
             // in a clear pipe: the traveller carries the player (DrawDokanMove)
+        } else if std::mem::take(&mut self.change_done) {
+            // (its update this frame was the form change's last)
         } else {
             self.pu_sense();
             self.player.twister = self.twister_receiver();
@@ -2283,6 +2295,25 @@ impl World {
             self.extra_player_rest(input, jump_held);
             return;
         }
+        // items taken last frame: the player's form changes now, after this frame's move; a
+        // growth freezes the rest of the world before it moves this frame [obs: Ryujinx trace
+        // X_mushstart (out-probe): the other mushrooms stand from the frame the form changes]
+        let due: Vec<_> = self
+            .pending_collect
+            .iter()
+            .filter(|p| p.4 == 0)
+            .map(|p| (p.0, p.1, p.2, p.3))
+            .collect();
+        self.pending_collect.retain(|p| p.4 > 0);
+        for p in &mut self.pending_collect {
+            p.4 -= 1;
+        }
+        for (kind, x, y, sub) in due {
+            self.collect_item(kind, x, y, sub);
+        }
+        if matches!(self.player.control, Control::Change { .. }) {
+            return;
+        }
 
         // objects reaching the spawn zone of last frame's view appear now and act this frame [obs:
         // Ryujinx trace M1_hit hit_combo, a Goomba first seen one step into its walk, on the
@@ -2466,20 +2497,6 @@ impl World {
         self.shell_walls();
         self.thaw_frozen_coins();
         self.actor_interactions();
-        // items taken last frame: the player's form changes now, after this frame's move
-        let due: Vec<_> = self
-            .pending_collect
-            .iter()
-            .filter(|p| p.4 == 0)
-            .map(|p| (p.0, p.1, p.2, p.3))
-            .collect();
-        self.pending_collect.retain(|p| p.4 > 0);
-        for p in &mut self.pending_collect {
-            p.4 -= 1;
-        }
-        for (kind, x, y, sub) in due {
-            self.collect_item(kind, x, y, sub);
-        }
         self.player_interactions(jump_held);
         self.step_effects();
         self.carry_clown_riders();
@@ -3530,8 +3547,32 @@ impl World {
                 // (3D World's reach is shorter: 13.36 px between centres doesn't touch there,
                 // 13.29 does in SMW [obs: Ryujinx traces 3W_blocks / MW_blocks]; the item's box
                 // taken a pixel narrower a side [inf])
+                // (a mushroom is met where it stood before this frame's move, its box narrower a
+                // side: 12 px between centres for the small player's box B in SMB1 / SMB3, 13 in
+                // SMW / NSMBU [obs: Ryujinx traces X_mushstart (out-probe), a mushroom walking at
+                // a standing / turned / walking player: touched 11.1 / 11.7 / 11.5 px from its
+                // last place, not 12.1 / 12.7 / 13.7; blk_mush, chased: M1 / M3 11.8, not 13.3,
+                // MW / WU 12.3, not 13.8])
+                let (dx, dy) = if matches!(a.kind, Kind::Mushroom | Kind::OneUp)
+                    && self.style != crate::player::Style::W3
+                {
+                    (a.pre.0 - a.x, a.pre.1 - a.y)
+                } else {
+                    (0.0, 0.0)
+                };
+                let ab = (ab.0 + dx, ab.1 + dy, ab.2 + dx, ab.3 + dy);
                 let ib = if self.style == crate::player::Style::W3 {
                     (ab.0 + 1.0, ab.1, ab.2 - 1.0, ab.3)
+                } else if matches!(a.kind, Kind::Mushroom | Kind::OneUp) {
+                    let n = if matches!(
+                        self.style,
+                        crate::player::Style::MW | crate::player::Style::WU
+                    ) {
+                        1.0
+                    } else {
+                        2.0
+                    };
+                    (ab.0 + n, ab.1, ab.2 - n, ab.3)
                 } else if a.kind == Kind::FireFlower {
                     // a Fire Flower is touched a pixel inside its 16 px [inf: a small player's
                     // box B 0.06 px into its bottom took nothing, Ryujinx trace W_3051046]
