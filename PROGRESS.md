@@ -40,9 +40,8 @@ sway, importer and pack 12, the dev cache already at v12).
   2. Maker: ✅ wings / parachutes (the attribute balloon, merged 2026-10-24), ✅ over a multigrab
      selection (hold a selected part: wings / parachute go to every part that takes them, one
      undo step); a part put into a block keeps its wings / parachute / form / size as the
-     contents' flags ✅; left: play side — a winged / parachuted item coming out of a block
-     (`blocks::Contents` keeps only the 0x4 form; its behaviour wants the binary), NSMBU / 3D
-     World wing art, the contents balloon (`Edit_BalloonPartsIn_00`, state `cDispInParts`: not
+     contents' flags ✅; the play side ✅ (any part out of a block, dressed: `Contents::Part`,
+     2026-10-24); left: NSMBU / 3D World wing art, the contents balloon (`Edit_BalloonPartsIn_00`, state `cDispInParts`: not
      built at all); tracks and links.
   3. Co-op: a players screen in SMM2's layouts.
   3b. Research queue (binary → spec → code), each an agent's task: stacking's tower rules and

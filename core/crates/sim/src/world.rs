@@ -6305,7 +6305,7 @@ impl World {
         }
         for a in &self.actors {
             if a.wings && !matches!(a.mode, Mode::DieFall) && visible(a.x, a.y) {
-                out.extend(Self::wing_sprites(a));
+                out.extend(Self::wing_sprites(a, self.style));
             }
             if matches!(a.mode, Mode::Parachute { .. }) && visible(a.x, a.y) {
                 out.push(Self::model_sprite(
@@ -6550,8 +6550,15 @@ impl World {
     /// its 16 × 16 texture has the wing in the left half, the quad sits at (0, −4)–(16, 12)
     /// from the bone) at the left of the part's head, and the same mirrored at the right,
     /// behind the part [obs data: the model's quad and textures; where the bones sit on each
-    /// part is inf]. They flap while the part moves (still in the maker's view).
-    fn wing_sprites(a: &Actor) -> [Sprite; 2] {
+    /// part is inf]. They flap while the part moves (still in the maker's view). SMB3 and SMW
+    /// have their own pair; NSMBU's and 3D World's are meshes (not drawn yet: SMB1's stand in).
+    fn wing_sprites(a: &Actor, style: crate::player::Style) -> [Sprite; 2] {
+        use crate::player::Style;
+        let model = match style {
+            Style::M3 => "M3_Enemy_wingcommon",
+            Style::MW => "MW_Enemy_wingcommon",
+            _ => "M1_Enemy_wingcommon",
+        };
         let s = if a.big { 2.0 } else { 1.0 };
         let tex = if (a.age / 8).is_multiple_of(2) {
             "wait.0"
@@ -6559,31 +6566,15 @@ impl World {
             "wait.1"
         };
         let (half, top) = (a.half_w(), a.y + a.height());
-        // the sprite's box is centred on the bone; the wing reaches 7 px from it
+        // the sprite's box is centred on the bone; the wing reaches 7 px from it; SMW's quad
+        // is twice as tall, from the same bottom ((0, −4)–(16, 28)) [obs data]
         let (w, y) = (16.0 * s, top - 8.0 * s);
+        let h = if style == Style::MW { 2.0 * w } else { w };
         let left_bone = a.x - half - 6.0 * s;
         let right_bone = a.x + half + 6.0 * s;
         [
-            Self::model_sprite(
-                "M1_Enemy_wingcommon",
-                tex,
-                left_bone - w / 2.0,
-                y,
-                w,
-                w,
-                false,
-                39,
-            ),
-            Self::model_sprite(
-                "M1_Enemy_wingcommon",
-                tex,
-                right_bone - w / 2.0,
-                y,
-                w,
-                w,
-                true,
-                39,
-            ),
+            Self::model_sprite(model, tex, left_bone - w / 2.0, y, w, h, false, 39),
+            Self::model_sprite(model, tex, right_bone - w / 2.0, y, w, h, true, 39),
         ]
     }
 
