@@ -1992,7 +1992,15 @@ impl World {
         // last frame's enemy touch (Player::enemy_hit), in the player's update after its move:
         // a death freezes the enemies before they move this frame [obs: Ryujinx trace M1_koopa
         // koopa_kick, the Koopa that walked into the player keeps its place on the death frame]
-        if std::mem::take(&mut self.player.enemy_hit) && self.player.hurt() && self.player.alive() {
+        // ... and an enemy the player's move this frame ran into, where it stood last frame (the
+        // touch test runs after the player's update, before the enemies') [obs: Ryujinx trace
+        // W_3049200: walking into a Koopa, box A 11.01 px from it after the move, dead that
+        // frame; 14.01 the frame before]
+        let touch_now = self.enemy_touch_after_move();
+        if (std::mem::take(&mut self.player.enemy_hit) || touch_now)
+            && self.player.hurt()
+            && self.player.alive()
+        {
             self.events.push(Event::PowerDown);
         }
         // pipes and doors
@@ -4047,7 +4055,8 @@ impl World {
             }
             // a walker placed on the ground starts in its walk (the Basic enter picks Walk on the
             // ground flag, 0-goomba.md), moving on its first frame [obs: Ryujinx trace M1_hit]
-            if a.kind.is_walker() && self.level.cell_at(a.x, a.y - 1.0).is_solid() {
+            let below = self.level.cell_at(a.x, a.y - 1.0);
+            if a.kind.is_walker() && (below.is_solid() || below == Cell::SemiTop) {
                 a.on_ground = true;
             }
             if s.kind == Kind::Blooper && s.alt {
@@ -5033,6 +5042,43 @@ impl World {
         }
         let inset = (x1 - x0) / 8.0;
         (x0 + inset, y0 + inset, x1 - inset, y1 - inset)
+    }
+
+    /// A walking enemy (an ordinary one in its Normal mode) whose box the player's hurt box
+    /// meets after the player's move, outside the stomp window.
+    fn enemy_touch_after_move(&self) -> bool {
+        let p = &self.player;
+        if !p.alive()
+            || p.star > 0
+            || p.shoe.is_some()
+            || p.yoshi.is_some()
+            || p.form == Form::Mega
+            || p.sliding
+        {
+            return false;
+        }
+        let hurt = p.hurt_box();
+        self.actors.iter().any(|a| {
+            if !(a.kind.is_walker() && a.alive() && a.mode == Mode::Normal && !a.held)
+                || !a.solid_contact()
+                || a.stacked
+                || a.wings
+            {
+                return false;
+            }
+            let ab = Self::player_contact_box(self.style, a);
+            if !overlap(hurt, ab) {
+                return false;
+            }
+            // not when the feet are in its top (the stomp, at the frame's end)
+            let d = ab.3 - p.y;
+            let w = if p.vy <= 0.0 {
+                7.0 + (-p.vy).max(0.0)
+            } else {
+                3.0
+            };
+            !(d > 0.0 && d < w + if a.big { 5.0 } else { 0.0 })
+        })
     }
 
     /// Moving one-way platforms (lifts) update after the player in the game: a player landing
