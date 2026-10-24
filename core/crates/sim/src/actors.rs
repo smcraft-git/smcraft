@@ -302,7 +302,8 @@ pub enum Kind {
     Superball,
     /// A coin that moves (wings or a track): collected on touch.
     FloatCoin,
-    /// Yoshi's Egg (45 in SMW / NSMBU): hatches into Yoshi; `red` = Red Yoshi [inf: alt flag].
+    /// Yoshi's Egg (45 in SMW / NSMBU): hatches into Yoshi; `red` = Red Yoshi (the egg's big
+    /// bits, level.rs).
     YoshiEgg {
         red: bool,
     },
