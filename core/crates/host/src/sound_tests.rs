@@ -864,6 +864,6 @@ fn an_ambient_effect_sounds_over_the_course_music() {
     r.played();
     w.tick += 1;
     r.s.after_step(&w);
-    // the heartbeat; the theme track goes on
-    assert_eq!(r.played(), ["sfx:OtoHeart"]);
+    // the heartbeat in the theme track's place
+    assert_eq!(r.played(), ["sfx:OtoHeart", "stop_music"]);
 }

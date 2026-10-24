@@ -6,8 +6,10 @@
 //! - a music effect: its `cue_bgm` (`cue_bgm_hurry` after hurry-up) in place of the theme track
 //!   until it ends (then the theme track from the top [inf]); Star and P Switch music still go
 //!   over it and come back to it;
-//! - an ambient effect (Heartbeat, Silence, Peaceful, Horror): its `cue` as a held sound whose
-//!   group ducks the course music, stopped when it ends.
+//! - a music-like effect (Heartbeat, Silence, Peaceful, Horror: on the window's Music page, with
+//!   music slots of their own): its `cue` as a held sound in the music's place — the theme track
+//!   stops while it lasts [inf: the game plays these slots on a sound holder, 0x71015378c0] —
+//!   stopped when it ends.
 
 use mmk_sim::otoasobi::{self as oto, SoundParts, Variant, Voice};
 
@@ -45,6 +47,11 @@ impl Sounds {
             Form::Smb2 => Variant::Usa,
             _ => Variant::Plain,
         }
+    }
+
+    /// A music-like effect holds the music's place (the theme track stays off).
+    pub(super) fn oto_ambient(&self) -> bool {
+        self.oto.music.is_some_and(|m| m.ambient)
     }
 
     /// The music effect's user and key when one is in the theme track's place.
@@ -110,8 +117,7 @@ impl Sounds {
             };
             self.sfx_at(world, &user, "cue", &PropList::default(), e, H_OTO_AMBIENT);
         }
-        let music_changed = old.is_some_and(|m| !m.ambient) || new.is_some_and(|m| !m.ambient);
-        if music_changed && world.player.alive() && self.over == Over::None && !self.fanfare {
+        if world.player.alive() && self.over == Over::None && !self.fanfare {
             self.course_music();
         }
     }

@@ -870,6 +870,12 @@ impl Sounds {
     /// The theme track from the top, or where it was if it is the same track; a music effect
     /// in its place (sound/otoasobi.rs).
     fn course_music(&mut self) {
+        if self.oto_ambient() {
+            self.send(Command::StopMusic { fade: 0 });
+            self.track = None;
+            self.over = Over::None;
+            return;
+        }
         if let Some((user, key)) = self.oto_music_key()
             && self.play_music_of(&user, key, 0, None)
         {
@@ -1541,7 +1547,10 @@ impl Sounds {
                     self.saved = None;
                     match self.over {
                         // a music effect goes on in its hurry version
-                        Over::None if !self.fanfare && self.oto_music_key().is_some() => {
+                        Over::None
+                            if !self.fanfare
+                                && (self.oto_music_key().is_some() || self.oto_ambient()) =>
+                        {
                             self.course_music();
                         }
                         Over::None if !self.fanfare => {
