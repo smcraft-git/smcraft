@@ -1702,11 +1702,12 @@ impl Actor {
             1 => {
                 if let Mode::Emerge { .. } = self.mode {
                     self.y += self.vy;
-                } else {
+                } else if matches!(self.kind, Kind::Mushroom | Kind::OneUp) {
                     // (the fall step moves it, its vy field stays) [obs]
                     self.x += self.vx;
                     self.y += (self.vy + ENEMY_GRAVITY).max(MAX_FALL);
                 }
+                // (a flower stays put [obs: Ryujinx trace W_3051046])
                 self.taken = 2;
                 return None;
             }

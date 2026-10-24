@@ -3300,7 +3300,19 @@ impl World {
                 // the player changes form a frame after that (it still moves on that frame) [obs:
                 // Ryujinx trace M1_blocks blk_mush: touching 12.83 px apart at frame N, the
                 // mushroom's last move at N+1, the growth freeze from N+3]
-                if a.taken == 0 && overlap(contact, ab) {
+                // (3D World's reach is shorter: 13.36 px between centres doesn't touch there,
+                // 13.29 does in SMW [obs: Ryujinx traces 3W_blocks / MW_blocks]; the item's box
+                // taken a pixel narrower a side [inf])
+                let ib = if self.style == crate::player::Style::W3 {
+                    (ab.0 + 1.0, ab.1, ab.2 - 1.0, ab.3)
+                } else if a.kind == Kind::FireFlower {
+                    // a Fire Flower is touched a pixel inside its 16 px [inf: a small player's
+                    // box B 0.06 px into its bottom took nothing, Ryujinx trace W_3051046]
+                    (ab.0 + 1.0, ab.1 + 1.0, ab.2 - 1.0, ab.3 - 1.0)
+                } else {
+                    ab
+                };
+                if a.taken == 0 && overlap(contact, ib) {
                     self.actors[i].taken = 1;
                 } else if a.taken == 2 {
                     let kind = a.kind;
@@ -5097,9 +5109,16 @@ impl World {
         {
             return false;
         }
+        // (3D World's Piranha Plant touches a frame later [obs: Ryujinx trace 3W_enemy; a
+        // Bob-omb walking in there hurts at once, 3W_bobomb]: the next-frame rule,
+        // Player::enemy_hit, covers it)
+        let w3 = self.style == crate::player::Style::W3;
         let hurt = p.hurt_box();
         self.actors.iter().any(|a| {
-            if !(a.kind.is_walker() && a.alive() && a.mode == Mode::Normal && !a.held)
+            // (the walkers, and Piranha Plants outside 3D World; other enemies keep the
+            // next-frame rule)
+            let kind_ok = a.kind.is_walker() || (!w3 && matches!(a.kind, Kind::Piranha { .. }));
+            if !(kind_ok && a.alive() && a.mode == Mode::Normal && !a.held)
                 || !a.solid_contact()
                 || a.stacked
                 || a.wings
