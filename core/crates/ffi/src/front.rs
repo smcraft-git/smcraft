@@ -201,6 +201,11 @@ struct FfiHost {
     pool_entries: std::collections::HashMap<PathBuf, Option<CourseEntry>>,
     /// Engine buttons this tick.
     input: u32,
+    /// Local co-op (`mmk_front_set_controls`): the device's own controls (keyboard / touch) and
+    /// each connected pad's buttons this tick; the players of the next course start.
+    own: u32,
+    pads: Vec<u32>,
+    players: u32,
     title: Option<Vec<PathBuf>>,
     servers: Option<Receiver<Vec<WorldCourse>>>,
     online_tx: Sender<(u32, Result<Value, String>)>,
@@ -236,9 +241,11 @@ impl FfiHost {
             theme: course.main.header.theme,
         };
         let audio = self.audio;
+        let players = self.players;
         let e = self.engine();
         e.world = World::from_course(&course);
         e.world.set_options(e.options);
+        e.world.set_players(players as usize);
         e.course = Some(course);
         e.resolver.reset();
         e.planner.reset();
@@ -602,16 +609,30 @@ impl Host for FfiHost {
         e.resolver.reset();
         e.planner.reset();
         self.recording = false;
+        // back to one player: a co-op start sets its players again before loading
+        self.players = 1;
     }
 
     fn step_course(&mut self, scripted: Option<u32>) {
         let b = scripted.unwrap_or(self.input) & !mmk_sim::input::START;
         let input = Input { buttons: b };
-        if self.recording && scripted.is_none() {
+        let players = self.engine_ref().world.players();
+        // replays are one player's
+        if self.recording && scripted.is_none() && players == 1 {
             self.replay.push(input);
         }
+        let inputs: Vec<Input> = if players > 1 && scripted.is_none() {
+            // co-op: pads by player; the device's own controls are player 1's
+            let (p1, extra) = mmk_front::coop::assign_pads(&self.pads, players);
+            std::iter::once((self.own | p1) & !mmk_sim::input::START)
+                .chain(extra)
+                .map(|buttons| Input { buttons })
+                .collect()
+        } else {
+            vec![input]
+        };
         let e = self.engine();
-        e.world.step(input);
+        e.world.step_players(&inputs);
         if let Some(d) = &mut e.director {
             d.after_step(&e.world);
         }
@@ -664,13 +685,30 @@ impl Host for FfiHost {
             None => World::new(),
         };
         e.world.set_options(e.options);
+        let players = self.players as usize;
+        let e = self.engine();
+        e.world.set_players(players);
         if let Some(d) = &mut e.director {
             d.start_course(&e.world);
         }
     }
 
     fn set_character(&mut self, character: u32) {
-        self.engine().world.main_char = (character as usize).min(3);
+        if self.players <= 1 {
+            self.engine().world.main_char = (character as usize).min(3);
+        }
+    }
+
+    fn set_players(&mut self, players: u32) {
+        self.players = players.clamp(1, 4);
+        let e = self.engine();
+        if e.world.players() != players as usize {
+            e.world.set_players(players as usize);
+        }
+    }
+
+    fn controllers(&mut self) -> u32 {
+        1 + self.pads.len() as u32
     }
 
     fn set_run_counters(&mut self, score: u32, coins: u32, lives: u32) {
@@ -1129,6 +1167,9 @@ pub unsafe extern "C" fn mmk_front_new(
             thumbs_rx,
             pool_entries: std::collections::HashMap::new(),
             input: 0,
+            own: 0,
+            pads: Vec::new(),
+            players: 1,
             title: None,
             servers: None,
             online_tx,
@@ -1257,6 +1298,36 @@ impl MmkFront {
     fn engine_tick(&self) -> u64 {
         self.host.engine_ref().world.tick
     }
+}
+
+/// Local co-op: the controls of this tick, each player's own. `own`: the device's keyboard /
+/// touch buttons (MMK_BTN_*); `pads`: each connected game controller's buttons, in a stable
+/// order (`count` of them; NULL with 0: none). Play Together offers one player per controller
+/// (the device's own controls count as one); in a co-op course pad k is player k + 1 when there
+/// are as many pads as players, else the device's controls are player 1 and pad k player k + 2.
+/// With one player `MmkFrontInput.buttons` stays the input (call this or not). Call before
+/// `mmk_front_tick`.
+///
+/// # Safety
+/// `front` live; `pads` NULL or `count` readable values.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mmk_front_set_controls(
+    front: *mut MmkFront,
+    own: u32,
+    pads: *const u32,
+    count: usize,
+) {
+    guard((), || {
+        let Some(f) = (unsafe { front.as_mut() }) else {
+            return;
+        };
+        f.host.own = own;
+        f.host.pads = if pads.is_null() || count == 0 {
+            Vec::new()
+        } else {
+            unsafe { std::slice::from_raw_parts(pads, count.min(8)) }.to_vec()
+        };
+    })
 }
 
 /// One 60 Hz tick: the screens (and the course, when one plays) advance. The UI sounds it
@@ -1795,6 +1866,9 @@ mod tests {
                 thumbs_rx,
                 pool_entries: std::collections::HashMap::new(),
                 input: 0,
+                own: 0,
+                pads: Vec::new(),
+                players: 1,
                 title: None,
                 servers: None,
                 online_tx,

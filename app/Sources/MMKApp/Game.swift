@@ -310,6 +310,11 @@ final class GameSession: ObservableObject, Identifiable {
             i.click_x = c.x
             i.click_y = c.y
         }
+        // co-op: each player's controls (the device's own, then one per controller)
+        let pads = scriptedInput == nil ? input.padButtons : []
+        pads.withUnsafeBufferPointer { p in
+            mmk_front_set_controls(front, scriptedInput == nil ? input.ownButtons : 0, p.baseAddress, p.count)
+        }
         mmk_front_tick(front, &i)
         var sounds: UnsafePointer<MmkFrontSound>?
         let n = mmk_front_sounds(front, &sounds)

@@ -64,6 +64,24 @@ impl PlayersAsk {
     }
 }
 
+/// Local co-op: which pads drive which players. Returns the pad buttons that go with the
+/// keyboard to player 1, and players 2…'s. With one player every pad plays; with as many pads
+/// as players, pad k is player k + 1 (the keyboard joins player 1); with fewer pads, the
+/// keyboard is player 1 on its own and pad k is player k + 2.
+pub fn assign_pads(pads: &[u32], players: usize) -> (u32, Vec<u32>) {
+    if players <= 1 {
+        return (pads.iter().fold(0, |a, b| a | b), Vec::new());
+    }
+    let extra = players - 1;
+    if pads.len() >= players {
+        (pads[0], pads[1..players].to_vec())
+    } else {
+        let mut v: Vec<u32> = pads.iter().copied().take(extra).collect();
+        v.resize(extra, 0);
+        (0, v)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -115,5 +133,17 @@ mod tests {
         with(&mut host, &mut saves, |cx| {
             assert_eq!(cx.together(), Some(4))
         });
+    }
+
+    #[test]
+    fn pads_go_to_players_and_the_keyboard_plays_when_pads_are_short() {
+        assert_eq!(assign_pads(&[1, 2], 1), (3, vec![]));
+        // two pads, two players: one each (the keyboard with player 1)
+        assert_eq!(assign_pads(&[1, 2], 2), (1, vec![2]));
+        // one pad, two players: the keyboard is player 1, the pad player 2
+        assert_eq!(assign_pads(&[4], 2), (0, vec![4]));
+        // one pad, three players: player 3 has no controls yet
+        assert_eq!(assign_pads(&[4], 3), (0, vec![4, 0]));
+        assert_eq!(assign_pads(&[1, 2, 4, 8], 3), (1, vec![2, 4]));
     }
 }

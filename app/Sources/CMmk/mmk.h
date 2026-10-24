@@ -389,6 +389,12 @@ void mmk_front_set_server(MmkFront *front, const char *server);
 // Course World's source: "tgrcode" (default), "server" (mmk_front_set_server's), "library";
 // dir: TGRCode's folder in the app's data (cache/, the 100 Mario / Endless pool/), or NULL
 void mmk_front_set_course_world(MmkFront *front, const char *source, const char *dir);
+// Local co-op: this tick's controls by player, before mmk_front_tick. own: the device's
+// keyboard / touch buttons (MMK_BTN_*); pads: each connected controller's buttons in a stable
+// order (count of them). Play Together offers one player per controller (the device counts
+// as one); in a co-op course pad k is player k + 1 when there are as many pads as players,
+// else the device is player 1 and pad k player k + 2. One player: MmkFrontInput.buttons.
+void mmk_front_set_controls(MmkFront *front, uint32_t own, const uint32_t *pads, size_t count);
 void mmk_front_tick(MmkFront *front, const MmkFrontInput *input);
 // valid until the next mmk_front_frame
 size_t mmk_front_frame(MmkFront *front, const MmkFrontItem **out);
