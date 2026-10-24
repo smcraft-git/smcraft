@@ -153,11 +153,32 @@ pub fn run_all(course: &[u8], script: &[Input], start: &Start) -> Result<(String
 // Physics test courses
 
 pub const STYLES: [&str; 5] = ["M1", "M3", "MW", "WU", "3W"];
-pub const KINDS: [&str; 20] = [
-    "flat", "wall", "slope", "water", "items", "form", "enemy", "koopa", "shell", "hit",
-    "shellbrk", "shellq", "blocks", "bigblk", "spring", "note", "donut", "lift", "pswitch",
+pub const KINDS: [&str; 21] = [
+    "flat",
+    "wall",
+    "slope",
+    "water",
+    "items",
+    "form",
+    "enemy",
+    "koopa",
+    "shell",
+    "hit",
+    "shellbrk",
+    "shellq",
+    "blocks",
+    "bigblk",
+    "spring",
+    "note",
+    "donut",
+    "lift",
+    "pswitch",
     "bobomb",
+    "slopejoin",
 ];
+
+/// Kinds made in SMB1 only (the terrain they test is the same in every style).
+const M1_ONLY: [&str; 1] = ["slopejoin"];
 
 /// Where the items / form courses keep their power-up: the ? block's tile column and its row
 /// above the floor (the capture walks there first; no test script gets that far).
@@ -169,7 +190,7 @@ pub fn course_names() -> Vec<String> {
     for s in STYLES {
         for k in KINDS {
             // (3D World has no Note Blocks)
-            if s == "3W" && k == "note" {
+            if s == "3W" && k == "note" || s != "M1" && M1_ONLY.contains(&k) {
                 continue;
             }
             v.push(format!("{s}_{k}"));
@@ -194,7 +215,12 @@ pub fn build_course(name: &str) -> Result<Vec<u8>, String> {
         120
     };
     // floor height in tiles: the game rejects a 3D World course with start height 1
-    let base: i32 = if style == "3W" { 2 } else { 1 };
+    // (slopejoin: the start height of the course it copies)
+    let base: i32 = if style == "3W" || kind == "slopejoin" {
+        2
+    } else {
+        1
+    };
     let mut e = Editor::new(style);
     e.set_name("Physics");
     e.set_theme(if kind == "water" { 4 } else { 0 });
@@ -443,6 +469,120 @@ pub fn build_course(name: &str) -> Result<Vec<u8>, String> {
             e.place_sized(88, 50, row, 5, 4, rise).map_err(err)?;
             e.place_sized(87, 60, row, 8, 4, fall).map_err(err)?;
             floor(&mut e, 68, len - 1)?;
+        }
+        "slopejoin" => {
+            // gentle slopes (4×2 unless noted) beside ground, an open pit under each, walked over
+            // left to right on a 5-high floor (top row 4, up a steep slope from the start
+            // ground), flat stretches between them. A copies W_3049200's x 50..62, where the game
+            // walks flat over the slope's first step:
+            // - A x 14: rising, ground above the low end cap and under it (W_3049200's tile ids);
+            // - B x 34: rising 6×3, ground above the cap and under it;
+            // - D x 50: rising, ground above the cap only (nothing under the cap);
+            // - F x 62: rising, ground under the high cap only (the layout's other empty corner;
+            //   ground over a diagonal cell makes the game reject the course [obs: emulator]);
+            // - G x 74: rising, no ground above the cap (a plain dip: the control);
+            // - C x 86: falling, ground above the low cap (on the right) and under it
+            let rise = mmk_editor::DEFAULT_FLAGS;
+            let fall = mmk_editor::DEFAULT_FLAGS | (1 << 20);
+            let pit = |e: &mut Editor, x0: i32, x1: i32, below: i32| {
+                for x in x0..=x1 {
+                    for y in 0..below {
+                        e.erase_ground(x, y);
+                    }
+                }
+            };
+            floor(&mut e, 0, len - 1)?;
+            for x in 12..len - 11 {
+                for y in 2..=4 {
+                    e.paint_ground(x, y).map_err(err)?;
+                }
+            }
+            pit(&mut e, 7, 11, 2);
+            for x in 7..=11 {
+                e.paint_ground(x, 0).map_err(err)?;
+            }
+            e.place_sized(88, 7, 1, 5, 4, rise).map_err(err)?;
+            // A: W_3049200's tiles (columns 50..62 → 14..26), its slope at (55, 3) → (19, 3)
+            const A: [(i32, i32, u8); 33] = [
+                (51, 4, 59),
+                (52, 4, 9),
+                (53, 4, 10),
+                (54, 4, 10),
+                (55, 4, 59),
+                (55, 2, 63),
+                (55, 1, 63),
+                (55, 0, 63),
+                (54, 0, 62),
+                (53, 0, 62),
+                (52, 0, 14),
+                (51, 0, 62),
+                (50, 0, 13),
+                (50, 3, 62),
+                (50, 2, 13),
+                (51, 2, 62),
+                (51, 1, 62),
+                (50, 1, 12),
+                (52, 2, 14),
+                (52, 3, 13),
+                (51, 3, 62),
+                (52, 1, 13),
+                (53, 1, 62),
+                (53, 2, 62),
+                (54, 2, 12),
+                (54, 3, 62),
+                (54, 1, 14),
+                (53, 3, 62),
+                (50, 4, 11),
+                (59, 4, 26),
+                (60, 4, 7),
+                (61, 4, 6),
+                (62, 4, 26),
+            ];
+            pit(&mut e, 19, 22, 5);
+            e.place_sized(87, 19, 3, 4, 2, rise).map_err(err)?;
+            // B
+            pit(&mut e, 34, 39, 5);
+            for y in 0..=2 {
+                e.paint_ground(34, y).map_err(err)?;
+            }
+            e.paint_ground(34, 4).map_err(err)?;
+            e.place_sized(87, 34, 3, 6, 3, rise).map_err(err)?;
+            for x in 40..=43 {
+                e.paint_ground(x, 5).map_err(err)?;
+            }
+            // D
+            pit(&mut e, 50, 53, 5);
+            e.paint_ground(50, 4).map_err(err)?;
+            e.place_sized(87, 50, 3, 4, 2, rise).map_err(err)?;
+            // F
+            pit(&mut e, 62, 65, 5);
+            for y in 0..=2 {
+                e.paint_ground(62, y).map_err(err)?;
+            }
+            e.paint_ground(65, 3).map_err(err)?;
+            e.place_sized(87, 62, 3, 4, 2, rise).map_err(err)?;
+            // G
+            pit(&mut e, 74, 77, 5);
+            for y in 0..=2 {
+                e.paint_ground(74, y).map_err(err)?;
+            }
+            e.place_sized(87, 74, 3, 4, 2, rise).map_err(err)?;
+            // C (low end on the right, at x 89)
+            pit(&mut e, 86, 89, 5);
+            for y in 0..=2 {
+                e.paint_ground(89, y).map_err(err)?;
+            }
+            e.paint_ground(89, 4).map_err(err)?;
+            e.place_sized(87, 86, 3, 4, 2, fall).map_err(err)?;
+            // A's tile ids as W_3049200 has them (last: painting re-tiles neighbours)
+            for (x, y, id) in A {
+                let (x, y) = (x - 36, y);
+                e.paint_ground(x, y).map_err(err)?;
+                let g = e.course.main.ground.items.iter_mut();
+                for t in g.filter(|t| t.x as i32 == x && t.y as i32 == y) {
+                    t.id = id;
+                }
+            }
         }
         _ => unreachable!(),
     }

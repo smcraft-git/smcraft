@@ -2451,8 +2451,9 @@ impl Actor {
                 } else if (touch || wall_prev) && self.on_ground {
                     touch_turn = true;
                 }
-                // the frame after landing from a fall it stands (Fall hands over to Walk) [obs:
-                // Ryujinx trace W_3051605, a Goomba landing on a slope, still a frame, then on]
+                // the frame after landing from a fall onto a slope it stands (Fall hands over to
+                // Walk) [obs: Ryujinx trace W_3051605, a Goomba landing on a slope, still a
+                // frame, then on; W_3049200 frame 395, a Koopa landing on flat ground walks on]
                 if self.land_wait > 0 {
                     self.land_wait -= 1;
                     self.vx = 0.0;
@@ -2460,7 +2461,13 @@ impl Actor {
                 let was_on_ground = self.on_ground;
                 self.vy = (self.vy + ENEMY_GRAVITY).max(MAX_FALL);
                 self.collide(level);
-                if !was_on_ground && self.on_ground && self.age > 1 {
+                if !was_on_ground
+                    && self.on_ground
+                    && self.age > 1
+                    && level
+                        .slope_at(self.x)
+                        .is_some_and(|(sy, _)| (sy - self.y).abs() < 0.5)
+                {
                     self.land_wait = 1;
                 }
                 if touch_turn {

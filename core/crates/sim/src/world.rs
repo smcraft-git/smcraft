@@ -3935,8 +3935,11 @@ impl World {
             }
             // stomp window (interactions: 0x710076b6b0, classes 0x7101d035b0) [obs]: the feet
             // are inside the enemy's top by d > 0 and d < W; W = 10 − 3 + this frame's fall for
-            // ordinary enemies when falling (3 when rising), 12 / 10 for big ones
-            let d = ay + ah - p.y;
+            // ordinary enemies when falling (3 when rising), 12 / 10 for big ones; the top where
+            // the enemy stood before this frame's move, as the box [obs: Ryujinx trace
+            // W_3049200 frame 424: a stomp 1.41 px into a falling Koopa's last-frame top, which
+            // its move this frame takes 1.875 px down]
+            let d = ab.3 - p.y;
             let falling = p.vy <= 0.0;
             let w = match (a.big, falling) {
                 // SMM1 (0x0234aa14): a flat 10 for ordinary enemies when falling
@@ -4086,9 +4089,16 @@ impl World {
             } else if stomp {
                 let was_lakitu = self.actors[i].kind == Kind::Lakitu;
                 if self.actors[i].stomp() {
-                    // the stomped enemy doesn't move this frame (Actor::pre)
+                    // the stomped enemy doesn't move this frame (Actor::pre); a Koopa stomped
+                    // in the air falls that frame as its shell, from rest [obs: Ryujinx trace
+                    // W_3049200 frame 424: the new shell 0.1875 down, vx 0]
                     let (x, y) = self.actors[i].pre;
-                    (self.actors[i].x, self.actors[i].y) = (x, y);
+                    let a = &mut self.actors[i];
+                    (a.x, a.y) = (x, y);
+                    if a.mode == Mode::ShellWait && !a.on_ground {
+                        a.vy = crate::actors::ENEMY_GRAVITY;
+                        a.collide(&self.level);
+                    }
                     if was_lakitu {
                         // the empty cloud stays, rideable
                         let mut c = Actor::new(Kind::Cloud, ax, ay);
