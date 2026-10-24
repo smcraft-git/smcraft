@@ -352,8 +352,13 @@ Nextendo; `docs/nextendo-network-play.md`, spec `research/specs/network-play.md`
   | NSMBU | 50.1 / 71% | 15.9 / 46% | 26.5 / 49% | 62.6 / 77% | 47.9 / 73% | 24.8 / 60% | 38.0 / 66% | 22.2 / 51% | 60.8 / 73% | 36.2 / 63% | 38.5 |
   | NSMBU night | 41.7 / 78% | 41.6 / 76% | 46.4 / 88% | 79.9 / 87% | 5.8 / 12% | 4.5 / 11% | 40.8 / 76% | 41.6 / 74% | 40.7 / 75% | 56.0 / 91% | 39.9 |
 
-  3D World: the references were the game's blank fallback course (the Koopa made it reject them);
-  recaptured with the fixed courses, not yet diffed. Done since the revival: start sign, 2D drop
+  3D World (references recaptured 2026-10-24, MAE): ground 53.7, underground 34.3, castle 75.9,
+  airship 26.9, water 33.3, ghost 31.8, snow 70.6, desert 60.4, sky 24.6, forest 48.4 (were
+  31–77 before: the start sign 3× too big — a model without an SMB1 picture is drawn at its own
+  size —, Mini Mario's face / eyes / hands misplaced — parts in files of their own are modelled
+  in the model's axes —, Mini Mario stretched by Mario's animations — retargeted, its own rest
+  translations). Left in 3D World: the background lighting (ours too dark / blue), the ground's
+  texture (pebbled dirt, ours flat stripes), the player's turn angle. Done since the revival: start sign, 2D drop
   shadow (wgpu + Swift), animated blocks / coins (importer 10), night darkness (importer 12, wgpu
   + Swift), SceneDB backdrops for every style and night, night field art, airship sway and sky
   drift. Open: the final colour table (every pixel 1–2 levels off: ramp backdrops ready in

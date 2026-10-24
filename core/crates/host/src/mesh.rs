@@ -270,6 +270,8 @@ pub struct MeshStore {
     pub meshes: Vec<LoadedMesh>,
     pub by_name: HashMap<String, i32>,
     pub anims: Vec<SkelAnim>,
+    /// The folder each of `anims` came from.
+    pub anim_folder: Vec<String>,
     pub anim_ids: HashMap<(String, String), i32>,
     pub anim_index: HashMap<String, Vec<AnimInfo>>,
     pub bindings: HashMap<(i32, usize, i32), Binding>,
@@ -375,6 +377,7 @@ impl MeshStore {
         {
             Some(a) => {
                 self.anims.push(a);
+                self.anim_folder.push(folder.to_string());
                 self.anims.len() as i32 - 1
             }
             None => -1,
@@ -458,13 +461,17 @@ impl MeshStore {
         let lm: &LoadedMesh = self.meshes.get(usize::try_from(mesh).ok()?)?;
         let m = lm.file.models.get(model)?;
         let a: Option<&SkelAnim> = usize::try_from(anim).ok().and_then(|i| self.anims.get(i));
+        let folder = usize::try_from(anim)
+            .ok()
+            .and_then(|i| self.anim_folder.get(i));
         let bound = match a {
             Some(a) => Some((
                 a,
-                &*self
-                    .bindings
-                    .entry((mesh, model, anim))
-                    .or_insert_with(|| Binding::new(m, a)),
+                &*self.bindings.entry((mesh, model, anim)).or_insert_with(|| {
+                    let mut b = Binding::new(m, a);
+                    b.retarget = folder.is_some_and(|f| foreign_anim(&lm.name, f));
+                    b
+                }),
             )),
             None => None,
         };
@@ -602,6 +609,18 @@ pub fn anim_folders(mesh: &str) -> Vec<String> {
     out
 }
 
+/// A 3D World player model playing another model's animations (Mini Mario on Mario's
+/// `3W_Player_Animation_Mario`): its own folder is `3W_Player_Animation_<model>`.
+pub fn foreign_anim(mesh: &str, folder: &str) -> bool {
+    match (
+        mesh.strip_prefix("3W_Player_"),
+        folder.strip_prefix("3W_Player_Animation_"),
+    ) {
+        (Some(model), Some(of)) => model != of,
+        _ => false,
+    }
+}
+
 /// One model drawn for a sprite.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Part {
@@ -616,7 +635,9 @@ pub struct Part {
 #[derive(Clone, Debug, PartialEq)]
 pub struct MeshPlan {
     pub parts: Vec<Part>,
-    /// Size of the SMB1 texture the sim sized the sprite by (for the scale).
+    /// Size of the SMB1 texture the sim sized the sprite by (for the scale); (0, 0) when the model
+    /// has no SMB1 picture (a style's own object, e.g. 3D World's start signs): drawn at its own
+    /// size, model units being world px.
     pub ref_size: (f32, f32),
     /// The SMB1 art faces right (players) or left (everything else) when not flipped.
     pub art_faces_right: bool,
@@ -796,7 +817,7 @@ impl MeshStore {
                     .or_else(|| of_model().next())
                     .map(size)
             })
-            .unwrap_or((16.0, 16.0));
+            .unwrap_or((0.0, 0.0));
         let candidates = anim_candidates(frame);
         let mut parts = Vec::new();
         let mut variant = 0;
@@ -942,7 +963,11 @@ impl MeshStore {
         } else {
             // the sim's box over the SMB1 picture's size; the smaller ratio, since some boxes
             // are wider than the picture (a big Sledge Bro: 64 × 64 for a 24 × 32 picture)
-            let k = (s.w / plan.ref_size.0.max(1.0)).min(s.h / plan.ref_size.1.max(1.0));
+            let k = if plan.ref_size.0 <= 0.0 {
+                1.0
+            } else {
+                (s.w / plan.ref_size.0.max(1.0)).min(s.h / plan.ref_size.1.max(1.0))
+            };
             (k, s.x + s.w / 2.0, s.y)
         };
         let facing_right = if plan.art_faces_right {
@@ -989,6 +1014,22 @@ impl MeshStore {
                         )
                         .and_then(|_| self.posed_bone(bone))
                     {
+                        // a part in a file of its own (3D World's faces, eyes, hands) is
+                        // modelled round the bone's origin in the model's axes, not the bone's:
+                        // undo the bone's rest rotation (its inverse bind without the
+                        // translation) [obs: 3D World's MiniFace bone Face00 = − the Head's rest
+                        // position]; a model of the same file (NSMBU's heads) is in the bone's
+                        Some(b) if p.mesh != pp.mesh => {
+                            let mut unrot = self
+                                .mesh(pp.mesh)
+                                .and_then(|m| m.file.models.get(pp.model as usize))
+                                .and_then(|m| m.bones.get(bone))
+                                .map_or(IDENTITY, |b| b.inverse_bind);
+                            for row in unrot.iter_mut() {
+                                row[3] = 0.0;
+                            }
+                            mul(&pw, &mul(&b, &unrot))
+                        }
                         Some(b) => mul(&pw, &b),
                         None => pw,
                     }
@@ -1220,5 +1261,27 @@ impl MeshPlanner {
             }
             sprites.push(resolver.resolve_one(style, &s, cache));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mini_mario_retargets_marios_animations_but_not_its_own() {
+        assert!(foreign_anim(
+            "3W_Player_MarioMini",
+            "3W_Player_Animation_Mario"
+        ));
+        assert!(!foreign_anim(
+            "3W_Player_MarioMini",
+            "3W_Player_Animation_MarioMini"
+        ));
+        assert!(!foreign_anim(
+            "3W_Player_Mario",
+            "3W_Player_Animation_Mario"
+        ));
+        assert!(!foreign_anim("WU_Player_MarioMdl", "WU_Player_CommonAnm"));
     }
 }

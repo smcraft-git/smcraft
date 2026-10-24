@@ -236,6 +236,10 @@ pub fn srt_component(target: u32) -> Option<u8> {
 /// Per model × animation: which track drives which bone.
 #[derive(Clone, Debug, Default)]
 pub struct Binding {
+    /// The animation was made for another skeleton (3D World's Mini Mario plays Mario's): the
+    /// bones below the root keep their own rest translations, the animation turns them
+    /// [inf: retargeting, as the Mini model's shorter limbs need].
+    pub retarget: bool,
     bone_track: Vec<Option<usize>>,
     vis_track: Vec<Option<usize>>,
     tex_track: Vec<Option<usize>>,
@@ -262,6 +266,7 @@ impl Binding {
             .map(|(i, t)| (t.material.as_str(), i))
             .collect();
         Self {
+            retarget: false,
             bone_track: model
                 .bones
                 .iter()
@@ -307,6 +312,8 @@ impl MeshModel {
         let mut scales: Vec<[f32; 3]> = Vec::with_capacity(n);
         for (i, b) in self.bones.iter().enumerate() {
             let track = anim.and_then(|(a, bind)| Some((a, &a.bones[bind.bone_track[i]?])));
+            // retargeted: below the root the translation stays the rest one
+            let keep_t = b.parent.is_some() && anim.is_some_and(|(_, bind)| bind.retarget);
             let (s, r, t, euler) = match track {
                 Some((a, tr)) => {
                     let mut v = [0.0f32; 10];
@@ -319,11 +326,14 @@ impl MeshModel {
                         v[3..7].copy_from_slice(&[0.0, 0.0, 0.0, 1.0]);
                     }
                     for (bit, range) in [(1u8, 0..3), (2, 3..7), (4, 7..10)] {
-                        if tr.mask & bit != 0 {
+                        if tr.mask & bit != 0 && !(bit == 4 && keep_t) {
                             v[range.clone()].copy_from_slice(&tr.base[range]);
                         }
                     }
                     for c in &tr.curves {
+                        if keep_t && c.target >= 7 {
+                            continue;
+                        }
                         if let Some(slot) = v.get_mut(c.target as usize) {
                             *slot = c.eval(frame);
                         }
