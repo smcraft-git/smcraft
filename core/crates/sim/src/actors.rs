@@ -8,7 +8,7 @@
 use crate::fmath::DetMath;
 use crate::level::{Cell, Level, PipeDir, TILE};
 
-mod block_out;
+pub mod block_out;
 mod bosses;
 mod ceiling;
 mod chute;
@@ -595,8 +595,10 @@ pub enum Mode {
     },
     /// Coming out of a block (the Block context's Out, actors/block_out.rs): the block centre
     /// `yb`, where the motion started, this frame's gravity, whether it comes out downward
-    /// and a parachute's countdown (a Goomba's hold in water); terrain collision is off while
-    /// `timer` runs. `wet`: it came out in water (the presets' water variants).
+    /// and a parachute's countdown (a Goomba's hold in water, a preset's own count); terrain
+    /// collision is off while `timer` runs. `wet`: it came out in water (the presets' water
+    /// variants); `preset`: whose Out it runs; `note`: out of a note block (or a tree);
+    /// `clear`: a coin is clear of the block (its hit box is in).
     BlockOut {
         yb: f32,
         y0: f32,
@@ -604,6 +606,9 @@ pub enum Mode {
         down: bool,
         left: i32,
         wet: bool,
+        preset: block_out::Preset,
+        note: bool,
+        clear: bool,
     },
     /// Coming out of a pipe mouth (the Dokan context, actors/dokan.rs): the slide's target
     /// (tx, ty) and where it is in the context.
