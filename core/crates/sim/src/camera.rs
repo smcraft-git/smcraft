@@ -888,10 +888,17 @@ impl Camera {
             .shifted_into(&area.bounds);
 
         // followers
+        // the follower adds the aggregated tracker speed when it points the way the camera must
+        // go (0x7100b63990: the trackers' +0x1C, copied from player field +0x514 in v1.0.0). That
+        // field is not the player's speed: a run, a walk and a slow-down on flat ground follow
+        // 0.3 × distance alone [obs: Ryujinx camera trace, the view rect in M1_hit hit_combo,
+        // within 0.0002 px over 200 frames; with the player's |vx| added it ran 7 px ahead].
+        // What sets it is unknown [?]; 0 here.
         let vx_toward = {
             let (cx, tx) = (self.view.cx(), goal_rect.cx());
             let toward_target = if tx <= cx { f.vx < 0.0 } else { f.vx > 0.0 };
-            if toward_target { f.vx.abs() } else { 0.0 }
+            let _ = toward_target;
+            0.0
         };
         let cx = follow_x(
             self.view.cx(),
@@ -1245,9 +1252,11 @@ mod tests {
         let mut cam = Camera::start(&a, 56.0, GROUND, empty);
         let x = walk(&mut cam, &a, 56.0, 3.0, 400);
         let v = cam.view(&a);
+        // 4 px of dead zone plus 7 behind at 3 px/frame: the follower closes 0.3 of the gap
+        // [obs: Ryujinx camera trace, 11.0 px at a run]
         let off = x - v.cx();
         assert!(
-            (0.0..=8.0).contains(&off),
+            (10.5..=11.5).contains(&off),
             "player {off} px from the centre"
         );
     }

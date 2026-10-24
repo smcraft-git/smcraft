@@ -240,6 +240,9 @@ enum Cmd {
         /// Start state of the course's first actor "x,y,vx,vy,dir" (e.g. from a recorded trace).
         #[arg(long, allow_hyphen_values = true)]
         actor: Option<String>,
+        /// Also write every actor's state per frame to this CSV.
+        #[arg(long)]
+        actors: Option<PathBuf>,
     },
     /// Write the physics test courses (`<style>_<kind>.course`) used with `mmk trace`; with
     /// --title and --table, also the selected one as replacement title courses (encrypted .szs).
@@ -1036,6 +1039,7 @@ fn main() -> ExitCode {
             form,
             vx,
             actor,
+            actors,
         } => {
             let table = read_key_table(keys);
             let Some(data) = load(&course)
@@ -1083,9 +1087,13 @@ fn main() -> ExitCode {
                 vx,
                 actor,
             };
-            match trace::run(&data, &script, &start)
-                .and_then(|csv| std::fs::write(&out, csv).map_err(|e| e.to_string()))
-            {
+            match trace::run_all(&data, &script, &start).and_then(|(csv, all)| {
+                std::fs::write(&out, csv).map_err(|e| e.to_string())?;
+                match &actors {
+                    Some(p) => std::fs::write(p, all).map_err(|e| e.to_string()),
+                    None => Ok(()),
+                }
+            }) {
                 Ok(()) => ExitCode::SUCCESS,
                 Err(e) => fail("trace", e),
             }

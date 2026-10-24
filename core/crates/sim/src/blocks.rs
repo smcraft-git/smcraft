@@ -103,6 +103,10 @@ pub struct Bump {
     v_end: f32,
     /// Player index that hit the block (contents go to them).
     pub frames: u32,
+    /// Created this frame: the bounce starts with the next frame's step [obs: Ryujinx traces
+    /// M1_blocks blk_mush (a head hit, the mushroom 14 frames later) and M1_shellq (a shell side
+    /// hit registered after the blocks' update: 15 frames)].
+    pub fresh: bool,
 }
 
 impl Bump {
@@ -114,6 +118,7 @@ impl Bump {
             a: 0.281,
             v_end: -2.0,
             frames: 0,
+            fresh: true,
         }
     }
     pub fn down() -> Self {
@@ -124,6 +129,7 @@ impl Bump {
             a: 0.281,
             v_end: 2.0,
             frames: 0,
+            fresh: true,
         }
     }
     pub fn note_up() -> Self {
@@ -134,6 +140,7 @@ impl Bump {
             a: 0.64,
             v_end: -4.5,
             frames: 0,
+            fresh: true,
         }
     }
     pub fn note_down() -> Self {
@@ -144,6 +151,7 @@ impl Bump {
             a: 0.64,
             v_end: 4.3,
             frames: 0,
+            fresh: true,
         }
     }
 
@@ -212,6 +220,9 @@ pub struct Release {
     pub y: i32,
     pub contents: Contents,
     pub down: bool,
+    /// The block's bounce offset before its last step: the item appears there (the block's
+    /// position isn't reset yet) [obs: Ryujinx traces, a mushroom first at block y + 0.429].
+    pub offset: f32,
 }
 
 /// How strong the hitter is (B4: the player's per-side capability levels).
@@ -314,6 +325,12 @@ impl Blocks {
                 b.coin_timer -= 1;
             }
             if let Some(mut bump) = b.bump {
+                if bump.fresh {
+                    bump.fresh = false;
+                    b.bump = Some(bump);
+                    continue;
+                }
+                let d_before = bump.d;
                 if bump.step() {
                     b.bump = None;
                     let down = bump.down;
@@ -325,6 +342,7 @@ impl Blocks {
                                     y,
                                     contents: c,
                                     down,
+                                    offset: d_before,
                                 });
                             }
                             b.kind = BlockKind::Empty;
@@ -340,6 +358,7 @@ impl Blocks {
                                     y,
                                     contents: c,
                                     down,
+                                    offset: d_before,
                                 });
                             }
                         }
@@ -358,7 +377,7 @@ impl Blocks {
     pub fn rising(&self) -> impl Iterator<Item = (i32, i32)> + '_ {
         self.map
             .iter()
-            .filter(|(_, b)| b.bump.is_some_and(|bp| !bp.down && bp.frames <= 1))
+            .filter(|(_, b)| b.bump.is_some_and(|bp| !bp.down && bp.frames == 0))
             .map(|(&k, _)| k)
     }
 }
@@ -376,6 +395,7 @@ mod tests {
     fn bump_matches_spec_curve() {
         // B6: normal up-bump lasts 14 frames, peak 6.13 at frame 7
         let mut b = Bump::up();
+        b.fresh = false;
         let mut path = Vec::new();
         loop {
             let done = b.step();
@@ -394,7 +414,8 @@ mod tests {
         let mut bl = Blocks::default();
         bl.map.insert((3, 4), Block::new(BlockKind::Question, None));
         assert_eq!(bl.hit(3, 4, true, HitPower::Bump), HitResult::Coin);
-        for _ in 0..14 {
+        // the hit frame's step, then the 14 bounce frames
+        for _ in 0..15 {
             bl.step();
         }
         assert_eq!(bl.get(3, 4).unwrap().kind, BlockKind::Empty);
@@ -410,7 +431,8 @@ mod tests {
         );
         assert_eq!(bl.hit(0, 0, true, HitPower::Bump), HitResult::Bumped);
         let mut released = None;
-        for f in 1..=14 {
+        // the bounce starts the frame after the hit: the item 14 frames after it
+        for f in 0..=15 {
             let r = bl.step();
             if !r.is_empty() {
                 released = Some(f);
@@ -424,7 +446,7 @@ mod tests {
         let mut bl = Blocks::default();
         bl.map.insert((0, 0), Block::new(BlockKind::Brick, None));
         assert_eq!(bl.hit(0, 0, true, HitPower::Bump), HitResult::Bumped);
-        for _ in 0..14 {
+        for _ in 0..15 {
             bl.step();
         }
         assert_eq!(bl.hit(0, 0, true, HitPower::Break), HitResult::Broke);

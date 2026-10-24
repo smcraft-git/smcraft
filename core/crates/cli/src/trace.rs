@@ -79,7 +79,14 @@ pub struct Start {
 }
 
 /// Run the script; one CSV row per frame (the state after that frame's step).
+#[cfg(test)]
 pub fn run(course: &[u8], script: &[Input], start: &Start) -> Result<String, String> {
+    run_all(course, script, start).map(|(csv, _)| csv)
+}
+
+/// `run`, plus every actor's state after each frame (a second CSV: frame, id, kind / mode, x,
+/// y, vx, vy, dir), for traces that follow more objects than the first actor.
+pub fn run_all(course: &[u8], script: &[Input], start: &Start) -> Result<(String, String), String> {
     let c = mmk_formats::smm2::Course::parse(course).map_err(|e| e.to_string())?;
     let mut w = mmk_sim::World::from_course(&c);
     if let Some((x, y)) = start.pos {
@@ -101,10 +108,24 @@ pub fn run(course: &[u8], script: &[Input], start: &Start) -> Result<String, Str
     }
     let first_id = w.actors.first().map_or(u32::MAX, |a| a.id);
     w.reset_camera();
-    let mut csv =
-        String::from("frame,x,y,vx,vy,facing,ground,pose,form,input,ax,ay,avx,avy,adir,akind\n");
+    let mut csv = String::from(
+        "frame,x,y,vx,vy,facing,ground,pose,form,input,ax,ay,avx,avy,adir,akind,camx,camy\n",
+    );
+    let mut all = String::from("frame,id,kind,x,y,vx,vy,dir\n");
     for (i, inp) in script.iter().enumerate() {
         w.step(*inp);
+        for a in &w.actors {
+            all.push_str(&format!(
+                "{i},{},{},{},{},{},{},{}\n",
+                a.id,
+                format!("{:?}/{:?}", a.kind, a.mode).replace([',', ' '], ""),
+                a.x,
+                a.y,
+                a.vx,
+                a.vy,
+                a.dir
+            ));
+        }
         let p = &w.player;
         csv.push_str(&format!(
             "{i},{},{},{},{},{},{},{:?},{:?},{}",
@@ -113,7 +134,7 @@ pub fn run(course: &[u8], script: &[Input], start: &Start) -> Result<String, Str
         // the course's first actor (a test course's enemy), by its spawn id
         match w.actors.iter().find(|a| a.id == first_id) {
             Some(a) => csv.push_str(&format!(
-                ",{},{},{},{},{},{}\n",
+                ",{},{},{},{},{},{}",
                 a.x,
                 a.y,
                 a.vx,
@@ -121,18 +142,21 @@ pub fn run(course: &[u8], script: &[Input], start: &Start) -> Result<String, Str
                 a.dir,
                 format!("{:?}/{:?}", a.kind, a.mode).replace([',', ' '], "")
             )),
-            None => csv.push_str(",,,,,,\n"),
+            None => csv.push_str(",,,,,,"),
         }
+        csv.push_str(&format!(",{},{}\n", w.camera_x, w.camera_y));
     }
-    Ok(csv)
+    Ok((csv, all))
 }
 
 // ---------------------------------------------------------------------------------------------
 // Physics test courses
 
 pub const STYLES: [&str; 5] = ["M1", "M3", "MW", "WU", "3W"];
-pub const KINDS: [&str; 9] = [
-    "flat", "wall", "slope", "water", "items", "form", "enemy", "koopa", "shell",
+pub const KINDS: [&str; 20] = [
+    "flat", "wall", "slope", "water", "items", "form", "enemy", "koopa", "shell", "hit",
+    "shellbrk", "shellq", "blocks", "bigblk", "spring", "note", "donut", "lift", "pswitch",
+    "bobomb",
 ];
 
 /// Where the items / form courses keep their power-up: the ? block's tile column and its row
@@ -144,6 +168,10 @@ pub fn course_names() -> Vec<String> {
     let mut v = Vec::new();
     for s in STYLES {
         for k in KINDS {
+            // (3D World has no Note Blocks)
+            if s == "3W" && k == "note" {
+                continue;
+            }
             v.push(format!("{s}_{k}"));
         }
     }
@@ -160,7 +188,7 @@ pub fn build_course(name: &str) -> Result<Vec<u8>, String> {
     }
     let err = |x: mmk_editor::EditError| format!("{x:?}");
     // the items / form courses are longer: their power-up block is past every test's reach
-    let len = if matches!(kind, "items" | "form") {
+    let len = if matches!(kind, "items" | "form" | "bigblk") {
         160
     } else {
         120
@@ -256,6 +284,101 @@ pub fn build_course(name: &str) -> Result<Vec<u8>, String> {
             let (sw, sh) = mmk_editor::default_size(part);
             e.place_sized(part, 20, up(1), sw, sh, mmk_editor::DEFAULT_FLAGS | 0x4)
                 .map_err(err)?;
+        }
+        "hit" | "shellbrk" | "shellq" => {
+            // the still shell of `shell` at x 20; then
+            // - hit: two Goombas at x 40 and 42, out of the spawn zone until the view comes near
+            //   (a running kick, the shell runs through both: the kill chain), and a 3-high wall
+            //   at x 56 for the shell to come back off;
+            // - shellbrk: a Brick Block on the floor at x 30 (the shell runs into its side);
+            // - shellq: a ? Block with a Super Mushroom on the floor at x 30
+            floor(&mut e, 0, len - 1)?;
+            let part = if style == "3W" { 25 } else { 28 };
+            let (sw, sh) = mmk_editor::default_size(part);
+            e.place_sized(part, 20, up(1), sw, sh, mmk_editor::DEFAULT_FLAGS | 0x4)
+                .map_err(err)?;
+            match kind {
+                "hit" => {
+                    e.place(0, 40, up(1)).map_err(err)?;
+                    e.place(0, 42, up(1)).map_err(err)?;
+                    for y in 1..=3 {
+                        e.paint_ground(56, up(y)).map_err(err)?;
+                    }
+                }
+                "shellbrk" => {
+                    e.place(4, 30, up(1)).map_err(err)?;
+                }
+                _ => {
+                    let i = e.place(5, 30, up(1)).map_err(err)?;
+                    e.try_set_child(i, 20, mmk_editor::DEFAULT_FLAGS)
+                        .map_err(err)?;
+                }
+            }
+        }
+        "blocks" | "bigblk" => {
+            // blocks to hit from below, 4 tiles up (a 3-tile gap over the floor): a Brick Block
+            // at x 12, a ? Block (a coin) at x 18, a ? Block with a Super Mushroom at x 24, a
+            // Brick Block with ten coins at x 30; bigblk adds the items courses' power-up block
+            // (the capture makes the player Super first)
+            floor(&mut e, 0, len - 1)?;
+            e.place(4, 12, up(4)).map_err(err)?;
+            e.place(5, 18, up(4)).map_err(err)?;
+            let i = e.place(5, 24, up(4)).map_err(err)?;
+            e.try_set_child(i, 20, mmk_editor::DEFAULT_FLAGS)
+                .map_err(err)?;
+            let i = e.place(4, 30, up(4)).map_err(err)?;
+            e.try_set_child(i, 8, mmk_editor::DEFAULT_FLAGS)
+                .map_err(err)?;
+            if kind == "bigblk" {
+                let (bx, by) = (POWER_BLOCK.0, up(POWER_BLOCK.1));
+                let i = e.place(5, bx, by).map_err(err)?;
+                e.try_set_child(i, 20, mmk_editor::DEFAULT_FLAGS)
+                    .map_err(err)?;
+                for y in 1..=2 {
+                    e.paint_ground(bx - 4, up(y)).map_err(err)?;
+                    e.paint_ground(bx + 4, up(y)).map_err(err)?;
+                }
+            }
+        }
+        "spring" => {
+            // a Trampoline on the floor at x 14
+            floor(&mut e, 0, len - 1)?;
+            e.place(10, 14, up(1)).map_err(err)?;
+        }
+        "note" => {
+            // a Note Block on the floor at x 14 (a one-tile step) and one 3 tiles up at x 24
+            // (to hit from below)
+            floor(&mut e, 0, len - 1)?;
+            e.place(23, 14, up(1)).map_err(err)?;
+            e.place(23, 24, up(4)).map_err(err)?;
+        }
+        "donut" => {
+            // a row of three Donut Blocks 2 tiles up at x 14..16 over the floor
+            floor(&mut e, 0, len - 1)?;
+            for x in 14..=16 {
+                e.place(21, x, up(3)).map_err(err)?;
+            }
+        }
+        "lift" => {
+            // a 3-wide Lift 3 tiles up at x 16..18 (it paces ±48 px about its spawn)
+            floor(&mut e, 0, len - 1)?;
+            let (_, lh) = mmk_editor::default_size(11);
+            e.place_sized(11, 16, up(4), 3, lh, mmk_editor::DEFAULT_FLAGS)
+                .map_err(err)?;
+        }
+        "pswitch" => {
+            // a P Switch on the floor at x 14 and a 3-high wall of Brick Blocks at x 20 (coins
+            // while the switch runs)
+            floor(&mut e, 0, len - 1)?;
+            e.place(18, 14, up(1)).map_err(err)?;
+            for y in 1..=3 {
+                e.place(4, 20, up(y)).map_err(err)?;
+            }
+        }
+        "bobomb" => {
+            // a Bob-omb at x 40, out of the spawn zone until the view comes near
+            floor(&mut e, 0, len - 1)?;
+            e.place(15, 40, up(1)).map_err(err)?;
         }
         "items" | "form" => {
             // the power-up in a ? block 4 tiles up, far enough right that no test reaches it:
