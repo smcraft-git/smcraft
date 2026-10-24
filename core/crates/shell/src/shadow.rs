@@ -1,7 +1,10 @@
-//! The 2D styles' drop shadow (`mmk_host::frame::FieldShadow`): the play field's sprites, moved
-//! by the shadow offset, are drawn into a coverage mask (the most opaque texel wins, so
-//! overlapping sprites darken once), then the mask is laid over the backdrop in the shadow colour
-//! before the play field itself is drawn.
+//! Coverage masks laid over the frame in a flat colour:
+//! - the 2D styles' drop shadow (`mmk_host::frame::FieldShadow`): the play field's sprites, moved
+//!   by the shadow offset, are drawn into the mask (the most opaque texel wins, so overlapping
+//!   sprites darken once), then the mask is laid over the backdrop in the shadow colour before
+//!   the play field itself is drawn;
+//! - the night darkness (`mmk_host::darkness`): the lights' shapes go into the mask and the
+//!   colour covers everything outside them (`inverted`).
 
 use crate::render::Gpu;
 
@@ -34,6 +37,8 @@ fn fs_mask(i: VOut) -> @location(0) vec4<f32> {
 
 struct Shade {
     color: vec4<f32>,
+    // x: 1 = cover outside the mask (darkness) instead of inside (shadow)
+    mode: vec4<f32>,
 };
 
 @group(0) @binding(0) var mask: texture_2d<f32>;
@@ -49,7 +54,10 @@ fn vs_full(@builtin(vertex_index) k: u32) -> @builtin(position) vec4<f32> {
 
 @fragment
 fn fs_shade(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
-    let m = textureLoad(mask, vec2<i32>(pos.xy), 0).r;
+    var m = textureLoad(mask, vec2<i32>(pos.xy), 0).r;
+    if (shade.mode.x > 0.5) {
+        m = 1.0 - m;
+    }
     if (m <= 0.0) {
         discard;
     }
@@ -70,8 +78,10 @@ pub struct ShadowPass {
     verts: Vec<[f32; 4]>,
     /// (first vertex, count, cache texture)
     batches: Vec<(u32, u32, u32)>,
-    /// The frame's shadow colour (None: no shadow this frame).
+    /// The frame's colour (None: nothing this frame).
     color: Option<[f32; 4]>,
+    /// Cover outside the mask (the darkness) rather than inside it (the shadow).
+    inverted: bool,
 }
 
 impl ShadowPass {
@@ -80,6 +90,7 @@ impl ShadowPass {
         format: wgpu::TextureFormat,
         sprite_layout: &wgpu::BindGroupLayout,
         depth: wgpu::DepthStencilState,
+        inverted: bool,
     ) -> Self {
         let device = &gpu.device;
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -185,7 +196,7 @@ impl ShadowPass {
         });
         let uniform = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("shadow colour"),
-            size: 16,
+            size: 32,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -200,6 +211,7 @@ impl ShadowPass {
             verts: Vec::new(),
             batches: Vec::new(),
             color: None,
+            inverted,
         }
     }
 
@@ -284,8 +296,9 @@ impl ShadowPass {
             });
             self.mask = Some((t, v, g));
         }
+        let mode = [self.inverted as u32 as f32, 0.0, 0.0, 0.0];
         gpu.queue
-            .write_buffer(&self.uniform, 0, bytemuck::cast_slice(&color));
+            .write_buffer(&self.uniform, 0, bytemuck::cast_slice(&[color, mode]));
         let bytes: &[u8] = bytemuck::cast_slice(&self.verts);
         if bytes.len() as u64 > self.vbuf.size() {
             self.vbuf = Self::vertex_buffer(&gpu.device, self.verts.len().next_power_of_two());

@@ -105,6 +105,8 @@ pub struct Scene<'a> {
     pub effects: &'a crate::effects::EffectFrame,
     /// The 2D styles' drop shadow of the play field (`crate::shadow`).
     pub shadow: Option<mmk_host::frame::FieldShadow>,
+    /// The night darkness over the play field (`mmk_host::darkness`).
+    pub darkness: Option<&'a mmk_host::darkness::DarkFrame>,
 }
 
 /// A cache texture on the GPU: not uploaded yet, unusable on this path, or ready.
@@ -172,6 +174,8 @@ enum Bind {
     Effects,
     /// The play field's drop shadow (`crate::shadow`), between the backdrop and the field.
     Shadow,
+    /// The night darkness (`crate::shadow`, inverted), over the field and its effects.
+    Dark,
 }
 
 /// Mesh pipeline variant: (blend 0 / 2 / 3, cull 0 back / 1 front / 2 none, background pass).
@@ -408,6 +412,8 @@ pub struct Renderer {
     depth: Option<(wgpu::Texture, wgpu::TextureView)>,
     effects: crate::effects::EffectsPass,
     shadow: crate::shadow::ShadowPass,
+    /// The night darkness (`mmk_host::darkness`), over the play field and its effects.
+    dark: crate::shadow::ShadowPass,
 }
 
 pub(crate) fn make_texture(
@@ -637,7 +643,10 @@ impl Renderer {
         let mesh_vbuf = Self::buffer(device, "mesh vertices", 1 << 16, wgpu::BufferUsages::VERTEX);
         let mesh_ibuf = Self::buffer(device, "mesh indices", 1 << 16, wgpu::BufferUsages::INDEX);
         let effects = crate::effects::EffectsPass::new(gpu, format, &layout);
-        let shadow = crate::shadow::ShadowPass::new(gpu, format, &layout, Self::depth_state(false));
+        let shadow =
+            crate::shadow::ShadowPass::new(gpu, format, &layout, Self::depth_state(false), false);
+        let dark =
+            crate::shadow::ShadowPass::new(gpu, format, &layout, Self::depth_state(false), true);
         let bg_vbuf = Self::buffer(
             device,
             "background vertices",
@@ -653,6 +662,7 @@ impl Renderer {
         Self {
             effects,
             shadow,
+            dark,
             mesh_pipelines: Default::default(),
             mesh_tex_layout,
             mesh_module,
@@ -1216,6 +1226,28 @@ impl Renderer {
             ndc,
         );
         self.batches.push((0, 0, Bind::Effects));
+        // the night darkness: the lights' shapes into its mask, then everything outside covered
+        self.dark
+            .begin(scene.darkness.map(|d| [0.0, 0.0, 0.0, d.level]));
+        if let Some(d) = scene.darkness {
+            for l in &d.lights {
+                self.ensure(gpu, l.texture as usize);
+                let [ax, ay] = ndc(l.x - l.half, l.y - l.half);
+                let [bx, by] = ndc(l.x + l.half, l.y + l.half);
+                self.dark.push(
+                    l.texture,
+                    [
+                        [ax, ay, 0.0, 1.0],
+                        [bx, ay, 1.0, 1.0],
+                        [bx, by, 1.0, 0.0],
+                        [ax, ay, 0.0, 1.0],
+                        [bx, by, 1.0, 0.0],
+                        [ax, by, 0.0, 0.0],
+                    ],
+                );
+            }
+            self.batches.push((0, 0, Bind::Dark));
+        }
         self.push(Bind::Hud, Self::full_quad());
 
         // meshes arrive in clip space
@@ -1253,6 +1285,13 @@ impl Renderer {
         let (vx, vy, vw, vh, _) = viewport(size.0, size.1, self.integer_scale);
         let textures = &self.textures;
         self.shadow
+            .encode_mask(gpu, encoder, size, (vx, vy, vw, vh), |t| {
+                match textures.get(t as usize) {
+                    Some(TexState::Ready(b, _)) => Some(b),
+                    _ => None,
+                }
+            });
+        self.dark
             .encode_mask(gpu, encoder, size, (vx, vy, vw, vh), |t| {
                 match textures.get(t as usize) {
                     Some(TexState::Ready(b, _)) => Some(b),
@@ -1333,6 +1372,12 @@ impl Renderer {
                 pass.set_vertex_buffer(0, self.vbuf.slice(..));
                 continue;
             }
+            if let Bind::Dark = bind {
+                self.dark.shade(&mut pass);
+                pass.set_pipeline(&self.pipeline);
+                pass.set_vertex_buffer(0, self.vbuf.slice(..));
+                continue;
+            }
             if let Bind::Shadow = bind {
                 self.shadow.shade(&mut pass);
                 pass.set_pipeline(&self.pipeline);
@@ -1358,7 +1403,7 @@ impl Renderer {
                 Bind::Missing(i) => &self.missing[i],
                 Bind::Sky => &self.sky.1,
                 Bind::Hud => &self.hud.1,
-                Bind::Effects | Bind::Shadow => continue,
+                Bind::Effects | Bind::Shadow | Bind::Dark => continue,
             };
             pass.set_bind_group(0, group, &[]);
             pass.draw(start..start + n, 0..1);

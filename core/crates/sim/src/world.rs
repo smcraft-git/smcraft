@@ -433,6 +433,37 @@ fn field_anime(style: crate::player::Style, kind: BlockKind, on: bool) -> Option
     })
 }
 
+/// A player's light in the night darkness: the half size its shape is drawn at, world px [obs:
+/// v1.0.0 0x710036bc90 aims at 67.5 (45.0 when the player's +0x2968 is unset, 200.0 in some states
+/// [?]); the game's frames show the 67.5 one].
+pub const PLAYER_LIGHT: f32 = 67.5;
+
+/// The night darkness this frame: `level` 0 (none) … 1 (dark outside the lights).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Darkness {
+    pub level: f32,
+    pub lights: Vec<Light>,
+}
+
+/// One light: centred at (x, y), world px.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Light {
+    pub source: LightSource,
+    pub x: f32,
+    pub y: f32,
+    /// Half the size of the light's shape, world px (`LightSource::Player`); a table light's
+    /// size, shape and y offset come from `LightMaskTable` / `LightMaskWipeTypeTable`.
+    pub half: f32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LightSource {
+    /// A player (shape `PlayerMove`).
+    Player,
+    /// An actor by its `LightMaskTable` name.
+    Table(&'static str),
+}
+
 /// The start sign's layer: in front of the backdrop (0), behind everything else.
 pub const START_SIGN_LAYER: u32 = 1;
 
@@ -4008,6 +4039,49 @@ impl World {
         self.level.theme == 1 && self.level.night
     }
 
+    /// The night darkness (underwater and ghost house at night, not in 3D World): how dark the
+    /// view is and the lights that show through [themes.md §1.6; v1.0.0 0x710081aeb0 enables it
+    /// for `night && (theme & ~1) == 4`, 0x710036bc90 places the players' lights]. None in other
+    /// themes.
+    pub fn darkness(&self) -> Option<Darkness> {
+        if !(self.level.night && matches!(self.level.theme, 4 | 5))
+            || self.style == crate::player::Style::W3
+        {
+            return None;
+        }
+        // both fade in from the area's start, frame by frame [obs]: the darkness d toward 1 by
+        // max(|1 − d| · 0.1, 0.01); a player's light size s toward its target by
+        // clamp(|T − s| · 0.25, 0.1, 100) [inf: from the course's first frame, the clock here]
+        let frames = self.tick.min(240) as u32;
+        let mut level = 0.0f32;
+        let mut size = 0.0f32;
+        for _ in 0..frames {
+            level = (level + ((1.0 - level) * 0.1).max(0.01)).min(1.0);
+            size = (size + ((PLAYER_LIGHT - size) * 0.25).clamp(0.1, 100.0)).min(PLAYER_LIGHT);
+        }
+        let mut lights = Vec::new();
+        for p in std::iter::once(&self.player).chain(&self.others) {
+            if !p.hidden {
+                lights.push(Light {
+                    source: LightSource::Player,
+                    x: p.x,
+                    y: p.y + 16.0,
+                    half: size,
+                });
+            }
+        }
+        if self.area == 0 {
+            // the start sign lights its surroundings (LightMaskTable `StartSignBoard`)
+            lights.push(Light {
+                source: LightSource::Table("StartSignBoard"),
+                x: 40.0,
+                y: self.level.start.1,
+                half: 0.0,
+            });
+        }
+        Some(Darkness { level, lights })
+    }
+
     /// Twister wind column: x within ±16 of the twister, from its feet to the column top. The
     /// player is lifted (vy toward 4.5 at +0.6/frame) [inf: the twister's contact 0x71008c0630
     /// fills the player's tornado receiver (actor +0x398: the twister's centre x, top y and x
@@ -7157,6 +7231,31 @@ mod tests {
         for _ in 0..frames {
             w.step(Input { buttons });
         }
+    }
+
+    /// Night underwater and ghost house are dark outside the lights: the player's (fading in
+    /// to 67.5 px) and the start sign's; other themes and 3D World have none.
+    #[test]
+    fn night_darkness_and_its_lights() {
+        let mut w = World::with_level(Level::flat(100));
+        assert!(w.darkness().is_none());
+        w.level.night = true;
+        w.level.theme = 4;
+        let d = w.darkness().unwrap();
+        assert_eq!(d.level, 0.0);
+        w.tick = 600;
+        let d = w.darkness().unwrap();
+        assert_eq!(d.level, 1.0);
+        assert_eq!(d.lights[0].source, LightSource::Player);
+        assert_eq!(
+            (d.lights[0].half, d.lights[0].y),
+            (PLAYER_LIGHT, w.player.y + 16.0)
+        );
+        assert_eq!(d.lights[1].source, LightSource::Table("StartSignBoard"));
+        w.level.theme = 5;
+        assert!(w.darkness().is_some());
+        w.style = crate::player::Style::W3;
+        assert!(w.darkness().is_none());
     }
 
     /// The start sign stands at x = 40 on the start ground, behind the field; snow has its own.
