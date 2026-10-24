@@ -29,12 +29,13 @@ sway, importer and pack 12, the dev cache already at v12).
   game-server access key — (a) read from the player's own dump at import (recommended) or (b) one
   Nextendo issues. Nextendo has agreed to SMCraft going online. Releases need the owner's OK.
 - **Next, in order:**
-  1. Physics (344 / 344 exact over 22 courses): first get the trace Ryujinx booting again (it
-     stalls at LoadApplication since a MoltenVK trial build — suspect its `root/` data folder),
-     then the enemy traces (`<style>_enemy` courses and scripts ready), WU form (the Propeller
-     Mushroom flies off), the 3D World courses (MoltenVK rejects a texture on first blit).
-     Pixels: the 3D World sky material, light-map lighting and fogs (measured in G8), the colour
-     table (ramps ready), NSMBU's background lighting.
+  1. Physics (352 / 352 exact over 26 courses, enemy stomp / die included; the trace Ryujinx
+     boots again from /private/tmp copies — a macOS privacy prompt hung it on ~/Documents and the
+     SSD): the 3D World courses (a MoltenVK build without 3D texture compression is ready,
+     `ryubuild/no3dbc`), Koopa / shell traces, WU form. Pixels (3D World mean 46.0 → 33.0;
+     NSMBU day 38.5 → 39.9): NSMBU's TEV colour stages, the light-map lookup domain, specular /
+     env-map reflections, rim light, baked AO (needs an importer bump), the other sky variants,
+     3D World snow, the colour table.
   2. Maker: ✅ wings / parachutes (the attribute balloon, merged 2026-10-24), ✅ over a multigrab
      selection (hold a selected part: wings / parachute go to every part that takes them, one
      undo step); a part put into a block keeps its wings / parachute / form / size as the
