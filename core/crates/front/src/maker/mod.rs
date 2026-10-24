@@ -36,6 +36,7 @@ pub mod art;
 pub mod attr;
 pub mod catalog;
 pub mod help;
+pub mod inparts;
 pub mod liquid;
 pub mod mission;
 pub mod modes;
@@ -344,6 +345,8 @@ pub struct MakerFlow {
     icons: std::collections::HashMap<(String, i16, u32), Option<String>>,
     /// The attribute balloon while open.
     attr: Option<attr::Balloon>,
+    /// The contents balloon while a container is held.
+    contents: Option<inparts::Contents>,
     /// The `EditModel` textures found in the import (name → UI texture id).
     textures: std::collections::HashMap<&'static str, u32>,
     /// Changes since the last save.
@@ -436,6 +439,7 @@ impl MakerFlow {
             mario: None,
             icons: Default::default(),
             attr: None,
+            contents: None,
             textures: view::TEXTURES
                 .iter()
                 .filter_map(|&n| {
@@ -1101,18 +1105,26 @@ impl MakerFlow {
                 }
             }
             Some(Drag::Carry { index, from, held }) => {
+                if self.contents.is_some() && (!place_held || self.cur != from) {
+                    // letting go or carrying the container on closes its contents balloon
+                    self.close_contents();
+                }
                 if !place_held {
                     self.drop_carried(cx, index, from, held);
                 } else if held >= 0 && self.cur == from {
-                    // held still on the part: its attribute balloon opens
+                    // held still on the part: what is inside it shows, else its attribute
+                    // balloon opens (0x7100e90c70 tries 0x7100e9e400 first)
                     let held = held + 1;
                     self.drag = Some(Drag::Carry { index, from, held });
-                    if held >= attr::HOLD && !self.open_attr(index) {
-                        self.drag = Some(Drag::Carry {
-                            index,
-                            from,
-                            held: -1,
-                        });
+                    if held >= attr::HOLD {
+                        let shown = self.open_contents(index);
+                        if shown || !self.open_attr(index) {
+                            self.drag = Some(Drag::Carry {
+                                index,
+                                from,
+                                held: -1,
+                            });
+                        }
                     }
                 } else if held >= 0 {
                     self.drag = Some(Drag::Carry {
@@ -2298,6 +2310,7 @@ impl MakerFlow {
     }
 
     fn end_drag_if_any(&mut self) {
+        self.close_contents();
         if self.drag.is_some() {
             if let Some(Drag::Carry { .. } | Drag::CarryPipe { .. }) = self.drag {
                 self.editor.discard_checkpoint();
@@ -3504,6 +3517,12 @@ impl MakerFlow {
                 push_layout(out, l, h.tick);
             }
         }
+        if self.mode == Mode::Edit
+            && let Some(c) = &mut self.contents
+            && let Some(l) = &mut c.layout
+        {
+            push_layout(out, l, tick);
+        }
         if self.mode == Mode::Attr
             && let Some(b) = &mut self.attr
             && let Some(l) = &mut b.layout
@@ -3683,6 +3702,7 @@ impl MakerFlow {
     }
 
     /// Captures: open a window ("parts", "menu", "save", "style", "theme", "play", "subarea";
+    /// "inparts", "inparts-big": the contents balloon over a ? block;
     /// "vertical": a vertical sub-area; "water", "water-rising", "water-both", "water-speed",
     /// "water-tip": the Water Level mode in the forest; "scroll", "scroll-nodes", "scroll-tip":
     /// Custom Scroll).
@@ -3722,6 +3742,26 @@ impl MakerFlow {
                 self.slot = 0;
                 self.dirty = true;
                 self.update_page();
+            }
+            // what is inside a ? block: a winged Goomba (the contents balloon), and a big
+            // Super Mushroom in the one next to it ("inparts-big")
+            "inparts" | "inparts-big" => {
+                let big = what == "inparts-big";
+                let (part, flags) = if big {
+                    (20, DEFAULT_FLAGS | 0x4000)
+                } else {
+                    (0, DEFAULT_FLAGS | 0x2)
+                };
+                let Ok(q) = self.editor.place(5, 12, 6) else {
+                    return false;
+                };
+                if self.editor.try_set_child(q, part, flags).is_err() {
+                    return false;
+                }
+                self.cur = (12, 6);
+                self.dirty = true;
+                self.update_page();
+                return self.open_contents(q);
             }
             // the Water Level mode in the forest: still water, rising (the button, its path),
             // rising and falling, the speed balloon; its tip
@@ -3787,6 +3827,10 @@ impl MakerFlow {
                 wanted.extend(pg.iter().map(|e| (e.tool.part(), DEFAULT_FLAGS)));
             }
         }
+        // the contents balloon's picture
+        if let Some(c) = &self.contents {
+            wanted.push((c.child, c.picture_flags()));
+        }
         // the balloon's pictures: the part as each choice would make it
         if let Some(b) = &self.attr
             && let Some(o) = self.editor.object(b.index)
@@ -3831,6 +3875,9 @@ impl MakerFlow {
             }
             if self.mode == Mode::Attr {
                 self.layout_attr(false);
+            }
+            if self.contents.is_some() {
+                self.layout_contents(false);
             }
         }
     }

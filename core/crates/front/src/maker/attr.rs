@@ -21,10 +21,22 @@ pub const LAYOUT: &str = "Edit_BalloonPartsChange_00";
 pub const HOLD: i32 = 16;
 /// Buttons in the layout.
 pub const BUTTONS: usize = 11;
-/// The balloon turns away from the screen's right / top edge when its frame would pass these
-/// (layout units, 1280 × 720 centred).
-const EDGE_X: f32 = 600.0;
-const EDGE_Y: f32 = 330.0;
+/// The balloon's side (`Direction`) from its part's place on the screen (layout units, 1280 ×
+/// 720 centred, y up): to the left of a part right of x 20, below one above y 40
+/// (0x71018bb490) [obs v3.0.3].
+const SIDE_X: f32 = 20.0;
+const SIDE_Y: f32 = 40.0;
+
+/// `Direction` frame for a balloon anchored at `at`: 0 up and right, 1 up and left, 2 down and
+/// left, 3 down and right (the frames mirror the frame through x and / or y).
+pub fn direction(at: [f32; 2], side_x: f32, side_y: f32) -> u8 {
+    match (at[0] > side_x, at[1] >= side_y) {
+        (false, false) => 0,
+        (true, false) => 1,
+        (true, true) => 2,
+        (false, true) => 3,
+    }
+}
 
 pub struct Balloon {
     /// The part (object index) and its id.
@@ -120,10 +132,8 @@ impl MakerFlow {
         let pictures: Vec<Option<String>> = (0..b.options.len())
             .map(|k| self.icon_key_flags(&style, b.part, b.flags_after(k, o.flags)))
             .collect();
-        // from the part's top centre, up and to the right (Direction 0); mirrored to the left
-        // and / or below when that would leave the screen (Direction 1–3, which mirror the
-        // frame; the buttons are turned back) [inf: the game chooses by the part's screen
-        // position, research/specs/maker.md C10]
+        // from the part's top centre, on the side the game picks from its screen place
+        // (0x71018bb490; the anchor is ours [inf])
         let fp = mmk_editor::parts::footprint(&o);
         let at = self.to_layout(
             (fp.x as f32 + fp.w as f32 / 2.0) * 16.0,
@@ -135,26 +145,14 @@ impl MakerFlow {
         let Some(l) = &mut b.layout else { return };
         l.set_translate("N_InOut_00", at);
         l.hold("Type", n.saturating_sub(1) as f32);
-        l.hold("Direction", 0.0);
+        let direction = direction(at, SIDE_X, SIDE_Y);
+        let (left, below) = (matches!(direction, 1 | 2), direction >= 2);
+        l.hold("Direction", direction as f32);
         for k in 0..BUTTONS {
             l.clear_pane(&format!("N_Btn_{k:02}"));
         }
-        l.apply(tick);
-        let (left, below) = match l.rect("W_Frame_00") {
-            Some(r) => (
-                r.center[0] + r.size[0] / 2.0 > EDGE_X,
-                r.center[1] + r.size[1] / 2.0 > EDGE_Y,
-            ),
-            None => (false, false),
-        };
-        let direction = match (left, below) {
-            (false, false) => 0.0,
-            (true, false) => 1.0,
-            (true, true) => 2.0,
-            (false, true) => 3.0,
-        };
-        l.hold("Direction", direction);
         if left || below {
+            // the frames mirror the frame; the buttons are turned back
             let scale = [
                 if left { -1.0 } else { 1.0 },
                 if below { -1.0 } else { 1.0 },
