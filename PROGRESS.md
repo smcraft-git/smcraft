@@ -29,11 +29,14 @@ sway, importer and pack 12, the dev cache already at v12).
   game-server access key — (a) read from the player's own dump at import (recommended) or (b) one
   Nextendo issues. Nextendo has agreed to SMCraft going online. Releases need the owner's OK.
 - **Next, in order:**
-  1. Physics: record the 16 courses left (WU items, walls, water, 3D World — headless Ryujinx
-     aborts in MoltenVK there —, WU form); then enemy traces. Pixels: diff the new 3D World
-     references, the colour table (ramps ready), NSMBU's background lighting.
-  2. Maker: wings / parachutes (the "put into" gesture: `Edit_BalloonPartsIn_00` has the wing and
-     parachute panes; read the drop handler in the binary), tracks and links.
+  1. Physics (344 / 344 exact over 22 courses): first get the trace Ryujinx booting again (it
+     stalls at LoadApplication since a MoltenVK trial build — suspect its `root/` data folder),
+     then the enemy traces (`<style>_enemy` courses and scripts ready), WU form (the Propeller
+     Mushroom flies off), the 3D World courses (MoltenVK rejects a texture on first blit).
+     Pixels: the 3D World sky material, light-map lighting and fogs (measured in G8), the colour
+     table (ramps ready), NSMBU's background lighting.
+  2. Maker: ✅ wings / parachutes (the attribute balloon, merged 2026-10-24); left: multigrab
+     choices, NSMBU / 3D World wing art, the contents balloon's dummies; tracks and links.
   3. Co-op: a players screen in SMM2's layouts; the P-door hold for followers.
   4. Super Worlds' 3D map and Toad Houses; airship sway; the colour table; NSMBU / 3D World pixels.
   5. iPad / Android device runs; the macOS package; live Network Play once the ID and key arrive.
