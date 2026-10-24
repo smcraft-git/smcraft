@@ -1500,6 +1500,12 @@ impl Sounds {
                 Event::DonutShake => {
                     self.object_sfx(world, "chikuwa_shake", pe);
                 }
+                Event::VineSprout => {
+                    let user = self.user("Ivy");
+                    for key in ["block_out", "tsuta_appear"] {
+                        self.sfx_at(world, &user, key, &PropList::default(), pe, 0);
+                    }
+                }
                 Event::DonutFall => {
                     self.object_sfx(world, "chikuwa_start_fall", pe);
                 }

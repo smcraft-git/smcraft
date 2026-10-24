@@ -51,6 +51,16 @@ pub enum Contents {
     /// An update power-up item (`Kind::PowerItem::what`): part 81, the Master Sword (part 20
     /// with flag 0x4 in SMB1), a wearable (127–131).
     Power(u8),
+    /// Any other part, or a simple item with wings, a parachute or big: the child part (id,
+    /// flags), released as the actor the course loader makes of it (`Level::part_actor`). The
+    /// block's descriptor holds the engine actor id of whatever was put in (4-brick.md B9), so
+    /// any part comes out as itself.
+    Part {
+        id: i16,
+        flags: u32,
+    },
+    /// A vine (Ivy, 64-vine.md): grows out of the block.
+    Vine,
 }
 
 impl Contents {

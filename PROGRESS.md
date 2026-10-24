@@ -50,7 +50,9 @@ sway, importer and pack 12, the dev cache already at v12).
      `Tower_stack` (maker C11); the maker's Water Level mode (`L_WaterLevelBtn_00`, mode banner
      "Water / Poison / Lava Level"; fixed / rising and the speed — not in the text, likely
      markers in the course), custom scroll nodes, Mario's Trail (`L_ZanzoBtn_00`), the trash can
-     (`L_TrashCan_00`); a winged / parachuted item coming out of a block; Super World enemy-icon
+     (`L_TrashCan_00`: UIEditMainPage part 8 at +0x800, set up in 0x71018cee20; `part(i)`
+     0x71018fc060 is virtual; placed from code, the pane sits at 0,0; Act 45 plays
+     `se_ui_edit_trash` + `SE_DropErase`; where it shows: one Ryujinx look when the slot is free); a winged / parachuted item coming out of a block; Super World enemy-icon
      courses, point icons by model, map ghosts; CJK course names (TGRCode's Japanese / Chinese /
      Korean names draw as the replacement glyph: the UI import rasterises only the English text's
      characters — rasterise a CJK set from the dump's `Font/ScalableFont.szs` at import, or keep
@@ -397,7 +399,7 @@ Nextendo; `docs/nextendo-network-play.md`, spec `research/specs/network-play.md`
 - ✅ Frozen Coins (3.0's `FreezeCoin`, the coin's 0x4 form; found blocking 4 of 38 recent TGRCode
   courses): solid ice round a coin (`<style>_Field_anime_coin_freeze`), the player's fireballs
   thaw it into the coin [inf: which fire thaws; `p_IceCoinThawing` isn't in the imported sound
-  users]. 38 of 38 recent TGRCode courses fully playable (Koopalings ride tracks now), 0 crashes
+  users]. 32 of 38 recent TGRCode courses fully playable, 0 crashes (the coverage check now reads block and Bill Blaster contents; left: coins from a Bill Blaster, the Coin actor's Killer Shot state, 6 courses; 536 of the 550 sample)
 - 🔄 Stacked parts (2026-10-24, from the game's tower manager; research objects/stacks.md): ✅
   play — columns chained as the game does (feet in the row above the lower top, x within 0.2 px
   of the bottom's; Bill Blasters / Cannons as fixed bases; 128 members at most); the base acts

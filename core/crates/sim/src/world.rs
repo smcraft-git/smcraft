@@ -28,6 +28,7 @@ use crate::render::{Sprite, SpriteImage};
 use crate::warp::{self, SideHold, Transit};
 
 mod bosses;
+mod contents;
 pub mod coop;
 mod debug;
 mod smm1;
@@ -101,6 +102,8 @@ pub enum Event {
     Locked,
     /// Fire thawed a Frozen Coin.
     Thaw,
+    /// A vine sprouted from a block.
+    VineSprout,
     /// A donut block began to shake under the player / dropped / came back.
     DonutShake,
     DonutFall,
@@ -188,6 +191,7 @@ struct AreaStash {
     spawns: Vec<SpawnRecord>,
     /// The left area's liquid, held where it was (see `switch_area`).
     liquid: Option<Liquid>,
+    ivy: Vec<contents::Ivy>,
 }
 
 #[derive(Clone, Debug)]
@@ -254,6 +258,8 @@ pub struct World {
     area_initial: Vec<Level>,
     pub area: usize,
     stash: Option<AreaStash>,
+    /// Vines grown out of blocks (in the current area).
+    ivy: Vec<contents::Ivy>,
     transit: Option<Transit>,
     side_hold: SideHold,
     prev_up: bool,
@@ -589,6 +595,7 @@ impl World {
             area_initial: areas,
             area: 0,
             stash: None,
+            ivy: Vec::new(),
             transit: None,
             side_hold: SideHold::default(),
             prev_up: false,
@@ -734,6 +741,7 @@ impl World {
     /// Build the current area's live state from its loaded level.
     fn load_area_fresh(&mut self) {
         self.level = self.initial.clone();
+        self.ivy.clear();
         self.field_model = Box::leak(
             field_model(&self.level.style, self.level.theme, self.level.night).into_boxed_str(),
         );
@@ -809,6 +817,7 @@ impl World {
             blocks: std::mem::take(&mut self.blocks),
             spawns: std::mem::take(&mut self.spawns),
             liquid: self.liquid,
+            ivy: std::mem::take(&mut self.ivy),
         };
         self.area = to;
         self.initial = self.area_initial[to].clone();
@@ -817,6 +826,7 @@ impl World {
                 self.level = st.level;
                 self.blocks = st.blocks;
                 self.spawns = st.spawns;
+                self.ivy = st.ivy;
                 self.field_model = Box::leak(
                     field_model(&self.level.style, self.level.theme, self.level.night)
                         .into_boxed_str(),
@@ -1375,6 +1385,20 @@ impl World {
                     self.events.push(Event::Coin);
                     continue;
                 }
+                Some(Contents::Vine) => {
+                    self.sprout_ivy(x, y, false);
+                    continue;
+                }
+                Some(Contents::Part { id, flags }) => {
+                    if let Some((mut a, parachute)) = self.part_out(id, flags, x, y) {
+                        a.vy = 3.5;
+                        if parachute {
+                            Self::open_parachute(&mut a);
+                        }
+                        self.add_actor(a);
+                    }
+                    continue;
+                }
                 Some(Contents::Mushroom) => Kind::Mushroom,
                 Some(Contents::Power(w)) => self.pu_item(w),
                 Some(Contents::Special) => self.style_item(),
@@ -1894,6 +1918,7 @@ impl World {
         }
         self.side_springs(input.held(input::DOWN));
         self.shake_trees();
+        self.grow_ivy();
         self.mega_breaks_bricks();
         if let Some((tx, ty)) = self.player.head_hit {
             self.head_hit(tx, ty);
@@ -2298,6 +2323,21 @@ impl World {
                     self.events.push(Event::Coin);
                     continue;
                 }
+                Contents::Vine => {
+                    self.sprout_ivy(x, y, false);
+                    continue;
+                }
+                Contents::Part { id, flags } => {
+                    if let Some((mut a, parachute)) = self.part_out(id, flags, x, y) {
+                        a.vy = 4.5;
+                        if parachute {
+                            Self::open_parachute(&mut a);
+                        }
+                        self.add_actor(a);
+                        self.events.push(Event::ItemAppear);
+                    }
+                    continue;
+                }
                 Contents::Special if self.pu_small() => Kind::Mushroom,
                 Contents::FireFlower if self.pu_small() => Kind::Mushroom,
                 Contents::Power(w) => self.pu_block_item(w),
@@ -2619,21 +2659,30 @@ impl World {
         } else {
             r.contents
         };
-        let item = match contents {
-            Contents::Mushroom => Some(Kind::Mushroom),
-            Contents::Power(w) => Some(self.pu_block_item(w)),
-            Contents::Special => Some(self.style_item()),
-            Contents::FireFlower => Some(Kind::FireFlower),
-            Contents::Star => Some(Kind::Star),
-            Contents::OneUp => Some(Kind::OneUp),
-            Contents::Coin => None,
-            Contents::Goomba => Some(Kind::Goomba),
-            Contents::Koopa { red } => Some(Kind::Koopa { red }),
-            Contents::YoshiEgg => Some(Kind::YoshiEgg { red: false }),
+        let (kind, wings, big, parachute) = match contents {
+            Contents::Coin => return,
+            Contents::Vine => {
+                self.sprout_ivy(bx, by, r.down);
+                return;
+            }
+            Contents::Part { id, flags } => match self.level.part_actor(id, flags) {
+                Some((kind, wings, parachute, big)) => (kind, wings, big, parachute),
+                None => return,
+            },
+            Contents::Mushroom => (Kind::Mushroom, false, false, false),
+            Contents::Power(w) => (self.pu_block_item(w), false, false, false),
+            Contents::Special => (self.style_item(), false, false, false),
+            Contents::FireFlower => (Kind::FireFlower, false, false, false),
+            Contents::Star => (Kind::Star, false, false, false),
+            Contents::OneUp => (Kind::OneUp, false, false, false),
+            Contents::Goomba => (Kind::Goomba, false, false, false),
+            Contents::Koopa { red } => (Kind::Koopa { red }, false, false, false),
+            Contents::YoshiEgg => (Kind::YoshiEgg { red: false }, false, false, false),
         };
-        let Some(kind) = item else { return };
         let mut a = Actor::new(kind, bx, by);
         a.dir = 1;
+        a.wings = wings;
+        a.big = big;
         if kind.is_item() {
             // rise 16 px at 0.5 (down: 1.0), no gravity
             a.vy = if r.down { -1.0 } else { 0.5 };
@@ -2652,6 +2701,12 @@ impl World {
                 a.y = by + 16.0;
                 a.vy = 2.5;
             }
+        }
+        if parachute {
+            if a.mode != Mode::PopOut {
+                a.y = if r.down { by - a.height() } else { by + 16.0 };
+            }
+            Self::open_parachute(&mut a);
         }
         self.add_actor(a);
     }
@@ -4531,6 +4586,25 @@ impl World {
                 self.effects.push(Effect::coin_pop(x, y, false));
                 return;
             }
+            Contents::Vine => {
+                self.sprout_ivy(x, y, false);
+                return;
+            }
+            Contents::Part { id, flags } => {
+                let Some((mut a, parachute)) = self.part_out(id, flags, x, y) else {
+                    return;
+                };
+                if parachute {
+                    a.y = y + 16.0;
+                    Self::open_parachute(&mut a);
+                } else {
+                    a.vy = 0.5;
+                    a.mode = Mode::Emerge { until: y + 16.0 };
+                }
+                self.events.push(Event::ItemAppear);
+                self.add_actor(a);
+                return;
+            }
             Contents::Mushroom => Kind::Mushroom,
             Contents::Power(w) => self.pu_block_item(w),
             Contents::Special => self.style_item(),
@@ -5667,6 +5741,25 @@ impl World {
                 s.flip_x = t.flip & 1 != 0;
                 s.flip_y = t.flip & 2 != 0;
                 out.push(s);
+            }
+        }
+        // vines grown out of blocks: the placed vine's tiles, the top one at the tip, the rest
+        // behind the block they come from
+        for ivy in &self.ivy {
+            let (bottom, top) = ivy.span();
+            let n = ((top - bottom) / TILE).ceil() as i32;
+            for k in 0..n {
+                let (py, tip) = if ivy.down {
+                    (bottom + k as f32 * TILE, k == 0)
+                } else {
+                    (top - (k + 1) as f32 * TILE, k == 0)
+                };
+                let px = ivy.x - TILE / 2.0;
+                if visible(px, py) {
+                    let mut s = tile(px, py, if tip { 0x7F } else { 0x7E }, 10);
+                    s.flip_y = ivy.down;
+                    out.push(s);
+                }
             }
         }
         for (&(bx, by), b) in &self.blocks.map {
@@ -7535,6 +7628,59 @@ mod tests {
         run(&mut w, 0, 100);
         run(&mut w, input::RIGHT, 240);
         assert_eq!(w.player.form, Form::Super);
+    }
+
+    fn hit_block_holding(contents: Contents, ceiling: Option<i32>) -> World {
+        let mut lvl = Level::flat(100);
+        lvl.set(3, 5, Cell::Solid);
+        if let Some(y) = ceiling {
+            lvl.set(3, y, Cell::Solid);
+        }
+        lvl.blocks.push(BlockPlacement {
+            x: 3,
+            y: 5,
+            kind: BlockKind::Question,
+            contents: Some(contents),
+        });
+        let mut w = World::with_level(lvl);
+        run(&mut w, input::JUMP, 30);
+        w
+    }
+
+    #[test]
+    fn block_releases_any_part_as_its_actor() {
+        let w = hit_block_holding(Contents::Part { id: 25, flags: 0 }, None);
+        assert!(
+            w.actors.iter().any(|a| a.kind == Kind::Spiny),
+            "{:?}",
+            w.actors
+        );
+        let w = hit_block_holding(
+            Contents::Part {
+                id: 15,
+                flags: 0x8000,
+            },
+            None,
+        );
+        let b = w.actors.iter().find(|a| a.kind == Kind::BobOmb).unwrap();
+        assert!(matches!(b.mode, Mode::Parachute { .. }), "{:?}", b.mode);
+        assert!(b.y > 6.0 * TILE + 8.0, "popped clear of the block: {}", b.y);
+    }
+
+    #[test]
+    fn vine_grows_out_of_a_block_until_terrain() {
+        // free: 1 px a frame
+        let mut w = hit_block_holding(Contents::Vine, None);
+        let (_, b0, t0) = *w.level.vines.last().unwrap();
+        assert_eq!(b0, 6.0 * TILE, "from the block's top");
+        run(&mut w, 0, 40);
+        let (_, _, t1) = *w.level.vines.last().unwrap();
+        assert!((t1 - t0 - 40.0).abs() < 0.01, "{}", t1 - t0);
+        // under a block 5 tiles up: stops there, a whole number of tiles long
+        let mut w = hit_block_holding(Contents::Vine, Some(11));
+        run(&mut w, 0, 200);
+        let (_, b, t) = *w.level.vines.last().unwrap();
+        assert_eq!((b, t), (6.0 * TILE, 11.0 * TILE));
     }
 
     #[test]

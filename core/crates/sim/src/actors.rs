@@ -698,6 +698,8 @@ pub struct Actor {
     /// Left its track at an open end: falls with its last speed (objects without gravity of
     /// their own; enemies fall by their own rules).
     pub derailed: bool,
+    /// Came out of a block with a parachute: it opens when the pop out ends.
+    pub chute: bool,
     /// Counted toward a "defeat N" clear condition.
     pub tallied: bool,
     /// Carried by the player: the world positions it; it doesn't step on its own.
@@ -776,6 +778,7 @@ impl Actor {
             rail: None,
             rail_off: (0.0, 0.0),
             derailed: false,
+            chute: false,
             tallied: false,
             held: false,
             camera: (0.0, 0.0),
@@ -1708,7 +1711,15 @@ impl Actor {
                 self.y += self.vy;
                 self.timer -= 1;
                 if self.timer <= 0 {
-                    self.mode = Mode::Normal;
+                    self.mode = if std::mem::take(&mut self.chute) {
+                        self.vy = 0.0;
+                        Mode::Parachute {
+                            x0: self.x,
+                            phase: 0.0,
+                        }
+                    } else {
+                        Mode::Normal
+                    };
                 }
             }
             Mode::Stomped => {

@@ -57,6 +57,9 @@ SMCraft is back in development (it was archived in October 2026).
 - **Stacked enemies** move together as in the game.
 - **Frozen Coins** (the 3.0 update's): ice round a coin, thawed by fireballs.
 - **Koopalings on tracks.**
+- **Blocks hold any part**: enemies, springs, P Switches, keys and the rest come out of ? blocks,
+  bricks, hidden blocks, trees and checkpoint flags as themselves, with their wings or parachute;
+  vines grow out of blocks. Bill Blasters fire any enemy or object.
 - **Endless**: the map's "New High Score!" panel.
 - **Physics**: 352 player traces recorded in the game match frame by frame (walls, water,
   slopes, items, the raccoon tail and SMW cape, enemies).

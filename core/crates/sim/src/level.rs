@@ -6,7 +6,7 @@
 //! row. Terrain art: SMB1 field atlases are 16 tiles wide and ground tile id n is atlas index
 //! 184 + n.
 
-use mmk_formats::smm2::{Area, Course};
+use mmk_formats::smm2::{Area, Course, CourseObject};
 
 use crate::actors::Kind;
 use crate::blocks::{BlockKind, Contents};
@@ -484,6 +484,202 @@ const RIDES_TRACKS: &[i16] = &[
     120, 121, 122, 123, 124, 125, 126,
 ];
 
+/// What a block (or tree, checkpoint flag) releases: its child part. The simple items keep
+/// their own kinds (`Contents::from_part`); a vine grows (Ivy); any other part, or a dressed
+/// one (wings, parachute, big), is kept as the part and comes out as its actor.
+fn block_contents(o: &CourseObject, lvl: &Level) -> Option<Contents> {
+    let (id, flags) = (o.child_id, o.child_flags);
+    if id < 0 {
+        return None;
+    }
+    if id == 64 {
+        return Some(Contents::Vine);
+    }
+    let dressed = flags & 0x8002 != 0 || flags & 0x6000 == 0x4000;
+    if !dressed && let Some(c) = Contents::from_part(id, flags) {
+        return Some(c);
+    }
+    lvl.part_actor(id, flags)
+        .map(|_| Contents::Part { id, flags })
+}
+
+impl Level {
+    /// The actor a child part (a block's contents, what a Bill Blaster fires) becomes, with its
+    /// wings, parachute and size: (kind, wings, parachute, big).
+    pub fn part_actor(&self, id: i16, flags: u32) -> Option<(Kind, bool, bool, bool)> {
+        let wings = flags & 0x2 != 0;
+        let kind = if id == 8 {
+            // a coin with actor flags is the Coin actor (8-coin.md)
+            Kind::FloatCoin
+        } else {
+            let mut c = <CourseObject as mmk_formats::record::Record>::parse(&[0; 0x20]);
+            (c.id, c.flags, c.child_id, c.width, c.height) = (id, flags, -1, 1, 1);
+            part_kind(&c, self)?
+        };
+        Some((kind, wings, flags & 0x8000 != 0, flags & 0x6000 == 0x4000))
+    }
+}
+
+/// The actor a course part becomes, by its id and flags (placed in the course or held in a block).
+fn part_kind(o: &CourseObject, lvl: &Level) -> Option<Kind> {
+    match o.id {
+        0 if o.flags & 0x4 != 0 => Some(Kind::Goombrat),
+        0 => Some(Kind::Goomba),
+        1 => Some(Kind::Koopa {
+            red: o.flags & 0x4 != 0,
+        }),
+        // the Super Mushroom's 0x4 form in SMB1 is the Master Sword (Triforce 0xff)
+        // [obs resolver 0x7100d80df0]
+        20 if o.flags & 0x4 != 0 && lvl.style == "M1" => Some(Kind::PowerItem {
+            what: crate::actors::SWORD,
+        }),
+        20 => Some(Kind::Mushroom),
+        // the style power-up: Super Leaf (SMB3), Cape Feather (SMW); SMB1 keeps the
+        // mushroom for now
+        44 if lvl.style != "M1" => Some(Kind::StyleItem),
+        44 => Some(Kind::Mushroom),
+        34 if o.flags & 0x4 != 0 && lvl.style == "M1" => Some(Kind::SuperballFlower),
+        34 => Some(Kind::FireFlower),
+        35 => Some(Kind::Star),
+        33 => Some(Kind::OneUp),
+        2 => Some(Kind::Piranha {
+            fire: o.flags & 0x4 != 0,
+        }),
+        82 => Some(Kind::Bumper),
+        76 => Some(Kind::Twister),
+        105 => Some(Kind::Claw),
+        56 => Some(Kind::CheepCheep {
+            red: o.flags & 0x4 != 0,
+        }),
+        48 => Some(Kind::Blooper),
+        39 => Some(Kind::Magikoopa),
+        58 => Some(Kind::RockyWrench),
+        52 => Some(Kind::Wiggler),
+        42 => Some(Kind::ClownCar {
+            fire: o.flags & 0x4 != 0,
+        }),
+        72 => Some(Kind::KoopaCar),
+        73 => Some(Kind::EscortToad),
+        75 => Some(Kind::Stone),
+        115 => Some(Kind::GoalToadette),
+        116 => Some(Kind::SuperHammer),
+        85 => Some(Kind::TrackBlock {
+            path: o.extended_data.wrapping_sub(1) as u8,
+            alt: o.flags & 0x4 != 0,
+        }),
+        113 => Some(Kind::Trampoline {
+            width: o.width.max(1),
+            // Trampoline init 0x71008c3200 [obs]: flag 0x4 → stationary (lift mode 6);
+            // otherwise bits 3–4 = s: s odd → mode 1, ±2 tiles, s even → mode 0, ±3
+            // (the first move is leftward for s = 0 or 3, +0x264 = 1)
+            moving: o.flags & 0x4 == 0,
+            range: if o.flags & 0x8 != 0 { 2 } else { 3 },
+        }),
+        112 => Some(Kind::Crate {
+            contents: block_contents(o, lvl),
+        }),
+        60 => Some(Kind::LavaBubble),
+        103 => Some(Kind::FishBone),
+        45 if matches!(lvl.style.as_str(), "MW" | "WU") => Some(Kind::YoshiEgg {
+            red: o.flags & 0x4 != 0,
+        }),
+        45 => Some(Kind::ShoeGoomba {
+            heels: o.flags & 0x4 != 0,
+        }),
+        // bosses: a child Key (95) drops on defeat; flag 0x200 = in a Koopa Clown Car;
+        // Boom Boom's alternate form is Pom Pom only in 3D World (Bunbun3W → Punpun)
+        62 => Some(Kind::Bowser {
+            key: o.child_id == 95,
+            clown: o.flags & 0x200 != 0,
+        }),
+        77 => Some(Kind::BoomBoom {
+            key: o.child_id == 95,
+            clown: o.flags & 0x200 != 0,
+            pom: o.flags & 0x4 != 0 && lvl.style == "3W",
+        }),
+        98 => Some(Kind::BowserJr {
+            key: o.child_id == 95,
+            clown: o.flags & 0x200 != 0,
+        }),
+        102 => Some(Kind::MontyMole),
+        104 => Some(Kind::AngrySun {
+            moon: o.flags & 0x4 != 0,
+        }),
+        61 => Some(Kind::ChainChomp {
+            chained: o.flags & 0x4 == 0,
+        }),
+        36 => Some(Kind::LavaLift {
+            fast: o.flags & 0x4 != 0,
+        }),
+        83 => Some(Kind::Skewer {
+            dir: ((o.flags >> 22) & 3) as u8,
+        }),
+        30 => Some(Kind::Lakitu),
+        31 => Some(Kind::Cloud),
+        19 => Some(Kind::Pow),
+        95 => Some(Kind::Key),
+        68 => Some(Kind::Grinder),
+        91 => Some(Kind::Seesaw {
+            width: o.width.max(2),
+        }),
+        32 => Some(Kind::BanzaiBill {
+            dir: ((o.flags >> 22) & 3) as u8,
+            homing: o.flags & 0x4 != 0,
+        }),
+        70 => Some(Kind::BigCoin {
+            value: ((o.flags >> 18) & 3).min(2) as u8,
+        }),
+        10 if o.flags & 0x4 != 0 => Some(Kind::SideSpring),
+        10 => Some(Kind::Spring),
+        18 => Some(Kind::PSwitch),
+        // the 0x4 forms are empty shells (MetShell / TogezoShell / KaronShell rows)
+        25 if o.flags & 0x4 != 0 => Some(Kind::EmptyShell { what: 2 }),
+        28 if o.flags & 0x4 != 0 => Some(Kind::EmptyShell { what: 1 }),
+        46 if o.flags & 0x4 != 0 => Some(Kind::EmptyShell { what: 3 }),
+        25 => Some(Kind::Spiny),
+        28 => Some(Kind::Buzzy),
+        40 => Some(Kind::SpikeTop {
+            surface: ((o.flags >> 25) & 3) as u8,
+        }),
+        3 => Some(Kind::HammerBro),
+        15 => Some(Kind::BobOmb),
+        46 => Some(Kind::DryBones),
+        41 => Some(Kind::Boo),
+        57 => Some(Kind::Muncher),
+        // bits 0x18 both set → Dossun, otherwise SideDossun, which looks right when
+        // (flags >> 3) & 3 == 2, else left (0x710076ab10) [obs]
+        12 => Some(Kind::Thwomp {
+            side: o.flags & 0x18 != 0x18,
+            right: (o.flags >> 3) & 3 == 2,
+        }),
+        11 => Some(Kind::Lift {
+            width: o.width.max(1),
+            falling: o.flags & 0x4 != 0,
+        }),
+        // 3D World enemies (actors/w3.rs); the alternate (0x4) is the horned / spiny /
+        // sleeping form; a creeper's path is extended data − 1
+        96 => Some(Kind::AntTrooper {
+            horned: o.flags & 0x4 != 0,
+        }),
+        65 => Some(Kind::Stingby),
+        51 => Some(Kind::Skipsqueak {
+            spiny: o.flags & 0x4 != 0,
+        }),
+        50 => Some(Kind::HopChops),
+        114 => Some(Kind::Porcupuffer),
+        117 => Some(Kind::Bully),
+        86 => Some(Kind::Charvaargh),
+        107 => Some(Kind::PiranhaCreeper {
+            path: o.extended_data.wrapping_sub(1).min(255) as u8,
+            sleeps: o.flags & 0x4 != 0,
+        }),
+        _ => v3::actor_kind(o, lvl).or_else(|| {
+            // the update power-ups: part 81 by style, the wearables 127–131
+            crate::actors::item_for_part(o.id).map(|what| Kind::PowerItem { what })
+        }),
+    }
+}
+
 /// Why a course is not fully playable yet: one entry per missing feature (empty = playable).
 pub fn unsupported_features(course: &Course) -> Vec<String> {
     let mut out = std::collections::BTreeSet::new();
@@ -500,7 +696,17 @@ pub fn unsupported_features(course: &Course) -> Vec<String> {
             continue; // unused sub-area
         }
 
+        let mut probe = Level::flat(1);
+        (probe.style, probe.theme) = (style.clone(), area.header.theme);
         for o in area.objects.iter() {
+            // what a block, tree, checkpoint flag or Bill Blaster holds comes out as its actor
+            if o.child_id >= 0 && (block_kind(o.id).is_some() || matches!(o.id, 13 | 90 | 106)) {
+                if o.id == 13 && o.child_id == 8 {
+                    out.insert("coins from a Bill Blaster".to_string());
+                } else if block_contents(o, &probe).is_none() {
+                    out.insert(format!("part {} in part {}", o.child_id, o.id));
+                }
+            }
             if !SUPPORTED_PARTS.contains(&o.id) {
                 out.insert(format!("part {}", o.id));
             } else if o.flags & 0x400 != 0 && !RIDES_TRACKS.contains(&o.id) {
@@ -851,162 +1057,7 @@ impl Level {
             let actorish = o.flags & 0x2 != 0 || o.flags & 0x400 != 0; // winged / on track → actor (step 6)
             let big = o.flags & 0x6000 == 0x4000;
             let wings = o.flags & 0x2 != 0;
-            let actor = match o.id {
-                0 if o.flags & 0x4 != 0 => Some(Kind::Goombrat),
-                0 => Some(Kind::Goomba),
-                1 => Some(Kind::Koopa {
-                    red: o.flags & 0x4 != 0,
-                }),
-                // the Super Mushroom's 0x4 form in SMB1 is the Master Sword (Triforce 0xff)
-                // [obs resolver 0x7100d80df0]
-                20 if o.flags & 0x4 != 0 && lvl.style == "M1" => Some(Kind::PowerItem {
-                    what: crate::actors::SWORD,
-                }),
-                20 => Some(Kind::Mushroom),
-                // the style power-up: Super Leaf (SMB3), Cape Feather (SMW); SMB1 keeps the
-                // mushroom for now
-                44 if lvl.style != "M1" => Some(Kind::StyleItem),
-                44 => Some(Kind::Mushroom),
-                34 if o.flags & 0x4 != 0 && lvl.style == "M1" => Some(Kind::SuperballFlower),
-                34 => Some(Kind::FireFlower),
-                35 => Some(Kind::Star),
-                33 => Some(Kind::OneUp),
-                2 => Some(Kind::Piranha {
-                    fire: o.flags & 0x4 != 0,
-                }),
-                82 => Some(Kind::Bumper),
-                76 => Some(Kind::Twister),
-                105 => Some(Kind::Claw),
-                56 => Some(Kind::CheepCheep {
-                    red: o.flags & 0x4 != 0,
-                }),
-                48 => Some(Kind::Blooper),
-                39 => Some(Kind::Magikoopa),
-                58 => Some(Kind::RockyWrench),
-                52 => Some(Kind::Wiggler),
-                42 => Some(Kind::ClownCar {
-                    fire: o.flags & 0x4 != 0,
-                }),
-                72 => Some(Kind::KoopaCar),
-                73 => Some(Kind::EscortToad),
-                75 => Some(Kind::Stone),
-                115 => Some(Kind::GoalToadette),
-                116 => Some(Kind::SuperHammer),
-                85 => Some(Kind::TrackBlock {
-                    path: o.extended_data.wrapping_sub(1) as u8,
-                    alt: o.flags & 0x4 != 0,
-                }),
-                113 => Some(Kind::Trampoline {
-                    width: o.width.max(1),
-                    // Trampoline init 0x71008c3200 [obs]: flag 0x4 → stationary (lift mode 6);
-                    // otherwise bits 3–4 = s: s odd → mode 1, ±2 tiles, s even → mode 0, ±3
-                    // (the first move is leftward for s = 0 or 3, +0x264 = 1)
-                    moving: o.flags & 0x4 == 0,
-                    range: if o.flags & 0x8 != 0 { 2 } else { 3 },
-                }),
-                112 => Some(Kind::Crate {
-                    contents: Contents::from_part(o.child_id, o.child_flags),
-                }),
-                60 => Some(Kind::LavaBubble),
-                103 => Some(Kind::FishBone),
-                45 if matches!(lvl.style.as_str(), "MW" | "WU") => Some(Kind::YoshiEgg {
-                    red: o.flags & 0x4 != 0,
-                }),
-                45 => Some(Kind::ShoeGoomba {
-                    heels: o.flags & 0x4 != 0,
-                }),
-                // bosses: a child Key (95) drops on defeat; flag 0x200 = in a Koopa Clown Car;
-                // Boom Boom's alternate form is Pom Pom only in 3D World (Bunbun3W → Punpun)
-                62 => Some(Kind::Bowser {
-                    key: o.child_id == 95,
-                    clown: o.flags & 0x200 != 0,
-                }),
-                77 => Some(Kind::BoomBoom {
-                    key: o.child_id == 95,
-                    clown: o.flags & 0x200 != 0,
-                    pom: o.flags & 0x4 != 0 && lvl.style == "3W",
-                }),
-                98 => Some(Kind::BowserJr {
-                    key: o.child_id == 95,
-                    clown: o.flags & 0x200 != 0,
-                }),
-                102 => Some(Kind::MontyMole),
-                104 => Some(Kind::AngrySun {
-                    moon: o.flags & 0x4 != 0,
-                }),
-                61 => Some(Kind::ChainChomp {
-                    chained: o.flags & 0x4 == 0,
-                }),
-                36 => Some(Kind::LavaLift {
-                    fast: o.flags & 0x4 != 0,
-                }),
-                83 => Some(Kind::Skewer {
-                    dir: ((o.flags >> 22) & 3) as u8,
-                }),
-                30 => Some(Kind::Lakitu),
-                31 => Some(Kind::Cloud),
-                19 => Some(Kind::Pow),
-                95 => Some(Kind::Key),
-                68 => Some(Kind::Grinder),
-                91 => Some(Kind::Seesaw {
-                    width: o.width.max(2),
-                }),
-                32 => Some(Kind::BanzaiBill {
-                    dir: ((o.flags >> 22) & 3) as u8,
-                    homing: o.flags & 0x4 != 0,
-                }),
-                70 => Some(Kind::BigCoin {
-                    value: ((o.flags >> 18) & 3).min(2) as u8,
-                }),
-                10 if o.flags & 0x4 != 0 => Some(Kind::SideSpring),
-                10 => Some(Kind::Spring),
-                18 => Some(Kind::PSwitch),
-                // the 0x4 forms are empty shells (MetShell / TogezoShell / KaronShell rows)
-                25 if o.flags & 0x4 != 0 => Some(Kind::EmptyShell { what: 2 }),
-                28 if o.flags & 0x4 != 0 => Some(Kind::EmptyShell { what: 1 }),
-                46 if o.flags & 0x4 != 0 => Some(Kind::EmptyShell { what: 3 }),
-                25 => Some(Kind::Spiny),
-                28 => Some(Kind::Buzzy),
-                40 => Some(Kind::SpikeTop {
-                    surface: ((o.flags >> 25) & 3) as u8,
-                }),
-                3 => Some(Kind::HammerBro),
-                15 => Some(Kind::BobOmb),
-                46 => Some(Kind::DryBones),
-                41 => Some(Kind::Boo),
-                57 => Some(Kind::Muncher),
-                // bits 0x18 both set → Dossun, otherwise SideDossun, which looks right when
-                // (flags >> 3) & 3 == 2, else left (0x710076ab10) [obs]
-                12 => Some(Kind::Thwomp {
-                    side: o.flags & 0x18 != 0x18,
-                    right: (o.flags >> 3) & 3 == 2,
-                }),
-                11 => Some(Kind::Lift {
-                    width: o.width.max(1),
-                    falling: o.flags & 0x4 != 0,
-                }),
-                // 3D World enemies (actors/w3.rs); the alternate (0x4) is the horned / spiny /
-                // sleeping form; a creeper's path is extended data − 1
-                96 => Some(Kind::AntTrooper {
-                    horned: o.flags & 0x4 != 0,
-                }),
-                65 => Some(Kind::Stingby),
-                51 => Some(Kind::Skipsqueak {
-                    spiny: o.flags & 0x4 != 0,
-                }),
-                50 => Some(Kind::HopChops),
-                114 => Some(Kind::Porcupuffer),
-                117 => Some(Kind::Bully),
-                86 => Some(Kind::Charvaargh),
-                107 => Some(Kind::PiranhaCreeper {
-                    path: o.extended_data.wrapping_sub(1).min(255) as u8,
-                    sleeps: o.flags & 0x4 != 0,
-                }),
-                _ => v3::actor_kind(o, &lvl).or_else(|| {
-                    // the update power-ups: part 81 by style, the wearables 127–131
-                    crate::actors::item_for_part(o.id).map(|what| Kind::PowerItem { what })
-                }),
-            };
+            let actor = part_kind(o, &lvl);
             if o.id == 61 && o.flags & 0x4 == 0 && o.flags & 0x400 == 0 {
                 // the Chain Chomp's stake is solid (WanwanPile has a collision body)
                 lvl.set(tx, ty, Cell::Solid);
@@ -1118,13 +1169,12 @@ impl Level {
                         lvl.set(tx, ty + dy, Cell::Solid);
                     }
                 }
-                let contents = match o.child_id {
-                    0 => Some(Kind::Goomba),
-                    1 => Some(Kind::Koopa {
-                        red: o.child_flags & 0x4 != 0,
-                    }),
-                    _ => None,
-                };
+                // it fires its child part (13-bill-blaster.md); a coin needs the Coin actor's
+                // Killer shot, not made yet (the coverage check reports it)
+                let contents = lvl
+                    .part_actor(o.child_id, o.child_flags)
+                    .map(|(kind, ..)| kind)
+                    .filter(|&k| k != Kind::FloatCoin);
                 if !on_track && tower_flags(o.flags) {
                     // a Bill Blaster adds its height less 2 px [obs]
                     tower_parts.push(TowerPart {
@@ -1269,7 +1319,7 @@ impl Level {
                     x: o.x as f32 / 10.0,
                     y: o.y as f32 / 10.0,
                     h: hgt,
-                    contents: Contents::from_part(o.child_id, o.child_flags),
+                    contents: block_contents(o, &lvl),
                 };
                 // the trunk climbs like a vine, up into the canopy [inf: the trunk is BG unit
                 // group 0x1C (0x7100396ff0) and the player climbs it in its own states
@@ -1399,7 +1449,7 @@ impl Level {
                 lvl.checkpoints.push(Checkpoint {
                     x: o.x as f32 / 10.0,
                     y: o.y as f32 / 10.0 - 8.0,
-                    contents: Contents::from_part(o.child_id, o.child_flags),
+                    contents: block_contents(o, &lvl),
                 });
                 continue;
             }
@@ -1425,7 +1475,7 @@ impl Level {
                 lvl.spawns.push(Spawn {
                     kind: Kind::MovingBlock {
                         block,
-                        contents: Contents::from_part(o.child_id, o.child_flags),
+                        contents: block_contents(o, &lvl),
                     },
                     x: tx as f32 * TILE + 8.0,
                     y: ty as f32 * TILE,
@@ -1458,7 +1508,7 @@ impl Level {
                     if id == 100 && o.flags & 0x4 != 0 {
                         kind = BlockKind::Dotted { blue: true };
                     }
-                    let contents = Contents::from_part(o.child_id, o.child_flags);
+                    let contents = block_contents(o, &lvl);
                     let cell = match kind {
                         BlockKind::Cloud | BlockKind::Donut => Cell::SemiTop,
                         BlockKind::Hidden | BlockKind::Dotted { blue: true } => Cell::Empty,
@@ -1959,6 +2009,50 @@ mod tests {
         c.main.header.autoscroll_type = autoscroll;
         c.main.objects.items = objects;
         Level::from_course(&c, 0)
+    }
+
+    #[test]
+    fn blocks_hold_any_part_dressed_as_put_in() {
+        let held = |child: i16, child_flags: u32| {
+            let mut o = object(5, 3, 5, 1, 1, 0);
+            (o.child_id, o.child_flags) = (child, 0x0600_0040 | child_flags);
+            let lvl = level(vec![o], 0);
+            lvl.blocks
+                .iter()
+                .find(|b| (b.x, b.y) == (3, 5))
+                .unwrap()
+                .contents
+        };
+        assert_eq!(held(20, 0), Some(Contents::Mushroom));
+        assert_eq!(held(64, 0), Some(Contents::Vine));
+        // a Spiny, and a winged 1-Up: kept as the part and released as its actor
+        assert!(matches!(held(25, 0), Some(Contents::Part { id: 25, .. })));
+        assert!(matches!(held(33, 0x2), Some(Contents::Part { id: 33, .. })));
+        let lvl = level(vec![], 0);
+        assert_eq!(
+            lvl.part_actor(25, 0x8000).unwrap(),
+            (Kind::Spiny, false, true, false)
+        );
+        assert_eq!(
+            lvl.part_actor(33, 0x2).unwrap(),
+            (Kind::OneUp, true, false, false)
+        );
+        assert_eq!(lvl.part_actor(7, 0), None, "ground has no actor");
+    }
+
+    #[test]
+    fn coverage_reports_contents_and_blaster_coins_it_cannot_make() {
+        let course = |id: i16, child: i16| {
+            let mut c = Course::blank("M1");
+            let mut o = object(id, 3, 5, 1, 2, 0);
+            o.child_id = child;
+            c.main.objects.items = vec![o];
+            unsupported_features(&c)
+        };
+        assert!(course(5, 25).is_empty(), "{:?}", course(5, 25));
+        assert!(course(13, 15).is_empty(), "a Bob-omb blaster");
+        assert_eq!(course(5, 7), vec!["part 7 in part 5".to_string()]);
+        assert_eq!(course(13, 8), vec!["coins from a Bill Blaster".to_string()]);
     }
 
     #[test]
