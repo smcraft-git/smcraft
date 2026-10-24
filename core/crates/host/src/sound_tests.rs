@@ -46,6 +46,9 @@ fn db() -> serde_json::Value {
         json!({"key": "FanfareGoal", "kind": "switch", "watch": "@theme", "children": [11, 12]}),
         json!({"key": "g_castle", "parent": 10, "if": ["==", "castle"], "wave": "CastleClear"}),
         json!({"key": "g_default", "parent": 10, "wave": "Clear"}),
+        // (after the switch's children: their indices stay)
+        asset("BGM_Plain_Edit", "PlainEdit"),
+        asset("BGM_Castle_Edit", "CastleEdit"),
     ];
     json!({
         "version": 1,
@@ -78,7 +81,8 @@ fn db() -> serde_json::Value {
                 {"key": "s_big", "parent": 0, "if": ["==", "Big"], "wave": "Split"},
                 {"key": "s_normal", "parent": 0, "if": ["==", "Normal"], "wave": "Stomp"}
             ]},
-            "M1_koura": {"calls": [asset("kick", "Kick")]}
+            "M1_koura": {"calls": [asset("kick", "Kick")]},
+            "M1_EditKuribo": {"calls": [asset("set", "EditSet"), asset("drag", "EditDrag")]}
         }
     })
 }
@@ -96,7 +100,10 @@ fn rig() -> Rig {
     for u in doc["users"].as_object().unwrap().values() {
         for c in u["calls"].as_array().unwrap() {
             if let Some(w) = c["wave"].as_str() {
-                let music = w.contains("Day") || w.contains("Night") || w == "Star";
+                let music = w.contains("Day")
+                    || w.contains("Night")
+                    || w.contains("Edit") && !w.starts_with("Edit")
+                    || w == "Star";
                 let dir = if music { "music" } else { "se" };
                 waves.insert(w.into(), json!(format!("{dir}/{w}.bwav")));
             }
@@ -381,4 +388,81 @@ fn costumes_keep_their_sounds() {
     w.events = vec![Event::Jump];
     r.s.after_step(&w);
     assert_eq!(r.played(), ["sfx:JumpSmall"]);
+}
+
+#[test]
+fn course_maker_music_and_part_sounds() {
+    let mut r = rig();
+    assert!(r.s.edit_music("M1", 0));
+    assert_eq!(r.played(), ["layer:0", "music:PlainEdit"]);
+    // already playing: not restarted
+    r.music_at("PlainEdit", 1000);
+    assert!(r.s.edit_music("M1", 0));
+    assert!(r.played().is_empty());
+    // a theme switch changes the track
+    assert!(r.s.edit_music("M1", 2));
+    assert_eq!(r.played(), ["layer:0", "music:CastleEdit"]);
+    assert!(r.s.edit_sound("M1", "M1_EditKuribo", "set"));
+    assert_eq!(r.played(), ["sfx:EditSet"]);
+    assert!(!r.s.edit_sound("M1", "M1_EditKuribo", "nope"));
+    r.s.stop_music();
+    assert_eq!(r.played(), ["stop_music"]);
+    // a test play's director took the mixer's set: the maker's comes back
+    *r.shared.lock().unwrap() = None;
+    assert!(r.s.edit_sound("M1", "M1_EditKuribo", "drag"));
+    assert_eq!(r.played(), ["sfx:EditDrag"]);
+    // no edit track in the style: false, nothing played
+    assert!(!r.s.edit_music("M1", 4));
+}
+
+/// With the owner's import (skipped without one): the maker's track of every style and theme
+/// and the parts' edit sounds resolve and load.
+#[test]
+fn the_imported_maker_music_and_edit_sounds_play() {
+    let Some(dir) = crate::paths::game_cache() else {
+        return;
+    };
+    let audio = dir.join("audio");
+    let read: FileReader = Box::new(move |rel| std::fs::read(audio.join(rel)).ok());
+    let Some(lib) = Library::load(read) else {
+        return;
+    };
+    if lib.db.user("M1_EditKuribo").is_none() {
+        return; // an import from before the maker's sounds
+    }
+    // every style and theme has its track on disk (one of them played: the streams are big)
+    for style in ["M1", "M3", "MW", "WU", "3W"] {
+        for theme in 0..10 {
+            let mut w = Vec::new();
+            let user = format!("CourseSceneBGM_{style}");
+            lib.db
+                .waves_of(&user, &crate::sound::edit_bgm_key(theme), &mut w);
+            let file = w.first().and_then(|w| lib.db.waves.get(w));
+            assert!(
+                file.is_some_and(|f| dir.join("audio").join(f).is_file()),
+                "{style} theme {theme}"
+            );
+        }
+    }
+    let (tx, rx) = command_channel(4096);
+    let clock: MusicClock = Arc::new(AtomicU64::new(u64::MAX));
+    let mut s = Sounds::new(tx, Arc::new(lib), shared_set(), clock, 48000);
+    let plays = |rx: &Receiver<Command>| {
+        rx.try_iter()
+            .filter(|c| matches!(c, Command::Play(_)))
+            .count()
+    };
+    assert!(s.edit_music("M1", 0));
+    assert_eq!(plays(&rx), 1);
+    for style in ["M1", "M3", "MW", "WU", "3W"] {
+        for key in [
+            "set", "drag", "eraser", "invalid", "partsMax", "Block_in", "voice",
+        ] {
+            assert!(
+                s.edit_sound(style, &format!("{style}_EditKuribo"), key),
+                "{style} {key}"
+            );
+            assert!(plays(&rx) >= 1, "{style} {key}");
+        }
+    }
 }

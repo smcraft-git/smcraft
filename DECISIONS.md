@@ -1540,3 +1540,14 @@ under `recomp/private|generated|build/`, and text that looks like disassembly or
 - Co-op clears count as clears (as SMM2 [inf]), but make no replay: the session records
   one-player runs only, so no co-op time is sent as a verified record.
 
+## 2026-10-24 — The Course Maker's sounds: a director of its own, centred
+- The maker's music and part sounds go through two Host hooks (`edit_music`, `edit_sound`); the
+  shell and FFI hosts give them a `Director` of their own, separate from the course session's
+  (which the edit view no longer has: it used to start the course's play music on each edit).
+  The two directors share the mixer's one sound set slot, so the maker's takes its set back
+  when it plays after a test play.
+- Edit sounds play at the centre (no pan by the part's place) and without the course's echo /
+  reverb [inf: the game's edit sounds are UI-like, group `UI_Common`].
+- The part's `voice` plays with `set` when a part is first put down (not while painting) [inf];
+  the binary's call for it wasn't read. The common keys (`set`, `drag`, `eraser` …) sound the
+  same for every part in the data, so a part without its own user takes the ground's.

@@ -645,6 +645,10 @@ impl Front {
     }
 
     fn apply(&mut self, host: &mut dyn Host, g: Go) {
+        // the maker's music stops when another screen comes (it starts again on the way back)
+        if let Screen::Maker(m) = &mut self.screen {
+            m.leave(host);
+        }
         match g {
             Go::Title { start, select } => self.show_title(host, start, select),
             Go::Enter(c) => match c {

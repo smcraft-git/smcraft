@@ -217,6 +217,31 @@ impl Director {
         }
     }
 
+    /// The Course Maker's music for `style` and `theme` (data-driven director only; the fixed
+    /// SMB1 set has none): from the top unless already playing.
+    pub fn edit_music(&mut self, style: &str, theme: u8) -> bool {
+        match &mut self.imp {
+            Imp::Data(s) => s.edit_music(style, theme),
+            Imp::Legacy(_) => false,
+        }
+    }
+
+    /// Stop the music.
+    pub fn stop_music(&mut self) {
+        match &mut self.imp {
+            Imp::Data(s) => s.stop_music(),
+            Imp::Legacy(_) => self.send(Command::StopMusic { fade: 0 }),
+        }
+    }
+
+    /// A Course Maker sound: `user`'s `key` (data-driven director only).
+    pub fn edit_sound(&mut self, style: &str, user: &str, key: &str) -> bool {
+        match &mut self.imp {
+            Imp::Data(s) => s.edit_sound(style, user, key),
+            Imp::Legacy(_) => false,
+        }
+    }
+
     /// The (user, key) pairs the last tick played (data-driven director only).
     pub fn played(&self) -> &[(String, String)] {
         match &self.imp {

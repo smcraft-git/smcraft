@@ -43,6 +43,8 @@ pub struct HostData {
     pub controllers: u32,
     /// Sound output for courses.
     pub audio: Option<Arc<AudioOut>>,
+    /// The Course Maker's music and edit sounds (made from `audio` when first needed).
+    maker_sounds: Option<mmk_host::audio::Director>,
     title: Option<Vec<PathBuf>>,
     library: Option<Vec<CourseEntry>>,
     scanning: Option<Receiver<Vec<CourseEntry>>>,
@@ -79,6 +81,14 @@ enum Answer {
 }
 
 impl HostData {
+    /// The Course Maker's sound director (None: no sound output).
+    fn maker_director(&mut self) -> Option<&mut mmk_host::audio::Director> {
+        if self.maker_sounds.is_none() {
+            self.maker_sounds = self.audio.as_ref().map(|a| a.director());
+        }
+        self.maker_sounds.as_mut()
+    }
+
     /// A persistent value (the data folder's file for it, or memory for captures).
     pub fn load_value(&self, key: &str) -> Option<String> {
         match &self.data_dir {
@@ -115,6 +125,7 @@ impl HostData {
             input: 0,
             controllers: 1,
             audio: None,
+            maker_sounds: None,
             title: None,
             library: None,
             scanning: None,
@@ -824,6 +835,24 @@ impl Host for ShellHost<'_> {
 
     fn edit_camera(&mut self, x: f32, y: f32) {
         self.game.session.world.look_at(x, y);
+    }
+
+    fn edit_music(&mut self, track: Option<(&str, u8)>) {
+        let Some(d) = self.data.maker_director() else {
+            return;
+        };
+        match track {
+            Some((style, theme)) => {
+                d.edit_music(style, theme);
+            }
+            None => d.stop_music(),
+        }
+    }
+
+    fn edit_sound(&mut self, style: &str, user: &str, key: &str) {
+        if let Some(d) = self.data.maker_director() {
+            d.edit_sound(style, user, key);
+        }
     }
 
     fn test_play(

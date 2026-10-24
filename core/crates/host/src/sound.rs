@@ -70,6 +70,13 @@ const RESUME_ALIGN: u32 = 0x480;
 const H_TIMER: u32 = 1;
 const H_AMBIENT: u32 = 2;
 const H_FIRST_FREE: u32 = 16;
+/// The maker's music fades out over this many frames (60 fps) [inf].
+const EDIT_MUSIC_FADE: f32 = 10.0;
+
+/// The Course Maker's music key of a theme: `BGM_<Theme>_Edit`.
+pub fn edit_bgm_key(theme: u8) -> String {
+    format!("BGM_{}_Edit", map::THEME_KEYS[(theme as usize).min(9)])
+}
 
 fn theme_value(theme: u8) -> &'static str {
     THEME_VALUES[(theme as usize).min(9)]
@@ -280,6 +287,12 @@ impl Sounds {
 
     /// A fresh set for a new style: groups from the database, the style's waves.
     fn build_set(&mut self, world: &World) {
+        let waves = self.style_waves(world);
+        self.build_set_of(waves);
+    }
+
+    /// A fresh set: groups from the database, `waves` preloaded (others load when first played).
+    fn build_set_of(&mut self, waves: Vec<String>) {
         self.costume.forget();
         let db = &self.lib.db;
         let groups: Vec<GroupDef> = db
@@ -310,7 +323,7 @@ impl Sounds {
             sounds: Vec::new(),
             groups,
         };
-        for w in self.style_waves(world) {
+        for w in waves {
             if let Some(s) = self.load_wave(&w) {
                 self.ids.insert(w, SET_BASE + set.sounds.len() as u16);
                 set.sounds.push(s);
@@ -815,6 +828,113 @@ impl Sounds {
         });
         self.set_area_audio(world);
         self.course_music();
+    }
+
+    // ---- the Course Maker ----------------------------------------------------------------
+
+    /// The maker edits a course of `style`: its own set (the style's edit sounds load as they
+    /// are first played), made the mixer's again if a test play's director replaced it.
+    fn edit_style(&mut self, style: &str) {
+        if style != self.style || self.set.groups.is_empty() {
+            self.style = style.to_string();
+            self.build_set_of(Vec::new());
+        } else if !self.owns_set() {
+            let set = self.set.clone();
+            if let Ok(mut g) = self.shared.lock() {
+                *g = Some(set);
+            }
+            self.send(Command::LoadSet);
+        }
+    }
+
+    /// Whether the mixer's shared set is this director's.
+    fn owns_set(&self) -> bool {
+        self.shared
+            .lock()
+            .ok()
+            .is_some_and(|g| g.as_ref().is_some_and(|s| Arc::ptr_eq(s, &self.set)))
+    }
+
+    /// The Course Maker's music for `style` and `theme` (`BGM_<Theme>_Edit` of
+    /// `CourseSceneBGM_<style>`; research/specs/maker.md C9), from the top unless it is
+    /// already playing; false if the cache has no such track.
+    pub fn edit_music(&mut self, style: &str, theme: u8) -> bool {
+        self.log.clear();
+        let key = edit_bgm_key(theme);
+        let same = style == self.style && self.track.as_deref() == Some(key.as_str());
+        self.edit_style(style);
+        self.theme = theme;
+        self.night = false;
+        if same && self.music_playing() {
+            return true;
+        }
+        // no course echo or ambience in the maker
+        self.send(Command::SetEffects {
+            delay: None,
+            reverb: None,
+        });
+        self.send(Command::StopHandle {
+            handle: H_AMBIENT,
+            fade: 0,
+        });
+        self.send(Command::SetMusicLayer {
+            gain: 0.0,
+            frames: 0,
+        });
+        let ok = self.play_music(&key, 0, None);
+        self.track = ok.then_some(key);
+        self.over = Over::None;
+        ok
+    }
+
+    /// Whether the music clock shows a track of this set playing.
+    fn music_playing(&self) -> bool {
+        let v = self.clock.load(Ordering::Relaxed);
+        v != u64::MAX && self.owns_set() && self.ids.values().any(|&id| (v >> 32) as u16 == id)
+    }
+
+    /// Stop the music (test play starts its own, the maker's menus are quiet), fading briefly.
+    pub fn stop_music(&mut self) {
+        self.track = None;
+        self.send(Command::StopMusic {
+            fade: self.frames(EDIT_MUSIC_FADE),
+        });
+    }
+
+    /// A Course Maker sound: `user`'s `key` (a part's `<style>_Edit<Part>` user: `set`,
+    /// `drag`, `eraser`, `invalid`, `partsMax`, `Block_in` …), at the centre; false if the user
+    /// or key is missing.
+    pub fn edit_sound(&mut self, style: &str, user: &str, key: &str) -> bool {
+        self.log.clear();
+        self.edit_style(style);
+        let local = PropList::default().with("@scene", "Edit");
+        let Some(plays) = self.resolve(user, key, &local) else {
+            return false;
+        };
+        for a in plays {
+            let Some(sound) = self.wave_id(&a.wave) else {
+                continue;
+            };
+            self.send(Command::Play(Play {
+                sound,
+                bus: Bus::Sfx,
+                volume: a.volume,
+                pitch: a.pitch,
+                pan: 0.0,
+                delay: self.frames(a.delay),
+                duration: self.frames(a.duration),
+                fade_in: (a.fade_in.max(0.0) * self.rate as f32) as u32,
+                stop_fade: self.frames(a.stop),
+                group: a.group.unwrap_or(NO_GROUP),
+                priority: a.priority,
+                lpf: a.lpf,
+                send: 0.0,
+                handle: 0,
+                start: 0,
+                then: None,
+            }));
+        }
+        true
     }
 
     fn stop_count(&mut self, world: &World) {

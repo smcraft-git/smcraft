@@ -30,9 +30,8 @@ Everything is on `main` and pushed, except `maker-audio` (pushed as a branch; se
   the player's own dump at import (recommended) or (b) one Nextendo issues. Nextendo has agreed
   to SMCraft going online.
 - **Next, in order:**
-  1. `maker-audio`: renumber its importer version (main is at 10 from the animated blocks: make it
-     11, with `GAME_PACK_VERSION`), merge, re-import the dev cache (+1.3 GB), then the maker's
-     music / part-sound hooks (list in the branch's notes and `research/specs/maker.md` C9).
+  1. ✅ `maker-audio` merged (importer / pack 11, dev cache re-imported); `maker-hooks`: the
+     maker's music and part sounds (2026-10-24, below).
   2. Co-op in the front end: Play Together buttons, controller set-up, co-op 100 Mario / Endless
      (sim side done: `world/coop.rs`).
   3. Physics: re-record all 29 trace courses (the old power-up recordings were small Mario; the
@@ -179,10 +178,19 @@ Everything is on `main` and pushed, except `maker-audio` (pushed as a branch; se
     the sub-area turns vertical from the scroll bar
   - ⬜ custom autoscroll and its nodes, water level, the sub-area set-up window, the vertical
     scroll bar, the part variants balloon (Fast Conveyor …), wings / parachutes / tracks /
-    doors' partners placed by hand, pipes turned by their mouth, maker BGM
-    (`Sound/Resource/Stream/<S>_BGM_<Theme>_Edit.bwav`) and the parts' edit sounds
-    (`Sound/Resource/Edit_*.bars`) — neither imported yet, the trash can, Mario's Trail, co-op
-    making
+    doors' partners placed by hand, pipes turned by their mouth, the trash can, Mario's Trail,
+    co-op making
+  - ✅ maker music and part sounds (2026-10-24; `research/specs/maker.md` C9): the style's
+    `BGM_<Theme>_Edit` for the area's theme while editing (a theme / style switch changes it,
+    test play stops it before the course's own starts, back it plays again, leaving the maker
+    stops it); parts' `<S>_Edit<Part>` sounds: put down (+ the part's voice [inf]), picked up,
+    dropped, erased, refused (`partsMax` / `invalid`), put inside (`Block_in`, `Dokan_in`,
+    `Killer_in`, `Jugem_in`, `Clown_in`, `Cloud_in`, `Key_In`), made big (`scaleChange`), form
+    change (`p_AttributeChange`), multigrab frame / grab / drop / erase. Host hooks
+    `edit_music` / `edit_sound`, routed in the shell and the FFI (so the Swift app has them) to a
+    maker `Director` of their own. ⬜ the selection frame's `cursor` ticks, `move`, the voices'
+    `MusicalScale` pitch by height, wings / parachutes (`p_EquipPara` …), the start / goal and
+    stretch drags' sounds, a listen on hardware against SMM2
 - 🔄 Edit any course: the open row of the Course World / Coursebot lists has "Make" (the co-op
   button's slot, the Coursebot's word, the glove icon) → the maker; someone else's course (a
   code whose maker isn't the signed-in player) saves as a new Coursebot course with "based on

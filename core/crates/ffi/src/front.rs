@@ -169,11 +169,23 @@ pub struct MmkFront {
     course_shown: bool,
 }
 
+impl FfiHost {
+    /// The Course Maker's sound director (None: silent).
+    fn maker_director(&mut self) -> Option<&mut mmk_host::audio::Director> {
+        if self.maker_sounds.is_none() {
+            self.maker_sounds = unsafe { self.audio.as_ref() }.map(|a| a.director());
+        }
+        self.maker_sounds.as_mut()
+    }
+}
+
 /// The [`Host`] over the app's engine.
 struct FfiHost {
     engine: *mut MmkEngine,
     assets: *const MmkAssets,
     audio: *const MmkAudio,
+    /// The Course Maker's music and edit sounds (made from `audio` when first needed).
+    maker_sounds: Option<mmk_host::audio::Director>,
     cb: MmkFrontHost,
     ui_dir: PathBuf,
     library: Vec<CourseEntry>,
@@ -775,7 +787,14 @@ impl Host for FfiHost {
         let Ok(c) = mmk_formats::smm2::Course::parse(course) else {
             return false;
         };
+        let audio = self.audio;
         let e = self.engine();
+        if e.director.is_some()
+            && let Some(a) = unsafe { audio.as_ref() }
+        {
+            // back from a test play: its sounds stop
+            a.send(mmk_audio::Command::StopAll);
+        }
         e.world = World::from_course(&c);
         e.world.set_options(e.options);
         e.world.show_area(area);
@@ -790,6 +809,24 @@ impl Host for FfiHost {
 
     fn edit_camera(&mut self, x: f32, y: f32) {
         self.engine().world.look_at(x, y);
+    }
+
+    fn edit_music(&mut self, track: Option<(&str, u8)>) {
+        let Some(d) = self.maker_director() else {
+            return;
+        };
+        match track {
+            Some((style, theme)) => {
+                d.edit_music(style, theme);
+            }
+            None => d.stop_music(),
+        }
+    }
+
+    fn edit_sound(&mut self, style: &str, user: &str, key: &str) {
+        if let Some(d) = self.maker_director() {
+            d.edit_sound(style, user, key);
+        }
     }
 
     fn test_play(
@@ -1079,6 +1116,7 @@ pub unsafe extern "C" fn mmk_front_new(
             engine,
             assets,
             audio,
+            maker_sounds: None,
             cb: host,
             ui_dir,
             library: Vec::new(),
@@ -1739,6 +1777,7 @@ mod tests {
                 engine: e,
                 assets: a,
                 audio: std::ptr::null(),
+                maker_sounds: None,
                 cb: MmkFrontHost {
                     user: std::ptr::null_mut(),
                     load_value: None,
