@@ -313,17 +313,44 @@ fn ray_hits(level: &Level, a: (f32, f32), d: (f32, f32), len: f32) -> bool {
     })
 }
 
-/// The block test (0x7100d831e0, the enemies' 15 px; the player's is taken to be the same
-/// [inf]): terrain within 14 px past the end `p` toward `side`, on rays 8 px either side of the
-/// centre line (1 px in courses of version 0) [obs].
-fn way_blocked(level: &Level, version: u32, p: (f32, f32), side: Side) -> bool {
+/// An enemy's or item's block test (0x71012965b0 → 0x7100d831e0 with 15): terrain within 14 px
+/// past the end `p` toward `side`, on rays 8 px either side of the centre line (1 px in courses
+/// of version 0); out of a side mouth, another clear pipe's mouth just ahead is no block (the
+/// rider goes straight into it) [obs; the ray filters 0x7102852e78 / e98 are taken as terrain].
+fn actor_way_blocked(level: &Level, p: (f32, f32), side: Side) -> bool {
+    let paths = &level.clear_pipe_paths;
     let d = side.vector();
+    if d.0 != 0.0
+        && clear_pipe::find_entrance(paths, (p.0 + d.0, p.1), side, ACTOR_RADIUS, |_, _| true)
+            .is_some()
+    {
+        return false;
+    }
     let perp = (d.1.abs(), d.0.abs());
-    let w = if version >= 1 { 8.0 } else { 1.0 };
+    let w = if paths.version >= 1 { 8.0 } else { 1.0 };
     [-w, w].iter().any(|&o| {
         let a = (p.0 + perp.0 * o + d.0, p.1 + perp.1 * o + d.1);
         ray_hits(level, a, d, 14.0)
     })
+}
+
+/// The player's block test (0x71015acf60, the traveller's callback +0x60 = player +0x2b40):
+/// room for the body past the end `p` — sideways, rays at the centre line ± 8 from 0.1 px out,
+/// the body's width long; up or down, rays 7.5 px either side of the centre from 0.1 px out,
+/// 15 px long (31 for a big player) [obs; the big-body flags +0x4c0 / +0x4c1 read as `big`
+/// inf]. (The game's downward rays start 8 px inside in courses of version ≥ 1, the body hanging
+/// that far under the mouth; the part inside the pipe meets no face.)
+fn player_way_blocked(level: &Level, big: bool, width: f32, p: (f32, f32), side: Side) -> bool {
+    let (dx, dy) = side.vector();
+    if dx != 0.0 {
+        return [-8.0f32, 8.0]
+            .iter()
+            .any(|&o| ray_hits(level, (p.0 + dx * 0.1, p.1 + o), (dx, 0.0), width));
+    }
+    let len = if big { 31.0 } else { 15.0 };
+    [-7.5f32, 7.5]
+        .iter()
+        .any(|&o| ray_hits(level, (p.0 + o, p.1 + dy * 0.1), (0.0, dy), len))
 }
 
 /// The mouth test (0x7100d83600): nothing solid just outside the mouth `p`, on rays 8 px either
@@ -448,12 +475,13 @@ impl World {
         if self.player.control == Control::Normal {
             self.player.control = Control::Demo;
         }
-        let version = self.level.clear_pipe_paths.version;
         {
+            let (big, width) = (self.player.big(), 2.0 * self.player.sensors().wall_x);
             let level = &self.level;
             let paths = &level.clear_pipe_paths;
-            ride.t
-                .update(paths, |pt, side| way_blocked(level, version, pt, side));
+            ride.t.update(paths, |pt, side| {
+                player_way_blocked(level, big, width, pt, side)
+            });
         }
         let t = ride.t;
         let p = &mut self.player;
@@ -582,7 +610,6 @@ impl World {
         }
         let ids: Vec<u32> = self.actors.iter().map(|a| a.id).collect();
         self.cpipe.riders.retain(|r| ids.contains(&r.id));
-        let version = self.level.clear_pipe_paths.version;
         let mut cues = Vec::new();
         let mut riders = std::mem::take(&mut self.cpipe.riders);
         riders.retain_mut(|r| {
@@ -596,7 +623,7 @@ impl World {
                 Phase::In => {
                     let level = &self.level;
                     let paths = &level.clear_pipe_paths;
-                    r.t.update(paths, |pt, side| way_blocked(level, version, pt, side));
+                    r.t.update(paths, |pt, side| actor_way_blocked(level, pt, side));
                     in_frame(a, r);
                     if r.t.done {
                         cues.push(Cue {
