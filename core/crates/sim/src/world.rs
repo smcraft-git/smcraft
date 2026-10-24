@@ -4375,9 +4375,11 @@ impl World {
                 a.dir = if right { 1 } else { -1 };
             }
             // a walker placed on the ground starts in its walk (the Basic enter picks Walk on the
-            // ground flag, 0-goomba.md), moving on its first frame [obs: Ryujinx trace M1_hit]
+            // ground flag, 0-goomba.md), moving on its first frame [obs: Ryujinx trace M1_hit]; a
+            // placed Super Mushroom / 1-Up too, to the right [obs: Ryujinx trace X_mushstart]
             let below = self.level.cell_at(a.x, a.y - 1.0);
-            if a.kind.is_walker() && (below.is_solid() || below == Cell::SemiTop) {
+            let walks = a.kind.is_walker() || matches!(a.kind, Kind::Mushroom | Kind::OneUp);
+            if walks && (below.is_solid() || below == Cell::SemiTop) {
                 a.on_ground = true;
             }
             if s.kind == Kind::Blooper && s.alt {

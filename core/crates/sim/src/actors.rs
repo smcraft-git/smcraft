@@ -2539,14 +2539,18 @@ impl Actor {
                 }
             }
             Kind::Mushroom | Kind::OneUp => {
+                // a wall met is turned at a frame late, the next move the new way [obs: Ryujinx
+                // trace X_mushstart: against a wall on frame 0 at +1, away at −1 from frame 1]
+                if std::mem::take(&mut self.wall_prev) {
+                    self.dir = -self.dir;
+                }
                 self.vy = (self.vy + ENEMY_GRAVITY).max(MAX_FALL);
                 if self.on_ground {
                     self.vx = ITEM_SPEED * self.dir as f32;
                 }
                 self.collide(level);
                 if self.wall {
-                    self.dir = -self.dir;
-                    self.vx = ITEM_SPEED * self.dir as f32;
+                    self.wall_prev = true;
                 }
             }
             Kind::FireFlower | Kind::SuperballFlower | Kind::SuperHammer => {
@@ -4610,9 +4614,10 @@ impl Actor {
         } else if basic {
             (hw, -0.1)
         } else if matches!(self.kind, Kind::Mushroom | Kind::OneUp) {
-            // a walking mushroom turns 0.1 px off a wall [obs: Ryujinx trace W_3010660, one
-            // shut in a one-tile box: x 168.1 / 167.9 by turns, walls at 160 / 176]
-            (hw, 0.1)
+            // a walking mushroom rests 0.1 px into a wall, as a Basic walker does [obs: Ryujinx
+            // traces W_3010660 / X_mushstart, mushrooms in one-tile boxes and against walls: x
+            // 296.1 against a wall at 304]
+            (hw, -0.1)
         } else {
             (hw, 0.001)
         };
@@ -4642,7 +4647,16 @@ impl Actor {
         self.x += self.vx * cos;
         if self.vx != 0.0 {
             let side = self.vx.signum();
-            let wx = self.x + side * side_hw;
+            // (a mushroom's sensor reaches only as far as it rests into a wall: flush against a
+            // wall's face doesn't meet it [obs: Ryujinx trace X_mushstart, a mushroom stepping
+            // to x 200.0 by a wall at 208 walks on into it the next frame]; a Basic walker's
+            // meets the face [obs: W_3051605])
+            let reach = if matches!(self.kind, Kind::Mushroom | Kind::OneUp) {
+                side_hw + gap
+            } else {
+                side_hw
+            };
+            let wx = self.x + side * reach;
             let ys = [self.y + 2.0, self.y + (h - 2.0).max(2.0)];
             // one-way walls block only motion into them from their blocking side
             let prev_wx = wx - self.vx * cos;

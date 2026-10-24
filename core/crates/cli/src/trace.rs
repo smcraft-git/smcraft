@@ -153,7 +153,7 @@ pub fn run_all(course: &[u8], script: &[Input], start: &Start) -> Result<(String
 // Physics test courses
 
 pub const STYLES: [&str; 5] = ["M1", "M3", "MW", "WU", "3W"];
-pub const KINDS: [&str; 23] = [
+pub const KINDS: [&str; 24] = [
     "flat",
     "wall",
     "slope",
@@ -177,10 +177,11 @@ pub const KINDS: [&str; 23] = [
     "slopejoin",
     "cpipe",
     "cpipeg",
+    "mushstart",
 ];
 
 /// Kinds made in SMB1 only (the terrain they test is the same in every style).
-const M1_ONLY: [&str; 1] = ["slopejoin"];
+const M1_ONLY: [&str; 2] = ["slopejoin", "mushstart"];
 /// Kinds made in 3D World only (clear pipes are a 3D World part).
 const W3_ONLY: [&str; 2] = ["cpipe", "cpipeg"];
 
@@ -502,6 +503,19 @@ pub fn build_course(name: &str) -> Result<Vec<u8>, String> {
             clear_pipe(&mut e, (40, 7), &[(43, 6)])?;
             clear_pipe(&mut e, (44, 7), &[(47, 6)])?;
             clear_pipe(&mut e, (50, 7), &[(53, 6)])?;
+        }
+        "mushstart" => {
+            // Super Mushrooms placed on the floor near the start, the player standing still: one
+            // in the open at x 10, one shut in a one-tile box at x 14 (walls at 13 and 15), one
+            // with a wall flush on its right at x 18 (wall 19), one with a wall flush on its left
+            // at x 21 (wall 20)
+            floor(&mut e, 0, len - 1)?;
+            for x in [13, 15, 19, 20] {
+                e.paint_ground(x, up(1)).map_err(err)?;
+            }
+            for x in [10, 14, 18, 21] {
+                e.place(20, x, up(1)).map_err(err)?;
+            }
         }
         "cpipeg" => {
             // a Goomba at x 22 walking left into the right mouth of a straight 8-tile pipe at
