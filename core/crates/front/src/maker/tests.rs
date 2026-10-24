@@ -974,3 +974,22 @@ fn holding_a_part_of_a_selection_gives_the_whole_selection_wings() {
         assert_eq!(m.editor.object(i).unwrap().flags & 0x2, 0);
     }
 }
+
+#[test]
+fn a_winged_part_put_into_a_block_keeps_its_wings() {
+    let (mut host, mut saves) = (MockHost::default(), Saves::default());
+    let mut m = maker(&mut host, &mut saves, MakerStart::New("M1".into()));
+    m.editor.place(5, 30, 4).unwrap();
+    let g = m.editor.place(0, 33, 4).unwrap();
+    m.editor.set_wings(g, true).unwrap();
+    m.cur = (33, 4);
+    run(&mut m, &mut host, &mut saves, press(Buttons::CONFIRM));
+    assert!(m.carrying());
+    m.cur = (30, 4);
+    run(&mut m, &mut host, &mut saves, held(Buttons::CONFIRM));
+    run(&mut m, &mut host, &mut saves, idle());
+    let block = m.editor.object_at(30, 4).unwrap();
+    let o = m.editor.object(block).unwrap();
+    assert_eq!(o.child_id, 0, "the Goomba went in");
+    assert_eq!(o.child_flags & 0x2, 0x2, "with its wings");
+}

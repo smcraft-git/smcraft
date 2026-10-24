@@ -67,6 +67,8 @@ pub mod keys {
     pub const COPY: u16 = 512;
 }
 
+/// What a part keeps when it is put into another: wings, alternate form, size, parachute.
+const CHILD_KEEPS: u32 = 0x2 | 0x4 | 0x6000 | 0x8000;
 const PAGE: &str = "Edit_MainPage_00";
 const MENU: &str = "Cmn_MainMenu_00";
 const SAVE: &str = "Edit_SaveLoadMenu_00";
@@ -1188,7 +1190,7 @@ impl MakerFlow {
                 return;
             }
             if let Tool::Part(p) = self.tool()
-                && let Some(key) = self.put_into(i, p)
+                && let Some(key) = self.put_into(i, p, DEFAULT_FLAGS)
             {
                 self.changed();
                 let into = self.editor.object(i).map_or(7, |o| o.id);
@@ -1298,7 +1300,9 @@ impl MakerFlow {
             .editor
             .object_at(self.cur.0, self.cur.1)
             .filter(|&t| t != index)
-            && let Some(key) = self.put_into(t, o.id)
+            // it goes in as it is: its wings, parachute, form and size (the contents
+            // balloon draws a child's wings and parachute, maker spec C10)
+            && let Some(key) = self.put_into(t, o.id, DEFAULT_FLAGS | (o.flags & CHILD_KEEPS))
         {
             let into = self.editor.object(t).map_or(7, |x| x.id);
             self.editor.erase_object(index);
@@ -1337,7 +1341,7 @@ impl MakerFlow {
     /// Bill Blasters, Lakitu, trees, checkpoints, a pipe's), or a Super Mushroom makes it big
     /// [inf: as dropping an item on a part does in the game]. The edit sound key if something
     /// changed (`Block_in`, `Dokan_in` …, `scaleChange`).
-    fn put_into(&mut self, i: usize, part: i16) -> Option<&'static str> {
+    fn put_into(&mut self, i: usize, part: i16, child_flags: u32) -> Option<&'static str> {
         let o = self.editor.object(i).cloned()?;
         let key = catalog::put_in_key(o.id, part);
         if o.id == 9 {
@@ -1346,7 +1350,7 @@ impl MakerFlow {
         if o.child_id != part && mmk_editor::rules::check_child(o.id, part).is_ok() {
             return self
                 .editor
-                .try_set_child(i, part, DEFAULT_FLAGS)
+                .try_set_child(i, part, child_flags)
                 .is_ok()
                 .then_some(key);
         }
