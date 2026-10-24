@@ -38,8 +38,10 @@ sway, importer and pack 12, the dev cache already at v12).
   0x71013baa90 — Wait 0x71013bb630/6d0 (100 f at an offset), WarpWait bb770/810 (60 f), Attack
   bb990/bbbc0 (the swoop: angle words +0x628/+0x630, radius +0x634 = 128, speed 1 ↔ 3), Leave
   bc610/bc7c0, DieWait/FallCastle; `PlayerKeyChain_CurseModel` 0x7101583a40) — the last coverage
-  blocker in a new TGRCode sample (84 / 85); SMM1 UI sounds (Wii U BFSAR / BFWAV import) for the
-  SMM1-look 100 Mario.
+  blocker in a new TGRCode sample (84 / 85); SMM1 UI sounds for the SMM1-look 100 Mario: SMM1's
+  `Pack/Sound.pack` holds 534 `Sound/Resource/*.bars` (BFWAV), the UI ones per layout and pane
+  (`UI_<layout>_<pane>.bars`, e.g. `UI_Nwk_WorldMapExp_00_L_WorldMapKuribo_00`); `mmk audio` reads
+  only SMM2's BWAV BARS so far.
 - **Waiting on the owner:** the SMCraft app on Nextendo's portal (public client / PKCE, scopes
   `identity game.matchmaking`, redirect `http://127.0.0.1:47614/callback`) and its client ID; the
   game-server access key — (a) read from the player's own dump at import (recommended) or (b) one
