@@ -45,8 +45,7 @@ sway, importer and pack 12, the dev cache already at v12).
      World wing art, the contents balloon (`Edit_BalloonPartsIn_00`, state `cDispInParts`: not
      built at all); tracks and links.
   3. Co-op: a players screen in SMM2's layouts.
-  3b. Research queue (binary → spec → code), each an agent's task: the Toad House minigames
-     (`super-worlds.md` "Toad House minigames": the three Seq classes); stacking's tower rules and
+  3b. Research queue (binary → spec → code), each an agent's task: stacking's tower rules and
      `Tower_stack` (maker C11); the maker's Water Level mode (`L_WaterLevelBtn_00`, mode banner
      "Water / Poison / Lava Level"; fixed / rising and the speed — not in the text, likely
      markers in the course), custom scroll nodes, Mario's Trail (`L_ZanzoBtn_00`), the trash can
@@ -64,7 +63,7 @@ sway, importer and pack 12, the dev cache already at v12).
      `_KRko` combinations add them; UI importer and pack 6 — **re-import the UI pack**). Left:
      the region combinations' range modes 3 / 4 / 9 (not parsed; their fonts are tried after the
      combination's own), the web build reads all 31 MB of fonts up front.
-  4. Super Worlds' 3D map and Toad Houses; airship sway; the colour table; NSMBU / 3D World pixels.
+  4. Super Worlds' 3D map; airship sway; the colour table; NSMBU / 3D World pixels.
   5. iPad / Android device runs; the macOS package; live Network Play once the ID and key arrive.
 
 ### Plan
@@ -307,9 +306,19 @@ sway, importer and pack 12, the dev cache already at v12).
   decrypts the map); captures `superworld`, `-title`, `-map`, `-walk`, `-play`, `-ending`
 - ⬜ The map in 3D with the game's models (`MyWorld_Model.pack`: fields, roads, points, Mario's
   walk / swim / climb animations from `WM_*Anime`), the map music and sounds
-- ⬜ Toad House minigames (`MyWEdit_Minigame_00…02`; a fixed 3-life gift for now), enemy-icon
-  courses that start on contact, point icons by model, map ghosts · ✅ co-op: the card's Play Together
-  (left onto it, or a click; L / R change worlds), every controller plays, one shared life counter
+- ✅ Toad House minigames (`super-worlds.md` §6, read from the three sequences): each house runs
+  its kind from the world data over the map — MATCH & WIN (`MyWEdit_Minigame_00`: three strips
+  at 45 / 30 / 50 a frame, top and bottom left, centre right; A stops them in turn, four slots on;
+  three Stars 5 lives, Flowers 3, Mushrooms 1), POP & WIN (`_01`: A pumps, stages at 4 / 10 / 18
+  / 28, bursts at 50 into 1 / 3 / 5 lives, 4 / 4 / 3 in 11), CATCH & WIN (`_02`: ten pitches,
+  Fastball / Changeup / Knuckleball / Forkball / Heater on the game's flights, A jumps, the
+  game's catch test on the boxes, 3 misses lose, else 5 / 3 / 1 for 0 / 1 / 2 misses), with
+  their animations and sounds; one go per house until a game over. Rules `mmk_modes::minigame`,
+  scenes `mmk_front::minigame`; captures `superworld-minigame0` / `1` / `2`. Left: Play
+  Together's per-player input (menus have one merged input), the controller rumble cues
+- ⬜ Enemy-icon courses that start on contact, point icons by model, map ghosts · ✅ co-op: the card's
+  Play Together (left onto it, or a click; L / R change worlds), every controller plays, one
+  shared life counter
 - ⬜ Super World maker (later)
 
 **G6 — Network Play through Nextendo** 🔄 (works end to end on a local server; live waits for

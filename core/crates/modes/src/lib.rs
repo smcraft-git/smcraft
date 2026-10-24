@@ -17,6 +17,8 @@
 //! - [`superworld`]: Super Worlds (`research/specs/super-worlds.md`): the world and its courses
 //!   (a test world from the library, or a downloaded one), the walk on the 7 × 4 maps, the rules
 //!   (clears, lives, game over, Toad Houses, world clear) and the saved progress.
+//! - [`minigame`]: the Super World Toad House minigames' rules (Match & Win, Pop & Win, Catch &
+//!   Win: the strips, the balloon, the pitches, the catch test and the prizes).
 //! - [`dojo`]: Yamamura's Dojo lesson list (from the owner's imported `lessons/index.json`),
 //!   lesson starts and the saved completion marks / Maker Basics / Nina flags.
 //!
@@ -27,6 +29,7 @@ pub mod coursebot;
 pub mod dojo;
 pub mod endless;
 pub mod hundred;
+pub mod minigame;
 pub mod pool;
 pub mod replay;
 pub mod save;

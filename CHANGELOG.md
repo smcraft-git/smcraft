@@ -31,6 +31,8 @@ SMCraft is back in development (it was archived in October 2026).
   as a new course, "based on <code> by <maker>".
 - **Super Worlds**: play a Super World (its map, lives, progress), made from your library or
   downloaded from TGRCode.
+- **Toad House minigames** in Super Worlds: Match & Win, Pop & Win and Catch & Win, with the
+  game's own rules and prizes.
 - **SMM2's own Endless Challenge**, and **Challenge Modes**: Course World's Endless button
   switches between it and the 100 Mario Challenge with ZL / ZR.
 - **Play Together (local co-op)** for up to four players with SMM2's rules: bubbles, shared

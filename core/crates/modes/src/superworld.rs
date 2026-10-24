@@ -46,10 +46,10 @@ pub const MAX_LIVES: u32 = 99;
 
 impl SuperWorld {
     /// A test world from up to 40 library courses, five to a world (the fifth is the goal), on
-    /// one fixed map shape per world: start, three courses along the top row with a Toad House
-    /// below the second, down the right side, the fourth course and the goal along the third
-    /// row; a pipe at the bottom right leads to an island with a second Toad House. None
-    /// without courses.
+    /// one fixed map shape per world: start (a Toad House below it: Pop & Win), three courses
+    /// along the top row with a Toad House below the second (Match & Win), down the right side,
+    /// the fourth course and the goal along the third row; a pipe at the bottom right leads to
+    /// an island with a Catch & Win Toad House. None without courses.
     pub fn test_world(courses: &[SwCourse]) -> Option<Self> {
         if courses.is_empty() {
             return None;
@@ -151,7 +151,8 @@ fn test_layout(theme: u8, courses: usize, first_slot: u8) -> World {
             flag: 0,
         };
     };
-    set(0, 0, 2, road::END);
+    set(0, 0, 0, road::CORNER); // E+S: down to the third Toad House
+    set(0, 1, 0, road::END);
     set(1, 0, 2, road::STRAIGHT);
     set(2, 0, 2, road::STRAIGHT);
     set(3, 0, 2, road::TEE);
@@ -195,6 +196,11 @@ fn test_layout(theme: u8, courses: usize, first_slot: u8) -> World {
     w.toad_houses[1] = Some(ToadHouse {
         x: 2,
         y: 3,
+        kind: 2,
+    });
+    w.toad_houses[2] = Some(ToadHouse {
+        x: 0,
+        y: 1,
         kind: 1,
     });
     w.pipes = [Some((6, 3)), Some((0, 3))];
@@ -437,19 +443,24 @@ impl Progress {
         self.lives = (self.lives + n).min(MAX_LIVES);
     }
 
-    /// A Toad House under Mario: the lives it gives (once per house until a game over), 0 when
-    /// used. SMCraft has no minigames yet: a fixed gift by the house's kind [departure].
-    pub fn toad_house(&mut self, k: usize) -> u32 {
+    /// Enter Toad House `k` of the current world: true (and the house is used) when it is still
+    /// open — one go per house until a game over [inf: the game's progress record keeps no
+    /// house field]. Its minigame's prize comes through [`Progress::add_lives`].
+    pub fn enter_toad_house(&mut self, k: usize) -> bool {
         let Some(t) = self.toads.get_mut(self.world) else {
-            return 0;
+            return false;
         };
         if *t & (1 << k) != 0 {
-            return 0;
+            return false;
         }
         *t |= 1 << k;
-        let n = 3;
-        self.add_lives(n);
-        n
+        true
+    }
+
+    /// Which minigame Toad House `k` of the current world runs.
+    pub fn toad_house_kind(&self, sw: &SuperWorld, k: usize) -> Option<crate::minigame::Kind> {
+        let t = self.world_map(sw)?.toad_houses.get(k).copied().flatten()?;
+        Some(crate::minigame::Kind::from_byte(t.kind))
     }
 
     pub fn to_json(&self) -> String {
@@ -558,6 +569,7 @@ mod tests {
         assert_eq!(spot(w, 3, 1), Spot::ToadHouse(0));
         assert_eq!(spot(w, 6, 3), Spot::Pipe(0));
         assert_eq!(spot(w, 2, 3), Spot::ToadHouse(1));
+        assert_eq!(spot(w, 0, 1), Spot::ToadHouse(2));
         // a two-course world: one course, then the goal
         let w2 = &sw.map.worlds[2];
         assert_eq!(w2.course_order().len(), 2);
@@ -592,6 +604,8 @@ mod tests {
         assert_ne!(reachable(w, 0b0111) & bit(1, 3), 0);
         assert_eq!(route(w, 0b0111, 0, 3, EAST), vec![(1, 3), (2, 3)]);
         assert!(route(w, 0, 0, 0, NORTH).is_empty());
+        // the start's third Toad House, just below it
+        assert_eq!(route(w, 0, 0, 0, SOUTH), vec![(0, 1)]);
     }
 
     #[test]
@@ -604,9 +618,18 @@ mod tests {
         }
         assert_eq!(p.clear(&sw, 4), ClearResult::WorldClear);
         assert_eq!((p.world, p.x, p.y), (1, 0, 0));
-        assert_eq!(p.toad_house(0), 3);
-        assert_eq!(p.toad_house(0), 0);
+        // the houses run their own minigames, one go each
+        use crate::minigame::Kind;
+        assert_eq!(p.toad_house_kind(&sw, 0), Some(Kind::Match));
+        assert_eq!(p.toad_house_kind(&sw, 1), Some(Kind::Catch));
+        assert_eq!(p.toad_house_kind(&sw, 2), Some(Kind::Pop));
+        assert!(p.enter_toad_house(0));
+        assert!(!p.enter_toad_house(0));
+        p.add_lives(3);
         assert_eq!(p.lives, 33);
+        p.add_lives(90);
+        assert_eq!(p.lives, 99, "capped at 99");
+        p.lives = 33;
         p.lives = 1;
         assert!(!p.died());
         p.game_over(&sw);

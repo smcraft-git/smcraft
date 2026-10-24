@@ -377,6 +377,7 @@ pub unsafe extern "C" fn mmk_ui_set_pane(
             size: (flags & 2 != 0).then_some([w, h]),
             scale: (flags & 4 != 0).then_some([sx, sy]),
             alpha: (flags & 8 != 0).then_some(alpha),
+            rotate: None,
         };
         let ok = l.player.set_pane(pane, o);
         if !ok {
