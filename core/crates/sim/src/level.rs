@@ -680,6 +680,7 @@ fn part_kind(o: &CourseObject, lvl: &Level) -> Option<Kind> {
         11 => Some(Kind::Lift {
             width: o.width.max(1),
             falling: o.flags & 0x4 != 0,
+            right: o.flags & 0x18 == 0x10,
         }),
         // 3D World enemies (actors/w3.rs); the alternate (0x4) is the horned / spiny /
         // sleeping form; a creeper's path is extended data − 1

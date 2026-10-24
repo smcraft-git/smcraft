@@ -322,28 +322,6 @@ fn trunc16(v: f32) -> f32 {
     }
 }
 
-/// The game's 256-entry sine table: sin, its step to the next entry, cos, its step
-/// [obs 0x7101d34bf8; same values as sin/cos of 2π·i/256 rounded to f32, exact 0 on the axes].
-fn wave(i: u32) -> (f32, f32, f32, f32) {
-    let at = |k: u32| (std::f64::consts::TAU * k as f64 / 256.0).dsin_cos();
-    let (s0, c0) = at(i);
-    let (s1, c1) = at(i + 1);
-    let axis = |v: f64, zero: bool| if zero { 0.0 } else { v as f32 };
-    (
-        axis(s0, i.is_multiple_of(128)),
-        (s1 - s0) as f32,
-        axis(c0, i % 128 == 64),
-        (c1 - c0) as f32,
-    )
-}
-
-/// sin and cos of a 32-bit angle (top byte = table entry, the rest interpolates).
-fn sin_cos(angle: u32) -> (f32, f32) {
-    let (s, ds, c, dc) = wave(angle >> 24);
-    let f = (angle & 0xff_ffff) as f32 * f32::from_bits(0x3380_0000);
-    (s + ds * f, c + f * dc)
-}
-
 /// The bend (1–4) a cell's exits belong to (bits 8–10), if any.
 fn bend_of((e0, e1): (u16, u16)) -> Option<u16> {
     [e0, e1]
@@ -797,7 +775,7 @@ impl Rail {
             (dx, dy)
         };
         self.pos = (self.pos.0 + ux * v, self.pos.1 + uy * v);
-        let (s, _, c, _) = wave(self.dir as u32 * 32);
+        let (s, _, c, _) = crate::fmath::table_wave(self.dir as u32 * 32);
         self.vel = (v * c, s * v);
         // each axis snaps onto the target within 0.7 v; both snapped = arrived
         let tol = v * SNAP;
@@ -885,7 +863,7 @@ impl Rail {
         if done {
             b.angle = b.end;
         }
-        let (s, c) = sin_cos(b.angle);
+        let (s, c) = crate::fmath::table_sin_cos(b.angle);
         self.vel = if b.ccw {
             (-(v * s), v * c)
         } else {

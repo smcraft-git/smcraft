@@ -63,6 +63,30 @@ impl DetMath for f64 {
     }
 }
 
+/// The game's 256-entry sine table: sin, its step to the next entry, cos, its step
+/// [obs 0x7101d34bf8; v3.0.3 0x71023385b8: the same values as sin/cos of 2π·i/256 rounded to
+/// f32, exact 0 on the axes].
+pub fn table_wave(i: u32) -> (f32, f32, f32, f32) {
+    let at = |k: u32| (std::f64::consts::TAU * k as f64 / 256.0).dsin_cos();
+    let (s0, c0) = at(i);
+    let (s1, c1) = at(i + 1);
+    let axis = |v: f64, zero: bool| if zero { 0.0 } else { v as f32 };
+    (
+        axis(s0, i.is_multiple_of(128)),
+        (s1 - s0) as f32,
+        axis(c0, i % 128 == 64),
+        (c1 - c0) as f32,
+    )
+}
+
+/// sin and cos of a 32-bit binary angle (0x4000_0000 = 90°) the game's way: the top byte picks
+/// the table entry, the low 24 bits interpolate (× 2⁻²⁴).
+pub fn table_sin_cos(angle: u32) -> (f32, f32) {
+    let (s, ds, c, dc) = table_wave(angle >> 24);
+    let f = (angle & 0xff_ffff) as f32 * f32::from_bits(0x3380_0000);
+    (s + ds * f, c + f * dc)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

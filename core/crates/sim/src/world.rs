@@ -4254,8 +4254,7 @@ impl World {
                 a.home_y = s.y - 8.0;
             }
             if let Kind::Lift { falling: false, .. } = s.kind {
-                // the pacing lift's centre; it starts left unless (flags & 0x18) = 0x10
-                // (11-lift.md) [inf: the flag isn't kept on the spawn; left]
+                // the pacing lift's centre
                 a.home_x = s.x;
             }
             if s.kind == Kind::Magikoopa {
@@ -4290,8 +4289,15 @@ impl World {
             } else {
                 1
             };
-            if let Kind::Lift { falling: false, .. } = s.kind {
-                a.dir = -1;
+            if let Kind::Lift {
+                falling: false,
+                right,
+                ..
+            } = s.kind
+            {
+                // it starts left unless (flags & 0x18) = 0x10 (11-lift.md) [obs v3.0.3 init
+                // 0x71013c2790]
+                a.dir = if right { 1 } else { -1 };
             }
             // a walker placed on the ground starts in its walk (the Basic enter picks Walk on the
             // ground flag, 0-goomba.md), moving on its first frame [obs: Ryujinx trace M1_hit]
@@ -7364,7 +7370,7 @@ impl World {
                 }
                 continue;
             }
-            if let Kind::Lift { width, falling } = a.kind {
+            if let Kind::Lift { width, falling, .. } = a.kind {
                 let x0 = a.x - width as f32 * 8.0;
                 for i in 0..width {
                     let tex = if i == 0 {
@@ -9602,6 +9608,7 @@ mod tests {
             Kind::Lift {
                 width: 4,
                 falling: true,
+                right: false,
             },
             200.0,
             96.0,
@@ -9615,6 +9622,40 @@ mod tests {
         run(&mut w, 0, 20);
         assert!(w.actors[0].y < y0);
         assert_eq!(w.player.y, w.actors[0].y + 15.95);
+    }
+
+    #[test]
+    fn a_pacing_lift_starts_by_its_flag_and_a_winged_one_bobs_8_px() {
+        let lift = |right: bool, falling: bool, wings: bool| {
+            let mut lvl = Level::flat(60);
+            let mut s = spawn(
+                Kind::Lift {
+                    width: 3,
+                    falling,
+                    right,
+                },
+                400.0,
+                160.0,
+            );
+            s.wings = wings;
+            lvl.spawns.push(s);
+            let mut w = World::with_level(lvl);
+            w.player.x = 100.0;
+            run(&mut w, 0, 32);
+            (w.actors[0].x, w.actors[0].y)
+        };
+        let (x, y) = lift(true, false, false);
+        assert!(
+            x > 400.0 && y == 160.0,
+            "(flags & 0x18) = 0x10 starts right: {x}"
+        );
+        assert!(lift(false, false, false).0 < 400.0);
+        // flag 0x2: 8·sin φ, φ at 2.8125°/frame: a quarter of the bob in 32 frames
+        let (_, y) = lift(false, false, true);
+        assert!((y - 168.0).abs() < 1e-3, "{y}");
+        // a resting winged falling lift: half that rate
+        let (x, y) = lift(false, true, true);
+        assert!(x == 400.0 && (y - (160.0 + 8.0 * std::f32::consts::FRAC_1_SQRT_2)).abs() < 1e-3);
     }
 
     #[test]
@@ -10213,7 +10254,7 @@ mod tests {
     }
 
     #[test]
-    fn winged_blocks_bob_and_release_their_contents() {
+    fn winged_blocks_fly_and_release_their_contents() {
         let mut lvl = Level::flat(40);
         let mut b = spawn(
             Kind::MovingBlock {
@@ -10229,6 +10270,7 @@ mod tests {
             Kind::Lift {
                 width: 3,
                 falling: false,
+                right: false,
             },
             300.0,
             80.0,
@@ -10238,19 +10280,21 @@ mod tests {
         let mut w = World::with_level(lvl);
         w.player.x = 40.0;
         run(&mut w, 0, 33);
-        // a quarter period (90° / 2.8125° = 32 frames): 16 px up
+        // a quarter period (90° / 2.8125° = 32 frames): the block 16 px up, drifting right
+        // 0.625 a frame; the winged lift paces left with an 8 px bob
         let blk = w
             .actors
             .iter()
             .find(|a| matches!(a.kind, Kind::MovingBlock { .. }))
             .unwrap();
         assert!((blk.y - 96.0).abs() < 0.5, "{}", blk.y);
+        assert!((blk.x - (200.0 + 0.625 * 32.0)).abs() < 0.7, "{}", blk.x);
         let l = w
             .actors
             .iter()
             .find(|a| matches!(a.kind, Kind::Lift { .. }))
             .unwrap();
-        assert!((l.y - 96.0).abs() < 0.5, "{}", l.y);
+        assert!((l.y - 88.0).abs() < 0.5 && l.x < 300.0, "{} {}", l.x, l.y);
         // bump from below: one coin, then used
         let i = w
             .actors

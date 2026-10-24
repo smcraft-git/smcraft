@@ -16,6 +16,8 @@ mod clown;
 pub use clown::ClownFire;
 mod dokan;
 pub use dokan::Dokan;
+mod fly;
+pub use fly::Fly;
 mod koopalings;
 mod powerups;
 mod shot;
@@ -118,10 +120,12 @@ pub enum Kind {
         side: bool,
         right: bool,
     },
-    /// One-way lift, `width` tiles; falling = drops once stood on.
+    /// One-way lift, `width` tiles; falling = drops once stood on; `right`: a pacing lift that
+    /// starts to the right ((flags & 0x18) = 0x10).
     Lift {
         width: u8,
         falling: bool,
+        right: bool,
     },
     /// Trampoline.
     Spring,
@@ -822,6 +826,8 @@ pub struct Actor {
     /// A shell that is a Spiny dropped off the ceiling (spiky; wakes as a Spiny). Not `alt`,
     /// which is the placement's 0x4 flag (a red Koopa's shell has it).
     pub spiny_shell: bool,
+    /// The shared winged flight (items, coins, map objects and blocks with wings; actors/fly.rs).
+    pub fly: Fly,
 }
 
 impl Actor {
@@ -899,6 +905,7 @@ impl Actor {
             clown_fire: matches!(kind, Kind::ClownCar { fire: true }).then(ClownFire::default),
             ceiling: false,
             spiny_shell: false,
+            fly: Fly::default(),
         }
     }
 
@@ -1314,14 +1321,6 @@ impl Actor {
     /// 3.0, no gravity) until it hits a wall; FallWait 64, then back to its start at up to
     /// 0.875 px/f (±0.2/frame) [obs Wait 0x7100768800, box 0x710076ab10, Fall 0x7100769210,
     /// Return 0x710076a140].
-    /// Winged blocks and lifts (4-brick.md B12 "Wing"): a vertical sine bob around home at
-    /// 2.8125°/frame [inf: amplitude 16 px, 48 for the helper's special mode (hard, ice, donut,
-    /// cloud)]. Angle in `heading`.
-    fn wing_bob(&mut self, amp: f32) {
-        self.heading = (self.heading + 2.8125) % 360.0;
-        self.y = self.home_y + amp * self.heading.to_radians().dsin();
-    }
-
     /// A player in the Side Thwomp's attack box (see `step_thwomp`); the player's box is taken
     /// as 16 px tall from its feet [inf].
     fn side_thwomp_sees(&self, level: &Level, right: bool) -> bool {
@@ -2146,11 +2145,17 @@ impl Actor {
                 Kind::Bowser { .. } | Kind::BoomBoom { .. } | Kind::BowserJr { .. } => {}
                 k if k.is_w3() => {} // their own wing behaviour (actors/w3.rs)
                 k if k.is_v3() => {} // their own wing behaviour (actors/v3.rs)
+                // the shared fly helper (actors/fly.rs); a track carries a winged part itself
+                k if k.flies_winged() && !self.thrown && self.rail.is_none() => {
+                    let slow = self.wet();
+                    self.step_fly(level, slow);
+                    return None;
+                }
                 Kind::Piranha { .. } | Kind::Muncher if self.pipe.is_none() => {
                     self.step_winged_plant(level);
                     return None;
                 }
-                k if k.is_enemy() || k.is_item() || matches!(k, Kind::BigCoin { .. }) => {
+                k if k.is_enemy() => {
                     self.step_generic_wings(level);
                     return None;
                 }
@@ -2244,8 +2249,6 @@ impl Actor {
                     if self.timer <= 0 {
                         (self.thrown, self.vx, self.vy) = (false, 0.0, 0.0);
                     }
-                } else if self.wings {
-                    self.wing_bob(16.0);
                 }
             }
             Kind::ClownCar { .. } => return self.step_clown_car(level),
@@ -2468,17 +2471,7 @@ impl Actor {
                 }
             }
             Kind::Thwomp { side, right } => self.step_thwomp(level, side, right),
-            Kind::MovingBlock { block, .. } => {
-                if self.wings {
-                    use crate::blocks::BlockKind as B;
-                    let amp = if matches!(block, B::Hard | B::Ice | B::Donut | B::Cloud) {
-                        48.0
-                    } else {
-                        16.0
-                    };
-                    self.wing_bob(amp);
-                }
-            }
+            Kind::MovingBlock { .. } => {} // wings: the fly helper (above); a track: its rail
             Kind::TrackMount { .. } => {}  // moved by its rail only
             Kind::BabyBlooper { .. } => {} // placed by the world
             Kind::SideSpring => {
@@ -2574,12 +2567,24 @@ impl Actor {
                     }
                 }
             }
-            Kind::Lift { .. } if self.wings => self.wing_bob(16.0),
             Kind::Lift { falling, .. } => {
                 if falling && (self.ridden || self.phase == 1) {
+                    // flag 0x2: gravity −0.01875, falling at most 1.2 (11-lift.md) [obs v1.0.0
+                    // FallLift Move enter 0x7100899500, table 0x7101c8c658]
                     self.phase = 1;
-                    self.vy = (self.vy - 0.0625).max(-4.0);
+                    let (g, cap) = if self.wings {
+                        (-0.01875, -1.2)
+                    } else {
+                        (-0.0625, -4.0)
+                    };
+                    self.vy = (self.vy + g).max(cap);
                     self.y += self.vy;
+                } else if falling && self.wings && self.rail.is_none() {
+                    // a resting winged falling lift bobs 8·sin φ about its height, φ stepping
+                    // 0x1000000 (1.40625°) a frame [obs v3.0.3 Stop exe 0x71013c2430, rate
+                    // _INIT 0x7100aff810]
+                    self.fly.angle.1 = self.fly.angle.1.wrapping_add(0x100_0000);
+                    self.y = self.home_y + 8.0 * crate::fmath::table_sin_cos(self.fly.angle.1).0;
                 } else if !falling && self.rail.is_none() && !self.derailed {
                     // off a track it paces ±48 px about its spawn (actor 8): speed
                     // min(0.5, d/16 + 0.125) for d the distance to the nearer end, stopping on
@@ -2598,6 +2603,14 @@ impl Actor {
                         if self.x <= lo {
                             self.dir = 1;
                         }
+                    }
+                    if self.wings {
+                        // flag 0x2 adds 8·sin φ across the motion, φ stepping 0x2000000
+                        // (2.8125°) a frame [obs v3.0.3 Move 0x71013c06d0, rate _INIT
+                        // 0x7100aff510]
+                        self.fly.angle.1 = self.fly.angle.1.wrapping_add(0x200_0000);
+                        self.y =
+                            self.home_y + 8.0 * crate::fmath::table_sin_cos(self.fly.angle.1).0;
                     }
                 }
             }
@@ -4333,8 +4346,10 @@ impl Actor {
         }
     }
 
-    /// Generic winged flight [inf, from the winged Thwomp]: drift ±0.3 px/frame (turning at
-    /// walls), bob vy = 0.15·sin(2°·t).
+    /// Generic winged flight for the enemies without a wing behaviour of their own here (each
+    /// has its own EnemyDB Wing action: PataTogezo, Teresa, Bubble, …) [inf, from the winged
+    /// Thwomp]: drift ±0.3 px/frame (turning at walls), bob vy = 0.15·sin(2°·t). The items,
+    /// coins, map objects and blocks fly with the shared fly helper (actors/fly.rs).
     fn step_generic_wings(&mut self, level: &Level) {
         let t = 0.3 * self.dir as f32;
         self.vx += (t - self.vx).clamp(-0.003, 0.003);
