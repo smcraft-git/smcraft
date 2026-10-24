@@ -518,6 +518,13 @@ pub trait Host {
     fn player_position(&self) -> Option<(usize, [f32; 2])> {
         None
     }
+    /// Course Maker's Mario's Trail: a picture of player 1 as drawn now (nothing else in it) and
+    /// the world rectangle it shows (x0, y0, x1, y1, world px, y up): 80 px each side of the
+    /// feet, 12 below and 52 above (3D World 24 / 4 / 44) (research/specs/maker.md C12). None:
+    /// the player isn't drawn, or this host can't take pictures.
+    fn player_snapshot(&mut self) -> Option<(Icon, [f32; 4])> {
+        None
+    }
     /// Save a made course (raw course data) to the Coursebot: as entry `id` when given
     /// (overwrite), else as a new entry. Returns the entry's id (a library id: it then lists in
     /// [`Host::library`] and loads with [`Source::Library`]).

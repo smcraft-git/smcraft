@@ -27,7 +27,9 @@ SMCraft is back in development (it was archived in October 2026).
 - **The Course Maker**: SMM2's own maker screens (part palette and part window, styles, themes,
   timer, autoscroll, clear conditions, multigrab, stretching, test play, the Undodog and the
   rocket) with its music and the parts' sounds, and the **Coursebot** (120 slots, Save As,
-  Load, Upload). Wings and parachutes from a part's attribute balloon (hold a part still). Any course can be opened in the maker: someone else's course saves and uploads
+  Load, Upload). Wings and parachutes from a part's attribute balloon (hold a part still).
+  **Mario's Trail**: after a test play the maker shows where Mario went, faint pictures of him
+  along the way as in SMM2; the left column's button switches it on and off. Any course can be opened in the maker: someone else's course saves and uploads
   as a new course, "based on <code> by <maker>".
 - **Super Worlds**: play a Super World (its map, lives, progress), made from your library or
   downloaded from TGRCode.

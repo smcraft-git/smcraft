@@ -50,6 +50,8 @@ pub struct Game {
     /// The night darkness's tables and this frame's lights.
     dark_tables: mmk_host::darkness::DarknessTables,
     dark: Option<mmk_host::darkness::DarkFrame>,
+    /// Textures decoded for the Course Maker's trail snapshots.
+    snapshots: mmk_host::icon::Decoded,
 }
 
 impl Game {
@@ -111,6 +113,7 @@ impl Game {
             shadow: None,
             dark_tables: Default::default(),
             dark: None,
+            snapshots: Default::default(),
         }
     }
 
@@ -179,6 +182,20 @@ impl Game {
             height: i.height,
             rgba: i.rgba,
         })
+    }
+
+    /// Mario's Trail: a picture of player 1 as drawn now and the world rectangle it shows.
+    pub fn player_snapshot(&mut self) -> Option<(mmk_front::Icon, [f32; 4])> {
+        let (i, area) =
+            mmk_host::icon::player_snapshot(&self.cache, &self.session.world, &mut self.snapshots)?;
+        Some((
+            mmk_front::Icon {
+                width: i.width,
+                height: i.height,
+                rgba: i.rgba,
+            },
+            area,
+        ))
     }
 
     /// Test-play the maker's course (Enter in the editor).

@@ -48,7 +48,8 @@ sway, importer and pack 12, the dev cache already at v12).
   3b. Research queue (binary → spec → code), each an agent's task: stacking's tower rules and
      `Tower_stack` (maker C11); the maker's Water Level mode (`L_WaterLevelBtn_00`, mode banner
      "Water / Poison / Lava Level"; fixed / rising and the speed — not in the text, likely
-     markers in the course), custom scroll nodes, Mario's Trail (`L_ZanzoBtn_00`), the trash can
+     markers in the course), custom scroll nodes, ✅ Mario's Trail (`L_ZanzoBtn_00`, 2026-10-24:
+     maker C12 — 40 snapshots of player 1, one per 22 px of travel; built), the trash can
      (`L_TrashCan_00`: UIEditMainPage part 8 at +0x800, set up in 0x71018cee20; `part(i)`
      0x71018fc060 is virtual; placed from code, the pane sits at 0,0; Act 45 plays
      `se_ui_edit_trash` + `SE_DropErase`; where it shows: one Ryujinx look when the slot is free);
@@ -234,8 +235,19 @@ sway, importer and pack 12, the dev cache already at v12).
     inside" balloon with its dummy wings / parachute, wings on the NSMBU / 3D World models
     (their own textures; SMB1 art stands in), parts that drop wings / parachute with their
     other form (vtables not resolved), winged Bill Blasters in play
+  - ✅ Mario's Trail (2026-10-24; `research/specs/maker.md` C12, from the v3.0.3 binary: the
+    game's `SnapshotTextureMgr`): during test play a picture of player 1 each time it is more
+    than 22 px from the last (none below the area's bottom), at most 40, each the 160 × 64 px
+    round the feet (`Host::player_snapshot`: the hosts copy the player's sprite out of its
+    texture); back in the maker the short / screen-bound part is trimmed as the game does
+    (ends < 128 px apart: last 12; 27 within a screen: those), then they come in one every 2
+    ticks, oldest first, alpha 0.3 → 0.7, under the grid. Emptied by a new test play, an area
+    change (in play or the maker) and a style / theme change, kept through edits. The left
+    column's `L_ZanzoBtn_00` (Check = on, `se_ui_edit_open_ringmenu`, `yr_Delay_01` switched
+    on) toggles it, kept as `maker.trail`. ⬜ 3D World's model player (no 2D art: no pictures),
+    what Mario holds / rides in the picture, the maker following Mario to the area he ended in
   - ⬜ custom autoscroll and its nodes, water level, the part variants balloon (Fast Conveyor …), tracks / doors' partners placed
-    by hand, the trash can, Mario's Trail, co-op making
+    by hand, the trash can, co-op making
   - ✅ the vertical scroll bar for vertical sub-areas (`N_SlideBarV_00`: its handle by the view's
     height, pressed / dragged to scroll; captures `maker-vertical`, `maker-subarea`)
   - ✅ the sub-area's orientation window (`Edit_SubAreaWindow_00`: Horizontal / Vertical) when

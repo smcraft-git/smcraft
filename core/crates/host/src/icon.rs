@@ -101,7 +101,16 @@ pub fn part_icon(cache: &Cache, style: &str, part: i16, flags: u32) -> Option<Ic
     let scale = 3.0;
     let (w, h) = (((x1 - x0) * scale) as u32, ((y1 - y0) * scale) as u32);
     let mut rgba = vec![0u8; (w * h * 4) as usize];
-    let any = blit(cache, &sprites, [x0, y0, x1, y1], scale, (w, h), &mut rgba);
+    let mut decoded = Decoded::default();
+    let any = blit(
+        cache,
+        &sprites,
+        [x0, y0, x1, y1],
+        scale,
+        (w, h),
+        &mut rgba,
+        &mut decoded,
+    );
     if !any {
         return None;
     }
@@ -124,6 +133,51 @@ pub fn part_icon(cache: &Cache, style: &str, part: i16, flags: u32) -> Option<Ic
     })
 }
 
+/// Mario's Trail: player 1 as the engine draws it now, the way the game's `SnapshotTextureMgr`
+/// renders the player into one of its snapshot textures (research/specs/maker.md C12, private):
+/// the rectangle from 80 px left to 80 px right of the player's feet and from 12 px below them to
+/// 52 above (3D World 24 / 4 / 44) [obs 0x710158de40], 2 px per world px, nothing but the player.
+/// Returns the picture (rows top first) and that rectangle (x0, y0, x1, y1, world px, y up); None
+/// when the player isn't drawn or has no 2D art.
+pub fn player_snapshot(
+    cache: &Cache,
+    world: &mmk_sim::World,
+    decoded: &mut Decoded,
+) -> Option<(Icon, [f32; 4])> {
+    let sp = world.player_sprite()?;
+    let style = world.level.style.clone();
+    let d = SpriteResolver::default().resolve_one(&style, &sp, cache);
+    let (px, py) = (world.player.x, world.player.y);
+    let (side, below, above) = if style == "3W" {
+        (24.0, 4.0, 44.0)
+    } else {
+        (80.0, 12.0, 52.0)
+    };
+    let area = [px - side, py - below, px + side, py + above];
+    let scale = 2.0;
+    let (w, h) = (
+        ((area[2] - area[0]) * scale) as u32,
+        ((area[3] - area[1]) * scale) as u32,
+    );
+    let mut rgba = vec![0u8; (w * h * 4) as usize];
+    if !blit(cache, &[d], area, scale, (w, h), &mut rgba, decoded) {
+        return None;
+    }
+    Some((
+        Icon {
+            width: w,
+            height: h,
+            rgba,
+        },
+        area,
+    ))
+}
+
+/// Textures decoded for [`blit`] (by asset-cache index; None: not decodable), kept by a caller
+/// that draws often.
+#[derive(Default)]
+pub struct Decoded(std::collections::HashMap<u32, Option<(u32, u32, Vec<u8>)>>);
+
 /// Draw `sprites` (world px, y up) into an RGBA canvas of `size` showing world rectangle
 /// `area` (x0, y0, x1, y1) at `scale` px per world px, nearest texels, alpha over what is
 /// there. True if any pixel was drawn.
@@ -134,10 +188,9 @@ fn blit(
     scale: f32,
     (w, h): (u32, u32),
     rgba: &mut [u8],
+    decoded: &mut Decoded,
 ) -> bool {
     let [x0, y0, x1, y1] = area;
-    let mut decoded: std::collections::HashMap<u32, Option<(u32, u32, Vec<u8>)>> =
-        Default::default();
     let mut any = false;
     for s in sprites {
         let Some(t) = s.texture else { continue };
@@ -145,6 +198,7 @@ fn blit(
             continue;
         }
         let tex = decoded
+            .0
             .entry(t)
             .or_insert_with(|| {
                 let m = cache.texture(t as usize)?;
@@ -226,6 +280,7 @@ pub fn course_view(cache: &Cache, course: &mmk_formats::smm2::Course) -> Icon {
         1.0,
         (w, h),
         &mut rgba,
+        &mut Decoded::default(),
     );
     Icon {
         width: w,
