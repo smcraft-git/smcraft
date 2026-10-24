@@ -1167,7 +1167,12 @@ impl Sounds {
                             "wallkick"
                         }
                     } else if p.spinning {
-                        "spinjump"
+                        // 3D World names its spin jump by where it starts (from the ground here)
+                        if self.has_player_key("spinjump") {
+                            "spinjump"
+                        } else {
+                            "spinjump_Ground"
+                        }
                     } else {
                         "jump"
                     };
@@ -1177,6 +1182,16 @@ impl Sounds {
                     )];
                     if !self.player_sfx(world, key, &count) && key != "jump" {
                         self.player_sfx(world, "jump", &count);
+                    }
+                    // the character's voice for a wall kick / a spin jump (NSMBU, 3D World)
+                    match key {
+                        "kabekick" | "wallkick" => {
+                            self.player_sfx(world, "voice_kabekick", &[]);
+                        }
+                        "spinjump" | "spinjump_Ground" => {
+                            self.player_sfx(world, "voice_spinjump", &[]);
+                        }
+                        _ => {}
                     }
                     // the voice of a chained jump (NSMBU 2nd / 3rd, 3D World 3rd) [inf: the
                     // keys' names; the code playing them was not found]

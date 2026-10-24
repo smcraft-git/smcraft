@@ -80,7 +80,9 @@ fn db() -> serde_json::Value {
                 asset("footstep_Dash", "DashStep"),
                 asset("r_get_met", "HelmetOn"),
                 asset("r_get_togemet", "SpikyHelmetOn"),
-                asset("r_lose_met", "HelmetOff")
+                asset("r_lose_met", "HelmetOff"),
+                asset("spinjump_Ground", "SpinGround"),
+                asset("voice_spinjump", "SpinVoice")
             ]},
             "M1_JumpStep": {"calls": [asset("jump", "Spring"), asset("high_jump", "SpringHigh")]},
             "M1_PowBlock": {"calls": [asset("pow", "Pow")]},
@@ -399,6 +401,18 @@ fn a_conveyor_on_screen_runs_its_loop_once() {
     assert_eq!(r.played(), ["sfx:BeltLoop"]);
     r.s.after_step(&w);
     assert!(r.played().is_empty(), "still running, not restarted");
+}
+
+#[test]
+fn a_spin_jump_named_by_where_it_starts_and_its_voice() {
+    let mut r = rig();
+    let mut w = world();
+    r.s.start_course(&w);
+    r.played();
+    w.player.spinning = true;
+    w.events = vec![Event::Jump];
+    r.s.after_step(&w);
+    assert_eq!(r.played(), ["sfx:SpinGround", "sfx:SpinVoice"]);
 }
 
 #[test]
