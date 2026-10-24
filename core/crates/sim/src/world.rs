@@ -2064,18 +2064,22 @@ impl World {
             self.drive_koopa_car(input);
         } else if self.clear_pipe_player() {
             // in a clear pipe: the traveller carries the player (DrawDokanMove)
+            self.player.hold_buttons(input);
         } else if std::mem::take(&mut self.change_done) {
             // (its update this frame was the form change's last)
+        } else if self.clear_pipe_entry(input, true) {
+            // down into a clear pipe's upward mouth: its first step is this frame's
+            self.clear_pipe_player();
         } else {
             self.pu_sense();
             self.player.twister = self.twister_receiver();
             let lifted = self.clear_pipe_lift();
-            let inp = if std::mem::take(&mut self.cpipe.out_step) {
-                Input::default()
-            } else {
-                input
-            };
-            self.player.step(inp, &self.level);
+            let out = std::mem::take(&mut self.cpipe.out_step);
+            self.player
+                .step(if out { Input::default() } else { input }, &self.level);
+            if out {
+                self.player.hold_buttons(input);
+            }
             self.clear_pipe_unlift(lifted);
         }
         if let (Some((tx, ty)), Some(c)) = (note_hole, note_cell) {
@@ -2227,7 +2231,7 @@ impl World {
                 }
             }
             if entry.is_none() {
-                self.clear_pipe_entry(input, pushing);
+                self.clear_pipe_entry(input, false);
             }
         }
         if was_ground && !self.player.on_ground && self.player.vy > 3.0 {

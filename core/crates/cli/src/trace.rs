@@ -153,7 +153,7 @@ pub fn run_all(course: &[u8], script: &[Input], start: &Start) -> Result<(String
 // Physics test courses
 
 pub const STYLES: [&str; 5] = ["M1", "M3", "MW", "WU", "3W"];
-pub const KINDS: [&str; 24] = [
+pub const KINDS: [&str; 25] = [
     "flat",
     "wall",
     "slope",
@@ -178,12 +178,13 @@ pub const KINDS: [&str; 24] = [
     "cpipe",
     "cpipeg",
     "mushstart",
+    "cpipev",
 ];
 
 /// Kinds made in SMB1 only (the terrain they test is the same in every style).
 const M1_ONLY: [&str; 2] = ["slopejoin", "mushstart"];
 /// Kinds made in 3D World only (clear pipes are a 3D World part).
-const W3_ONLY: [&str; 2] = ["cpipe", "cpipeg"];
+const W3_ONLY: [&str; 3] = ["cpipe", "cpipeg", "cpipev"];
 
 /// Where the items / form courses keep their power-up: the ? block's tile column and its row
 /// above the floor (the capture walks there first; no test script gets that far).
@@ -516,6 +517,19 @@ pub fn build_course(name: &str) -> Result<Vec<u8>, String> {
             for x in [10, 14, 18, 21] {
                 e.place(20, x, up(1)).map_err(err)?;
             }
+        }
+        "cpipev" => {
+            // clear pipes' vertical mouths: x 12..16, right 3 from a side mouth, a bend up and up
+            // 3 to an upward mouth (out on top, back in with Down, out of the side mouth); x 7–8,
+            // a pipe up 6 tiles from a downward mouth 3 tiles over the floor (in from below with
+            // Up held in a jump, out of its top)
+            floor(&mut e, 0, len - 1)?;
+            clear_pipe(&mut e, (12, 3), &[(14, 2), (15, 4), (15, 6)])?;
+            e.place_clear_pipe((8, 5), mmk_formats::smm2::clear_pipe::Dir::Up)
+                .map_err(err)?;
+            let slot = e.clear_pipes().last().map(|p| p.0).ok_or("no pipe")?;
+            e.draw_clear_pipe(slot, mmk_editor::clearpipe::PipeEnd::End, (8, 10))
+                .map_err(err)?;
         }
         "cpipeg" => {
             // a Goomba at x 22 walking left into the right mouth of a straight 8-tile pipe at

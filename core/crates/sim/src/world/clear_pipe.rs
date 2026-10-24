@@ -392,10 +392,11 @@ impl World {
     /// falling in courses of version ≥ 3, unless swimming); down: standing on an upward mouth
     /// with Down held; sideways: on the ground (or swimming), the direction held 10 frames, the
     /// wall sensor on the mouth's face (the binary's other way in, pushing the face while facing
-    /// it, wants more than a push: `_pushing` unused [?]). The probe — the head, the feet − 1, or
+    /// it, wants more than a push [?]). Down is tried `before_move` (this frame's input, last
+    /// frame's place: the ride's first step is this frame's), the others after it. The probe — the head, the feet − 1, or
     /// the body's side + 1 at 11.9 px up — must be within 7.89 px of the mouth's centre, the
     /// pipe must lead on that way and the mouth be clear. Returns whether the player went in.
-    pub(super) fn clear_pipe_entry(&mut self, inp: Input, _pushing: bool) -> bool {
+    pub(super) fn clear_pipe_entry(&mut self, inp: Input, before_move: bool) -> bool {
         if self.pipe_paths().pipes.is_empty()
             || self.cpipe.player.is_some()
             || self.cpipe.left_at == Some(self.tick)
@@ -414,10 +415,10 @@ impl World {
         let probe_y = p.y + if p.crouch { 8.0 } else { SIDE_PROBE_Y };
         let mut tries: Vec<(Side, (f32, f32))> = Vec::new();
         let falling_block = version >= 3 && p.vy < 0.0 && !p.in_water;
-        if inp.held(input::UP) && !falling_block {
+        if inp.held(input::UP) && !falling_block && !before_move {
             tries.push((Side::Up, (p.x, p.y + s.head_y)));
         }
-        if grounded {
+        if grounded && !before_move {
             // (the direction held 10 frames on the ground: pushing the face while facing it
             // isn't enough by itself [obs: Ryujinx trace X_cpipe: pushing a mouth's face for 9
             // frames after landing, in on the 10th held frame; the push predicate 0x71015a9d00's
@@ -430,7 +431,10 @@ impl World {
                 tries.push((Side::Left, (p.x - (s.wall_x + 1.0), probe_y)));
             }
         }
-        if p.on_ground && inp.held(input::DOWN) {
+        // (down: the frame Down is held, before the move, standing where it stood last frame
+        // [obs: Ryujinx trace X_cpipev: on an upward mouth walking, Down pressed: in and 3 px
+        // down that frame])
+        if p.on_ground && inp.held(input::DOWN) && before_move {
             tries.push((Side::Down, (p.x, p.y - 1.0)));
         }
         let radius = if version > 0 && p.form == Form::Small && swimming {
@@ -466,10 +470,10 @@ impl World {
         let t = Traveller::enter(self.pipe_paths(), k, last, (0.0, PLAYER_OFF_Y));
         let p = &mut self.player;
         p.control = Control::Demo;
-        (p.vx, p.vy) = (0.0, 0.0);
         p.crouch = false;
-        // (it stays where it stood this frame, on the ground: the ride moves it from the mouth
-        // from the next [obs: X_cpipe, 3 px past the mouth the frame after])
+        // (it stays where it stood this frame, its speeds as they were, on the ground: the ride
+        // moves it from the mouth from the next [obs: X_cpipe, 3 px past the mouth the frame
+        // after; X_cpipev_u, the speed of the jump into a mouth kept on that frame])
         self.cpipe.player = Some(PlayerRide { t, roll: 0 });
         self.cue(None, CueKind::In);
         true
@@ -566,6 +570,12 @@ impl World {
         self.cpipe.player = None;
         self.cpipe.left_at = Some(self.tick);
         self.cue(None, CueKind::Out);
+        if t.leg == Some(Leg::Up) {
+            // out on top: standing on the mouth, walking from the next frame [obs: Ryujinx trace
+            // X_cpipev: on the pipe's top that frame, the walk's own start (0.1 a frame) next]
+            self.player.on_ground = true;
+            return true;
+        }
         // the state it goes on in (Fall) runs this frame too, before any input counts [obs:
         // Ryujinx trace X_cpipe: out of a side mouth 8 px down and a fall step down that frame,
         // its speed still 0]

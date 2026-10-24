@@ -1332,6 +1332,18 @@ impl Player {
     }
 
     /// One 60 Hz tick.
+    /// Take the buttons as held this frame for the next frame's presses without an update (a
+    /// clear-pipe ride, its way out): a button held through it isn't pressed anew after it
+    /// [obs: Ryujinx trace X_cpipev: Down held from the ride into the fall out of a side mouth,
+    /// no ground pound].
+    pub fn hold_buttons(&mut self, inp: Input) {
+        self.prev_jump = inp.held(input::JUMP);
+        self.prev_run = inp.held(input::RUN);
+        self.prev_down = inp.held(input::DOWN);
+        self.prev_spin = inp.held(input::SPIN);
+        self.prev_spin_dive = inp.held(input::SPIN);
+    }
+
     pub fn step(&mut self, inp: Input, level: &Level) {
         let inp = if self.stun > 0 {
             self.stun -= 1;
