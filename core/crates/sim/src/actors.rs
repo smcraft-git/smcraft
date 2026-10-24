@@ -487,6 +487,11 @@ impl Kind {
             Kind::BanzaiBill { .. } => e::BANZAI_BILL,
             Kind::Magikoopa => e::MAGIKOOPA,
             Kind::BulletBill => e::BULLET_BILL,
+            Kind::Spike | Kind::SpikeBall { .. } => e::SPIKE,
+            Kind::Pokey { .. } => e::POKEY,
+            Kind::Mechakoopa { .. } => e::MECHAKOOPA,
+            // who: 0 Lemmy, 1 Morton, 2 Larry, 3 Wendy, 4 Iggy, 5 Roy, 6 Ludwig
+            Kind::Koopaling { who, .. } => e::KOOPALINGS[[3, 5, 0, 2, 1, 4, 6][who as usize % 7]],
             _ => return None,
         })
     }
