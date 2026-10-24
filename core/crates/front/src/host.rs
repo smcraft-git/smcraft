@@ -425,6 +425,9 @@ pub trait Host {
     fn challenge_courses(&mut self) -> Vec<CourseEntry> {
         Vec::new()
     }
+    /// Start fetching a server course in the background (an opened Course World row), so
+    /// loading it later doesn't wait on the network. Library courses: nothing to do.
+    fn prefetch_course(&mut self, _source: &Source) {}
     /// Load a course into the engine (a library file, or a server course: download it).
     fn load_course(&mut self, source: &Source) -> Result<LoadedCourse, String>;
     /// How many title demo courses there are; load one (false: unreadable).

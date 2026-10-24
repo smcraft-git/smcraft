@@ -484,6 +484,16 @@ impl Host for FfiHost {
         true
     }
 
+    fn prefetch_course(&mut self, source: &Source) {
+        // TGRCode's client keeps what it fetched (memory and disk): the load reads it from there
+        if let (Source::Server(code), Backend::TgrCode(t)) = (source, &self.backend) {
+            let (t, code) = (t.clone(), code.clone());
+            std::thread::spawn(move || {
+                let _ = t.data(&code);
+            });
+        }
+    }
+
     fn request_thumbnail(&mut self, code: &str, entire: bool) -> bool {
         if !self.backend.online() {
             return false;

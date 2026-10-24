@@ -524,6 +524,16 @@ impl Host for ShellHost<'_> {
         true
     }
 
+    fn prefetch_course(&mut self, source: &Source) {
+        // TGRCode's client keeps what it fetched (memory and disk): the load reads it from there
+        if let (Source::Server(code), Backend::TgrCode(t)) = (source, &self.data.backend) {
+            let (t, code) = (t.clone(), code.clone());
+            std::thread::spawn(move || {
+                let _ = t.data(&code);
+            });
+        }
+    }
+
     fn poll_thumbnail(&mut self) -> Option<(String, bool, Vec<u8>)> {
         self.data.thumbs.as_ref()?.1.try_recv().ok()
     }

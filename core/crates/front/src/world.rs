@@ -324,6 +324,8 @@ pub struct CourseListScene {
     pub button: usize,
     busy_until: i32,
     pending: Option<(ListEvent, i32)>,
+    /// A row just opened: its course, for the host to fetch ahead of Play.
+    prefetch: Option<Source>,
     pub variant: ListVariant,
     name: &'static str,
     /// A maker's profile: the server call bringing their courses.
@@ -420,6 +422,7 @@ impl CourseListScene {
             button: 0,
             busy_until: 0,
             pending: None,
+            prefetch: None,
             variant,
             name,
             source_call: None,
@@ -1053,6 +1056,7 @@ impl CourseListScene {
         self.open = on;
         self.button = 0;
         if on {
+            self.prefetch = Some(self.courses[self.selection as usize].source.clone());
             // the open row on the middle line: it grows 180 up and down, over its neighbours,
             // and stays inside the list's scissor [inf]
             let mid = self.selection - 1;
@@ -1676,6 +1680,9 @@ impl WorldFlow {
                     }
                 }
                 take_source(s, cx);
+                if let Some(src) = s.prefetch.take() {
+                    cx.host.prefetch_course(&src);
+                }
                 let variant = s.variant;
                 match s.step(&input.ui, &mut self.script)? {
                     ListEvent::Back => {
@@ -2105,6 +2112,27 @@ mod tests {
     use crate::Saves;
     use crate::online::{Account, Online};
     use crate::play::tests::{MockHost, with_online};
+
+    #[test]
+    fn an_opened_row_asks_the_host_to_fetch_its_course() {
+        let Some(ui) = crate::testing::smm2() else {
+            return;
+        };
+        let mut s = CourseListScene::new(&ui).unwrap();
+        let mut c = WorldCourse::library(
+            &CourseEntry::default(),
+            &crate::host::CourseRecord::default(),
+        );
+        c.source = Source::Server("ABC-DEF-GHJ".into());
+        s.set_courses(vec![c], false);
+        s.toggle(true);
+        assert_eq!(
+            s.prefetch.take(),
+            Some(Source::Server("ABC-DEF-GHJ".into()))
+        );
+        s.toggle(false);
+        assert_eq!(s.prefetch, None, "closing fetches nothing");
+    }
 
     #[test]
     fn server_listing_fields() {

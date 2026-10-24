@@ -102,7 +102,8 @@ sway, importer and pack 12, the dev cache already at v12).
   tags and the record holder / first clearer, comments (text ones), the maker's profile with
   their uploads; the hub's ID button (course ID → the course, maker ID → the profile; typed into
   the comment window)
-- ⬜ Play without a pause: the download blocks a tick while it runs (the cache makes it once)
+- ✅ Play without a pause: an opened row's course is fetched in the background (`Host::prefetch_course`;
+  TGRCode's client caches it), so Play loads from the cache
 - ⬜ Popular across difficulties / TGRCode's sort options; more than 20 New courses (paging)
 - ⬜ Leaderboards / Ninji where TGRCode has data; Super Worlds screens (G5; the client has
   `super_world`)
