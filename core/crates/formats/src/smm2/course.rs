@@ -33,7 +33,9 @@ record! {
         creation_id: u32 = 0x24,
         upload_id: u64 = 0x28,
         clear_check_game_version: u32 = 0x30,
-        unk_f0: u8 = 0xF0,
+        // the sound effect put on Mario at the start (`NO_SOUND_EFFECT` none): the maker's
+        // player object's effect, written here by the course writer [obs v3.0.3 0x7100fde2c0]
+        player_sound_effect: u8 = 0xF0,
         game_style: Ascii<3> = 0xF1,
         name: Utf16<0x21> = 0xF4,
         description: Utf16<0x65> = 0x136,
@@ -105,7 +107,30 @@ impl CourseObject {
     }
 }
 
-record! { pub struct SoundEffect, 4, Little, { id: u8 = 0, x: u8 = 1, y: u8 = 2 } }
+record! {
+    /// A sound effect put on an empty spot (research/specs/sound-effect-parts.md, private): the
+    /// effect's course id (0–55, `Otoasobi<id>`), the tile it sits on (x from the area's left,
+    /// y from its bottom; the editor object's pixel centre ÷ 16, rounded down) and a byte the
+    /// game always writes 0 [obs v3.0.3 course writer 0x7100fde2c0].
+    pub struct SoundEffect, 4, Little, { id: u8 = 0, x: u8 = 1, y: u8 = 2 }
+}
+
+/// No sound effect: a part's `sound_effect_id` −1, the header's `player_sound_effect` 0xFF.
+pub const NO_SOUND_EFFECT: u8 = 0xFF;
+
+impl CourseHeader {
+    /// The effect on Mario at the start, if any.
+    pub fn player_effect(&self) -> Option<u8> {
+        (self.player_sound_effect != NO_SOUND_EFFECT).then_some(self.player_sound_effect)
+    }
+}
+
+impl CourseObject {
+    /// The effect put on this part, if any.
+    pub fn sound_effect(&self) -> Option<u8> {
+        u8::try_from(self.sound_effect_id).ok()
+    }
+}
 record! { pub struct GroundTile, 4, Little, { x: u8 = 0, y: u8 = 1, id: u8 = 2, background_id: u8 = 3 } }
 record! {
     pub struct Track, 0x0C, Little, {
@@ -396,7 +421,7 @@ impl Course {
         let mut c = Self::parse(&vec![0u8; COURSE_SIZE]).expect("blank course");
         c.header.timer = 300;
         c.header.game_style.set(style);
-        c.header.unk_f0 = 0xFF;
+        c.header.player_sound_effect = NO_SOUND_EFFECT;
         c.header.start_y = 1;
         c.header.goal_y = 1;
         c.header.goal_x = 2400;
@@ -426,5 +451,57 @@ impl Course {
             "header": Value::Object(self.header.fields_json()),
             "areas": [self.main.to_json(), self.sub.to_json()],
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Spots, part effects and Mario's effect survive a write and a re-read byte for byte; a
+    /// shorter spot list zeroes the freed records and the count follows the list.
+    #[test]
+    fn sound_effects_round_trip() {
+        let mut c = Course::blank("M1");
+        assert_eq!(c.header.player_effect(), None);
+        c.header.player_sound_effect = 52;
+        let rec = |id, x, y| {
+            let mut r = SoundEffect::from_slice(&[0u8; 4], 0);
+            (r.id, r.x, r.y) = (id, x, y);
+            r
+        };
+        c.main.sound_effects.items = vec![rec(0, 3, 1), rec(54, 239, 26), rec(20, 10, 0)];
+        let mut o = CourseObject::from_slice(&[0u8; 0x20], 0);
+        (o.x, o.y, o.id, o.child_id, o.link_id, o.sound_effect_id) =
+            (80 + 160 * 5, 80, 4, -1, -1, 36);
+        c.main.objects.items.push(o);
+        let bytes = c.to_bytes().unwrap();
+        let again = Course::parse(&bytes).unwrap();
+        assert_eq!(again.to_bytes().unwrap(), bytes);
+        assert_eq!(again.header.player_effect(), Some(52));
+        assert_eq!(again.main.header.sound_effect_count, 3);
+        let spots: Vec<(u8, u8, u8)> = again
+            .main
+            .sound_effects
+            .iter()
+            .map(|r| (r.id, r.x, r.y))
+            .collect();
+        assert_eq!(spots, [(0, 3, 1), (54, 239, 26), (20, 10, 0)]);
+        assert_eq!(again.main.objects.items[0].sound_effect(), Some(36));
+        // the area's record bytes: id, x, y, 0
+        let at = AREA_OFFSETS[0] + SOUND_EFFECTS.0;
+        assert_eq!(&bytes[at..at + 8], &[0, 3, 1, 0, 54, 239, 26, 0]);
+        assert_eq!(bytes[0xF0], 52);
+
+        let mut fewer = again.clone();
+        fewer.main.sound_effects.items.truncate(1);
+        fewer.main.objects.items[0].sound_effect_id = -1;
+        fewer.header.player_sound_effect = NO_SOUND_EFFECT;
+        let b2 = fewer.to_bytes().unwrap();
+        let back = Course::parse(&b2).unwrap();
+        assert_eq!(back.main.header.sound_effect_count, 1);
+        assert_eq!(&b2[at + 4..at + 12], &[0; 8]);
+        assert_eq!(back.main.objects.items[0].sound_effect(), None);
+        assert_eq!(back.header.player_effect(), None);
     }
 }

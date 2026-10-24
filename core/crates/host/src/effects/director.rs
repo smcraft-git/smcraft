@@ -184,6 +184,8 @@ pub struct EffectDirector {
     coins: u32,
     coins_known: bool,
     in_water: bool,
+    /// The course's placed sound effects (their pictures: the effect user's `cue`).
+    sound_parts: Option<mmk_sim::otoasobi::SoundParts>,
 }
 
 impl EffectDirector {
@@ -414,7 +416,9 @@ impl EffectDirector {
             self.held.clear();
             self.seen.clear();
             self.coins_known = false;
+            self.sound_parts = None;
         }
+        let fresh = self.last_tick == 0 || self.sound_parts.is_none();
         self.last_tick = world.tick;
         if self.lib.is_empty() {
             return;
@@ -424,6 +428,7 @@ impl EffectDirector {
         for fx in cues {
             self.play_cue(world, &fx);
         }
+        self.sound_effect_pictures(world, fresh);
         let p = &world.player;
         let (px, py, flip) = (p.x, p.y, p.facing < 0);
         let now = Self::player_actions(world);
@@ -458,6 +463,28 @@ impl EffectDirector {
             self.held.insert(a, hs);
         }
         self.player.step();
+    }
+
+    /// The placed sound effects set off this tick: their pictures, at the effect
+    /// (`mmk_sim::otoasobi`).
+    fn sound_effect_pictures(&mut self, world: &World, fresh: bool) {
+        if fresh && world.sound_parts.any() {
+            self.sound_parts = Some(world.sound_parts.clone());
+        }
+        let Some(mut parts) = self.sound_parts.take() else {
+            return;
+        };
+        parts.step(world);
+        let variant = match world.player.form {
+            mmk_sim::player::Form::Link => mmk_sim::otoasobi::Variant::Link,
+            mmk_sim::player::Form::Smb2 => mmk_sim::otoasobi::Variant::Usa,
+            _ => mmk_sim::otoasobi::Variant::Plain,
+        };
+        for c in &parts.cues {
+            let user = mmk_sim::otoasobi::user(c.id, variant);
+            self.play_key(world, &user, "cue", c.x, c.y, false, false, None, false);
+        }
+        self.sound_parts = Some(parts);
     }
 
     /// The quads to draw this frame.

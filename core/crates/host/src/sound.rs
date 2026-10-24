@@ -31,6 +31,8 @@ use mmk_sim::player::Form;
 use mmk_sim::world::{Event, GoalPhase};
 
 use crate::costume_sound::{CostumeReader, CostumeSounds};
+
+mod otoasobi;
 use crate::sound_map::{self as map, THEME_VALUES, bgm_key};
 
 /// Reads a file of the cache's `audio/` folder by its relative path (`se/x.bwav`).
@@ -201,6 +203,8 @@ pub struct Sounds {
     pipe_loops: BTreeMap<u32, u32>,
     /// The worn SMM1 costume's sounds (Phase 11).
     costume: CostumeSounds,
+    /// The course's placed sound effects (sound/otoasobi.rs).
+    oto: otoasobi::OtoState,
     /// What the last tick played (for tests and diagnostics): user, key.
     pub log: Vec<(String, String)>,
 }
@@ -258,6 +262,7 @@ impl Sounds {
             pipe_loop: false,
             pipe_loops: BTreeMap::new(),
             costume: CostumeSounds::default(),
+            oto: Default::default(),
             log: Vec::new(),
         }
     }
@@ -862,8 +867,16 @@ impl Sounds {
         }
     }
 
-    /// The theme track from the top, or where it was if it is the same track.
+    /// The theme track from the top, or where it was if it is the same track; a music effect
+    /// in its place (sound/otoasobi.rs).
     fn course_music(&mut self) {
+        if let Some((user, key)) = self.oto_music_key()
+            && self.play_music_of(&user, key, 0, None)
+        {
+            self.track = None;
+            self.over = Over::None;
+            return;
+        }
         let key = self.theme_key();
         let start = match self.saved.take() {
             Some((k, frame)) if k == key => frame / RESUME_ALIGN * RESUME_ALIGN,
@@ -997,6 +1010,7 @@ impl Sounds {
             frames: 0,
         });
         self.set_area_audio(world);
+        self.oto_start(world);
         self.course_music();
     }
 
@@ -1265,6 +1279,7 @@ impl Sounds {
         self.observe_objects(world);
         self.observe_chara(world);
         self.end_pipe_loops(world);
+        self.oto_step(world);
 
         let pe = Self::player_emitter(world);
         let events = world.events.clone();
@@ -1525,6 +1540,10 @@ impl Sounds {
                     self.hurry = true;
                     self.saved = None;
                     match self.over {
+                        // a music effect goes on in its hurry version
+                        Over::None if !self.fanfare && self.oto_music_key().is_some() => {
+                            self.course_music();
+                        }
                         Over::None if !self.fanfare => {
                             let key = self.theme_key();
                             if !self.play_music("BGM_Hurry", 0, Some(&key)) {

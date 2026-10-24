@@ -114,6 +114,19 @@ fn db() -> serde_json::Value {
             ]},
             "M1_EnmyFire": {"calls": [asset("r_appear_title", "Magic")]},
             "M1_EditKuribo": {"calls": [asset("set", "EditSet"), asset("drag", "EditDrag")]},
+            // placed sound effects: Shock, Boss Music, Heartbeat
+            "Otoasobi00": {"calls": [asset("cue", "OtoShock")]},
+            "Otoasobi09": {"calls": [
+                {"key": "cue"},
+                asset("cue_bgm", "OtoBossDay"),
+                asset("cue_bgm_hurry", "OtoBossHurryDay")
+            ]},
+            "Otoasobi09_Link": {"calls": [
+                {"key": "cue"},
+                asset("cue_bgm", "OtoLinkBossDay"),
+                asset("cue_bgm_hurry", "OtoLinkBossHurryDay")
+            ]},
+            "Otoasobi10": {"calls": [asset("cue", "OtoHeart")]},
             "MyWorldScene": {"calls": [
                 asset("BGM_WorldMap_Plain_Play", "MapPlain"),
                 asset("BGM_WorldMap_Night_Play", "MapNight"),
@@ -788,4 +801,69 @@ fn the_imported_super_world_map_sounds_play() {
         assert!(s.map_sound(user, key, anim, point), "{user} {key}");
         assert!(plays(&rx) >= 1, "{user} {key}");
     }
+}
+
+/// A course whose Mario carries `player` and with spots `spots` (id, tile x, tile y).
+fn sound_parts(player: u8, spots: &[(u8, u8, u8)]) -> mmk_sim::otoasobi::SoundParts {
+    use mmk_formats::record::Record;
+    let mut c = mmk_formats::smm2::Course::blank("M1");
+    c.header.player_sound_effect = player;
+    c.main.sound_effects.items = spots
+        .iter()
+        .map(|&(id, x, y)| {
+            let mut r = mmk_formats::smm2::SoundEffect::from_slice(&[0; 4], 0);
+            (r.id, r.x, r.y) = (id, x, y);
+            r
+        })
+        .collect();
+    mmk_sim::otoasobi::SoundParts::new(&c)
+}
+
+#[test]
+fn placed_sound_effects_play_their_sounds_and_music() {
+    let mut r = rig();
+    let mut w = world();
+    let (tx, ty) = ((w.player.x / 16.0) as u8, (w.player.y / 16.0) as u8);
+    // Mario's Boss Music from the start, a Shock where he stands
+    w.sound_parts = sound_parts(9, &[(0, tx, ty)]);
+    r.s.start_course(&w);
+    assert_eq!(r.played(), ["layer:0", "music:PlainDay"]);
+    w.tick += 1;
+    r.s.after_step(&w);
+    assert_eq!(r.played(), ["sfx:OtoShock", "music:OtoBossDay"]);
+    // standing in the spot: once
+    w.tick += 1;
+    r.s.after_step(&w);
+    assert!(r.played().is_empty());
+    // hurry-up: the effect's hurry version
+    w.tick += 1;
+    w.events = vec![Event::Hurry];
+    r.s.after_step(&w);
+    assert_eq!(r.played(), ["music:OtoBossHurryDay"]);
+    w.events.clear();
+    // Link's version after a restart
+    w.player.form = Form::Link;
+    r.s.start_course(&w);
+    r.played();
+    w.tick += 1;
+    r.s.after_step(&w);
+    let p = r.played();
+    assert_eq!(
+        p.last().map(String::as_str),
+        Some("music:OtoLinkBossDay"),
+        "{p:?}"
+    );
+}
+
+#[test]
+fn an_ambient_effect_sounds_over_the_course_music() {
+    let mut r = rig();
+    let mut w = world();
+    w.sound_parts = sound_parts(10, &[]);
+    r.s.start_course(&w);
+    r.played();
+    w.tick += 1;
+    r.s.after_step(&w);
+    // the heartbeat; the theme track goes on
+    assert_eq!(r.played(), ["sfx:OtoHeart"]);
 }
