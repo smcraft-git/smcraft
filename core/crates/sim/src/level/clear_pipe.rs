@@ -6,11 +6,15 @@
 //! with the mouth's rim, `dokan_tomei_curve00_model` a 2 × 2 bend) [obs RomFS]. The models
 //! stand along y: the unit and the mouth are 32 px across (x ±16) and a tile long (y ±8), the
 //! mouth opening toward +y; the bend's openings face −x and −y (x, y ±16) [obs: their
-//! vertices]. Which piece each tile gets and its turn are ours from that geometry [inf]; the
-//! walls' collision and the ride through the pipe are not built yet.
+//! vertices]. Which piece each tile gets and its turn are ours from that geometry [inf].
+//!
+//! In play the pipe is solid terrain over every tile it covers, and its traveller path is a list
+//! of points the game builds from the nodes (`path_points`); the ride is crate::clear_pipe.
 
 use mmk_formats::smm2::clear_pipe::{Dir, Piece, Shape};
-use mmk_formats::smm2::course::Area;
+use mmk_formats::smm2::course::{Area, ClearPipe};
+
+use super::{Cell, Level};
 
 /// The model a piece draws.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -157,6 +161,117 @@ pub fn pieces(s: &Shape) -> Vec<ClearPipeDraw> {
         }
     }
     out
+}
+
+/// The points a clear pipe's traveller follows, the game's way (the area's path table,
+/// 0x7100e5a230 [obs v3.0.3]): a node's tile becomes its centre (16·x + 8, 16·y + 8) and each
+/// node writes the points at its index k and k + 1 — the first run (type 0) the outer edge of the
+/// start mouth, on the pipe's centre line; a bend (3–10) its entry and exit, the middles of the
+/// two sides it joins (16 px from its corner, so the traveller's arc has radius 16); the last
+/// run (1) the outer edge of the end mouth at k + 1; a single run (2) both. Middle runs (11)
+/// write nothing: they are the segment between two bends. The count is the last run's k + 2
+/// (at most 72 points).
+pub fn path_points(p: &ClearPipe) -> Vec<(f32, f32)> {
+    const MAX: usize = 72;
+    let nodes = &p.nodes.items;
+    let mut pts = vec![(0.0, 0.0); (nodes.len() + 1).min(MAX)];
+    let mut count = 0;
+    let mut put = |k: usize, at: (f32, f32)| {
+        if let Some(slot) = pts.get_mut(k) {
+            *slot = at;
+        }
+    };
+    for (k, n) in nodes.iter().enumerate() {
+        let (x, y) = (n.x as f32 * 16.0 + 8.0, n.y as f32 * 16.0 + 8.0);
+        let len = n.height as f32 * 16.0;
+        // the start mouth's edge: the run's base tile's outer corner, on the centre line
+        let start = |dir: u8| match dir {
+            0 => Some((x - 8.0, y - 8.0)),
+            1 => Some((x + 8.0, y + 8.0)),
+            2 => Some((x + 8.0, y - 8.0)),
+            3 => Some((x - 8.0, y + 8.0)),
+            _ => None,
+        };
+        let along = |(sx, sy): (f32, f32), dir: u8| match dir {
+            0 => (sx + len, sy),
+            1 => (sx - len, sy),
+            2 => (sx, sy + len),
+            _ => (sx, sy - len),
+        };
+        match n.r#type {
+            0 => {
+                if let Some(s) = start(n.direction) {
+                    put(k, s);
+                }
+            }
+            1 | 2 => {
+                if let Some(s) = start(n.direction) {
+                    if n.r#type == 2 {
+                        put(k, s);
+                    }
+                    put(k + 1, along(s, n.direction));
+                }
+                count = k + 2;
+            }
+            // bends: entry, then exit (bottom-left tile at (x, y), the 2 × 2 box's sides)
+            3 | 4 => {
+                put(k, (x - 8.0, y + 8.0));
+                put(
+                    k + 1,
+                    (x + 8.0, if n.r#type == 3 { y - 8.0 } else { y + 24.0 }),
+                );
+            }
+            5 | 6 => {
+                put(k, (x + 24.0, y + 8.0));
+                put(
+                    k + 1,
+                    (x + 8.0, if n.r#type == 5 { y - 8.0 } else { y + 24.0 }),
+                );
+            }
+            7 | 8 => {
+                put(k, (x + 8.0, y - 8.0));
+                put(
+                    k + 1,
+                    (if n.r#type == 7 { x - 8.0 } else { x + 24.0 }, y + 8.0),
+                );
+            }
+            9 | 10 => {
+                put(k, (x + 8.0, y + 24.0));
+                put(
+                    k + 1,
+                    (if n.r#type == 9 { x - 8.0 } else { x + 24.0 }, y + 8.0),
+                );
+            }
+            _ => {}
+        }
+    }
+    pts.truncate(count.min(MAX));
+    pts
+}
+
+/// The traveller paths of an area's clear pipes, in slot order (live slots: a node count above
+/// zero, as the game reads them).
+pub fn area_paths(area: &Area) -> Vec<Vec<(f32, f32)>> {
+    area.clear_pipes
+        .slots
+        .values()
+        .filter(|p| !p.nodes.items.is_empty())
+        .map(path_points)
+        .filter(|pts| pts.len() >= 2)
+        .collect()
+}
+
+/// The walls: every tile a clear pipe covers is solid (BgUnit group 24, one segment per node,
+/// course-loading.md §1.4); the open ends are the mouths' outer faces, which the game's sensors
+/// report with their own collision kind (0x116 on a wall, 0x16 on a floor or ceiling [obs v3.0.3
+/// 0x71015e7840, 0x71012100e0]) — here the entry tests find them from the path's end points
+/// (crate::clear_pipe). The cells are the tiles' full squares, bends too [inf].
+pub fn add_walls(level: &mut Level, area: &Area) {
+    for s in area.clear_pipes.slots.values().filter_map(Shape::decode) {
+        for (tx, ty) in s.tiles() {
+            level.set(tx, ty, Cell::Solid);
+        }
+    }
 }
 
 /// The pieces of every clear pipe of an area (records that make no shape are left out).

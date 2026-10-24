@@ -136,6 +136,7 @@ pub fn costume_sprite(p: &crate::player::Player, layer: u32, tick: u64) -> crate
         flip_x: p.facing < 0,
         flip_y: false,
         layer,
+        roll: 0.0,
     }
 }
 

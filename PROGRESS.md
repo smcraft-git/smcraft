@@ -469,8 +469,7 @@ sway, importer and pack 12, the dev cache already at v12).
     area, nothing in its tiles; records encoded byte for byte (all 208 sample pipes); drawn
     with `3W_Object_dokan_tomei` (unit / top / curve00, turned) in the maker and play; capture
     `maker-clearpipe --style 3W` · ⬜ the Clear Pipe's palette icon (no 2D art: the icon
-    renderer has no meshes), its collision and the ride through it in play (the sim draws it
-    only), junctions, multigrab of clear pipes; Lakitu's Cloud isn't a part of its own (no name
+    renderer has no meshes), multigrab of clear pipes (✅ the ride in play: Phase 9, 2026-10-25); Lakitu's Cloud isn't a part of its own (no name
     in the game's part list: it comes with Lakitu, parts go into it)
   - ✅ tracks (2026-10-24): the Track part in Gizmos; a press lays a horizontal piece, dragging
     draws on from its end, 2 tiles a piece, 8 ways [inf: the gesture]; a part that rides tracks
@@ -1418,6 +1417,24 @@ a portable Rust shell runs the game everywhere, the Swift app stays as the Apple
   flight, the horned Ant Trooper's top; what is left is listed in DECISIONS.md
   - ⬜ Hook `World::w3_charvaarghs` into `World::step` (several Charvaarghs' turns and spacing);
     Piranha Creeper stalk as solid terrain, block bumps trampling the head
+- ✅ Clear Pipes play (2026-10-25, branch `clearpipe2`; research objects/93-clear-pipe.md, all v3.0.3):
+  the walls (every pipe tile solid), the game's point paths (0x7100e5a230), the traveller (3.0 px/f
+  for everyone, 10°/f bends of radius 16, 8 px past the far mouth, pipes joined end to end ridden as
+  one, a blocked exit pauses 5 frames and turns back: 0x7100d86d90 / 0x7100d87a50), the player's
+  DrawDokanMove (entries: the direction held 10 frames or pushing a side mouth, Down on an upward
+  mouth, Up under a downward one, 7.89 px; rolled ±90° on vertical legs, set down by half the body out
+  of a side mouth, stoops if there is no room; 0x71015aa8c0, 0x71015afe50 / 0x71015b0300 /
+  0x71015b0d40), enemies' and items' DrawDokan (walked into a side mouth, 16 px; the EnemyDB rows'
+  offset y / rotate type / out type; out at 4 px/f easing to 0.5, 10 frames, re-entry 16 px ahead;
+  0x71012100e0, cDrawDokan 0x71028b3d20), the sounds `route_dokan_in` / `_move` / `_out`, riders
+  drawn in front, rolled (Sprite.roll) or at 66 % (items); the blocked tests (the player's: room
+  for the body, 0x71015acf60; enemies': 14 px rays, a mouth just ahead is no block); the pipes
+  render again in the maker and play (their materials' colour combiner came out fully transparent:
+  a pale glass stand-in for the game's own clear-pipe shader, host `clear_pipe_glass` [inf]) ·
+  ⬜ the block rays' terrain filters, the BgUnit's own mouth faces (full tiles here), the game's
+  clear-pipe shader (fresnel / refraction), the in-pipe player scale table, carrying / Yoshi / boxes through pipes, multiplayer screen
+  edges, the Screw spin about the vertical (not drawn); captures: `research/specs/objects/
+  93-clear-pipe.md` "How to verify"
 - ✅ Fire Bars, Burners, airship Cannons and Bill Blasters on tracks: a carrier actor rides the
   track as the moving solid and the fixed object follows it — sample 550/550 by the coverage check
 - ⚠️ The 550-course sample dates from June 2019 (game versions 1–3, before the 2.0/3.0 updates),

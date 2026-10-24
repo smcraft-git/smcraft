@@ -11,6 +11,7 @@ pub mod blocks;
 pub mod camera;
 pub mod checksum;
 pub mod clear;
+pub mod clear_pipe;
 pub mod exclamation;
 pub mod fmath;
 pub mod fx;

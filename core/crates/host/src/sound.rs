@@ -73,6 +73,8 @@ const H_AMBIENT: u32 = 2;
 const H_CONVEYOR: u32 = 3;
 /// The player's slide down a wall (NSMBU, 3D World).
 const H_WALLSLIP: u32 = 4;
+/// The player's clear-pipe ride loop (`route_dokan_move`).
+const H_CLEARPIPE: u32 = 5;
 const H_FIRST_FREE: u32 = 16;
 /// The maker's music fades out over this many frames (60 fps) [inf].
 const EDIT_MUSIC_FADE: f32 = 10.0;
@@ -194,6 +196,9 @@ pub struct Sounds {
     /// The conveyor loop playing: Some(fast) (3D World).
     conveyor: Option<bool>,
     burning: [bool; 2],
+    /// Clear-pipe ride loops playing: the player's, and actors' (actor id → handle).
+    pipe_loop: bool,
+    pipe_loops: BTreeMap<u32, u32>,
     /// The worn SMM1 costume's sounds (Phase 11).
     costume: CostumeSounds,
     /// What the last tick played (for tests and diagnostics): user, key.
@@ -250,6 +255,8 @@ impl Sounds {
             blink_alt: false,
             conveyor: None,
             burning: [false; 2],
+            pipe_loop: false,
+            pipe_loops: BTreeMap::new(),
             costume: CostumeSounds::default(),
             log: Vec::new(),
         }
@@ -1257,6 +1264,7 @@ impl Sounds {
         self.observe_blocks(world);
         self.observe_objects(world);
         self.observe_chara(world);
+        self.end_pipe_loops(world);
 
         let pe = Self::player_emitter(world);
         let events = world.events.clone();
@@ -1601,6 +1609,7 @@ impl Sounds {
                 Event::Wearing => _ = self.player_sfx(world, "Wearing", &[]),
                 Event::HeadDressOff => _ = self.player_sfx(world, "HeadDressOff", &[]),
                 Event::KillerBreak => _ = self.player_sfx(world, "KillerBreak", &[]),
+                Event::ClearPipe => self.clear_pipe_sounds(world),
                 Event::PropellerBox => _ = self.player_sfx(world, "PropellerFly", &[]),
                 Event::BoomerangThrow => _ = self.player_sfx(world, "fireball", &[]),
                 Event::ArrowShoot => {
@@ -2169,6 +2178,107 @@ impl Sounds {
                 }
             }
             self.burning[i] = burning;
+        }
+    }
+
+    /// Clear pipes (3D World): a rider going in plays `route_dokan_in` and starts the ride's
+    /// loop `route_dokan_move`; coming out, `route_dokan_out`. The player's are 3W_Player's
+    /// (the state cState_DrawDokanMove's in / out, the RouteDokanMove animation's loop); an
+    /// actor's its own user's, else 3W_GameObject's (cDrawDokan_In / cDrawDokan_Out) [obs data:
+    /// SLink2DB]. Each key switches on BodyWaterType (the in-water waves).
+    fn clear_pipe_sounds(&mut self, world: &World) {
+        use mmk_sim::world::ClearPipeCueKind as K;
+        for cue in world.cpipe.cues.clone() {
+            match cue.actor {
+                None => match cue.kind {
+                    K::In => {
+                        self.player_sfx(world, "route_dokan_in", &[]);
+                        let props = self.player_props(world);
+                        let user = self.user("Player");
+                        let e = Self::player_emitter(world);
+                        self.pipe_loop =
+                            self.sfx_at(world, &user, "route_dokan_move", &props, e, H_CLEARPIPE);
+                    }
+                    K::Out => {
+                        self.stop_pipe_loop(None);
+                        self.player_sfx(world, "route_dokan_out", &[]);
+                    }
+                },
+                Some(id) => {
+                    let Some(a) = world.actors.iter().find(|a| a.id == id) else {
+                        continue;
+                    };
+                    let (kind, x, y) = (a.kind, a.x, a.y);
+                    match cue.kind {
+                        K::In => {
+                            self.pipe_actor_sfx(world, kind, "route_dokan_in", x, y, 0);
+                            let h = self.next_handle();
+                            if self.pipe_actor_sfx(world, kind, "route_dokan_move", x, y, h) {
+                                self.pipe_loops.insert(id, h);
+                            }
+                        }
+                        K::Out => {
+                            self.stop_pipe_loop(Some(id));
+                            self.pipe_actor_sfx(world, kind, "route_dokan_out", x, y, 0);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// An actor's clear-pipe key: its own user, else the style's GameObject.
+    fn pipe_actor_sfx(
+        &mut self,
+        world: &World,
+        kind: Kind,
+        key: &str,
+        x: f32,
+        y: f32,
+        h: u32,
+    ) -> bool {
+        let e = Emitter {
+            x,
+            y,
+            water: self.in_water(world, y),
+        };
+        let props =
+            PropList::default().with("BodyWaterType", if e.water { "Water" } else { "None" });
+        let own = self.pick_user(map::actor_users(kind));
+        if let Some(user) = own
+            && self.sfx_at(world, &user, key, &props, e, h)
+        {
+            return true;
+        }
+        let user = self.user("GameObject");
+        self.sfx_at(world, &user, key, &props, e, h)
+    }
+
+    fn stop_pipe_loop(&mut self, actor: Option<u32>) {
+        let handle = match actor {
+            None if std::mem::take(&mut self.pipe_loop) => H_CLEARPIPE,
+            Some(id) => match self.pipe_loops.remove(&id) {
+                Some(h) => h,
+                None => return,
+            },
+            None => return,
+        };
+        self.send(Command::StopHandle { handle, fade: 0 });
+    }
+
+    /// Ride loops whose rider is gone (or out by other means) stop.
+    fn end_pipe_loops(&mut self, world: &World) {
+        if self.pipe_loop && world.cpipe.player.is_none() {
+            self.stop_pipe_loop(None);
+        }
+        let gone: Vec<u32> = self
+            .pipe_loops
+            .keys()
+            .copied()
+            .filter(|&id| !world.cpipe.riders.iter().any(|r| r.id == id && r.inside()))
+            .collect();
+        for id in gone {
+            self.stop_pipe_loop(Some(id));
         }
     }
 

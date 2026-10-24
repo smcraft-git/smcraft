@@ -14,7 +14,9 @@ use crate::blocks::{BlockKind, Contents};
 mod clear_pipe;
 mod v3;
 
-pub use clear_pipe::{CLEAR_PIPE_MESH, ClearPipeDraw, ClearPipeModel};
+pub use clear_pipe::{
+    CLEAR_PIPE_MESH, ClearPipeDraw, ClearPipeModel, path_points as clear_pipe_path_points,
+};
 pub use v3::V3Tiles;
 
 pub const TILE: f32 = 16.0;
@@ -387,6 +389,8 @@ pub struct Level {
     pub tracks: crate::track::Tracks,
     /// Clear pipes (93): the pieces they draw (level/clear_pipe.rs).
     pub clear_pipes: Vec<ClearPipeDraw>,
+    /// Clear pipes' traveller paths (crate::clear_pipe).
+    pub clear_pipe_paths: crate::clear_pipe::Paths,
     /// Piranha Creeper paths (107): record index and node codes (actors/w3.rs).
     pub creepers: Vec<(u8, Vec<u8>)>,
     /// Custom autoscroll path (89 nodes): (node number, x, y, speed setting 0–2), in px.
@@ -967,6 +971,7 @@ impl Level {
             v3: V3Tiles::default(),
             tracks: Default::default(),
             clear_pipes: Vec::new(),
+            clear_pipe_paths: Default::default(),
             creepers: Vec::new(),
             liquid: None,
             oneway: Vec::new(),
@@ -1070,6 +1075,11 @@ impl Level {
             .map(|c| (c.head.index, c.nodes.iter().map(|n| n.direction).collect()))
             .collect();
         lvl.clear_pipes = clear_pipe::area_pieces(area);
+        lvl.clear_pipe_paths = crate::clear_pipe::Paths {
+            pipes: clear_pipe::area_paths(area),
+            version: course.header.game_version,
+        };
+        clear_pipe::add_walls(&mut lvl, area);
         lvl.tracks = crate::track::Tracks::with_ends(
             area.tracks
                 .iter()
@@ -2083,6 +2093,7 @@ impl Level {
             v3: V3Tiles::default(),
             tracks: Default::default(),
             clear_pipes: Vec::new(),
+            clear_pipe_paths: Default::default(),
             creepers: Vec::new(),
             liquid: None,
             oneway: Vec::new(),

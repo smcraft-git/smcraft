@@ -46,8 +46,10 @@ use crate::fmath::DetMath;
 use crate::player::{Control, Form, Player, Pose, STAR_FRAMES};
 use crate::render::{Sprite, SpriteImage};
 use crate::warp::{self, SideHold, Transit};
+pub use clear_pipe::{Cue as ClearPipeCue, CueKind as ClearPipeCueKind};
 
 mod bosses;
+mod clear_pipe;
 mod contents;
 pub mod coop;
 mod debug;
@@ -168,6 +170,9 @@ pub enum Event {
     /// Co-op: a player came back in a bubble; a bubble popped.
     Bubble,
     BubblePop,
+    /// A clear-pipe rider went in or came out: who and which in `World::cpipe.cues`
+    /// (world/clear_pipe.rs).
+    ClearPipe,
 }
 
 /// P-switch duration: 540 frames, reloaded by every press (the course switch state's P timer,
@@ -443,6 +448,8 @@ pub struct World {
     pub v3: v3::V3World,
     /// World state of the update power-ups (world/powerups.rs).
     pu: powerups::PuWorld,
+    /// Riders in clear pipes (world/clear_pipe.rs).
+    pub cpipe: clear_pipe::ClearPipes,
     /// Local co-op (world/coop.rs): empty with one player.
     pub coop: coop::Coop,
 }
@@ -758,6 +765,7 @@ impl World {
             prev_jump_claw: false,
             v3: v3::V3World::default(),
             pu: powerups::PuWorld::default(),
+            cpipe: Default::default(),
             wind: 0.0,
             wind_n: 0,
             options: Default::default(),
@@ -773,6 +781,7 @@ impl World {
         self.area = 0;
         self.stash = None;
         self.transit = None;
+        self.cpipe = Default::default();
         self.fade = 0.0;
         self.initial = self.area_initial[0].clone();
         self.load_area_fresh();
@@ -1947,6 +1956,7 @@ impl World {
         let main_pass = !self.coop.extra;
         if main_pass {
             self.events.clear();
+            self.cpipe.cues.clear();
             self.fx.clear();
             self.tick += 1;
         } else {
@@ -2042,10 +2052,14 @@ impl World {
             self.fly_clown_car(input);
         } else if self.player.car.is_some() {
             self.drive_koopa_car(input);
+        } else if self.clear_pipe_player() {
+            // in a clear pipe: the traveller carries the player (DrawDokanMove)
         } else {
             self.pu_sense();
             self.player.twister = self.twister_receiver();
+            let lifted = self.clear_pipe_lift();
             self.player.step(input, &self.level);
+            self.clear_pipe_unlift(lifted);
         }
         if let (Some((tx, ty)), Some(c)) = (note_hole, note_cell) {
             self.level.set(tx, ty, c);
@@ -2195,6 +2209,9 @@ impl World {
                     return;
                 }
             }
+            if entry.is_none() {
+                self.clear_pipe_entry(input, pushing);
+            }
         }
         if was_ground && !self.player.on_ground && self.player.vy > 3.0 {
             self.events.push(Event::Jump);
@@ -2329,7 +2346,7 @@ impl World {
             .filter_map(|a| a.parent)
             .collect();
         for a in &mut self.actors {
-            if a.held {
+            if a.held || a.mode == Mode::ClearPipe || self.cpipe.carries(a.id) {
                 continue;
             }
             if a.kind.is_platform() {
@@ -2383,6 +2400,7 @@ impl World {
             }
         }
         self.step_towers();
+        self.clear_pipe_actors();
         self.explosions();
         for n in born {
             if n.kind == Kind::FloatCoin && n.parent.is_some() {
@@ -6793,6 +6811,7 @@ impl World {
             flip_x: false,
             flip_y: false,
             layer,
+            roll: 0.0,
         };
         self.background_sprites(&mut out);
         // tracks: each rail cell's template code is its field-atlas tile (59-track.md); a
@@ -6818,6 +6837,7 @@ impl World {
             flip_x: false,
             flip_y: false,
             layer: 9,
+            roll: 0.0,
         };
         let bare = |px: f32, py: f32| {
             !tracks.has_art((px / TILE).floor() as i32, (py / TILE).floor() as i32)
@@ -7517,6 +7537,7 @@ impl World {
             }
             if let Some(mut s) = self.actor_sprite(a) {
                 s.x += a.sway;
+                self.clear_pipe_actor_pose(a, &mut s);
                 out.push(s);
             }
         }
@@ -7555,6 +7576,7 @@ impl World {
         self.yoshi_sprites(&mut out);
         self.phanto_sprites(&mut out);
         if let Some(mut s) = self.player_sprite() {
+            self.clear_pipe_player_pose(&mut s);
             if self.player.yoshi.is_some() {
                 // the rider sits on Yoshi's saddle [inf: drawing only; the rider is attached to
                 // a joint of the Yoshi model (Ride exec 0x7100a32570 sits inside a larger
@@ -7706,6 +7728,7 @@ impl World {
             flip_x,
             flip_y: false,
             layer,
+            roll: 0.0,
         }
     }
 
@@ -8613,6 +8636,7 @@ impl World {
             flip_y: false,
             // behind terrain while sliding through a pipe
             layer,
+            roll: 0.0,
         })
     }
 

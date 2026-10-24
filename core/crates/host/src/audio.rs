@@ -497,7 +497,8 @@ impl Legacy {
                 | Event::PropellerBox
                 | Event::KillerBreak
                 | Event::Bubble
-                | Event::BubblePop => {}
+                | Event::BubblePop
+                | Event::ClearPipe => {}
                 Event::Death if self.costume.sound(world, "down").is_some() => {
                     self.stop_count();
                     self.play_set(self.costume.sound(world, "down"), true);

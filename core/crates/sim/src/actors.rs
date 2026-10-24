@@ -658,6 +658,9 @@ pub enum Mode {
     ShellSlide,
     /// Thrown by the SMB2 Mushroom (actors/powerups.rs): flies until it lands.
     Thrown,
+    /// Carried through a clear pipe (the DrawDokan context's In, world/clear_pipe.rs): the world
+    /// moves it; no collision, no contact.
+    ClearPipe,
     /// Remove at the end of the frame.
     Dead,
 }
@@ -1970,6 +1973,7 @@ impl Actor {
             }
             Mode::Normal => spawned = self.step_normal(level, player_x),
             Mode::Thrown => self.step_thrown(level),
+            Mode::ClearPipe => {}
             Mode::ShellWait => {
                 if self.on_ground && self.vy <= 0.0 {
                     self.vx = 0.0;

@@ -14,6 +14,14 @@ SMCraft is back in development (it was archived in October 2026).
   longer hazy; 3D World's mean pixel error 29.0 → 21.2. Re-import your game once (asset pack 16).
 - The Swift app's NSMBU / 3D World background clouds drift as in the game.
 
+- **Clear Pipes play as in SMM2** (3D World): their walls are solid, and Mario walks into a side
+  mouth (holding the direction, or pushing it), drops into an upward one with Down or jumps into a
+  downward one holding Up; he's carried through at the game's speed, round bends and through pipes
+  joined end to end, and comes out the far end — or turns back when the way out is blocked. Enemies
+  and items that walk into a mouth ride through too and shoot out of the other end. Riders are
+  drawn in front of the pipe, turned along it (items shrunk), with the pipe's in / along / out
+  sounds.
+- Clear Pipes are drawn as pale glass with brighter edges, in the Course Maker and in play.
 - **Wings as in SMM2**: winged power-ups, coins, springs, P Switches and POW Blocks fly slowly
   the way they face with a 16-px bob and pass through walls (they meet walls only in 3D World);
   winged blocks fly the same way, and winged Hard, Ice and Donut Blocks swing 48 px from side to
