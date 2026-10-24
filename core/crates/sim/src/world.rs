@@ -1679,6 +1679,13 @@ impl World {
         self.player.style = self.style;
         self.player.on_ice = self.ice_under_player();
         self.player.low_gravity = self.level.theme == 8 && self.level.night;
+        // alone, falling out of the view is a pit death with no hop (the miss sequence takes
+        // over); with others in play the co-op edge rules handle it (coop.rs view_edges)
+        self.player.pit_y = if self.players() > 1 {
+            f32::NEG_INFINITY
+        } else {
+            self.camera_y - crate::player::PIT_BELOW
+        };
         if main_pass {
             self.step_wind();
             if let Some(l) = &mut self.liquid {

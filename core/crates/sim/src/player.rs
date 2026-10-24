@@ -175,6 +175,10 @@ pub fn change_shows_old(timer: i32) -> bool {
 // Death (DownPose 0x71009e13e0 / DownFall 0x71009e1ea0): 45-frame pose, then a hop at 3.2 with
 // gravity −0.16; the restart request comes 140 frames into the fall.
 pub const DOWN_POSE_FRAMES: i32 = 45;
+/// Slip on flat ground ends once the speed is below this (v3 0x71015ddb40: 1.1) [obs].
+const SLIDE_END: f32 = 1.1;
+/// A player whose feet are this far below the view's bottom has fallen into a pit.
+pub const PIT_BELOW: f32 = 56.0;
 pub const DOWN_VY: f32 = 3.2;
 pub const DOWN_GRAVITY: f32 = -0.16;
 pub const DOWN_FALL_FRAMES: i32 = 140;
@@ -385,6 +389,11 @@ pub struct Player {
     pub low_gravity: bool,
     /// Desert-night wind level w (−1…1): the position moves w px per frame (themes.md §2).
     pub wind: f32,
+    /// Feet below this y is a pit death: the view's bottom − 56 (set by the world each frame;
+    /// the off-screen check after the edge push, local-coop.md §4.5 [obs]).
+    pub pit_y: f32,
+    /// This death was a pit fall: no hop, the player stays where it fell.
+    pub pit_death: bool,
     /// Moving solid the head bonked this frame (POW blocks react).
     pub head_solid: Option<u32>,
     /// The moving solid a wall sensor ran into this frame (pushed out of it), if any.
@@ -517,6 +526,8 @@ pub struct Player {
     slope_prev: Option<(usize, i32)>,
     slide_float: u8,
     slide_hop: bool,
+    /// Slip's "slip_to_stoop" phase on flat ground: frames left before it hands over to Crouch.
+    slide_stoop: i32,
     /// Walked off a ledge last frame: this frame (Walk handing over to Fall) adds no gravity.
     fell_off: bool,
     /// 3D World long jump (BroadJump, state 14: begin 0x71009d3020, exec 0x71009d3330) and the
@@ -579,6 +590,8 @@ impl Player {
             in_water: false,
             low_gravity: false,
             wind: 0.0,
+            pit_y: -PIT_BELOW,
+            pit_death: false,
             head_solid: None,
             wall_solid: None,
             was_in_water: false,
@@ -652,6 +665,7 @@ impl Player {
             slope_prev: None,
             slide_float: 0,
             slide_hop: false,
+            slide_stoop: 0,
             fell_off: false,
             broad: false,
             broad_land: 0,
@@ -863,6 +877,10 @@ impl Player {
         self.control = Control::DownPose {
             timer: DOWN_POSE_FRAMES,
         };
+        self.pit_death = false;
+        // DownPose begin (v3 0x71015b4850) lifts the player 2 px and stops it [obs; Ryujinx
+        // trace: a pit death at y −56.54 shows −54.54]
+        self.y += 2.0;
         self.vx = 0.0;
         self.vy = 0.0;
         self.star = 0;
@@ -967,7 +985,9 @@ impl Player {
             }
             Control::DownPose { timer } => {
                 self.control = if timer <= 1 {
-                    self.vy = DOWN_VY;
+                    if !self.pit_death {
+                        self.vy = DOWN_VY;
+                    }
                     Control::DownFall {
                         timer: DOWN_FALL_FRAMES,
                     }
@@ -977,8 +997,10 @@ impl Player {
                 false
             }
             Control::DownFall { timer } => {
-                self.vy = (self.vy + DOWN_GRAVITY).max(FALL_CAP);
-                self.y += self.vy;
+                if !self.pit_death {
+                    self.vy = (self.vy + DOWN_GRAVITY).max(FALL_CAP);
+                    self.y += self.vy;
+                }
                 if timer > 0 {
                     self.control = Control::DownFall { timer: timer - 1 };
                 }
@@ -1353,6 +1375,7 @@ impl Player {
             let ready = self.style == Style::M3 || self.duck || self.crouch;
             if on_slope && inp.held(input::DOWN) && self.held.is_none() && ready {
                 self.sliding = true;
+                self.slide_stoop = 0;
                 self.crouch = false;
             }
         }
@@ -1458,7 +1481,7 @@ impl Player {
                     self.slide_float = 8;
                     self.slide_hop = true;
                 } else if self.sliding {
-                    self.slide(level);
+                    self.slide(inp, level);
                 } else if self.cape == CapeState::Slide {
                     self.cape_slide(level);
                 } else if self.landed && self.broad {
@@ -1784,8 +1807,11 @@ impl Player {
         if !(self.style == Style::M1 && !self.on_ground && !self.in_water) {
             self.drawn_facing = self.facing;
         }
-        if self.y < -2.0 * TILE {
-            self.kill(); // fell into a pit
+        if self.y < self.pit_y {
+            // fell into a pit: in single play DownPose holds until the miss sequence restarts
+            // the course; no hop [obs: Ryujinx trace, 60 frames of DownPose and no DownFall]
+            self.kill();
+            self.pit_death = true;
         }
     }
 
@@ -1828,7 +1854,7 @@ impl Player {
     /// Slip: downhill toward 4.0 px/f with the slide accel of the slope class (table
     /// 0x7101d09700: gentle, class 2, 0.05; steep, class 3, 0.07) [obs]; on flat ground it
     /// slows by 0.09 and ends at rest.
-    fn slide(&mut self, level: &Level) {
+    fn slide(&mut self, inp: Input, level: &Level) {
         // slide rates by steepness (0x7101d09700 / 0x7101d09714): one row while moving
         // downhill, the other while still moving uphill [obs: Ryujinx trace, 0.045 uphill on
         // the gentle slope]
@@ -1845,9 +1871,37 @@ impl Player {
             });
         match slope {
             Some((down, acc)) => self.vx = approach(self.vx, 4.0 * down, acc),
+            None if self.slide_stoop > 0 => {
+                // slip_to_stoop: the ground routine with no input (0.05 below 1.5), then Crouch
+                // takes over once the animation ends (its last frame still moves at 0.05)
+                self.vx = approach(self.vx, 0.0, 0.05);
+                self.slide_stoop -= 1;
+                if self.slide_stoop == 0 {
+                    self.sliding = false;
+                }
+            }
             None => {
+                // on flat ground the slide slows at 0.09; the end check (v3 0x71015ddb40) runs
+                // after this frame's move is chosen, on the speed it starts the frame with
+                // [obs; Ryujinx traces SMB3 / SMW / NSMBU]
+                let before = self.vx;
                 self.vx = approach(self.vx, 0.0, 0.09);
-                if self.vx == 0.0 {
+                if before.abs() < SLIDE_END {
+                    if !inp.held(input::DOWN) && self.can_stand(level) {
+                        // Down let go: the slide stops dead ("sliped", 0x71015ddd90)
+                        self.vx = 0.0;
+                        self.sliding = false;
+                    } else if self.style == Style::MW {
+                        self.sliding = false; // SMW crouches at once
+                    } else {
+                        // the animation's length: SMB3 1, NSMBU 10 [obs: traces]; 3D World's
+                        // SquatStart taken as NSMBU's until traced [inf]
+                        self.slide_stoop = match self.style {
+                            Style::M3 => 1,
+                            _ => 10,
+                        };
+                    }
+                } else if self.vx == 0.0 {
                     self.sliding = false;
                 }
             }
@@ -2306,6 +2360,7 @@ impl Player {
         if on_slope {
             self.cape = CapeState::None;
             self.sliding = true;
+            self.slide_stoop = 0;
             return;
         }
         let decel = if self.on_ice { 0.02 } else { 0.06 };
