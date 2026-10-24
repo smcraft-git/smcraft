@@ -534,7 +534,10 @@ Nextendo; `docs/nextendo-network-play.md`, spec `research/specs/network-play.md`
   SMB1 courses exact start to goal (W_3064188, W_3046973: player + Goombas; the pole touch is
   taken in the next update after a normal move, the enemies stop, the pole's x from the frame
   after, 12 frames of hold, the slide at −1.9, 93 frames in all, then x + 6 facing right);
-  W_3049200 (cloud blocks, Dry Bones, Cheep Cheeps, Koopas) exact to frame 182; W_3065813 exact
+  W_3049200 (cloud blocks, Dry Bones, Cheep Cheeps, Koopas) exact to frame 374 (a jump's take-off
+  frame from a slope still moves along it; sliding shells are met where they stood before their
+  move too; a ground block above a slope's surface holds the feet; at 374 the game walks flat
+  over a slope that overlaps ground, unexplained [?]); W_3065813 exact
   (a wall of dotted-line blocks: their 0x4 variant is the red one, solid at ON), W_3051046 to its death at 103 (then the title course's death sequence), W_3006094 to
   481, W_3051605 to 233, W_3145588 to 384, W_3010660 to 137 (a Seesaw's tilt starts 2 frames later in the game). Object courses in all styles exact
   (3D World's Trampoline eases 3 px, its falling Donut is gone after 21 frames, a lift pushes up

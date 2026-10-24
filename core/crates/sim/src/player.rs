@@ -2676,17 +2676,25 @@ impl Player {
     fn move_and_collide(&mut self, level: &Level, s: &Sensors) {
         self.slope_prev = self.slope;
         // horizontal: on a slope, ground speed is along the surface (x scaled by |cos θ|, §1.3)
-        let cos = match self.slope {
-            Some((steep, _)) if self.on_ground => {
-                if steep >= 3 {
-                    std::f32::consts::FRAC_1_SQRT_2
+        // the take-off frame of a jump from a slope still moves along it: x·cos θ, and y
+        // + vx·sin θ on top of the jump's vy (§1.2 step 8, the ground angle kept) [obs: Ryujinx
+        // trace W_3049200, a jump off a gentle slope: +2.667, +3.868 + 1.333]
+        let takeoff = !self.on_ground && self.vy > 0.0 && self.slope.is_some();
+        let (cos, sin) = match self.slope {
+            Some((steep, rise)) if self.on_ground || takeoff => {
+                let (c, s) = if steep >= 3 {
+                    (
+                        std::f32::consts::FRAC_1_SQRT_2,
+                        std::f32::consts::FRAC_1_SQRT_2,
+                    )
                 } else {
                     // cos of the gentle angle (0x12e4051d) from the game's 256-step sine
                     // table with linear interpolation, not the exact 0.8944272 [obs: trace]
-                    0.894_400_9
-                }
+                    (0.894_400_9, 0.447_214)
+                };
+                (c, s * rise as f32)
             }
-            _ => 1.0,
+            _ => (1.0, 0.0),
         };
         let was_on_ground = self.on_ground;
         self.spiked = false;
@@ -2768,6 +2776,9 @@ impl Player {
         // vertical
         let prev_y = self.y;
         self.y += self.vy;
+        if takeoff {
+            self.y += self.vx * sin;
+        }
         self.ride = None;
         if self.vy > 0.0 {
             let hy = self.y + s.head_y;
@@ -2820,9 +2831,14 @@ impl Player {
                 // the probe sits just under the feet: arriving exactly on a tile top lands
                 // [obs: Ryujinx trace, a long jump ending at y = 32.0]
                 let (px, py) = (self.x + fx, self.y - 0.001);
-                // a slope's columns are probed at the feet centre only (below)
-                if level.slope_at(px).is_some() {
-                    continue;
+                // a slope's columns are probed at the feet centre only (below), unless a ground
+                // block stands there (it wins over the slope) [obs: Ryujinx trace W_3049200, the
+                // left foot on a block a slope overlaps holds the player at its top]
+                if let Some((surf, _)) = level.slope_at(px) {
+                    let above = ((py / TILE).floor() + 1.0) * TILE > surf + 0.01;
+                    if !(above && level.cell_at(px, py).is_solid()) {
+                        continue;
+                    }
                 }
                 let top = ((py / TILE).floor() + 1.0) * TILE;
                 let cell = level.cell_at(px, py);

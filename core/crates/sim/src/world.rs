@@ -3265,11 +3265,12 @@ impl World {
             // 0.46 px into its moved box, no touch; M1_koopa: a stomped enemy doesn't move]
             let ab = {
                 let b = Self::player_contact_box(self.style, a);
-                let (dx, dy) = if a.kind.is_enemy() && a.mode == Mode::Normal {
-                    (a.pre.0 - a.x, a.pre.1 - a.y)
-                } else {
-                    (0.0, 0.0)
-                };
+                let (dx, dy) =
+                    if a.kind.is_enemy() && matches!(a.mode, Mode::Normal | Mode::ShellSlide) {
+                        (a.pre.0 - a.x, a.pre.1 - a.y)
+                    } else {
+                        (0.0, 0.0)
+                    };
                 (b.0 + dx, b.1 + dy, b.2 + dx, b.3 + dy)
             };
             if let Kind::BigCoin { value } = a.kind {
