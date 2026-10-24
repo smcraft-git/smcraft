@@ -53,6 +53,11 @@ SMCraft is back in development (it was archived in October 2026).
 - Swinging Claws hold Mario by his hands as the game does, and jumping off one is an ordinary
   standing jump that keeps the swing's motion. A Twister also lifts a swimming Mario, more
   gently than on land.
+- **Winged Hammer Bros hop**: instead of pacing, a winged Hammer Bro hops along, throws one
+  hammer each time it lands (in NSMBU and 3D World after its crouch and landing animations) and
+  makes its big jump every third throw. A winged Spike Top can be stood on like a Para-Beetle —
+  it dips under you — but its spikes still hurt. Bowser no longer jumps over a wall or a gap when
+  solid ground hangs just above him; a 3D World power-up's touch box is 14 px tall, as in the game.
 
 - **Import once, then no dump or keys.** SMCraft reads your NSPs and `prod.keys` itself (no
   hactool, nothing extracted) and writes its own asset pack; the game runs from the pack alone.
