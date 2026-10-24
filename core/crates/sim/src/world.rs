@@ -4191,7 +4191,9 @@ impl World {
         };
         // a column's members spawn only through its tower manager record: a member record has
         // a tower id and no spawn of its own (0x71003fbef0), the manager's box reaching the zone
-        // spawns every member not out yet, then itself (0x71003fc820) [obs v1.0.0]
+        // spawns every member not out yet, then itself (0x71003fc820) [obs v1.0.0]; the same in
+        // v3.0.3 with the manager's actor id 0x124 [obs v3.0.3 0x7100e3fcd0 / 0x7100e40a10, box
+        // test 0x7100e41150]
         let column = self.tower_member_columns();
         let col_due: Vec<(bool, bool)> = self
             .level

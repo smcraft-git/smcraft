@@ -2203,7 +2203,11 @@ impl Actor {
                 | Kind::ChainChomp { .. } => {}
                 // a Dry Bones' Wing is the red Paratroopa's (Karon Wing vtable 0x7102179e68 =
                 // NokonokoRed's; its Fly enter 0x7100697e40 is the same and its exe 0x7100697ec0
-                // runs NokonokoRed's Fly exe 0x710072b370) [obs v1.0.0]: step_wings
+                // runs NokonokoRed's Fly exe 0x710072b370) [obs v1.0.0]; the same in v3.0.3 [obs
+                // v3.0.3: factory 0x7101135770 builds NokonokoRed's Wing (0x71011fe070) and only
+                // swaps the vtable to 0x71028df578, whose Fly enter 0x710113adf0 is NokonokoRed's
+                // 0x71011fedf0 and whose exe 0x710113ae70 runs NokonokoRed's 0x71011fee70, then
+                // its bones' helper]: step_wings
                 Kind::DryBones => {}
                 // the Para-Beetle: the Spiny's hover without its wall turn (actors/fly.rs)
                 Kind::Buzzy | Kind::SpikeTop { .. } if !self.ceiling => {

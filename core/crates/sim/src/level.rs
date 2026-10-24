@@ -876,11 +876,12 @@ fn tower_columns(parts: &[TowerPart]) -> Vec<TowerColumn> {
         if chain.len() < 2 {
             continue;
         }
-        // the chain's manager record (actor 0xeb) sits at the bottom part, as wide as the
-        // widest member and as tall as all of them; its profile box {0, 8, 8, 8} grows by the
-        // record's size (profile flag 0x400: 8 px a side per tile of width past one, 16 px up
+        // the chain's manager record (actor 0xeb, v3.0.3 0x124) sits at the bottom part, as wide
+        // as the widest member and as tall as all of them; its profile box {0, 8, 8, 8} grows by
+        // the record's size (profile flag 0x400: 8 px a side per tile of width past one, 16 px up
         // per tile of height past one) [obs 0x7100404f80 / 0x71003fcb90 v1.0.0, profiles.txt
-        // EnemyTowerManager flags 0x448]
+        // EnemyTowerManager flags 0x448; obs v3.0.3: box test 0x7100e41150, the profile (actor
+        // 0x124, _INIT 0x7100ad5ea0) box {0, 8, 8, 8} at 0x71023ce534, flags 0x448]
         let bottom = parts[first];
         let w = chain.iter().map(|&p| parts[p].w).max().unwrap_or(1) as f32;
         let h = chain.iter().map(|&p| parts[p].h).sum::<i32>() as f32;
