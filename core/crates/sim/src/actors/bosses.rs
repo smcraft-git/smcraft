@@ -83,7 +83,10 @@ const FIRE_LANE: f32 = 17.0;
 /// The Turn animation (anim 13, non-SMB1) before he turns round: the model's animation length
 /// and its EnemyModelParams play rate — SMB3 `turn` 30 and SMW `turn` 45 at 2.0, NSMBU
 /// `lkp_walk` 160 at 3.0; a big Bowser plays it at 1.0 in every style. Frames = length / rate,
-/// rounded up [inf: the anim player's exact end test].
+/// rounded up. The Turn exe waits for the anim controller's end test (slot 0xc8; Turn exe
+/// 0x7101157320 / 0x710115a230, the latter not in SMB1) [obs v3.0.3], so `lkp_walk` is played to
+/// its end like a one-shot although its FSKA loop bit is clear like every clip of the model's
+/// (walks included, which loop): the bit does not decide [inf: the end test's rounding].
 const BOWSER_TURN: [(f32, f32); 4] = [(0.0, 1.0), (30.0, 2.0), (45.0, 2.0), (160.0, 3.0)];
 /// The flame's carried speed is the mean of Bowser's own x steps over the last 16 frames
 /// (actor ring +0x560, capacity 16 set by the enemy base 0x7100786710, filled by 0x710078adb0).
@@ -478,9 +481,10 @@ impl Actor {
 
     /// A hit from `attack` (coming from `from_x`), through the boss HP rules.
     ///
-    /// Bowser (helper 0x71006b4c20): fire 1, shell 3, Bob-omb blast 3 [?: the explosion's
-    /// collider attack kind was not found; the kind → attack map 0x7100730510 would make kind 5
-    /// attack 33 (Bowser −2, the others killed)]; a block hit only
+    /// Bowser (helper 0x71006b4c20): fire 1, shell 3, Bob-omb blast 3 (the blast is the shell
+    /// attack: while the Explode flag is up the collider update swaps the bomb's body box for a
+    /// cc 6 box [obs v1.0.0 0x7100732640, world.rs `explosions`]; the v3.0.3 Mechakoopa missile's
+    /// blast profile 0x7102a62d28 is attack type 6 too [obs]); a block hit only
     /// bumps him (HitBlock); stomps are Invalid. Boom Boom / Bowser Jr. (boss helper
     /// 0x71006116d0): a fireball drains the counter (5, big 10) and costs 1 HP when it empties
     /// (then refills); every other hit costs 1 HP; none while guarded. Star, POW quake and lava
@@ -865,8 +869,8 @@ impl Actor {
                 };
             }
             bw::LITTLE_JUMP => {
-                // the low hop 0.7 is for a ceiling found by the jump-height search, which
-                // only reacts to one collider kind (36) the engine has no source of
+                // the low hop 0.7 is for a Trampoline found by the jump-height search
+                // (LittleJump 0x7101158ff0) [inf: not ported; its reach field +0x94 not read]
                 self.vy = 1.1;
                 self.on_ground = false;
                 self.bowser_walk_speed(st);
@@ -888,7 +892,16 @@ impl Actor {
             }
             bw::HIP_DROP => {
                 self.vx = 0.0;
-                self.vy = 3.0;
+                // 1.0 under a Trampoline less than his height + 16 over him (HipDrop enter
+                // 0x7101159750) [obs v3.0.3]
+                self.vy = if self
+                    .spring_over
+                    .is_some_and(|h| h <= self.spring_reach_body)
+                {
+                    1.0
+                } else {
+                    3.0
+                };
                 self.timer = 0;
                 self.bowser_set_sub(0);
                 self.bowser_cancel_breath();
@@ -965,6 +978,7 @@ impl Actor {
             return self.bowser_fire(st);
         }
         let state = self.phase;
+        self.spring_over = self.bowser_height_search(level);
         self.bowser_move(level, st);
         self.bowser_record_step();
         // the fire helper runs in Fall, LandOn, Walk, LittleJump, MiddleJump and a Fly that
@@ -1256,14 +1270,18 @@ impl Actor {
 
     /// The jump-counter tail of a decision: both counters count down; at 0 the big jump (if
     /// allowed: not SMB1, not while breathing) or the middle jump, otherwise a walk (SMB1) or
-    /// little hop. The jump-height search (0x71006ab020) only looks for one collider kind
-    /// overhead, which the engine never has, so every jump goes ahead.
+    /// little hop. No big jump with a Trampoline over him within its reach
+    /// (`bowser_height_search`) [obs v3.0.3 0x7101153750]; [inf: the decision's other use of
+    /// the search (middle jump → walk, 0x7101152520 slots 0x358–0x378) not ported].
     fn bowser_counters(&mut self, st: usize) {
         let j = self.byte(0).saturating_sub(1);
         let b = self.byte(1).saturating_sub(1);
         self.set_byte(0, j);
         self.set_byte(1, b);
-        let big_ok = st != 0 && !self.bowser_flag(bwf::BREATHING);
+        // (the big jump's allowed test 0x7101153750: no Trampoline over him within its reach)
+        let big_ok = st != 0
+            && !self.bowser_flag(bwf::BREATHING)
+            && !self.spring_over.is_some_and(|h| h <= self.spring_reach_big);
         if big_ok && b == 0 {
             self.bowser_reset_big();
             self.bowser_rearm_fire();
@@ -1358,9 +1376,9 @@ impl Actor {
     /// [obs v3.0.3 0x7101154260: its vtable slots 0x18 further on]); true when a jump
     /// started. The obstacle kind (vtable slot 0x310 → 0x71006abfe0; SMB1 never takes the big
     /// jump); whether that jump is allowed (slot 0x428, 0x71006aa9d0 = v3.0.3 0x7101153860:
-    /// not for kind 0, nor with solid terrain overhead (`bowser_blocked_overhead`); its
-    /// jump-height search (0x7101153f00) looks for BG units of type 0x25 without collision,
-    /// which the engine has no source of, so it passes [inf]); a wall on his right (BG bit 12:
+    /// not for kind 0, nor with solid terrain overhead (`bowser_blocked_overhead`), nor with a
+    /// Trampoline over him within the kind's reach (`bowser_height_search`, slot 0x3f8)); a
+    /// wall on his right (BG bit 12:
     /// v1.0.0's +0x649 bit 4, v3.0.3's +0x659 bit 5) with a way over → kind 2 the big jump (slot 0x308, state
     /// BigJump), kind 1 the middle jump (slot 0x300); then the gap scan (0x71006ab810): a gap
     /// with the jump allowed and no wall in the way → the middle jump across (slot 0x2f8, the
@@ -1371,7 +1389,11 @@ impl Actor {
         if st == 0 && kind > 1 {
             kind = 1;
         }
-        let can = kind != 0 && !self.bowser_blocked_overhead(level, rows);
+        let can = kind != 0
+            && !self.bowser_blocked_overhead(level, rows)
+            && !self
+                .spring_over
+                .is_some_and(|h| h <= self.bowser_reach(level, kind == 2));
         let wall = self.touching_wall(level, 1);
         if wall && can {
             self.bowser_enter(
@@ -1463,6 +1485,93 @@ impl Actor {
             x += 16.0;
         }
         false
+    }
+
+    /// The jump-height search (0x7101153f00, run by the allowed tests 0x7101153860 /
+    /// 0x7101153750, the decision 0x7101152520, LittleJump 0x7101158ff0 and HipDrop
+    /// 0x7101159750) [obs v3.0.3]. His columns (3, big 6, from x − 16, big x − 40, 16 apart)
+    /// probe upward from 24 px over his feet to the big jump's height (`bowser_reach`): first
+    /// for solid terrain (each column held within his BG half less 1 px; counting the columns
+    /// hit and keeping the lowest hit), then, unheld, for the BG units of type 0x25 with no
+    /// collision class that an actor owns (filter 0x71028e3ba8). Those are a Trampoline's body
+    /// (JumpStep's second collider, 0x71013b9260: the block attribute table _INIT_369's
+    /// "Jumpdai" entry 0x25; its one-way top is type 0x24). The lowest Trampoline found is the
+    /// answer when terrain doesn't cover every column, or when it does but the Trampoline is no
+    /// higher than the lowest terrain. Height from his feet. [inf: the body box x ±8, 0–15 up
+    /// (descriptor 0x71023cf754); found each frame, where the game caches it in +0xb4]
+    fn bowser_height_search(&mut self, level: &Level) -> Option<f32> {
+        let st = style_index(level);
+        let top = if level.style == "3W" {
+            46.0
+        } else {
+            [26.0, 31.8, 34.0, 36.0][st]
+        } * self.scale();
+        // the apex heights (0x71011530f0): Σ v while v += g stays > 0, + his height + 16
+        let apex = |mut v: f32, g: f32| {
+            let mut h = 0.0;
+            loop {
+                v += g;
+                h += v;
+                if v <= 0.0 {
+                    break;
+                }
+            }
+            h + top + 16.0
+        };
+        let wings = self.wings;
+        self.spring_reach_mid = apex(if wings { 3.4 } else { 3.0 }, BOWSER_GRAVITY);
+        self.spring_reach_big = apex(if wings { 6.4 } else { 5.9 }, -0.1875);
+        self.spring_reach_body = top + 16.0;
+        if self.overhead_units.is_empty() {
+            return None;
+        }
+        let half = if level.style == "3W" {
+            30.0
+        } else {
+            BOWSER_BG_HALF[st]
+        } * self.scale();
+        let cols = if self.big { 6 } else { 3 };
+        let x0 = self.x - if self.big { 40.0 } else { 16.0 };
+        let (y0, y1) = (self.y + 24.0, self.y + self.spring_reach_big);
+        let (lo, hi) = (self.x - half + 1.0, self.x + half - 1.0);
+        let (mut hits, mut low_solid) = (0, f32::MAX);
+        let mut x = x0;
+        for _ in 0..cols {
+            x = x.clamp(lo, hi);
+            let mut y = y0;
+            while y <= y1 {
+                if level.cell_at(x, y).is_solid() {
+                    let at = (y / TILE).floor() * TILE;
+                    hits += 1;
+                    low_solid = low_solid.min(at.max(y0) - self.y);
+                    break;
+                }
+                y = ((y / TILE).floor() + 1.0) * TILE;
+            }
+            x += 16.0;
+        }
+        let mut low = None::<f32>;
+        for c in 0..cols {
+            let cx = x0 + 16.0 * c as f32;
+            for &(bx0, by0, bx1, by1) in &self.overhead_units {
+                if cx >= bx0 && cx <= bx1 && by1 > y0 && by0 <= y1 {
+                    let h = by0.max(y0) - self.y;
+                    low = Some(low.map_or(h, |l: f32| l.min(h)));
+                }
+            }
+        }
+        let low = low?;
+        (hits != cols || low <= low_solid).then_some(low)
+    }
+
+    /// His jump's reach for the obstacle kind (slot 0x3f8 0x7101153460: kind 2 the big jump's
+    /// height +0xa4, else the middle jump's +0x9c; `bowser_height_search` sets them).
+    fn bowser_reach(&self, _level: &Level, big: bool) -> f32 {
+        if big {
+            self.spring_reach_big
+        } else {
+            self.spring_reach_mid
+        }
     }
 
     /// The gap scan (0x71006ab810 with no third argument [obs v1.0.0] = [obs v3.0.3
@@ -3186,6 +3295,51 @@ mod tests {
         level.set(mx, row, Cell::Empty);
         level.set_solid(mx, row + 2);
         assert!(!a.bowser_blocked_overhead(&level, rows));
+        assert!(a.bowser_chase_jumps(&level, 2));
+    }
+
+    #[test]
+    fn a_trampoline_over_bowser_stops_jumps_that_reach_it() {
+        let (mut level, mut a) = boss(BOWSER, 30.0 * TILE);
+        level.style = "WU".to_string();
+        a.dir = 1;
+        // NSMBU: reach 3.0 at −0.1 → 43.4 + 36 + 16; big 5.9 at −0.1875 → 89.8 + 36 + 16
+        assert_eq!(a.bowser_height_search(&level), None);
+        assert!(
+            (a.spring_reach_mid - 95.4).abs() < 0.01,
+            "{}",
+            a.spring_reach_mid
+        );
+        assert!(
+            (a.spring_reach_big - 141.8).abs() < 0.01,
+            "{}",
+            a.spring_reach_big
+        );
+        // a Trampoline 80 px over his feet, over his middle column
+        a.overhead_units = vec![(a.x - 8.0, a.y + 80.0, a.x + 8.0, a.y + 95.0)];
+        assert_eq!(a.bowser_height_search(&level), Some(80.0));
+        // out of his columns' way: none
+        a.overhead_units = vec![(a.x + 40.0, a.y + 80.0, a.x + 56.0, a.y + 95.0)];
+        assert_eq!(a.bowser_height_search(&level), None);
+        // terrain over every column, lower than the Trampoline: hidden
+        a.overhead_units = vec![(a.x - 8.0, a.y + 80.0, a.x + 8.0, a.y + 95.0)];
+        let row = ((a.y + 48.0) / TILE) as i32;
+        for tx in -3..=3 {
+            level.set_solid((a.x / TILE).floor() as i32 + tx, row);
+        }
+        assert_eq!(a.bowser_height_search(&level), None);
+        for tx in -3..=3 {
+            level.set((a.x / TILE).floor() as i32 + tx, row, Cell::Empty);
+        }
+        // the chase: a low wall would be middle-jumped (reach 95.4 ≥ 80): refused
+        let tx = ((a.x + 24.0) / TILE).floor() as i32;
+        level.set_solid(tx, 2);
+        a.spring_over = a.bowser_height_search(&level);
+        assert!(!a.bowser_chase_jumps(&level, 2));
+        // higher up (100 px) the middle jump goes ahead
+        a.overhead_units = vec![(a.x - 8.0, a.y + 100.0, a.x + 8.0, a.y + 115.0)];
+        a.spring_over = a.bowser_height_search(&level);
+        assert_eq!(a.spring_over, Some(100.0));
         assert!(a.bowser_chase_jumps(&level, 2));
     }
 

@@ -2421,12 +2421,22 @@ impl World {
             .filter(|a| a.alive())
             .filter_map(|a| a.parent)
             .collect();
+        // the Trampolines' bodies (type-0x25 BG units) for Bowser's jump-height search
+        let springs: Vec<(f32, f32, f32, f32)> = self
+            .actors
+            .iter()
+            .filter(|a| a.kind == Kind::Spring && a.mode == Mode::Normal && !a.held)
+            .map(|a| (a.x - 8.0, a.y, a.x + 8.0, a.y + 15.0))
+            .collect();
         for a in &mut self.actors {
             if a.held || a.mode == Mode::ClearPipe || self.cpipe.carries(a.id) {
                 continue;
             }
             if a.kind.is_platform() {
                 continue; // already moved before the player
+            }
+            if matches!(a.kind, Kind::Bowser { .. }) {
+                a.overhead_units.clone_from(&springs);
             }
             // a tower rider: the tower places it; it only idles, or keeps its own action in place
             let rider = a.stacked.then_some((a.x, a.y, a.dir));
@@ -3410,6 +3420,7 @@ impl World {
                     if matches!(f.kind, Kind::Fireball | Kind::Superball)
                         && e.kind.is_enemy()
                         && f.mode != Mode::Dead
+                        && !(f.alt && f.phase == 2)
                     {
                         let (fx, fy) = (f.x, f.y);
                         f.mode = Mode::Dead;
@@ -4649,6 +4660,7 @@ impl World {
     /// swaps the bomb's body box for a shell-attack (cc 6) box centred 8 px above its feet,
     /// half 18 × 18 (Big: × 2), that hits any body it touches, players included.
     fn explosions(&mut self) {
+        self.charge_bursts();
         let bombs: Vec<(f32, f32, f32)> = self
             .actors
             .iter()
@@ -4710,6 +4722,38 @@ impl World {
                 });
             }
             self.events.push(Event::Break);
+        }
+    }
+
+    /// A Fire Koopa Clown Car's charged shot that met terrain (`phase` 2): its ChargeExplode
+    /// breaks what a blast breaks on its tiles (actors/clown.rs `charge_burst_tiles`), then it
+    /// is gone [simplified: the 3-frame burst body (half 8, big 16) is not modelled].
+    fn charge_bursts(&mut self) {
+        let bursts: Vec<(f32, f32, u8, i32, bool)> = self
+            .actors
+            .iter()
+            .filter(|a| a.kind == Kind::Fireball && a.alt && a.phase == 2 && a.alive())
+            .map(|a| (a.x, a.y + 4.0, a.hops, a.dir, a.big))
+            .collect();
+        for a in &mut self.actors {
+            if a.kind == Kind::Fireball && a.alt && a.phase == 2 {
+                a.mode = Mode::Dead;
+            }
+        }
+        for (x, y, side, dir, big) in bursts {
+            for (tx, ty) in crate::actors::charge_burst_tiles(x, y, side, dir, big) {
+                if self
+                    .blocks
+                    .get(tx, ty)
+                    .is_some_and(|b| matches!(b.kind, BlockKind::Brick | BlockKind::Hard))
+                {
+                    self.blocks.map.remove(&(tx, ty));
+                    self.level.set(tx, ty, Cell::Empty);
+                    let (ox, oy) = blocks::origin(tx, ty);
+                    self.effects.extend(Effect::debris(ox, oy, 0.25, 0.1));
+                    self.events.push(Event::Break);
+                }
+            }
         }
     }
 
@@ -10054,6 +10098,29 @@ mod tests {
         assert!(w.actors.iter().any(|a| a.kind == Kind::Buzzy && a.alive()));
         assert!(w.actors[0].stomp());
         assert!(matches!(w.actors[0].kind, Kind::Shell { .. }) && w.actors[0].buzzy);
+    }
+
+    #[test]
+    fn a_charged_clown_shot_breaks_the_bricks_it_bursts_on() {
+        let mut lvl = Level::flat(40);
+        // a brick wall at x tile 20, rows 3–5, and one brick at 22 (out of reach)
+        for y in 3..=5 {
+            place(&mut lvl, 20, y, BlockKind::Brick, Cell::Solid);
+        }
+        place(&mut lvl, 22, 4, BlockKind::Brick, Cell::Solid);
+        let mut w = World::with_level(lvl);
+        w.player.x = 40.0;
+        let mut f = Actor::new(Kind::Fireball, 18.0 * TILE, 4.0 * TILE + 2.0);
+        (f.alt, f.phase, f.vx, f.dir, f.timer) = (true, 1, 4.0, 1, 600);
+        w.add_actor(f);
+        run(&mut w, 0, 20);
+        // the burst sits on the wall tile (20, 4): its row and column (19–21, 3–5) and the
+        // column behind (19)
+        for y in 3..=5 {
+            assert!(w.blocks.get(20, y).is_none(), "wall brick at row {y}");
+        }
+        assert!(w.blocks.get(22, 4).is_some());
+        assert!(w.actors.iter().all(|a| a.kind != Kind::Fireball));
     }
 
     #[test]

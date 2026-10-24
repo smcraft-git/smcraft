@@ -19,13 +19,15 @@ mod claw;
 pub mod seesaw;
 pub use claw::{ClawRope, NUDGE as CLAW_NUDGE, REACH as CLAW_REACH};
 mod clown;
-pub use clown::ClownFire;
+pub use clown::{ClownFire, charge_burst_tiles};
 mod dokan;
 pub use dokan::Dokan;
 mod fly;
 pub use fly::Fly;
 mod koopalings;
 mod powerups;
+mod propeller;
+pub use propeller::{Prop, PropPhase};
 mod shot;
 pub use koopalings::{shot as koopaling_shot, who as koopaling_who};
 pub use powerups::{ARROW_LAUNCH, BOOMERANG_LEGS, STYLE2, SWORD, WEAR, item_for_part};
@@ -863,6 +865,16 @@ pub struct Actor {
     pub wing_rate: f32,
     /// A winged Hammer Bro's WingWalk (actors/bros.rs).
     pub bro_wing: BroWing,
+    /// NSMBU's Propeller Mushroom's Move (actors/propeller.rs).
+    pub prop: Prop,
+    /// Bowser: the Trampoline bodies in the area (x0, y0, x1, y1; set by the world), what his
+    /// jump-height search found over him (height from his feet), and his jump reaches
+    /// (actors/bosses.rs `bowser_height_search`).
+    pub overhead_units: Vec<(f32, f32, f32, f32)>,
+    pub spring_over: Option<f32>,
+    pub spring_reach_mid: f32,
+    pub spring_reach_big: f32,
+    pub spring_reach_body: f32,
 }
 
 impl Actor {
@@ -947,6 +959,12 @@ impl Actor {
             gap_jump: false,
             wing_rate: 1.0,
             bro_wing: BroWing::default(),
+            prop: Prop::default(),
+            overhead_units: Vec::new(),
+            spring_over: None,
+            spring_reach_mid: 0.0,
+            spring_reach_big: 0.0,
+            spring_reach_body: 0.0,
         }
     }
 
@@ -1962,6 +1980,12 @@ impl Actor {
         }
         match self.mode {
             Mode::Dead => {}
+            Mode::Emerge { .. } if self.kind == Kind::StyleItem && level.style == "WU" => {
+                // straight into its Move (actors/propeller.rs)
+                self.mode = Mode::Normal;
+                self.propeller_enter(Some(self.vy < 0.0));
+                self.propeller_move(level);
+            }
             Mode::Emerge { .. }
                 if self.kind == Kind::StyleItem && !matches!(level.style.as_str(), "M1" | "3W") =>
             {
@@ -2598,13 +2622,36 @@ impl Actor {
                 // a Fire Koopa Clown Car's PlayerShot (exe 0x7100ddf010, v3.0.3): straight at
                 // its launch speed, put out by terrain, at most 600 frames [obs]; the charged
                 // one (`phase` 1, ChargeShot 0x7100ddf610) has no life count and bursts on
-                // terrain (its burst's tile hits are not modelled)
+                // terrain (`phase` 2: ChargeExplode, its tiles hit by the world,
+                // actors/clown.rs `charge_burst_tiles`)
+                if self.phase == 2 {
+                    return None;
+                }
                 if self.phase != 1 {
                     self.timer -= 1;
                 }
                 self.x += self.vx;
                 self.y += self.vy;
-                if level.cell_at(self.x, self.y + 4.0).is_solid() || self.timer <= 0 {
+                if level.cell_at(self.x, self.y + 4.0).is_solid() {
+                    if self.phase == 1 {
+                        // the side it hit (+0x19ec: 1 wall, 2 floor, 3 ceiling) [inf: a wall
+                        // when the cell it came from sideways is free]
+                        let side = if !level.cell_at(self.x - self.vx, self.y + 4.0).is_solid() {
+                            1
+                        } else if self.vy > 0.0 {
+                            3
+                        } else {
+                            2
+                        };
+                        // (held outside, as the game's terrain check leaves it)
+                        self.x -= self.vx;
+                        self.y -= self.vy;
+                        self.phase = 2;
+                        self.hops = side;
+                    } else {
+                        self.mode = Mode::Dead;
+                    }
+                } else if self.timer <= 0 {
                     self.mode = Mode::Dead;
                 }
             }
@@ -3871,10 +3918,15 @@ impl Actor {
     /// flips once |vx| ≥ 2, 0x710082e720), falling 1.225 px/f while gathering speed to the
     /// right, 1.1 to the left, and rising 0.025 while braking (0x710082e110, table
     /// 0x7101d03c18) — ±16 px swings, a 64-frame period, about 0.57 px/f down. A placed one
-    /// sways down from where it is. Phases: 0 new, 1 shooting up, 2 swaying, 3 landed (it stops
-    /// [inf]); push direction in `hops` bit 0; frames left of a downward pop in `timer`.
-    /// NSMBU's Propeller Mushroom uses its own ItemPropeller Move (0x7100832250 /
-    /// 0x7100831bf0), not modelled: it sways here like the leaf [inf].
+    /// sways down from where it is and lands [inf: its start path (the Basic context's enter
+    /// 0x71013466f0 picks Move, state 2, but a placed leaf is taken to rest on the ground) not
+    /// traced]. Out of a block the Move passes through terrain (its enter 0x7101347170 sets
+    /// +0x524 bit 4) and has no ground case, so the leaf never lands: it sways on down through
+    /// the floor [obs v3.0.3 0x7101346980]. In water the push flips at |vx| ≥ 3 (0x71013472a0),
+    /// and out of water again vx is held ≥ −2. Phases: 0 new, 1 shooting up, 2 swaying through
+    /// terrain, 3 a placed one landed, 4 a placed one swaying; push direction in `hops` bit 0;
+    /// frames left of a downward pop in `timer`. NSMBU's Propeller Mushroom has its own Move
+    /// (actors/propeller.rs).
     fn step_style_item(&mut self, level: &Level) {
         if level.style == "M1" {
             self.vy = (self.vy + ENEMY_GRAVITY).max(MAX_FALL);
@@ -3894,14 +3946,19 @@ impl Actor {
             self.collide(level);
             return;
         }
+        if level.style == "WU" {
+            self.step_propeller(level);
+            return;
+        }
         match self.phase {
             0 => {
-                // placed: sway from here
-                self.phase = 2;
+                // placed: sway from here, meeting the terrain [inf]
+                self.phase = 4;
                 self.vx = 0.0;
                 self.hops = 0;
-                self.leaf_sway(level);
+                self.leaf_sway(level, true);
             }
+            4 => self.leaf_sway(level, true),
             1 => {
                 // shooting out of the block, through the terrain
                 if self.timer > 0 {
@@ -3922,8 +3979,9 @@ impl Actor {
                     self.hops = 0;
                 }
             }
-            2 => self.leaf_sway(level),
+            2 => self.leaf_sway(level, false),
             _ => {
+                // a placed one landed
                 self.vx = 0.0;
                 self.vy = (self.vy + ENEMY_GRAVITY).max(MAX_FALL);
                 self.collide(level);
@@ -3931,8 +3989,16 @@ impl Actor {
         }
     }
 
-    /// One frame of the ItemLeaf sway (Move 0x710082dd70 with the ItemLeaf slots).
-    fn leaf_sway(&mut self, level: &Level) {
+    /// One frame of the ItemLeaf sway (Move exe 0x7101346980, mode 0, with the ItemLeaf slots
+    /// 0x7101346d00 / 0x7101346d20 / 0x71013472a0) [obs v3.0.3].
+    /// `solid`: a placed one, which meets the terrain and lands (phase 3) [inf].
+    fn leaf_sway(&mut self, level: &Level, solid: bool) {
+        let wet = self.wet();
+        // out of the water this frame: the sideways speed is held at −2 or more
+        if !wet && self.prop.wet_prev {
+            self.vx = self.vx.max(-2.0);
+        }
+        self.prop.wet_prev = wet;
         let right = self.hops & 1 == 0;
         self.vx += if right { 0.125 } else { -0.125 };
         self.vy = match (u8::from(self.vx < 0.0)) + (self.hops & 1) {
@@ -3940,12 +4006,19 @@ impl Actor {
             1 => 0.025,
             _ => -1.1,
         };
-        if self.vx.abs() >= 2.0 {
+        if self.vx.abs() >= if wet { 3.0 } else { 2.0 } {
             self.hops ^= 1;
         }
-        self.collide(level);
-        if self.on_ground {
-            self.phase = 3;
+        if solid {
+            self.collide(level);
+            if self.on_ground {
+                self.phase = 3;
+            }
+        } else {
+            // through terrain
+            self.x += self.vx;
+            self.y += self.vy;
+            self.on_ground = false;
         }
     }
 
@@ -5335,14 +5408,13 @@ mod tests {
     fn super_leaf_shoots_out_then_sways_down() {
         let mut level = Level::flat(60);
         level.style = "M3".into();
-        // out of a block at tile (20, 6) (left out: the leaf would land back on it)
+        // out of a block at tile (20, 6)
         let mut a = Actor::new(Kind::StyleItem, 20.0 * TILE + 8.0, 96.0);
         a.vy = 0.5;
         a.mode = Mode::Emerge { until: 112.0 };
         let mut top: f32 = 0.0;
         let (mut xmin, mut xmax) = (f32::MAX, f32::MIN);
-        let mut frames = 0;
-        while a.phase != 3 && frames < 2000 {
+        for _ in 0..400 {
             a.step(&level, 0.0);
             top = top.max(a.y);
             if a.phase == 2 {
@@ -5350,14 +5422,24 @@ mod tests {
                 xmax = xmax.max(a.x);
                 assert!(a.vx.abs() <= 2.0 + 1e-4);
             }
-            frames += 1;
         }
-        // 4.0 under −0.25: 30 px up (16 frames), then ±16 px swings down to the floor
+        // 4.0 under −0.25: 30 px up (16 frames), then ±16 px swings down, through the floor
+        // (the block too) at ~0.57 px/f
         assert!((top - 126.0).abs() < 0.01, "peak {top}");
         assert!((xmax - xmin - 32.0).abs() < 1.0, "swing {}", xmax - xmin);
-        assert_eq!(a.y, 32.0);
-        // (126 − 32) px at ~0.57 px/f
-        assert!((150..=190).contains(&frames), "{frames} frames");
+        assert_eq!(a.phase, 2);
+        assert!((a.y + 64.7).abs() < 0.01, "y {}", a.y);
+    }
+
+    #[test]
+    fn a_placed_super_leaf_sways_down_and_lands() {
+        let mut level = Level::flat(60);
+        level.style = "MW".into();
+        let mut a = Actor::new(Kind::StyleItem, 200.0, 80.0);
+        for _ in 0..200 {
+            a.step(&level, 0.0);
+        }
+        assert_eq!((a.phase, a.y), (3, 32.0));
     }
 
     #[test]
