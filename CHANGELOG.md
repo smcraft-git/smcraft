@@ -24,4 +24,23 @@ SMCraft is back in development (it was archived in October 2026).
   (tested against a local server; live play waits for Nextendo).
 - Fix: Munchers hurt on a wall sensor's touch, as in SMM2 (a one-tile gap between Munchers is as
   tight as in the game).
+- **The Course Maker**: SMM2's own maker screens (part palette and part window, styles, themes,
+  timer, autoscroll, clear conditions, multigrab, stretching, test play, the Undodog and the
+  rocket) with its music and the parts' sounds, and the **Coursebot** (120 slots, Save As,
+  Load, Upload). Any course can be opened in the maker: someone else's course saves and uploads
+  as a new course, "based on <code> by <maker>".
+- **Super Worlds**: play a Super World (its map, lives, progress), made from your library or
+  downloaded from TGRCode.
+- **SMM2's own Endless Challenge**, and **Challenge Modes**: Course World's Endless button
+  switches between it and the 100 Mario Challenge with ZL / ZR.
+- **Play Together (local co-op)** for up to four players with SMM2's rules: bubbles, shared
+  lives (a life goes when everyone is down), anyone at the goal clears; also for 100 Mario and
+  Endless runs.
+- **Network Play screens** (co-op and versus) over Nextendo matchmaking, tested against a local
+  server.
+- **A Mods page** on the title screen with every option below.
+- **100 Mario: SMM1's Mystery Mushroom reward**: a finished run wins a costume.
+- **Lanky Mario's own sounds** (jump, float, growth), keys' and pink coins' sounds, Burners.
+- **Pictures closer to the game**: the start sign, the 2D styles' drop shadow, animated
+  ? blocks, bricks and coins, SMB1's black daytime ghost house.
 - Release packages for Windows, Linux (x64, arm64), macOS, Android and the web.
