@@ -19,9 +19,11 @@
 //!   (its lowest, at the second trough, about 94 px below a placed one's start) and then climbs
 //!   away at 4 px/f. In water the caps are ×0.7 (the
 //!   last ×0.4).
-//! - A placed one runs the same Move from rest but meets the terrain and rests where it lands
-//!   [inf: the Basic context's enter 0x71013466f0 picks Move for it too, which would take it
-//!   through the floor; its real start path (Wait / Fall) was not traced].
+//! - A placed one starts in the same Move from rest, through terrain like the rest: it bobs down
+//!   through the floor under it and climbs away [obs v3.0.3: a new actor's base context is the
+//!   Basic one (0x7101298b90: not winged, not the Moon context), and with no event the Basic
+//!   context's enter 0x71013466f0 picks Move (state 2; the item state table 0x710133e820 counts
+//!   from None = 0) — there is no Fall or Wait first].
 //!
 //! Not modelled: the multiplayer scatter of several items from one block (vfunc 0x218
 //! 0x710134c200: spawn bits 0x1800, ±0.5 / ±1.0 sideways), the 15-frame flag after a downward
@@ -66,8 +68,6 @@ pub enum PropPhase {
     Stop,
     /// The bobbing descent and the climb away (4).
     Bob,
-    /// A placed one that met the ground [inf].
-    Rest,
 }
 
 /// The Propeller Mushroom's Move fields (action +0x6f… and the actor's motion fields
@@ -88,8 +88,6 @@ pub struct Prop {
     pub drift: f32,
     /// In water last frame (BG +0x660 bit 31; read by the ItemLeaf Move too).
     pub wet_prev: bool,
-    /// Placed (not out of a block): meets the terrain [inf].
-    pub placed: bool,
 }
 
 impl Actor {
@@ -120,10 +118,7 @@ impl Actor {
                 }
                 self.propeller_limits();
             }
-            None => {
-                self.prop.placed = true;
-                self.propeller_bob_start();
-            }
+            None => self.propeller_bob_start(),
         }
     }
 
@@ -177,19 +172,12 @@ impl Actor {
         } else {
             self.propeller_exe(version);
         }
-        self.propeller_move(level);
+        self.propeller_move();
     }
 
     /// The integrator's motion for the Move: the sideways speed eases to its target, vy to its
-    /// cap in the gravity's sense; through terrain (a placed one meets it and rests where it
-    /// lands [inf]).
-    pub(super) fn propeller_move(&mut self, level: &Level) {
-        if self.prop.phase == PropPhase::Rest {
-            self.vx = 0.0;
-            self.vy = (self.vy + super::ENEMY_GRAVITY).max(super::MAX_FALL);
-            self.collide(level);
-            return;
-        }
+    /// cap in the gravity's sense; through terrain (+0x524 bit 4, set by the Move enter).
+    pub(super) fn propeller_move(&mut self) {
         let p = self.prop;
         let a = p.accel.abs();
         if self.vx < p.target {
@@ -202,22 +190,15 @@ impl Actor {
         } else {
             (self.vy + p.g).max(p.cap)
         };
-        if p.placed {
-            self.collide(level);
-            if self.on_ground {
-                (self.vx, self.vy) = (0.0, 0.0);
-                self.prop.phase = PropPhase::Rest;
-            }
-        } else {
-            self.x += self.vx;
-            self.y += self.vy;
-        }
+        self.x += self.vx;
+        self.y += self.vy;
+        self.on_ground = false;
     }
 
     fn propeller_exe(&mut self, version: u32) {
         let wet = self.wet();
         match self.prop.phase {
-            PropPhase::New | PropPhase::Rest => {}
+            PropPhase::New => {}
             PropPhase::Rise => {
                 if self.vy >= 0.0 {
                     self.propeller_limits();
@@ -329,15 +310,16 @@ mod tests {
     }
 
     #[test]
-    fn placed_on_the_ground_it_rests() {
+    fn placed_on_the_ground_it_bobs_down_through_it() {
         let level = wu();
         let mut a = Actor::new(Kind::StyleItem, 200.0, 32.0);
-        for _ in 0..300 {
+        for _ in 0..60 {
             a.step(&level, 0.0);
         }
-        // (the first frame's sideways easing moves it 0.03125)
-        assert_eq!((a.x, a.y), (200.03125, 32.0));
-        assert_eq!(a.prop.phase, PropPhase::Rest);
+        // 45 frames to its first cap −1.4, then 15 more at it: through the floor
+        assert!(a.y < 0.0, "y {}", a.y);
+        assert!(!a.on_ground);
+        assert_eq!(a.prop.phase, PropPhase::Bob);
     }
 
     #[test]

@@ -274,6 +274,8 @@ pub struct World {
     pub camera: Camera,
     pub blocks: Blocks,
     pub actors: Vec<Actor>,
+    /// The area's projectile budget (actors/budget.rs).
+    budget: crate::actors::ThrowBudget,
     /// Stacked parts in play (world/tower.rs).
     towers: Vec<tower::Tower>,
     pub effects: Vec<Effect>,
@@ -710,6 +712,7 @@ impl World {
             camera: Camera::default(),
             blocks: Blocks::default(),
             actors: Vec::new(),
+            budget: Default::default(),
             towers: Vec::new(),
             effects: Vec::new(),
             spawns: Vec::new(),
@@ -2435,6 +2438,7 @@ impl World {
             .filter(|a| a.kind == Kind::Spring && a.mode == Mode::Normal && !a.held)
             .map(|a| (a.x - 8.0, a.y, a.x + 8.0, a.y + 15.0))
             .collect();
+        self.budget.begin_frame(&mut self.actors);
         for a in &mut self.actors {
             if a.held || a.mode == Mode::ClearPipe || self.cpipe.carries(a.id) {
                 continue;
@@ -2482,7 +2486,11 @@ impl World {
             }
             w3::sense(a, self.liquid, &self.player);
             a.pre = (a.x, a.y);
-            if let Some(n) = a.step_spawning(&self.level) {
+            self.budget.show(a);
+            let reserve = a.budget;
+            let spawned = a.step_spawning(&self.level);
+            self.budget.settle(a, reserve);
+            if let Some(n) = spawned {
                 born.push(n);
             }
             if let Some(n) = a.take_clown_shot() {
@@ -4950,6 +4958,13 @@ impl World {
                     }
                 }
                 1 => {
+                    // the cast needs a unit of the area's projectile budget; refused, the
+                    // wait is drawn again (0x710112eb10) [obs v3.0.3]
+                    if a.timer <= 0 && !self.budget.request(&mut self.actors, idx, 1) {
+                        self.actors[idx].timer = 30 + (r1 * 30.0) as i32;
+                        continue;
+                    }
+                    let a = &mut self.actors[idx];
                     if a.timer <= 0 {
                         let face = if px < a.x { 180.0f32 } else { 0.0 };
                         let want = (py + 8.0 - (a.y + 16.0)).datan2(px - a.x).to_degrees();
@@ -10864,10 +10879,44 @@ mod tests {
     }
 
     #[test]
+    fn a_hundred_and_one_hammer_bros_share_the_areas_hundred_throw_units() {
+        let mut lvl = Level::flat(60);
+        for i in 0..101 {
+            lvl.spawns
+                .push(spawn(Kind::HammerBro, 200.0 + (i % 10) as f32, 32.0));
+        }
+        let mut w = World::with_level(lvl);
+        w.player.invuln = 1_000_000;
+        run(&mut w, 0, 400);
+        use crate::actors::BudgetHold;
+        let count = |w: &World, h| {
+            w.actors
+                .iter()
+                .filter(|a| a.kind == Kind::HammerBro && a.budget.hold == h)
+                .count()
+        };
+        // each keeps its unit between throws: the last to ask waits
+        assert_eq!(
+            (count(&w, BudgetHold::Held), count(&w, BudgetHold::Queued)),
+            (100, 1)
+        );
+        // one goes: the one waiting gets its unit
+        let i = w
+            .actors
+            .iter()
+            .position(|a| a.budget.hold == BudgetHold::Held)
+            .unwrap();
+        w.actors[i].mode = Mode::DieFall;
+        run(&mut w, 0, 200);
+        assert_eq!(count(&w, BudgetHold::Queued), 0);
+    }
+
+    #[test]
     fn super_leaf_gives_tail_attack_and_p_meter_flight() {
         let mut lvl = Level::flat(200);
         lvl.style = "M3".into();
-        lvl.spawns.push(spawn(Kind::StyleItem, 80.0, 32.0));
+        // (a placed leaf sways down through the floor: just ahead of the player, at head height)
+        lvl.spawns.push(spawn(Kind::StyleItem, 70.0, 44.0));
         lvl.spawns.push(spawn(Kind::Goomba, 300.0, 32.0));
         let mut w = World::with_level(lvl);
         w.style = crate::player::Style::M3;

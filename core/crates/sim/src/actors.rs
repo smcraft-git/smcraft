@@ -13,6 +13,8 @@ mod boo;
 mod bosses;
 mod bros;
 pub use bros::BroWing;
+mod budget;
+pub use budget::{Hold as BudgetHold, Reserve, ThrowBudget};
 mod ceiling;
 mod chute;
 mod claw;
@@ -872,9 +874,14 @@ pub struct Actor {
     /// (actors/bosses.rs `bowser_height_search`).
     pub overhead_units: Vec<(f32, f32, f32, f32)>,
     pub spring_over: Option<f32>,
+    pub spring_reach_little: f32,
     pub spring_reach_mid: f32,
     pub spring_reach_big: f32,
     pub spring_reach_body: f32,
+    /// Bowser under the water-speed rule: the reaches above are the water ones.
+    pub spring_slow: bool,
+    /// A thrower's reservation in the area's projectile budget (actors/budget.rs).
+    pub budget: Reserve,
 }
 
 impl Actor {
@@ -962,9 +969,12 @@ impl Actor {
             prop: Prop::default(),
             overhead_units: Vec::new(),
             spring_over: None,
+            spring_reach_little: 0.0,
             spring_reach_mid: 0.0,
             spring_reach_big: 0.0,
             spring_reach_body: 0.0,
+            spring_slow: false,
+            budget: Reserve::default(),
         }
     }
 
@@ -1345,9 +1355,17 @@ impl Actor {
             }
             3 => {
                 self.heading = (self.heading + 0.4).min(10.0);
-                if self.heading >= 10.0 {
-                    self.phase = 4;
-                    self.timer = 47;
+                // up: the throw needs a unit of the area's projectile budget; refused, the
+                // helper tries again in 40 + U[0,30) frames (0x710121e7f0) [obs v3.0.3]
+                if self.pause > 0 {
+                    self.pause -= 1;
+                } else if self.heading >= 10.0 {
+                    if self.budget_request(1) {
+                        self.phase = 4;
+                        self.timer = 47;
+                    } else {
+                        self.pause = 40 + self.rand(30) as i32;
+                    }
                 }
             }
             4 => {
@@ -1984,7 +2002,7 @@ impl Actor {
                 // straight into its Move (actors/propeller.rs)
                 self.mode = Mode::Normal;
                 self.propeller_enter(Some(self.vy < 0.0));
-                self.propeller_move(level);
+                self.propeller_move();
             }
             Mode::Emerge { .. }
                 if self.kind == Kind::StyleItem && !matches!(level.style.as_str(), "M1" | "3W") =>
@@ -3531,6 +3549,11 @@ impl Actor {
         // throw timer in `timer`; second hammer pending in `chain`
         if self.timer <= 0 {
             self.timer = 75 + self.rand(30) as i32;
+            // the throw needs a unit of the area's projectile budget: refused, the helper only
+            // redraws its timer (0x7101098560 case 2 → case 1) [obs v3.0.3]
+            if !self.budget_request(1) {
+                return None;
+            }
             if self.rand(100) < 70 {
                 self.chain = 10;
             }
@@ -3726,6 +3749,10 @@ impl Actor {
         }
         if self.timer <= 0 {
             self.timer = 40 + self.rand(40) as i32;
+            // (the Bros' throw helper and its budget request, as the Hammer Bro's)
+            if !self.budget_request(1) {
+                return None;
+            }
             return Some(self.make_hammer());
         }
         self.timer -= 1;
@@ -3917,16 +3944,15 @@ impl Actor {
     /// down (Move 0x710082dd70): the sideways speed swings between ±2 at 0.125/frame (the push
     /// flips once |vx| ≥ 2, 0x710082e720), falling 1.225 px/f while gathering speed to the
     /// right, 1.1 to the left, and rising 0.025 while braking (0x710082e110, table
-    /// 0x7101d03c18) — ±16 px swings, a 64-frame period, about 0.57 px/f down. A placed one
-    /// sways down from where it is and lands [inf: its start path (the Basic context's enter
-    /// 0x71013466f0 picks Move, state 2, but a placed leaf is taken to rest on the ground) not
-    /// traced]. Out of a block the Move passes through terrain (its enter 0x7101347170 sets
-    /// +0x524 bit 4) and has no ground case, so the leaf never lands: it sways on down through
-    /// the floor [obs v3.0.3 0x7101346980]. In water the push flips at |vx| ≥ 3 (0x71013472a0),
+    /// 0x7101d03c18) — ±16 px swings, a 64-frame period, about 0.57 px/f down. The Move passes
+    /// through terrain (its enter 0x7101347170 sets +0x524 bit 4) and has no ground case, so the
+    /// leaf never lands: it sways on down through the floor [obs v3.0.3 0x7101346980]. A placed
+    /// one starts in that Move where it stands (a new actor's base context is the Basic one,
+    /// 0x7101298b90, whose enter 0x71013466f0 picks Move with no event) and sways down through
+    /// the floor under it too [obs v3.0.3]. In water the push flips at |vx| ≥ 3 (0x71013472a0),
     /// and out of water again vx is held ≥ −2. Phases: 0 new, 1 shooting up, 2 swaying through
-    /// terrain, 3 a placed one landed, 4 a placed one swaying; push direction in `hops` bit 0;
-    /// frames left of a downward pop in `timer`. NSMBU's Propeller Mushroom has its own Move
-    /// (actors/propeller.rs).
+    /// terrain; push direction in `hops` bit 0; frames left of a downward pop in `timer`.
+    /// NSMBU's Propeller Mushroom has its own Move (actors/propeller.rs).
     fn step_style_item(&mut self, level: &Level) {
         if level.style == "M1" {
             self.vy = (self.vy + ENEMY_GRAVITY).max(MAX_FALL);
@@ -3952,13 +3978,12 @@ impl Actor {
         }
         match self.phase {
             0 => {
-                // placed: sway from here, meeting the terrain [inf]
-                self.phase = 4;
+                // placed: the Move from here (enter: vx 0, push to the right)
+                self.phase = 2;
                 self.vx = 0.0;
                 self.hops = 0;
-                self.leaf_sway(level, true);
+                self.leaf_sway();
             }
-            4 => self.leaf_sway(level, true),
             1 => {
                 // shooting out of the block, through the terrain
                 if self.timer > 0 {
@@ -3979,20 +4004,13 @@ impl Actor {
                     self.hops = 0;
                 }
             }
-            2 => self.leaf_sway(level, false),
-            _ => {
-                // a placed one landed
-                self.vx = 0.0;
-                self.vy = (self.vy + ENEMY_GRAVITY).max(MAX_FALL);
-                self.collide(level);
-            }
+            _ => self.leaf_sway(),
         }
     }
 
     /// One frame of the ItemLeaf sway (Move exe 0x7101346980, mode 0, with the ItemLeaf slots
-    /// 0x7101346d00 / 0x7101346d20 / 0x71013472a0) [obs v3.0.3].
-    /// `solid`: a placed one, which meets the terrain and lands (phase 3) [inf].
-    fn leaf_sway(&mut self, level: &Level, solid: bool) {
+    /// 0x7101346d00 / 0x7101346d20 / 0x71013472a0), through terrain [obs v3.0.3].
+    fn leaf_sway(&mut self) {
         let wet = self.wet();
         // out of the water this frame: the sideways speed is held at −2 or more
         if !wet && self.prop.wet_prev {
@@ -4009,17 +4027,9 @@ impl Actor {
         if self.vx.abs() >= if wet { 3.0 } else { 2.0 } {
             self.hops ^= 1;
         }
-        if solid {
-            self.collide(level);
-            if self.on_ground {
-                self.phase = 3;
-            }
-        } else {
-            // through terrain
-            self.x += self.vx;
-            self.y += self.vy;
-            self.on_ground = false;
-        }
+        self.x += self.vx;
+        self.y += self.vy;
+        self.on_ground = false;
     }
 
     /// The Super Leaf / Cape Feather comes out of a block (instead of the Super Mushroom's slow
@@ -5432,14 +5442,16 @@ mod tests {
     }
 
     #[test]
-    fn a_placed_super_leaf_sways_down_and_lands() {
+    fn a_placed_super_leaf_sways_down_through_the_floor() {
         let mut level = Level::flat(60);
         level.style = "MW".into();
         let mut a = Actor::new(Kind::StyleItem, 200.0, 80.0);
         for _ in 0..200 {
             a.step(&level, 0.0);
         }
-        assert_eq!((a.phase, a.y), (3, 32.0));
+        // ~0.57 px/f down: past the ground (top 32) and on, never landing
+        assert_eq!(a.phase, 2);
+        assert!(a.y < 0.0 && !a.on_ground, "y {}", a.y);
     }
 
     #[test]

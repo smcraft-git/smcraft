@@ -95,6 +95,14 @@ SMCraft is back in development (it was archived in October 2026).
   Clown Car's charged shot breaks the bricks and hard blocks around where it bursts. Bowser
   doesn't jump into a Trampoline above him, and his ground pound then starts lower.
 
+- **Throwers share the game's limit**: as in SMM2, an area's enemies can only have so many throws
+  under way at once — with a hundred Hammer Bros (or Sledge Bros, winged Bros, Rocky Wrenches,
+  Magikoopas and Fire Koopa Clown Cars) throwing, the next one waits its turn until one of them is
+  gone. A placed Super Leaf, Cape Feather or Propeller Mushroom now starts moving straight away,
+  floating down through the floor as in the game instead of resting on it. Bowser (SMB1 / SMB3)
+  hops low under a Trampoline and doesn't jump into one above him, and how often he jumps in SMW
+  and NSMBU follows those styles' own timings.
+
 - **Import once, then no dump or keys.** SMCraft reads your NSPs and `prod.keys` itself (no
   hactool, nothing extracted) and writes its own asset pack; the game runs from the pack alone.
   On macOS the setup screen picks the files; on Windows, Linux and Android you put them in the
