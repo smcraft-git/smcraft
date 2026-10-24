@@ -4,6 +4,10 @@
 //! [`tgrcode`]: the read-only client of TGRCode's API over Nintendo's Course World; [`world`]:
 //! the Course World backend the hosts use (TGRCode, our server or the library); [`nextendo`]:
 //! signing in to Nextendo Network (Network Play). Never talks to Nintendo's network itself.
+//!
+//! The course server's [`Client`] sends its requests through a [`Transport`]: HTTP (feature
+//! `http`), or in a browser the page's `fetch` (the web shell's `web_server`, which answers the
+//! client from what the page fetched).
 
 #[cfg(feature = "http")]
 pub mod nextendo;
@@ -11,12 +15,9 @@ pub mod tgrcode;
 #[cfg(feature = "http")]
 pub mod world;
 
-#[cfg(feature = "http")]
 use mmk_modes::Rng;
 use mmk_modes::endless::{Difficulty, RunStatus};
-#[cfg(feature = "http")]
 use mmk_modes::endless::{Finished, HistoryEntry, Report, Ruleset};
-#[cfg(feature = "http")]
 use mmk_modes::pool::{CourseRef, CourseSource};
 use serde_json::Value;
 
@@ -48,7 +49,6 @@ pub struct Listing {
 }
 
 impl Listing {
-    #[cfg(feature = "http")]
     fn from_json(v: &Value) -> Option<Self> {
         let s = |k: &str| v[k].as_str().unwrap_or_default().to_string();
         let n = |k: &str| v[k].as_u64().unwrap_or(0);
@@ -84,7 +84,6 @@ pub struct Account {
 }
 
 impl Account {
-    #[cfg(feature = "http")]
     fn from_json(v: &Value) -> Option<Self> {
         Some(Self {
             id: v["id"].as_u64()? as u32,
@@ -143,23 +142,147 @@ pub struct EndlessAnswer {
     pub best: u64,
 }
 
+/// One request of the client to the course server.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Request {
+    /// `GET`, `POST` or `DELETE`.
+    pub method: &'static str,
+    /// Under the server's base URL (`/api/courses?q=…`).
+    pub path: String,
+    /// The bearer token, `Content-Type`, `X-Maker`.
+    pub headers: Vec<(&'static str, String)>,
+    pub body: Option<Vec<u8>>,
+    /// The longest answer taken (bytes).
+    pub limit: u64,
+}
+
+/// JSON answers up to this size.
+const JSON_LIMIT: u64 = 10 << 20;
+
+impl Request {
+    fn new(method: &'static str, path: String) -> Self {
+        Self {
+            method,
+            path,
+            headers: Vec::new(),
+            body: None,
+            limit: JSON_LIMIT,
+        }
+    }
+
+    fn header(mut self, name: &'static str, value: impl Into<String>) -> Self {
+        self.headers.push((name, value.into()));
+        self
+    }
+
+    fn body(self, content_type: &str, body: Vec<u8>) -> Self {
+        let mut r = self.header("Content-Type", content_type);
+        r.body = Some(body);
+        r
+    }
+
+    fn limit(mut self, limit: u64) -> Self {
+        self.limit = limit;
+        self
+    }
+}
+
+/// How the client's requests reach the server: HTTP (feature `http`), or the page's `fetch` in
+/// a browser (the web shell answers them from what the page fetched).
+pub trait Transport: Send + Sync {
+    /// Send `req` to the server at `base` (`http://host:port`): the answer's status and body.
+    fn send(&self, base: &str, req: &Request) -> Result<(u16, Vec<u8>)>;
+}
+
+/// An answer → its body (2xx), else the server's `error` text (or the status).
+pub fn answer(status: u16, body: Vec<u8>) -> Result<Vec<u8>> {
+    if (200..300).contains(&status) {
+        return Ok(body);
+    }
+    let text = serde_json::from_slice::<Value>(&body)
+        .ok()
+        .and_then(|v| v["error"].as_str().map(str::to_string));
+    Err(match text {
+        Some(e) => format!("{e} (HTTP {status})"),
+        None => format!("HTTP {status}"),
+    })
+}
+
+/// The course server over HTTP.
 #[cfg(feature = "http")]
-#[derive(Clone, Debug)]
+struct Http;
+
+#[cfg(feature = "http")]
+impl Transport for Http {
+    fn send(&self, base: &str, req: &Request) -> Result<(u16, Vec<u8>)> {
+        static AGENT: std::sync::OnceLock<ureq::Agent> = std::sync::OnceLock::new();
+        let agent = AGENT.get_or_init(|| {
+            ureq::Agent::config_builder()
+                .http_status_as_error(false)
+                .build()
+                .into()
+        });
+        fn with<B>(mut rb: ureq::RequestBuilder<B>, req: &Request) -> ureq::RequestBuilder<B> {
+            for (k, v) in &req.headers {
+                rb = rb.header(*k, v);
+            }
+            rb
+        }
+        let url = format!("{base}{}", req.path);
+        let resp = match (req.method, &req.body) {
+            ("GET", _) => with(agent.get(&url), req).call(),
+            ("DELETE", _) => with(agent.delete(&url), req).call(),
+            (_, Some(b)) => with(agent.post(&url), req).send(b.as_slice()),
+            (_, None) => with(agent.post(&url), req).send_empty(),
+        };
+        let mut r = resp.map_err(|e| e.to_string())?;
+        let status = r.status().as_u16();
+        let body = r
+            .body_mut()
+            .with_config()
+            .limit(req.limit)
+            .read_to_vec()
+            .map_err(|e| e.to_string())?;
+        Ok((status, body))
+    }
+}
+
+#[derive(Clone)]
 pub struct Client {
     /// e.g. "http://localhost:8640"
     pub base: String,
     /// Account token for signed-in calls (uploads under the account, votes, comments).
     pub token: Option<String>,
+    transport: std::sync::Arc<dyn Transport>,
+}
+
+impl std::fmt::Debug for Client {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        f.debug_struct("Client")
+            .field("base", &self.base)
+            .field("token", &self.token.as_ref().map(|_| "…"))
+            .finish()
+    }
 }
 
 pub type Result<T> = std::result::Result<T, String>;
 
-#[cfg(feature = "http")]
 impl Client {
+    /// The server at `base`, over HTTP.
+    #[cfg(feature = "http")]
     pub fn new(base: impl Into<String>) -> Self {
+        Self::with_transport(base, std::sync::Arc::new(Http))
+    }
+
+    /// The server at `base`, its requests sent through `transport`.
+    pub fn with_transport(
+        base: impl Into<String>,
+        transport: std::sync::Arc<dyn Transport>,
+    ) -> Self {
         Self {
             base: base.into().trim_end_matches('/').to_string(),
             token: None,
+            transport,
         }
     }
 
@@ -168,22 +291,36 @@ impl Client {
         self
     }
 
-    fn auth<B>(&self, req: ureq::RequestBuilder<B>) -> ureq::RequestBuilder<B> {
+    /// A request signed in when a token is set.
+    fn authed(&self, method: &'static str, path: String) -> Request {
+        let r = Request::new(method, path);
         match &self.token {
-            Some(t) => req.header("Authorization", &format!("Bearer {t}")),
-            None => req,
+            Some(t) => r.header("Authorization", format!("Bearer {t}")),
+            None => r,
         }
+    }
+
+    /// Send `req`: the body of a 2xx answer.
+    fn send(&self, req: Request) -> Result<Vec<u8>> {
+        let (status, body) = self.transport.send(&self.base, &req)?;
+        answer(status, body)
+    }
+
+    fn send_json(&self, req: Request) -> Result<Value> {
+        serde_json::from_slice(&self.send(req)?).map_err(|e| e.to_string())
     }
 
     /// POST a JSON body (signed in when a token is set); the JSON answer.
     fn post_json(&self, path: &str, body: &Value) -> Result<Value> {
-        let mut r = self
-            .auth(ureq::post(&format!("{}{path}", self.base)))
-            .header("Content-Type", "application/json")
-            .send(serde_json::to_vec(body).unwrap().as_slice())
-            .map_err(|e| e.to_string())?;
-        let s = r.body_mut().read_to_string().map_err(|e| e.to_string())?;
-        serde_json::from_str(&s).map_err(|e| e.to_string())
+        let body = serde_json::to_vec(body).unwrap();
+        self.send_json(
+            self.authed("POST", path.to_string())
+                .body("application/json", body),
+        )
+    }
+
+    fn get_json(&self, path: &str) -> Result<Value> {
+        self.send_json(self.authed("GET", path.to_string()))
     }
 
     /// Create an account named `name`: the account and its token (sign in with `with_token`).
@@ -196,12 +333,7 @@ impl Client {
 
     /// The signed-in account.
     pub fn me(&self) -> Result<Account> {
-        let mut r = self
-            .auth(ureq::get(&format!("{}/api/me", self.base)))
-            .call()
-            .map_err(|e| e.to_string())?;
-        let s = r.body_mut().read_to_string().map_err(|e| e.to_string())?;
-        let v: Value = serde_json::from_str(&s).map_err(|e| e.to_string())?;
+        let v = self.get_json("/api/me")?;
         Account::from_json(&v).ok_or_else(|| "not signed in".into())
     }
 
@@ -392,46 +524,22 @@ impl Client {
     /// Prove a clear with a replay (`mmk_modes::replay`): the server re-simulates it and records
     /// its time (a verified record when it is the best).
     pub fn submit_replay(&self, code: &str, replay: &[u8]) -> Result<Listing> {
-        let mut r = self
-            .auth(ureq::post(&format!(
-                "{}/api/courses/{code}/replay",
-                self.base
-            )))
-            .header("Content-Type", "application/octet-stream")
-            .send(replay)
-            .map_err(|e| e.to_string())?;
-        let s = r.body_mut().read_to_string().map_err(|e| e.to_string())?;
-        let v: Value = serde_json::from_str(&s).map_err(|e| e.to_string())?;
+        let v = self.send_json(
+            self.authed("POST", format!("/api/courses/{code}/replay"))
+                .body("application/octet-stream", replay.to_vec()),
+        )?;
         Listing::from_json(&v).ok_or_else(|| format!("refused: {v}"))
     }
 
     /// The verified record's replay (to race as a ghost).
     pub fn record_replay(&self, code: &str) -> Result<Vec<u8>> {
-        let mut r = ureq::get(&format!("{}/api/courses/{code}/replay", self.base))
-            .call()
-            .map_err(|e| e.to_string())?;
-        r.body_mut()
-            .with_config()
-            .limit(1 << 20)
-            .read_to_vec()
-            .map_err(|e| e.to_string())
+        self.send(Request::new("GET", format!("/api/courses/{code}/replay")).limit(1 << 20))
     }
 
     /// Remove a course (yours, or any with the admin token).
     pub fn delete(&self, code: &str) -> Result<()> {
-        self.auth(ureq::delete(&format!("{}/api/courses/{code}", self.base)))
-            .call()
+        self.send(self.authed("DELETE", format!("/api/courses/{code}")))
             .map(|_| ())
-            .map_err(|e| e.to_string())
-    }
-
-    fn get_json(&self, path: &str) -> Result<Value> {
-        let mut r = self
-            .auth(ureq::get(&format!("{}{path}", self.base)))
-            .call()
-            .map_err(|e| e.to_string())?;
-        let s = r.body_mut().read_to_string().map_err(|e| e.to_string())?;
-        serde_json::from_str(&s).map_err(|e| e.to_string())
     }
 
     fn list(v: &Value) -> Vec<Listing> {
@@ -467,14 +575,7 @@ impl Client {
 
     /// The course data (raw).
     pub fn download(&self, code: &str) -> Result<Vec<u8>> {
-        let mut r = ureq::get(&format!("{}/api/courses/{code}/data", self.base))
-            .call()
-            .map_err(|e| e.to_string())?;
-        r.body_mut()
-            .with_config()
-            .limit(0x80000)
-            .read_to_vec()
-            .map_err(|e| e.to_string())
+        self.send(Request::new("GET", format!("/api/courses/{code}/data")).limit(0x80000))
     }
 
     /// A course's thumbnail (`entire`: the whole-course map), a JPEG.
@@ -484,35 +585,26 @@ impl Client {
         } else {
             "thumbnail"
         };
-        let mut r = ureq::get(&format!("{}/api/courses/{code}/{kind}", self.base))
-            .call()
-            .map_err(|e| e.to_string())?;
-        r.body_mut()
-            .with_config()
-            .limit(1 << 20)
-            .read_to_vec()
-            .map_err(|e| e.to_string())
+        self.send(Request::new("GET", format!("/api/courses/{code}/{kind}")).limit(1 << 20))
     }
 
-    /// Upload raw course data as `maker`; returns the new listing (with its code).
+    /// Upload raw course data as `maker`; returns the new listing (with its code). The name goes
+    /// as the `maker` query parameter (any text; browsers and HTTP libraries only send header
+    /// values of plain ASCII), and as `X-Maker` too when it is plain ASCII (older servers).
     pub fn upload(&self, data: &[u8], maker: &str) -> Result<Listing> {
-        let mut r = self
-            .auth(ureq::post(&format!("{}/api/courses", self.base)))
-            .header("X-Maker", maker)
-            .header("Content-Type", "application/octet-stream")
-            .send(data)
-            .map_err(|e| e.to_string())?;
-        let s = r.body_mut().read_to_string().map_err(|e| e.to_string())?;
-        let v: Value = serde_json::from_str(&s).map_err(|e| e.to_string())?;
-        Listing::from_json(&v).ok_or_else(|| format!("upload refused: {s}"))
+        let mut req = self.authed("POST", format!("/api/courses?maker={}", encode(maker)));
+        if maker.bytes().all(|b| (0x20..0x7f).contains(&b)) {
+            req = req.header("X-Maker", maker);
+        }
+        let req = req.body("application/octet-stream", data.to_vec());
+        let v = self.send_json(req)?;
+        Listing::from_json(&v).ok_or_else(|| format!("upload refused: {v}"))
     }
 
     /// Report a play ("play") or an anonymous clear ("clear"); likes need an account (`vote`).
     pub fn report(&self, code: &str, what: &str) -> Result<()> {
-        ureq::post(&format!("{}/api/courses/{code}/{what}", self.base))
-            .send_empty()
+        self.send(Request::new("POST", format!("/api/courses/{code}/{what}")))
             .map(|_| ())
-            .map_err(|e| e.to_string())
     }
 
     /// Random courses with a difficulty value in `band` (100 Mario).
@@ -536,7 +628,6 @@ pub fn listing_json(l: &Listing) -> Value {
     })
 }
 
-#[cfg(feature = "http")]
 fn account_json(a: &Account) -> Value {
     serde_json::json!({ "id": a.id, "name": a.name, "maker_id": a.maker_id })
 }
@@ -563,8 +654,13 @@ fn account_json(a: &Account) -> Value {
 /// Replays (bytes) go through [`Client::submit_replay`] / [`Client::record_replay`].
 #[cfg(feature = "http")]
 pub fn call(server: &str, token: Option<&str>, action: &str, args: &Value) -> Result<Value> {
-    use serde_json::json;
     let c = Client::new(server).with_token(token.filter(|t| !t.is_empty()).map(str::to_string));
+    call_with(&c, action, args)
+}
+
+/// [`call`] on a client of any transport (signed in with its token, if it has one).
+pub fn call_with(c: &Client, action: &str, args: &Value) -> Result<Value> {
+    use serde_json::json;
     let s = |k: &str| args[k].as_str().unwrap_or_default();
     let n = |k: &str| args[k].as_u64().unwrap_or(0);
     Ok(match action {
@@ -631,7 +727,6 @@ pub fn call(server: &str, token: Option<&str>, action: &str, args: &Value) -> Re
     })
 }
 
-#[cfg(feature = "http")]
 fn encode(s: &str) -> String {
     s.bytes()
         .map(|b| match b {
@@ -644,14 +739,12 @@ fn encode(s: &str) -> String {
 
 /// 100 Mario courses from a server. `CourseRef::id` is the course code; the app downloads it
 /// before playing. Network errors give an empty search (the run reports "not enough courses").
-#[cfg(feature = "http")]
 pub struct RemoteSource {
     pub client: Client,
     /// Only courses in styles the engine plays.
     pub styles: Vec<String>,
 }
 
-#[cfg(feature = "http")]
 impl CourseSource for RemoteSource {
     fn search(
         &mut self,
@@ -703,6 +796,65 @@ pub fn base64(s: &str) -> Option<Vec<u8>> {
 mod tests {
     use super::*;
 
+    /// A stand-in for the browser's fetch: each request handed to the server's handler.
+    struct InProcess(mmk_server::Store);
+
+    impl Transport for InProcess {
+        fn send(&self, _base: &str, r: &Request) -> Result<(u16, Vec<u8>)> {
+            let headers: Vec<(String, String)> = r
+                .headers
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.clone()))
+                .collect();
+            let body = r.body.as_deref().unwrap_or_default();
+            let (status, _, out) = mmk_server::handle(&self.0, r.method, &r.path, &headers, body);
+            Ok((status, out))
+        }
+    }
+
+    #[test]
+    fn any_transport_carries_the_calls() {
+        use serde_json::json;
+        let dir = std::env::temp_dir().join(format!("mmk-online-transport-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let store = mmk_server::Store::open(&dir).unwrap();
+        let c = Client::with_transport("http://in-process/", std::sync::Arc::new(InProcess(store)));
+        assert_eq!(c.base, "http://in-process");
+        let mut course = mmk_formats::smm2::Course::blank("M1");
+        course.header.name.set("Through the page");
+        let data = course.to_bytes().unwrap();
+        // the maker's upload (hex_rle text, a name no header could carry)
+        let args = json!({ "course": mmk_formats::hex_rle::hex_rle(&data), "maker": "マリオ" });
+        let up = call_with(&c, "upload", &args).unwrap();
+        assert_eq!(up["maker"], "マリオ");
+        let code = up["code"].as_str().unwrap().to_string();
+        assert_eq!(c.download(&code).unwrap(), data);
+        let found = call_with(&c, "search", &json!({ "q": "page", "sort": "new" })).unwrap();
+        assert_eq!(found[0]["code"], code.as_str());
+        // an account: registered, then signed in with its token
+        let reg = call_with(&c, "register", &json!({ "name": "Web" })).unwrap();
+        let token = reg["token"].as_str().unwrap().to_string();
+        let me = c.clone().with_token(Some(token));
+        assert_eq!(call_with(&me, "me", &json!({})).unwrap()["name"], "Web");
+        assert!(call_with(&c, "me", &json!({})).is_err());
+        assert_eq!(me.vote(&code, true).unwrap().likes, 1);
+        // the server's own words for a refusal
+        let e = c.info("AAA-AAA-AAA").unwrap_err();
+        assert!(e.contains("HTTP 4"), "{e}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn an_answer_is_its_body_or_the_servers_error() {
+        assert_eq!(answer(201, b"ok".to_vec()).unwrap(), b"ok");
+        assert_eq!(
+            answer(404, br#"{"error":"not found"}"#.to_vec()).unwrap_err(),
+            "not found (HTTP 404)"
+        );
+        assert_eq!(answer(502, b"<html>".to_vec()).unwrap_err(), "HTTP 502");
+    }
+
+    #[cfg(feature = "http")]
     #[test]
     fn talks_to_a_live_server() {
         let dir = std::env::temp_dir().join(format!("mmk-online-test-{}", std::process::id()));
@@ -755,6 +907,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    #[cfg(feature = "http")]
     #[test]
     fn endless_runs_on_a_live_server() {
         use mmk_modes::endless::{HistoryResult, Outcome, Run};
