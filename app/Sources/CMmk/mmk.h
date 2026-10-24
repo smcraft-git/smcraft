@@ -123,6 +123,15 @@ void mmk_engine_play_status(const MmkEngine *engine, MmkPlayStatus *out);
 void mmk_engine_set_character(MmkEngine *engine, uint32_t character);
 // Background clear colour 0xRRGGBBAA (theme sky; black when the theme has no background art)
 uint32_t mmk_engine_clear_color(const MmkEngine *engine);
+// The 2D styles' drop shadow of the course's theme (false: none). Sprites of a layer >= min_layer,
+// moved `offset` world px right and down on the screen, darken what is drawn before them (the
+// backdrop) once: colour * a + backdrop * (1 - a), in linear colour.
+typedef struct {
+    float offset;
+    uint32_t min_layer;
+    float color[4];
+} MmkFieldShadow;                                                      // 24 bytes
+bool mmk_engine_field_shadow(MmkEngine *engine, MmkFieldShadow *out);
 // View flags: bit 0 = draw upside down (underground night)
 uint32_t mmk_engine_view_flags(const MmkEngine *engine);
 void mmk_engine_restart(MmkEngine *engine);

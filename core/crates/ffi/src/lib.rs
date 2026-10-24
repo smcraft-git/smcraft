@@ -258,7 +258,12 @@ pub struct MmkEngine {
     /// Engine options (SMM1 extras), applied to every world this engine makes
     /// (`options::mmk_engine_set_option`).
     options: mmk_sim::Options,
+    /// The 2D drop shadow of the last theme asked for: ((style, theme, night), shadow).
+    shadow: ShadowMemo,
 }
+
+/// A theme's drop shadow, looked up once: ((style, theme, night), shadow).
+type ShadowMemo = Option<((String, u8, bool), Option<mmk_host::frame::FieldShadow>)>;
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
@@ -324,6 +329,7 @@ pub unsafe extern "C" fn mmk_engine_new(assets: *const MmkAssets) -> *mut MmkEng
             planner: Default::default(),
             draw: Vec::new(),
             mesh_mode: true,
+            shadow: None,
             options: {
                 // random Mystery Mushroom costumes come from those the assets have art for
                 let mut o = mmk_sim::Options::default();
@@ -586,6 +592,55 @@ pub unsafe extern "C" fn mmk_engine_clear_color(engine: *const MmkEngine) -> u32
     })
 }
 
+/// The 2D styles' drop shadow (`mmk_host::frame::FieldShadow`).
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct MmkFieldShadow {
+    /// World px, right and down on the screen.
+    pub offset: f32,
+    /// Sprites of a layer above this cast it (the backdrop and the start sign don't).
+    pub min_layer: u32,
+    /// RGBA, 0…1 (blended over the backdrop: colour · a + backdrop · (1 − a), linear).
+    pub color: [f32; 4],
+}
+
+/// The drop shadow of the course's theme; false when there is none (3D styles, or themes
+/// without one).
+///
+/// # Safety
+/// `engine` must be a live handle, `out` writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mmk_engine_field_shadow(
+    engine: *mut MmkEngine,
+    out: *mut MmkFieldShadow,
+) -> bool {
+    guard(false, || {
+        let (Some(e), Some(out)) = (unsafe { engine.as_mut() }, unsafe { out.as_mut() }) else {
+            return false;
+        };
+        let l = &e.world.level;
+        let key = (l.style.clone(), l.theme, l.night);
+        let shadow = match &e.shadow {
+            Some((k, s)) if *k == key => *s,
+            _ => {
+                let cache = &unsafe { &*e.assets }.cache;
+                let s = mmk_host::frame::field_shadow(cache, &key.0, key.1, key.2);
+                e.shadow = Some((key, s));
+                s
+            }
+        };
+        let Some(s) = shadow else {
+            return false;
+        };
+        *out = MmkFieldShadow {
+            offset: s.offset,
+            min_layer: mmk_sim::world::START_SIGN_LAYER + 1,
+            color: s.color,
+        };
+        true
+    })
+}
+
 /// HUD counters and this tick's events (bit n = `mmk_sim::Event` discriminant n).
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
@@ -815,6 +870,7 @@ mod tests {
             planner: Default::default(),
             draw: Vec::new(),
             mesh_mode: true,
+            shadow: None,
             options: Default::default(),
         };
         unsafe {
