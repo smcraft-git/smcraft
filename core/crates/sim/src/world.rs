@@ -3448,7 +3448,7 @@ impl World {
             if still_shell {
                 let dir = if ax >= self.player.x { 1 } else { -1 };
                 let pvx = self.player.vx;
-                self.actors[i].touch_kick(dir, pvx);
+                self.actors[i].touch_kick(dir, pvx, stomp, &self.level);
                 // (a kick from above doesn't bounce the player [obs: Ryujinx trace M1_koopa
                 // koopa_kick, the fall goes on onto the pillar])
                 // the kick scores as a stomp-family attack on the player's stomp chain

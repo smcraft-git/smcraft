@@ -1681,6 +1681,9 @@ impl Level {
         // the bottom row continues below the course: a pit's walls go all the way down
         // [obs: Ryujinx trace, the player blocked by a pit wall below y = 0]
         let y = y.max(0);
+        // and the leftmost column continues to the left: a shell slides on along the floor
+        // past the course's left edge [obs: Ryujinx trace M1_shell shell_kick, y 16 to x −83]
+        let x = x.max(0);
         self.index(x, y)
             .map(|i| self.cells[i])
             .unwrap_or(Cell::Empty)

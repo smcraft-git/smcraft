@@ -1529,11 +1529,21 @@ impl Actor {
         self.chain = 0;
     }
 
-    /// A player's touch kicks a still shell (kick()), the slide starting with the shell's next
-    /// update (`kick_speed`).
-    pub fn touch_kick(&mut self, dir: i32, kicker_vx: f32) {
+    /// A player's touch kicks a still shell (kick()). From above the slide starts with the
+    /// shell's next update (`kick_speed`) [obs: Ryujinx trace M1_koopa koopa_kick]; from the
+    /// side the shell already slides this frame [obs: Ryujinx trace M1_shell, x + 3.25 on the
+    /// kick frame].
+    pub fn touch_kick(&mut self, dir: i32, kicker_vx: f32, from_top: bool, level: &Level) {
         self.kick(dir, kicker_vx);
-        self.kick_speed = std::mem::take(&mut self.vx);
+        if from_top {
+            self.kick_speed = std::mem::take(&mut self.vx);
+        } else {
+            self.vy = (self.vy + ENEMY_GRAVITY).max(MAX_FALL);
+            self.collide(level);
+            if self.wall {
+                self.bounce_pending = true;
+            }
+        }
     }
 
     pub fn turn(&mut self) {
@@ -3976,7 +3986,9 @@ impl Actor {
                 self.wall = true;
             }
         }
-        if self.x - hw < level.left {
+        // (a shell slides on past the course's left edge [obs: Ryujinx trace M1_shell
+        // shell_kick, x 5.0 → −14.5 at −3.25 a frame])
+        if self.x - hw < level.left && !shell {
             self.x = level.left + hw;
             self.wall = self.vx < 0.0 || self.wall;
         }
