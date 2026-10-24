@@ -51,7 +51,10 @@ sway, importer and pack 12, the dev cache already at v12).
      "Water / Poison / Lava Level"; fixed / rising and the speed — not in the text, likely
      markers in the course), custom scroll nodes, Mario's Trail (`L_ZanzoBtn_00`), the trash can
      (`L_TrashCan_00`); a winged / parachuted item coming out of a block; Super World enemy-icon
-     courses, point icons by model, map ghosts.
+     courses, point icons by model, map ghosts; CJK course names (TGRCode's Japanese / Chinese /
+     Korean names draw as the replacement glyph: the UI import rasterises only the English text's
+     characters — rasterise a CJK set from the dump's `Font/ScalableFont.szs` at import, or keep
+     the decrypted fonts in the pack and rasterise missing glyphs at run time).
   4. Super Worlds' 3D map and Toad Houses; airship sway; the colour table; NSMBU / 3D World pixels.
   5. iPad / Android device runs; the macOS package; live Network Play once the ID and key arrive.
 
