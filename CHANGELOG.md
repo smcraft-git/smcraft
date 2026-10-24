@@ -8,6 +8,18 @@ SMCraft never needs them again.
 
 SMCraft is back in development (it was archived in October 2026).
 
+- **Wings as in SMM2**: winged power-ups, coins, springs, P Switches and POW Blocks fly slowly
+  the way they face with a 16-px bob and pass through walls (they meet walls only in 3D World);
+  winged blocks fly the same way, and winged Hard, Ice and Donut Blocks swing 48 px from side to
+  side instead; a winged Spiny sets off left and hovers in a slow bob; a winged lift keeps pacing
+  with an 8-px bob, and a winged falling lift bobs and falls slowly; a Lakitu's coins fly on after
+  they are thrown.
+- A lift that's set to start right now starts right; the Angry Sun waits 5 seconds before its
+  first swoop; the cape spin lasts 20 frames; a Side Thwomp notices big Mario by his head; a Chain
+  Chomp flies back onto its stake along the game's curve; a Red Yoshi's Egg is the one with the
+  big flag; a custom autoscroll node set to "stop" stops the camera, and vertical custom
+  autoscroll uses the game's vertical speeds.
+
 - **Import once, then no dump or keys.** SMCraft reads your NSPs and `prod.keys` itself (no
   hactool, nothing extracted) and writes its own asset pack; the game runs from the pack alone.
   On macOS the setup screen picks the files; on Windows, Linux and Android you put them in the
