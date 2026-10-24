@@ -119,16 +119,24 @@ Everything is on `main` and pushed, except `maker-audio` (pushed as a branch; se
     push; the goal waits 240 (+30) frames, one player at the goal clears; a warp takes everyone
     (out 15 frames apart); time up kills everyone. One player steps exactly as before (traces,
     a test). 9 tests
-  - ⬜ Front end: Play Together in the Coursebot (`L_CoopModeBtn_00`) and the Course World /
-    library rows (the co-op slot now holds Make: the Report slot, labelled with the row's co-op
-    text), a controller step (2–4 players = connected controllers), `Host::set_players`,
-    `CourseStatus::players` and `dying` = all down (`World::all_down`), HUD `TypeMember`
-  - ⬜ Co-op 100 Mario / Endless (shared lives; ask "n players?" at New Game when ≥ 2
-    controllers are connected)
-  - ⬜ mmk-play: keyboard as its own player when there are fewer pads than players
+  - ✅ Front end: Play Together on the Coursebot's own button (`L_CoopModeBtn_00`, My Courses)
+    and on the Course World / library rows (the report button's slot with the co-op label and
+    icon: the co-op slot holds Make there); the controller step takes one player per connected
+    controller, 2–4 (a message with only one); `Host::set_players` / `Host::controllers`,
+    `CourseStatus::players`, "dying" = everyone down (`World::all_down`, `restart_in`), the
+    HUD's player icons (`TypeMember`). Checked: a capture of the Coursebot window with the
+    button; a headless three-player run (`mmk-play --players 3 --input-script`): player 1 dies,
+    comes back in a bubble from the right, floats to Luigi, pops and jumps out
+  - ✅ Co-op 100 Mario / Endless: with 2+ controllers New Game / Continue asks "How many
+    players?" (← / →, confirm); the run's courses start with them; one shared life counter
+    (a death is everyone down)
+  - ✅ mmk-play: the player count stays across restarts and courses (unloading goes back to
+    one); pads by player, the keyboard is player 1 on its own with fewer pads than players
+  - ⬜ The Swift app / FFI front end: still one player (its host reports one controller)
   - ⬜ Not yet: carrying players, ground-pound knock-flight, keys moving to the attacker, the
-    180-frame warp wait (the world waits instead), bubble / pop sounds, per-player clear
-    conditions
+    180-frame warp wait (the world waits instead), bubble / pop sounds (the import has them:
+    `WU_SE_OBJ_CMN_BALLOON_BREAK`; the sound director doesn't map the two events yet),
+    per-player clear conditions, a players screen in SMM2's layouts (the question is a toast)
 
 **G4 — Course Maker for any course** 🔄
 - ✅ Editor core (`mmk-editor`): parts, areas, links, tracks, selection, settings, the game's limits

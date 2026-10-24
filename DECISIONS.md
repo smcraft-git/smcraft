@@ -1525,3 +1525,18 @@ under `recomp/private|generated|build/`, and text that looks like disassembly or
   the leader travels, as in single player); the other pole players slide and walk in after the
   winner without SMM2's height-ordered choreography details.
 
+## 2026-10-24 — Play Together in the front end
+- SMM2 starts Play Together with the system's controller set-up (2–4 players, one per
+  controller). With no system applet on our platforms, the host's connected controllers are
+  the players (`Host::controllers`: the keyboard / touch and each pad); with only one a message
+  asks for another. mmk-play gives pad k to player k + 1 when there are as many pads as
+  players, else the keyboard is player 1 and the pads players 2….
+- Coursebot: SMM2's own co-op button. Course World / library rows: the game's co-op button
+  holds Make there (the maker work), so Play Together sits on the unused report button's slot
+  with the co-op label and icon [departure].
+- The challenges have no co-op in SMM2. Ours ask "How many players?" at New Game / Continue
+  when two or more controllers are connected; the party shares the run's lives (SMM2's Super
+  World co-op model) and a life goes only when everyone is down.
+- Co-op clears count as clears (as SMM2 [inf]), but make no replay: the session records
+  one-player runs only, so no co-op time is sent as a verified record.
+
