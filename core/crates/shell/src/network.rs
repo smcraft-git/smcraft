@@ -106,6 +106,7 @@ pub fn local_config(
         kind,
         players,
         course,
+        pick: Vec::new(),
         bind,
         advertise: None,
         nat_check: None,
@@ -208,6 +209,7 @@ impl NetworkHost {
             "0.0.0.0:0".parse().unwrap(),
             Arc::new(|m: &str| crate::app::log(m)),
         );
+        cfg.pick = r.pick.clone().unwrap_or_default().into_bytes();
         cfg.cancel = Some(cancel.clone());
         let p = progress.clone();
         cfg.progress = Some(Arc::new(move |found, wanted| {
@@ -235,7 +237,7 @@ impl NetworkHost {
 
     pub fn poll_match(&mut self) -> MatchState {
         if let Some((_, info)) = &self.found {
-            return MatchState::Ready(*info);
+            return MatchState::Ready(info.clone());
         }
         if let Some(e) = &self.failed {
             return MatchState::Failed(e.clone());
@@ -250,8 +252,11 @@ impl NetworkHost {
                     me: m.me,
                     players: m.players,
                     gid: m.gid,
+                    course: String::from_utf8(m.pick.clone())
+                        .ok()
+                        .filter(|c| !c.is_empty()),
                 };
-                self.found = Some((m, info));
+                self.found = Some((m, info.clone()));
                 MatchState::Ready(info)
             }
             Ok(Err(e)) => {

@@ -279,6 +279,10 @@ Nextendo; `docs/nextendo-network-play.md`, spec `research/specs/network-play.md`
   local matches between two `mmk-play --nextendo-local` front ends (co-op and versus: 600 frames,
   9 state checks, the same player positions on both, no desync; a peer quitting → the other back
   to the mode select; a cancelled search)
+- ✅ Course World courses: with TGRCode's Endless pool on disk every player searches with a pick
+  of their own (a course code after the course hash in the session's application data, pool
+  `WORLD_POOL`); the opener's pick is everyone's course, downloaded by code. Story Mode pool
+  without. Checked: a front flow test, the local-server end-to-end test (both get the opener's)
 - ⬜ Difficulty vote and TGRCode courses by difficulty (the owner sends the code); Miis / names
   of the other players (peers' names aren't exchanged: "Player n"); versus rating; watching mode
   after one's run ends; preset messages; Play with Friends (rooms); 3–4 players across NATs (the

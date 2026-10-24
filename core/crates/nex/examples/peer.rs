@@ -34,6 +34,7 @@ fn main() -> Result<(), String> {
         kind: smcraft::KIND_COOP,
         players: 2,
         course: 0,
+        pick: Vec::new(),
         bind: "0.0.0.0:0".parse().unwrap(),
         advertise: None,
         nat_check: None,

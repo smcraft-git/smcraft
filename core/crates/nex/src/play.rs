@@ -44,6 +44,8 @@ pub struct PlayConfig {
     pub players: u16,
     /// A hash of the course everyone plays.
     pub course: u64,
+    /// Our course pick, if we open the session (see [`Match::pick`]).
+    pub pick: Vec<u8>,
     /// Where the game's UDP socket binds (e.g. 0.0.0.0:0).
     pub bind: SocketAddr,
     /// Our LAN address in the station URL (default: the one that routes to the server).
@@ -78,6 +80,8 @@ pub struct Match {
     pub peers: Vec<SocketAddr>,
     pub host: bool,
     pub gid: u32,
+    /// The course pick of the player who opened the session (the same for everyone).
+    pub pick: Vec<u8>,
     stop: Arc<AtomicBool>,
     keepalive: Option<JoinHandle<()>>,
 }
@@ -187,7 +191,7 @@ pub fn find_match(cfg: PlayConfig) -> Result<Match, Error> {
         return Err(Error::Cancelled);
     }
     let session = secure.auto_matchmake(&AutoMatchmakeParam {
-        session: MatchmakeSession::smcraft(cfg.kind, players, cfg.course),
+        session: MatchmakeSession::smcraft(cfg.kind, players, cfg.course).with_pick(&cfg.pick),
         criteria: vec![SearchCriteria::smcraft(cfg.kind, cfg.course)],
         participation_count: 1,
         join_message: "SMCraft".into(),
@@ -202,6 +206,7 @@ pub fn find_match(cfg: PlayConfig) -> Result<Match, Error> {
         return Err(Error::Protocol("the session plays another course".into()));
     }
     let gid = session.id;
+    let pick = session.smcraft_pick().to_vec();
     let host = session.owner == cfg.pid;
     socket.set_read_timeout(Some(Duration::from_millis(20)))?;
     let deadline = Instant::now() + cfg.wait;
@@ -278,6 +283,7 @@ pub fn find_match(cfg: PlayConfig) -> Result<Match, Error> {
         peers,
         host,
         gid,
+        pick,
         stop,
         keepalive: Some(keepalive),
     })

@@ -163,6 +163,21 @@ impl MatchmakeSession {
             && self.application_data.starts_with(smcraft::MAGIC)
     }
 
+    /// The same, carrying the opener's course `pick` after the course hash (e.g. a Course World
+    /// course's code): whoever opens the session decides it for everyone who joins.
+    pub fn with_pick(mut self, pick: &[u8]) -> Self {
+        self.application_data.extend_from_slice(pick);
+        self
+    }
+
+    /// The pick of the player who opened the session (empty: none).
+    pub fn smcraft_pick(&self) -> &[u8] {
+        self.application_data
+            .strip_prefix(smcraft::MAGIC)
+            .and_then(|r| r.get(8..))
+            .unwrap_or_default()
+    }
+
     /// The course hash an SMCraft session was opened with.
     pub fn smcraft_course(&self) -> Option<u64> {
         let rest = self.application_data.strip_prefix(smcraft::MAGIC)?;
@@ -536,6 +551,10 @@ mod tests {
         let s = MatchmakeSession::smcraft(smcraft::KIND_COOP, 2, 0x1122_3344_5566_7788);
         assert!(s.is_smcraft());
         assert_eq!(s.smcraft_course(), Some(0x1122_3344_5566_7788));
+        assert!(s.smcraft_pick().is_empty());
+        let picked = s.clone().with_pick(b"ABC-DEF-GHJ");
+        assert_eq!(picked.smcraft_course(), Some(0x1122_3344_5566_7788));
+        assert_eq!(picked.smcraft_pick(), b"ABC-DEF-GHJ");
         let p = AutoMatchmakeParam {
             session: s.clone(),
             criteria: vec![SearchCriteria::smcraft(smcraft::KIND_COOP, 7)],

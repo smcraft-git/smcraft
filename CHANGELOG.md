@@ -38,7 +38,8 @@ SMCraft is back in development (it was archived in October 2026).
   waits for the others; also for 100 Mario and
   Endless runs.
 - **Network Play screens** (co-op and versus) over Nextendo matchmaking, tested against a local
-  server.
+  server: the match plays a Course World course (TGRCode) picked by whoever opened it, or one of
+  the import's Story Mode courses.
 - **A Mods page** on the title screen with every mod option (SMM1 extras, the recomp's mods, Course
   World's source).
 - **100 Mario: SMM1's Mystery Mushroom reward**: a finished run wins a costume.

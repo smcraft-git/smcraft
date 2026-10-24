@@ -17,10 +17,14 @@
 //!   result `Play_BattleResult_00`: Exit (back to the mode select) / Continue playing (a new
 //!   search, as the ReMatching states).
 //!
-//! The course [departure]: no difficulty vote; every player draws the same course from the pool
-//! all SMCraft players share — the Story Mode courses of their import ([`course_pool`]) — by the
-//! session's gathering ID ([`match_course`]). The pool's fingerprint ([`pool_id`]) goes into the
-//! session's attributes, so players whose pools differ never meet.
+//! The course [departure]: no difficulty vote. With Course World courses at hand (TGRCode's
+//! Endless pool the host keeps, [`crate::Host::challenge_courses`]) every player searches with a
+//! pick of their own, and the pick of whoever opens the session is everyone's course
+//! ([`MatchInfo::course`]; the others download it from TGRCode). Without, every player draws the
+//! same course from the pool all SMCraft players share — the Story Mode courses of their import
+//! ([`course_pool`]) — by the session's gathering ID ([`match_course`]). The pool's fingerprint
+//! ([`pool_id`], or [`WORLD_POOL`]) goes into the session's attributes, so players whose pools
+//! differ never meet.
 //!
 //! A peer that stops sending ([`LinkState::Lost`]) ends the match with a message, as the game's
 //! EndBattleDisconnected; giving up leaves the match. Spec: research `specs/network-play.md`.
@@ -47,23 +51,31 @@ pub enum NetAccount {
 }
 
 /// What to search for.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MatchRequest {
     pub versus: bool,
     /// Players in the match (2–4).
     pub players: usize,
-    /// The course pool's fingerprint ([`pool_id`]): only players with the same pool meet.
+    /// The course pool's fingerprint ([`pool_id`], [`WORLD_POOL`]): only players with the same
+    /// pool meet.
     pub pool: u64,
+    /// The Course World course (its code) everyone plays if we open the session.
+    pub pick: Option<String>,
 }
 
+/// The pool fingerprint of matches on Course World courses picked by the session's opener.
+pub const WORLD_POOL: u64 = u64::from_le_bytes(*b"TGRCode1");
+
 /// A match found: everyone is connected.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MatchInfo {
     /// Our position (0 = the session's owner) and the number of players.
     pub me: usize,
     pub players: usize,
     /// The session's gathering ID, the same for every player.
     pub gid: u32,
+    /// The Course World course the session's opener picked (None: the shared pool's draw).
+    pub course: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -698,11 +710,27 @@ impl NetplayFlow {
     /// Start the search for `versus` (signed in, with a pool).
     fn search(&mut self, cx: &mut Cx, versus: bool) {
         self.versus = versus;
-        if self.pool.is_empty() {
-            cx.toast("Network Play needs the Story Mode courses of your import.");
-            return;
-        }
-        let pool = pool_id(&self.pool);
+        let picks: Vec<String> = cx
+            .host
+            .challenge_courses()
+            .into_iter()
+            .filter_map(|e| e.meta.code)
+            .collect();
+        let (pool, pick) = if picks.is_empty() {
+            if self.pool.is_empty() {
+                cx.toast(
+                    "Network Play needs Course World courses or the Story Mode courses of your import.",
+                );
+                return;
+            }
+            (pool_id(&self.pool), None)
+        } else {
+            let k = (self.tick as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15) >> 17;
+            (
+                WORLD_POOL,
+                Some(picks[(k % picks.len() as u64) as usize].clone()),
+            )
+        };
         let Some(n) = cx.host.network() else {
             cx.toast("Network Play isn't set up: it needs a Nextendo game server.");
             return;
@@ -722,6 +750,7 @@ impl NetplayFlow {
             versus,
             players: PLAYERS,
             pool,
+            pick,
         });
         if let Some(w) = Wait::new(&self.ui, WaitFor::Players, versus, self.tick) {
             self.stage = Stage::Wait(Box::new(w));
@@ -765,23 +794,23 @@ impl NetplayFlow {
 
     /// Load the match's course and start it online.
     fn start_course(&mut self, cx: &mut Cx) {
-        let Some(m) = self.current else {
+        let Some(m) = self.current.clone() else {
             return self.show_modes(cx);
         };
-        let Some(course) = match_course(&self.pool, m.gid).cloned() else {
-            return self.end_match(cx, Some("No course to play."));
+        let (source, name) = match &m.course {
+            Some(code) => (Source::Server(code.clone()), code.clone()),
+            None => match match_course(&self.pool, m.gid) {
+                Some(c) => (Source::Library(c.id.clone()), c.name.clone()),
+                None => return self.end_match(cx, Some("No course to play.")),
+            },
         };
         let loaded = match cx.host.network() {
-            Some(n) => n.play_match(&Source::Library(course.id.clone())),
+            Some(n) => n.play_match(&source),
             None => Err("Network Play isn't set up.".into()),
         };
         match loaded {
             Ok(l) => {
-                self.course_name = if l.name.is_empty() {
-                    course.name.clone()
-                } else {
-                    l.name
-                };
+                self.course_name = if l.name.is_empty() { name } else { l.name };
                 let status = cx.host.course_status();
                 let mut c = NetCourse::new(&self.ui, &self.course_name, &m, &self.name, &status);
                 c.since = self.tick;
@@ -847,7 +876,7 @@ impl NetplayFlow {
                 match n.poll_match() {
                     MatchState::Searching { found, wanted } => w.set_count(found, wanted),
                     MatchState::Ready(info) => {
-                        self.current = Some(info);
+                        self.current = Some(info.clone());
                         if let Some(l) = Lobby::new(&self.ui, self.versus, &info, &self.name, tick)
                         {
                             self.stage = Stage::Lobby(Box::new(l));
@@ -944,7 +973,7 @@ impl NetplayFlow {
         let Stage::Playing(c) = &mut self.stage else {
             return None;
         };
-        let m = self.current?;
+        let m = self.current.clone()?;
         let offline = m.gid == 1 && cx.host.network().is_none();
         if !offline
             && c.cleared_at.is_none()
@@ -1123,6 +1152,7 @@ impl NetplayFlow {
             me: 0,
             players: 2,
             gid: 1,
+            course: None,
         };
         let tick = self.tick;
         match what {
@@ -1143,7 +1173,7 @@ impl NetplayFlow {
             },
             "result" => match Results::new(&self.ui, versus, &m, Some(1), &self.name, tick) {
                 Some(r) => {
-                    self.current = Some(m);
+                    self.current = Some(m.clone());
                     self.stage = Stage::Result(Box::new(r));
                 }
                 None => return false,
@@ -1158,7 +1188,7 @@ impl NetplayFlow {
                 if l.name.is_empty() {
                     l.name = course.name.clone();
                 }
-                self.current = Some(m);
+                self.current = Some(m.clone());
                 let status = cx.host.course_status();
                 let mut c = NetCourse::new(&self.ui, &l.name, &m, &self.name, &status);
                 c.since = tick;
@@ -1281,7 +1311,7 @@ mod tests {
         fn sign_in(&mut self) {}
         fn sign_out(&mut self) {}
         fn find_match(&mut self, r: &MatchRequest) {
-            self.requests.push(*r);
+            self.requests.push(r.clone());
             self.state = MatchState::Searching {
                 found: 1,
                 wanted: r.players,
@@ -1313,11 +1343,16 @@ mod tests {
     struct NetHost {
         inner: MockHost,
         net: MockNet,
+        /// Course World courses kept on disk (TGRCode's Endless pool).
+        world: Vec<CourseEntry>,
     }
 
     impl Host for NetHost {
         fn library(&mut self) -> Vec<CourseEntry> {
             self.inner.library()
+        }
+        fn challenge_courses(&mut self) -> Vec<CourseEntry> {
+            self.world.clone()
         }
         fn request_server_courses(&mut self) -> bool {
             false
@@ -1406,6 +1441,7 @@ mod tests {
                 state: MatchState::Idle,
                 link: LinkState::Up,
             },
+            world: Vec::new(),
         };
         let opts = Options {
             boot: false,
@@ -1424,7 +1460,8 @@ mod tests {
             [MatchRequest {
                 versus: false,
                 players: PLAYERS,
-                pool: pool_id(&pool)
+                pool: pool_id(&pool),
+                pick: None,
             }]
         );
         // found: the lobby, then the course everyone draws, after its countdown
@@ -1432,6 +1469,7 @@ mod tests {
             me: 1,
             players: 2,
             gid: 7,
+            course: None,
         });
         run_until(&mut f, &mut h, "lobby", 3);
         run_until(&mut f, &mut h, "loading", 400);
@@ -1465,6 +1503,7 @@ mod tests {
             me: 0,
             players: 2,
             gid: 8,
+            course: None,
         });
         run_until(&mut f, &mut h, "playing", 500);
         h.net.link = LinkState::Lost;
@@ -1480,6 +1519,57 @@ mod tests {
         // back from the mode select: Course World's hub
         press(&mut f, &mut h, Buttons::BACK, 3);
         assert!(matches!(f.screen, Screen::World(_)));
+    }
+
+    #[test]
+    fn with_course_world_courses_the_session_openers_pick_is_played() {
+        let Some(ui) = crate::testing::smm2() else {
+            return;
+        };
+        let world: Vec<CourseEntry> = ["AB1-CD2-EF3", "GH4-JK5-LM6"]
+            .iter()
+            .map(|c| CourseEntry {
+                id: format!("/pool/{c}"),
+                meta: crate::host::CourseMeta {
+                    code: Some(c.to_string()),
+                    ..Default::default()
+                },
+                ..Default::default()
+            })
+            .collect();
+        let mut h = NetHost {
+            inner: MockHost::default(),
+            net: MockNet {
+                requests: Vec::new(),
+                cancels: 0,
+                left: 0,
+                played: Vec::new(),
+                state: MatchState::Idle,
+                link: LinkState::Up,
+            },
+            world,
+        };
+        let opts = Options {
+            boot: false,
+            instant_fades: true,
+            ..Default::default()
+        };
+        let mut f = Front::new(ui, None, opts, &mut h);
+        assert!(f.capture(&mut h, "netplay", 0, 0));
+        press(&mut f, &mut h, Buttons::CONFIRM, 20);
+        assert_eq!(stage(&f), "wait", "no Story Mode courses needed");
+        let r = &h.net.requests[0];
+        assert_eq!(r.pool, WORLD_POOL);
+        assert!(r.pick.as_deref().is_some_and(|c| c.contains('-')));
+        // another player opened the session: their pick is played (downloaded by code)
+        h.net.state = MatchState::Ready(MatchInfo {
+            me: 1,
+            players: 2,
+            gid: 7,
+            course: Some("XY7-ZW8-QR9".into()),
+        });
+        run_until(&mut f, &mut h, "playing", 500);
+        assert_eq!(h.net.played, [Source::Server("XY7-ZW8-QR9".into())]);
     }
 
     fn entry(key: &str, story: bool) -> CourseEntry {

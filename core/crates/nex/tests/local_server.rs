@@ -252,6 +252,7 @@ fn config(s: &LocalServer, pid: u64) -> PlayConfig {
         kind: smcraft::KIND_COOP,
         players: 2,
         course: 0xC0FFEE,
+        pick: Vec::new(),
         bind: "127.0.0.1:0".parse().unwrap(),
         advertise: Some(Ipv4Addr::LOCALHOST),
         nat_check: None,
@@ -269,12 +270,23 @@ fn network_play_end_to_end() {
     };
     let s = Arc::new(s);
     let s2 = s.clone();
-    let host = std::thread::spawn(move || play::find_match(config(&s2, 3_000_001)));
+    // each searches with a course pick of their own: the opener's is everyone's
+    let picked = |pid: u64, pick: &[u8]| PlayConfig {
+        pick: pick.to_vec(),
+        ..config(&s, pid)
+    };
+    let first = picked(3_000_001, b"AB1-CD2-EF3");
+    let host = std::thread::spawn(move || {
+        let _keep = s2;
+        play::find_match(first)
+    });
     std::thread::sleep(Duration::from_millis(700));
-    let joiner = play::find_match(config(&s, 3_000_002)).expect("joiner");
+    let joiner = play::find_match(picked(3_000_002, b"GH4-JK5-LM6")).expect("joiner");
     let host = host.join().unwrap().expect("host");
     assert!(host.host && !joiner.host);
     assert_eq!(host.gid, joiner.gid);
+    assert_eq!(host.pick, b"AB1-CD2-EF3");
+    assert_eq!(joiner.pick, host.pick);
     assert_eq!((host.me, joiner.me), (0, 1));
     assert_eq!(host.peers, [joiner.socket.local_addr().unwrap()]);
     assert_eq!(joiner.peers, [host.socket.local_addr().unwrap()]);
