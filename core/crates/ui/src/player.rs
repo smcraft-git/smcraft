@@ -174,6 +174,8 @@ pub struct PaneOverride {
     pub scale: Option<[f32; 2]>,
     /// 0–255.
     pub alpha: Option<f32>,
+    /// Rotation about the screen axis (degrees).
+    pub rotate: Option<f32>,
 }
 
 /// A pane's place on screen (`LayoutPlayer::pane_global`): its rectangle's corners in layout
@@ -801,6 +803,9 @@ impl LayoutPlayer {
             }
             if let Some(a) = o.alpha {
                 st.alpha = a;
+            }
+            if let Some(r) = o.rotate {
+                st.r[2] = r;
             }
         }
         (panes, mats)

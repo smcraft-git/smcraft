@@ -16,8 +16,9 @@
 //!
 //! Walking: a direction walks Mario along the road to the next point, fork or dead end; an
 //! uncleared course blocks the way on; confirm plays the course under him, uses a pipe (to the
-//! other pipe) or a Toad House (lives). Progress is saved after every change through
-//! [`crate::Host::store_value`] under `superworld.<id>`.
+//! other pipe) or a Toad House: its minigame ([`crate::minigame`], the house's kind from the
+//! world data) over the map, the lives it wins added. Progress is saved after every change
+//! through [`crate::Host::store_value`] under `superworld.<id>`.
 
 use mmk_modes::superworld::{
     self as sw, ClearResult, EAST, NORTH, Progress, SOUTH, Spot, SuperWorld, SwCourse, WEST,
@@ -29,6 +30,7 @@ use crate::fade::FadeKind;
 use crate::host::{CourseEntry, Source};
 use crate::layout::{Layout, Ui};
 use crate::menu::{Buttons, MenuCursor, Script, UiInput, hit};
+use crate::minigame::{MinigameScene, MinigameStep};
 use crate::play::{CoursePlay, PlayEvent, PlayInput, RunLink};
 use crate::screens::{CardInfo, CourseScreens};
 use crate::smm1::RunCardInfo;
@@ -749,7 +751,9 @@ impl MapScene {
         None
     }
 
-    fn draw(&mut self, out: &mut Vec<DrawItem>, world: &SuperWorld, p: &Progress) {
+    /// The map; `prompts`: with the course name and the "Play" / "Enter" balloons (not under a
+    /// minigame).
+    fn draw(&mut self, out: &mut Vec<DrawItem>, world: &SuperWorld, p: &Progress, prompts: bool) {
         let Some(w) = p.world_map(world) else {
             return;
         };
@@ -900,7 +904,7 @@ impl MapScene {
             quads: q,
         });
         // the course's name above it, and the prompt, when Mario stands on a course
-        let here = (!self.walking()).then(|| sw::spot(w, p.x as i32, p.y as i32));
+        let here = (!self.walking() && prompts).then(|| sw::spot(w, p.x as i32, p.y as i32));
         let course = match here {
             Some(Spot::Course { order, .. }) => world.course(p.world, order),
             _ => None,
@@ -991,6 +995,8 @@ enum Stage {
     Loading(Box<PlanetScene>, u32),
     Title(Box<TitleScene>),
     Map(Box<MapScene>),
+    /// A Toad House's minigame over the map.
+    Minigame(Box<MapScene>, Box<MinigameScene>),
     Playing(Box<CoursePlay>),
     Ending(Box<EndingScene>),
     /// No layouts to show (an import without them): the next step leaves.
@@ -1349,10 +1355,11 @@ impl SuperWorldFlow {
                         }
                     }
                     Some(MapEvent::ToadHouse(k)) => {
-                        let n = run.progress.toad_house(k);
-                        run.persist(cx);
-                        if n > 0 {
-                            cx.toast(&format!("+{n} lives"));
+                        let kind = run.progress.toad_house_kind(&run.world, k);
+                        if let Some(kind) = kind
+                            && run.progress.enter_toad_house(k)
+                        {
+                            self.start_minigame(cx, kind);
                         }
                     }
                     Some(MapEvent::Quit) => {
@@ -1361,6 +1368,17 @@ impl SuperWorldFlow {
                         cx.fade_to(FadeKind::Black, Go::SuperWorld(SuperWorldGo::Title));
                     }
                     None => {}
+                }
+            }
+            Stage::Minigame(_, g) => {
+                if let MinigameStep::Done(n) = g.step(ui, &mut self.script) {
+                    let run = self.run.as_mut()?;
+                    run.progress.add_lives(n);
+                    run.persist(cx);
+                    if let Stage::Minigame(map, _) = std::mem::replace(&mut self.stage, Stage::None)
+                    {
+                        self.stage = Stage::Map(map);
+                    }
                 }
             }
             Stage::Playing(p) => {
@@ -1388,8 +1406,14 @@ impl SuperWorldFlow {
             Stage::Title(t) => t.draw(out),
             Stage::Map(m) => {
                 if let Some(run) = &self.run {
-                    m.draw(out, &run.world, &run.progress);
+                    m.draw(out, &run.world, &run.progress, true);
                 }
+            }
+            Stage::Minigame(m, g) => {
+                if let Some(run) = &self.run {
+                    m.draw(out, &run.world, &run.progress, false);
+                }
+                g.draw(out);
             }
             Stage::Playing(p) => p.draw(out),
             Stage::Ending(e) => e.draw(out),
@@ -1404,14 +1428,15 @@ impl SuperWorldFlow {
         }
     }
 
-    /// Captures and tests: the stage shown ("planets", "loading", "title", "map", "playing",
-    /// "ending").
+    /// Captures and tests: the stage shown ("planets", "loading", "title", "map", "minigame",
+    /// "playing", "ending").
     pub fn stage_name(&self) -> &'static str {
         match &self.stage {
             Stage::Planets(_) => "planets",
             Stage::Loading(..) => "loading",
             Stage::Title(_) => "title",
             Stage::Map(_) => "map",
+            Stage::Minigame(..) => "minigame",
             Stage::Playing(_) => "playing",
             Stage::Ending(_) => "ending",
             Stage::None => "none",
@@ -1423,8 +1448,38 @@ impl SuperWorldFlow {
         self.run.as_ref().map(|r| (&r.world, &r.progress))
     }
 
+    /// The Toad House minigame being played.
+    pub fn minigame(&self) -> Option<&MinigameScene> {
+        match &self.stage {
+            Stage::Minigame(_, g) => Some(g),
+            _ => None,
+        }
+    }
+
+    /// Start a minigame over the map shown (the house is already marked used).
+    fn start_minigame(&mut self, cx: &mut Cx, kind: mmk_modes::minigame::Kind) {
+        let character = cx
+            .host
+            .load_value("player.character")
+            .and_then(|s| s.trim().parse().ok())
+            .unwrap_or(0usize);
+        let seed = cx.host.random();
+        let Some(g) = MinigameScene::new(&self.ui, kind, character, seed) else {
+            return;
+        };
+        let map = match std::mem::replace(&mut self.stage, Stage::None) {
+            Stage::Map(m) => m,
+            other => {
+                self.stage = other;
+                Box::new(MapScene::new(&self.ui))
+            }
+        };
+        self.stage = Stage::Minigame(map, Box::new(g));
+    }
+
     /// Captures: open the library's test world at `what` ("title", "map", "walk": the map with
     /// `cleared` courses of world 1 cleared and Mario on the next, "play": its first course,
+    /// "minigame0" / "minigame1" / "minigame2": Match / Pop / Catch & Win in its Toad House,
     /// "ending").
     pub fn debug_open(&mut self, cx: &mut Cx, what: &str, cleared: usize) -> bool {
         let Some(w) = self.local_world() else {
@@ -1462,6 +1517,22 @@ impl SuperWorldFlow {
                 self.play(cx);
             }
             "ending" => self.go(cx, SuperWorldGo::Ending),
+            "minigame0" | "minigame1" | "minigame2" => {
+                let kind = mmk_modes::minigame::Kind::from_byte(what.as_bytes()[8] - b'0');
+                let run = self.run.as_mut().expect("opened");
+                // Mario in the house that runs it
+                let house = run.progress.world_map(&run.world).and_then(|wm| {
+                    (0..wm.toad_houses.len())
+                        .find(|&k| run.progress.toad_house_kind(&run.world, k) == Some(kind))
+                        .and_then(|k| wm.toad_houses[k].map(|t| (k, t)))
+                });
+                if let Some((k, t)) = house {
+                    (run.progress.x, run.progress.y) = (t.x, t.y);
+                    run.progress.enter_toad_house(k);
+                }
+                self.stage = Stage::Map(Box::new(MapScene::new(&self.ui)));
+                self.start_minigame(cx, kind);
+            }
             _ => return false,
         }
         true
@@ -1585,6 +1656,44 @@ mod tests {
         press(&mut f, &mut host, Buttons::RIGHT);
         idle(&mut f, &mut host, 40);
         assert_eq!(flow(&mut f).progress().unwrap().1.x, 3);
+    }
+
+    #[test]
+    fn a_toad_house_runs_its_minigame_and_pays_once() {
+        let mut host = MockHost {
+            library: library(7),
+            ..Default::default()
+        };
+        let Some(mut f) = front(&mut host) else {
+            return;
+        };
+        assert!(f.capture(&mut host, "superworld-map", 0, 0));
+        let lives = flow(&mut f).progress().unwrap().1.lives;
+        // the house below the start: Pop & Win
+        press(&mut f, &mut host, Buttons::DOWN);
+        idle(&mut f, &mut host, 20);
+        assert_eq!(flow(&mut f).progress().unwrap().1.y, 1);
+        press(&mut f, &mut host, Buttons::CONFIRM);
+        assert_eq!(flow(&mut f).stage_name(), "minigame");
+        assert_eq!(
+            flow(&mut f).minigame().map(|g| g.kind),
+            Some(mmk_modes::minigame::Kind::Pop)
+        );
+        // pump until it bursts, then the map again with the prize added and saved
+        for _ in 0..3000 {
+            press(&mut f, &mut host, Buttons::CONFIRM);
+            if flow(&mut f).stage_name() == "map" {
+                break;
+            }
+        }
+        assert_eq!(flow(&mut f).stage_name(), "map");
+        let won = flow(&mut f).progress().unwrap().1.lives - lives;
+        assert!([1, 3, 5].contains(&won), "won {won}");
+        assert_eq!(saved(&host)["lives"], lives + won);
+        assert_eq!(saved(&host)["toads"][0], 0b100);
+        // used: confirming again stays on the map
+        press(&mut f, &mut host, Buttons::CONFIRM);
+        assert_eq!(flow(&mut f).stage_name(), "map");
     }
 
     #[test]

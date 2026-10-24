@@ -26,6 +26,7 @@ pub mod layout;
 pub mod leaderboard;
 pub mod maker;
 pub mod menu;
+pub mod minigame;
 pub mod mods;
 pub mod mods_page;
 pub mod netplay;
