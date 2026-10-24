@@ -9,7 +9,7 @@
 //! [inf, the original's map position rule §4.4 counts history entries the same way]. The
 //! difficulty bands come from the courses' clear rates, else their difficulty values
 //! (`mmk_modes::endless::pick`). Not here yet: the server's runs and the world ranking, the
-//! goal time bonus (the course screens don't hand the timer on), the high score panel.
+//! goal time bonus (the course screens don't hand the timer on).
 
 use std::collections::HashMap;
 
@@ -369,6 +369,12 @@ impl EndlessFlow {
             Some(mut m) => {
                 m.board.layout.text("T_Title_00", TITLE);
                 m.board.set_counters(s.lives, s.clears as usize);
+                let record = Difficulty::from_index(self.run.difficulty)
+                    .and_then(|d| self.run.session.save.run(d))
+                    .is_some_and(|r| r.status.new_high_score());
+                if entry == MapEntry::AfterClear && record {
+                    m.board.show_high_score(s.clears, m.tick + 30);
+                }
                 Scene::Map(Box::new(m))
             }
             None => Scene::None,
@@ -560,6 +566,14 @@ impl EndlessFlow {
     pub fn debug_select(&mut self, d: usize) {
         self.run.difficulty = d.min(3);
         self.make_menu();
+    }
+
+    /// Captures: the map's "New High Score!" panel with `clears`.
+    pub fn debug_high_score(&mut self, clears: u32) {
+        if let Scene::Map(m) = &mut self.scene {
+            let t = m.tick;
+            m.board.show_high_score(clears, t);
+        }
     }
 }
 

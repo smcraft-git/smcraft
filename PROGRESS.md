@@ -310,8 +310,9 @@ Nextendo; `docs/nextendo-network-play.md`, spec `research/specs/network-play.md`
   (`front/src/endless_run.rs`: `mmk_modes::endless::Session` offline over the library and the
   TGRCode pool, 5 lives, 1-Ups paid at the goal, skips, Continue, saved as `endless`; the map's 32
   dots go round). L / R (Q / E) change the difficulty tabs on both menus. Off on the Mods page: the
-  button keeps its name and opens SMM2's Endless alone. Endless still open: the goal time bonus,
-  the high score panel, the server's runs and rankings
+  button keeps its name and opens SMM2's Endless alone. The map's "New High Score!" panel after a
+  clear past the old best (`N_BreakRecord_00`, InRanking / LoopRanking; capture `endless-record`).
+  Endless still open: the goal time bonus, the server's runs and rankings
 - ✅ One Mods page in the front end (`front/src/mods.rs`, `mods_page.rs`; every platform:
   `mmk-play` desktop / web, Android, the Swift app's front end): SMM2's settings window
   (`Cmn_OptionWindow_00`) over the title, opened from SMM2's round menu button in the title's

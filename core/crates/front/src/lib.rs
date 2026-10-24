@@ -1207,7 +1207,7 @@ impl Front {
                 }
                 self.show_modes(host, Some(true));
             }
-            "endless" | "endless-map" => {
+            "endless" | "endless-map" | "endless-record" => {
                 self.show_modes(host, Some(false));
                 let (mut cx, scr) = self.cx(host);
                 let Screen::Modes(m) = scr else {
@@ -1217,8 +1217,11 @@ impl Front {
                     return false;
                 };
                 f.debug_select(difficulty);
-                if screen == "endless-map" {
+                if screen != "endless" {
                     f.start(&mut cx, difficulty, false);
+                }
+                if screen == "endless-record" {
+                    f.debug_high_score(12);
                 }
                 self.run_now(host);
             }

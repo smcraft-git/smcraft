@@ -171,6 +171,22 @@ impl EndlessBoard {
         }
     }
 
+    /// SMM2's Endless: "New High Score!" with the run's count under "High Score" (`N_BreakRecord_00`,
+    /// InRanking's fade from `tick`, then LoopRanking); the world ranking beside it stays hidden
+    /// [departure: no ranking] [inf: shown on the map after each clear past the old best].
+    pub fn show_high_score(&mut self, clears: u32, tick: i32) {
+        let l = &mut self.layout;
+        for p in ["N_BreakRecord_00", "N_BestClearCount_00"] {
+            l.show(&format!("{MAP}/{p}"), true);
+        }
+        l.text(
+            &format!("{MAP}/L_BestClearCount_00/T_Count_00"),
+            &clears.to_string(),
+        );
+        l.play(&format!("{MAP}/InRanking"), tick);
+        l.play_loop(&format!("{MAP}/LoopRanking"), tick);
+    }
+
     /// The map's counters: lives left and courses cleared.
     pub fn set_counters(&mut self, lives: u32, cleared: usize) {
         let l = &mut self.layout;
