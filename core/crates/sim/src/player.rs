@@ -1540,7 +1540,7 @@ impl Player {
         let (vx_before, face_before) = (self.vx, self.facing);
         let grounded_before = self.on_ground;
         if self.in_water {
-            self.swim(inp, pressed);
+            self.swim(inp, pressed, tw.as_ref());
         } else {
             if self.was_in_water && self.exit_window > 0 && self.vy > 0.0 {
                 // leaving the water within 20 frames of a stroke: jump out (vy 3.5)
@@ -2649,20 +2649,26 @@ impl Player {
     /// Swimming (§5.1): strokes add 1.0 (1.25 from the bottom), the player sinks toward −1.5
     /// (−0.043/frame while rising, −0.027 while sinking), upward cap 1.8; horizontal speeds from
     /// the swim table (row 0 swimming, row 3 walking on the bottom).
-    fn swim(&mut self, inp: Input, pressed: bool) {
+    /// In a Twister's column (`tw`) the column's gravity replaces the sinking (the block's caps
+    /// already applied) and its steer the swim's horizontal control (player/twister.rs).
+    fn swim(&mut self, inp: Input, pressed: bool, tw: Option<&twister::TwisterMove>) {
         if !self.was_in_water {
             self.vy = self.vy.max(-1.5);
             self.vx = self.vx.clamp(-1.125, 1.125);
         }
         // vertical
-        if self.vy >= 0.0 {
+        if let Some(t) = tw {
+            self.vy += t.gravity;
+        } else if self.vy >= 0.0 {
             self.vy -= 0.043;
         } else if self.vy > -1.5 {
             self.vy = (self.vy - 0.027).max(-1.5);
         } else {
             self.vy = (self.vy + 0.094).min(-1.5);
         }
-        self.vy = self.vy.min(1.8);
+        if tw.is_none() {
+            self.vy = self.vy.min(1.8);
+        }
         if pressed {
             if self.on_ground {
                 self.vy = 1.25;
@@ -2687,6 +2693,9 @@ impl Player {
         let target = row.0 * dir as f32;
         if dir != 0 {
             self.facing = dir;
+        }
+        if tw.is_some_and(|t| t.steered) {
+            return;
         }
         let a = if v.abs() > row.6 {
             row.7
