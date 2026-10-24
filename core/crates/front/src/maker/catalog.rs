@@ -48,7 +48,7 @@ pub enum Tool {
     Part(i16),
     /// A pipe, facing up.
     Pipe,
-    /// A pair of doors / warp boxes: the second one goes a few tiles to the right [inf].
+    /// A pair of doors / warp boxes: the second one comes a tile to the right (0x7100ec9c00).
     Doors,
     WarpBoxes,
     /// Tracks: a press lays a piece, dragging draws on from its end, 2 tiles a piece, straight

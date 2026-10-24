@@ -248,6 +248,14 @@ impl Editor {
         Ok(())
     }
 
+    /// The straight piece whose free end is at a point (None: no free end there, or a bend's).
+    pub fn free_track_end(&self, p: (i32, i32)) -> Option<usize> {
+        match self.pieces_at(p).as_slice() {
+            [(i, _)] if self.area().tracks.items[*i].r#type <= 3 => Some(*i),
+            _ => None,
+        }
+    }
+
     /// Whether the free track end at a point is open (None: no free end there).
     pub fn track_end_open(&self, p: (i32, i32)) -> Option<bool> {
         let at = self.pieces_at(p);
@@ -379,6 +387,8 @@ mod tests {
         );
         assert_eq!((t[v[1]].k0, t[v[1]].k1), (0x72, NO_CODE), "top cap");
         assert_eq!(t[h[0]].link_id, 1, "link ids start at 0 (+1)");
+        assert_eq!(e.free_track_end((10, 6)), Some(h[0]));
+        assert_eq!(e.free_track_end((12, 6)), None, "a joint");
         e.set_track_end((10, 6), true).unwrap();
         assert_eq!(e.area().tracks.items[h[0]].k1, 0x80, "open end");
         assert!(e.draw_track((0, 3), (3, 3)).is_err(), "odd length");

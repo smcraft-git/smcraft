@@ -248,6 +248,15 @@ enum Drag {
         slot: usize,
         from: (i32, i32),
     },
+    /// Drawing a track from `tip`, a piece's end point; `open`: the drawn end is open (it
+    /// travels with the tip); `from_end`: the press was on a free end (a tap there opens or
+    /// closes it).
+    Track {
+        tip: (i32, i32),
+        open: bool,
+        from_end: bool,
+        changed: bool,
+    },
 }
 
 struct Test {
@@ -1140,6 +1149,13 @@ impl MakerFlow {
                     self.drop_clear_pipe(cx, slot, from);
                 }
             }
+            Some(Drag::Track { .. }) => {
+                if place_held {
+                    self.draw_track(cx);
+                } else {
+                    self.end_drag();
+                }
+            }
             Some(Drag::Select { from }) => {
                 if !place_held {
                     self.drag = None;
@@ -1498,6 +1514,19 @@ impl MakerFlow {
             return;
         }
         self.editor.checkpoint();
+        if self.tool() == Tool::Track {
+            // the drawing starts on the pressed point: nothing is laid until the cursor goes
+            // (0x7100fafe40 plays `begin_draw` and lays no piece); from a free end it draws on,
+            // and the new end is open or closed as that one was (+0x314) [obs]
+            let open = self.editor.track_end_open((tx, ty));
+            self.drag = Some(Drag::Track {
+                tip: (tx, ty),
+                open: open.unwrap_or(false),
+                from_end: open.is_some(),
+                changed: false,
+            });
+            return;
+        }
         if self.tool() == Tool::ClearPipe {
             // the drawing starts at the grid corner nearest the press (the game's guide point)
             let w = self.cursor_world();
@@ -1626,21 +1655,13 @@ impl MakerFlow {
     fn put(&mut self, cx: &mut crate::Cx, first: bool) {
         let (tx, ty) = self.cur;
         let tool = self.tool();
-        if tool == Tool::Track {
-            return self.put_track(cx, first);
-        }
         let r = match tool {
             Tool::Ground => self.editor.paint_ground(tx, ty).map(|_| ()),
             Tool::Part(p) => self.editor.place(p, tx, ty).map(|_| ()),
             Tool::Pipe => self.editor.place_pipe(tx, ty, 2, Dir::Up, 0).map(|_| ()),
-            Tool::Doors => self
-                .editor
-                .place_doors((tx, ty), (tx + 4, ty), mmk_editor::links::DoorKind::Normal)
-                .map(|_| ()),
-            Tool::WarpBoxes => self
-                .editor
-                .place_warp_boxes((tx, ty), (tx + 4, ty), false)
-                .map(|_| ()),
+            // the partner comes along, a tile to the right (`Editor::put_pair`)
+            Tool::Doors => self.editor.put_pair(55, (tx, ty)).map(|_| ()),
+            Tool::WarpBoxes => self.editor.put_pair(97, (tx, ty)).map(|_| ()),
             Tool::Track | Tool::ClearPipe => Ok(()),
         };
         // a part put down on a track rides it (flag 0x400, the piece's link)
@@ -1670,46 +1691,77 @@ impl MakerFlow {
         }
     }
 
-    /// Tracks: a press lays a horizontal piece at the cursor; dragging draws on from the last
-    /// end, 2 tiles a piece, in the cursor's direction (8 ways).
-    fn put_track(&mut self, cx: &mut crate::Cx, first: bool) {
+    /// A track follows the cursor from its drawn end, a piece of 2 tiles at a step, straight
+    /// or at 45° (the game lays one straight piece per arrow of its 8-way guide, its type by
+    /// the arrow's table 0x710231bb60: no bends are laid while drawing) [obs]; going back over
+    /// the piece the end belongs to takes it away (`shrink`, `Edit_DrawBackRail`; the back
+    /// arrow is set from that piece when the press starts on an end, 0x7100fafe40), the end
+    /// under it open or closed as the drawn end was (0x7100fb0200, 0x7100da2b30) [obs].
+    fn draw_track(&mut self, cx: &mut crate::Cx) {
+        let Some(Drag::Track {
+            tip,
+            open,
+            from_end,
+            changed,
+        }) = self.drag
+        else {
+            return;
+        };
         let (tx, ty) = self.cur;
-        // a press on a track's end opens or closes it [inf: as tapping an end does in the game]
-        if first && let Some(open) = self.editor.track_end_open((tx, ty)) {
-            if self.editor.set_track_end((tx, ty), !open).is_ok() {
-                if let Some(Drag::Place { changed, .. }) = &mut self.drag {
-                    *changed = true;
-                }
-                self.changed();
-                self.sound(59, "p_AttributeChange");
-            }
+        let (dx, dy) = (tx - tip.0, ty - tip.1);
+        let m = dx.abs().max(dy.abs());
+        if m < 2 {
             return;
         }
-        let (r, end) = if first {
-            (self.editor.place_track(tx, ty, 0).map(|_| ()), (tx + 1, ty))
-        } else {
-            let Some(Drag::Place { last, .. }) = self.drag else {
-                return;
-            };
-            let (dx, dy) = (tx - last.0, ty - last.1);
-            let m = dx.abs().max(dy.abs());
-            if m < 2 {
-                return;
+        let step = |d: i32| if d.abs() * 2 >= m { d.signum() } else { 0 };
+        let end = (tip.0 + 2 * step(dx), tip.1 + 2 * step(dy));
+        // back over the end's piece: its other end is where the cursor heads
+        if let Some(i) = self.editor.free_track_end(tip)
+            && let Some(c) = self
+                .editor
+                .area()
+                .tracks
+                .items
+                .get(i)
+                .map(mmk_editor::tracks::centre)
+            && end == (2 * c.0 - tip.0, 2 * c.1 - tip.1)
+        {
+            self.editor.erase_track(i);
+            if open {
+                let _ = self.editor.set_track_end(end, true);
             }
-            let step = |d: i32| if d.abs() * 2 >= m { d.signum() } else { 0 };
-            let end = (last.0 + 2 * step(dx), last.1 + 2 * step(dy));
-            (self.editor.draw_track(last, end).map(|_| ()), end)
-        };
-        match r {
-            Ok(()) => {
-                if let Some(Drag::Place { last, changed }) = &mut self.drag {
-                    *last = end;
-                    *changed = true;
+            self.changed();
+            self.sound(59, "shrink");
+            self.drag = Some(Drag::Track {
+                tip: end,
+                open,
+                from_end,
+                changed: true,
+            });
+            return;
+        }
+        match self.editor.draw_track(tip, end) {
+            Ok(_) => {
+                if open {
+                    let _ = self.editor.set_track_end(end, true);
                 }
                 self.changed();
                 self.sound(59, "set");
+                self.drag = Some(Drag::Track {
+                    tip: end,
+                    open,
+                    from_end,
+                    changed: true,
+                });
             }
-            Err(e) if first => self.refuse(cx, 59, &e),
+            // the first piece refused: say why once (the press then lays nothing)
+            Err(e) if !changed => {
+                self.refuse(cx, 59, &e);
+                self.drag = Some(Drag::Place {
+                    last: self.cur,
+                    changed: false,
+                });
+            }
             Err(_) => {}
         }
     }
@@ -1748,8 +1800,28 @@ impl MakerFlow {
             }
             _ => {}
         }
+        // a tap on a free track end (no piece drawn) opens or closes it [inf: as tapping an
+        // end does in the game]
+        if let Some(Drag::Track {
+            tip,
+            open,
+            from_end: true,
+            changed: false,
+        }) = self.drag
+            && self.editor.set_track_end(tip, !open).is_ok()
+        {
+            self.drag = Some(Drag::Track {
+                tip,
+                open: !open,
+                from_end: true,
+                changed: true,
+            });
+            self.changed();
+            self.sound(59, "p_AttributeChange");
+        }
         let changed = match self.drag.take() {
             Some(Drag::Place { changed, .. })
+            | Some(Drag::Track { changed, .. })
             | Some(Drag::Erase { changed })
             | Some(Drag::Start { changed })
             | Some(Drag::Goal { changed, .. })

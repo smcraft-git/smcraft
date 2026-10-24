@@ -1218,30 +1218,51 @@ fn a_track_is_drawn_by_dragging_and_a_lift_put_on_it_rides_it() {
     let mut m = maker(&mut host, &mut saves, MakerStart::New("M1".into()));
     m.palette[0] = Tool::Track;
     m.slot = 0;
-    m.cur = (20, 6);
-    run(&mut m, &mut host, &mut saves, press(Buttons::CONFIRM));
-    m.cur = (24, 6);
-    run(&mut m, &mut host, &mut saves, held(Buttons::CONFIRM));
-    m.cur = (28, 6);
-    run(&mut m, &mut host, &mut saves, held(Buttons::CONFIRM));
-    run(&mut m, &mut host, &mut saves, idle());
-    assert_eq!(
-        m.editor.area().tracks.len(),
-        3,
-        "a piece, then one per 2 tiles dragged"
+    let drag = |m: &mut MakerFlow, host: &mut MockHost, saves: &mut Saves, path: &[(i32, i32)]| {
+        m.cur = path[0];
+        run(m, host, saves, press(Buttons::CONFIRM));
+        for &t in &path[1..] {
+            m.cur = t;
+            run(m, host, saves, held(Buttons::CONFIRM));
+        }
+        run(m, host, saves, idle());
+    };
+    // a press alone lays nothing (the game's `begin_draw`)
+    drag(&mut m, &mut host, &mut saves, &[(20, 6)]);
+    assert_eq!(m.editor.area().tracks.len(), 0);
+    // dragging lays a piece of 2 tiles a step toward the cursor
+    drag(
+        &mut m,
+        &mut host,
+        &mut saves,
+        &[(20, 6), (24, 6), (28, 6), (30, 6)],
     );
+    assert_eq!(m.editor.area().tracks.len(), 3, "20 → 22 → 24 → 26");
     // a press on its far end opens it (new ends are closed)
-    assert_eq!(m.editor.track_end_open((25, 6)), Some(false));
-    m.cur = (25, 6);
-    run(&mut m, &mut host, &mut saves, press(Buttons::CONFIRM));
-    run(&mut m, &mut host, &mut saves, idle());
-    assert_eq!(m.editor.track_end_open((25, 6)), Some(true));
+    assert_eq!(m.editor.track_end_open((26, 6)), Some(false));
+    drag(&mut m, &mut host, &mut saves, &[(26, 6)]);
+    assert_eq!(m.editor.track_end_open((26, 6)), Some(true));
     assert_eq!(m.editor.area().tracks.len(), 3, "no new piece");
+    // drawing on from the open end: the new end is open too; back over the last piece takes
+    // it away and leaves the end open
+    drag(&mut m, &mut host, &mut saves, &[(26, 6), (28, 8), (30, 10)]);
+    assert_eq!(m.editor.area().tracks.len(), 5, "two diagonal pieces");
+    assert_eq!(m.editor.track_end_open((30, 10)), Some(true));
+    assert_eq!(m.editor.track_end_open((26, 6)), None, "a joint now");
+    drag(&mut m, &mut host, &mut saves, &[(30, 10), (28, 8)]);
+    assert_eq!(m.editor.area().tracks.len(), 4);
+    assert_eq!(m.editor.track_end_open((28, 8)), Some(true));
+    // one undo step a press
     m.editor.undo();
-    // one undo step for the whole drag
+    assert_eq!(m.editor.area().tracks.len(), 5);
+    m.editor.undo();
+    m.editor.undo();
+    assert_eq!(m.editor.track_end_open((26, 6)), Some(false));
     m.editor.undo();
     assert_eq!(m.editor.area().tracks.len(), 0);
-    m.editor.redo();
+    for _ in 0..4 {
+        m.editor.redo();
+    }
     // a lift put down on the track rides it
     m.palette[1] = Tool::Part(11);
     m.slot = 1;
