@@ -1155,6 +1155,8 @@ pub(crate) mod tests {
         /// Course Maker music asked for (None: stop) and edit sounds played (user, key).
         pub music: Vec<Option<(String, u8)>>,
         pub edit_sounds: Vec<(String, String)>,
+        /// The `MusicalScale` of each edit sound that had one: (key, scale).
+        pub edit_scales: Vec<(String, f32)>,
     }
 
     impl Host for MockHost {
@@ -1251,8 +1253,11 @@ pub(crate) mod tests {
         fn edit_music(&mut self, track: Option<(&str, u8)>) {
             self.music.push(track.map(|(s, t)| (s.to_string(), t)));
         }
-        fn edit_sound(&mut self, _style: &str, user: &str, key: &str) {
+        fn edit_sound(&mut self, _style: &str, user: &str, key: &str, scale: Option<f32>) {
             self.edit_sounds.push((user.to_string(), key.to_string()));
+            if let Some(s) = scale {
+                self.edit_scales.push((key.to_string(), s));
+            }
         }
         fn test_play(
             &mut self,

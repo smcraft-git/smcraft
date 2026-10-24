@@ -1012,10 +1012,15 @@ impl Sounds {
     /// A Course Maker sound: `user`'s `key` (a part's `<style>_Edit<Part>` user: `set`,
     /// `drag`, `eraser`, `invalid`, `partsMax`, `Block_in` …), at the centre; false if the user
     /// or key is missing.
-    pub fn edit_sound(&mut self, style: &str, user: &str, key: &str) -> bool {
+    /// `scale`: the `MusicalScale` property (0…27), which pitches `Tower_stack` by the stacked
+    /// part's tile row (maker spec C11, objects/stacks.md §6).
+    pub fn edit_sound(&mut self, style: &str, user: &str, key: &str, scale: Option<f32>) -> bool {
         self.log.clear();
         self.edit_style(style);
-        let local = PropList::default().with("@scene", "Edit");
+        let mut local = PropList::default().with("@scene", "Edit");
+        if let Some(s) = scale {
+            local.set("MusicalScale", s.clamp(0.0, 27.0));
+        }
         let Some(plays) = self.resolve(user, key, &local) else {
             return false;
         };

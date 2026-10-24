@@ -501,8 +501,9 @@ pub trait Host {
     /// None stops the music (test play, leaving the maker).
     fn edit_music(&mut self, _track: Option<(&str, u8)>) {}
     /// A Course Maker sound: SLink user `user` (a part's `<style>_Edit<Part>`) plays `key`
-    /// (`set`, `drag`, `eraser`, `invalid`, `partsMax`, `Block_in` …) in course style `style`.
-    fn edit_sound(&mut self, _style: &str, _user: &str, _key: &str) {}
+    /// (`set`, `drag`, `eraser`, `invalid`, `partsMax`, `Block_in` …) in course style `style`;
+    /// `scale` sets its `MusicalScale` (`Tower_stack`'s pitch: the part's tile row mod 28).
+    fn edit_sound(&mut self, _style: &str, _user: &str, _key: &str, _scale: Option<f32>) {}
     /// Course Maker test play: load raw course data `course` into the engine to play, the player
     /// starting in area `area` at `start` (world px, feet; None: the course's start).
     fn test_play(

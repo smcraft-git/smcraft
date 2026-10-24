@@ -871,9 +871,9 @@ impl Host for FfiHost {
         }
     }
 
-    fn edit_sound(&mut self, style: &str, user: &str, key: &str) {
+    fn edit_sound(&mut self, style: &str, user: &str, key: &str, scale: Option<f32>) {
         if let Some(d) = self.maker_director() {
-            d.edit_sound(style, user, key);
+            d.edit_sound(style, user, key, scale);
         }
     }
 

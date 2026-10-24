@@ -576,14 +576,14 @@ fn course_maker_music_and_part_sounds() {
     // a theme switch changes the track
     assert!(r.s.edit_music("M1", 2));
     assert_eq!(r.played(), ["layer:0", "music:CastleEdit"]);
-    assert!(r.s.edit_sound("M1", "M1_EditKuribo", "set"));
+    assert!(r.s.edit_sound("M1", "M1_EditKuribo", "set", None));
     assert_eq!(r.played(), ["sfx:EditSet"]);
-    assert!(!r.s.edit_sound("M1", "M1_EditKuribo", "nope"));
+    assert!(!r.s.edit_sound("M1", "M1_EditKuribo", "nope", None));
     r.s.stop_music();
     assert_eq!(r.played(), ["stop_music"]);
     // a test play's director took the mixer's set: the maker's comes back
     *r.shared.lock().unwrap() = None;
-    assert!(r.s.edit_sound("M1", "M1_EditKuribo", "drag"));
+    assert!(r.s.edit_sound("M1", "M1_EditKuribo", "drag", None));
     assert_eq!(r.played(), ["sfx:EditDrag"]);
     // no edit track in the style: false, nothing played
     assert!(!r.s.edit_music("M1", 4));
@@ -633,10 +633,23 @@ fn the_imported_maker_music_and_edit_sounds_play() {
             "set", "drag", "eraser", "invalid", "partsMax", "Block_in", "voice",
         ] {
             assert!(
-                s.edit_sound(style, &format!("{style}_EditKuribo"), key),
+                s.edit_sound(style, &format!("{style}_EditKuribo"), key, None),
                 "{style} {key}"
             );
             assert!(plays(&rx) >= 1, "{style} {key}");
         }
     }
+    // a stacked part's `Tower_stack` rises with its row (`MusicalScale`)
+    let mut pitch = |scale: f32| {
+        assert!(s.edit_sound("M1", "M1_EditKuribo", "Tower_stack", Some(scale)));
+        rx.try_iter()
+            .find_map(|c| match c {
+                Command::Play(p) => Some(p.pitch),
+                _ => None,
+            })
+            .unwrap()
+    };
+    let (low, mid) = (pitch(0.0), pitch(12.0));
+    eprintln!("Tower_stack pitch: row 0 {low}, row 12 {mid}");
+    assert!(mid > low * 1.5, "{low} → {mid}");
 }

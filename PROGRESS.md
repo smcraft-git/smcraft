@@ -386,7 +386,10 @@ Nextendo; `docs/nextendo-network-play.md`, spec `research/specs/network-play.md`
   starts its own column; most riders idle, Piranhas / Bros / Magikoopas … keep acting; drawn
   sway · ⬜ water gravities for riders, the full leave predicate, what each own tower action
   does; in the maker ✅ a carried part dropped on one that stacks goes on top of its column
-  (`mmk_editor::stack`) [inf: the gesture] · ⬜ `Tower_stack` pitch, the editor's limit
+  (`mmk_editor::stack`) [inf: the gesture] and sounds `Tower_stack` pitched by its row
+  (`MusicalScale` = row mod 28, through `Host::edit_sound`; `Combine` / `p_CancelUnion` turned
+  out to belong to the parts' 0xC0000 bits, not stacks) · ⬜ the editor's height limit (play
+  takes 128 members at most), pulling a member off a column
 - 🔄 Physics: re-recording every trace (2026-10-24; the old 428 / 454 was not a true count — the
   old items / form traces were all small Mario). Re-recorded so far, current engine: **352 / 352
   exact** over 26 courses: M1/M3/MW/WU flat 34 each, M1/M3/MW/WU items 34 each, M1/M3/MW/WU
