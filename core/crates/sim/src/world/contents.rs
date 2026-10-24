@@ -117,4 +117,19 @@ impl World {
             self.ivy[i] = ivy;
         }
     }
+
+    /// An enemy holding a Key lets it go when it is defeated, where it was (95-key.md: the
+    /// generic child spawn) [inf: the key's own start motion from the child spawn].
+    pub(super) fn drop_keys(&mut self) {
+        let mut keys = Vec::new();
+        for a in &mut self.actors {
+            if matches!(a.holds, Some((95, _))) && !a.alive() {
+                a.holds = None;
+                keys.push((a.x, a.y + a.height() / 2.0 - 8.0));
+            }
+        }
+        for (x, y) in keys {
+            self.add_actor(Actor::new(crate::actors::Kind::Key, x, y));
+        }
+    }
 }

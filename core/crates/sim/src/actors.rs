@@ -700,6 +700,8 @@ pub struct Actor {
     pub derailed: bool,
     /// Came out of a block with a parachute: it opens when the pop out ends.
     pub chute: bool,
+    /// The part it holds (`Level::held`): id, flags.
+    pub holds: Option<(i16, u32)>,
     /// Counted toward a "defeat N" clear condition.
     pub tallied: bool,
     /// Carried by the player: the world positions it; it doesn't step on its own.
@@ -779,6 +781,7 @@ impl Actor {
             rail_off: (0.0, 0.0),
             derailed: false,
             chute: false,
+            holds: None,
             tallied: false,
             held: false,
             camera: (0.0, 0.0),
@@ -973,12 +976,28 @@ impl Actor {
             if self.pause == 0 {
                 self.timer = 60 + self.rand(60) as i32;
                 if room {
+                    // its part, through the Jugem (thrown) context; a Spiny egg by default
+                    // [inf: the thrown state's motion for parts other than the egg]
                     let face = if px < self.x { -1.0 } else { 1.0 };
-                    let mut egg = Actor::new(Kind::SpinyEgg, self.x, self.y + 16.8);
+                    let part = self
+                        .holds
+                        .and_then(|(id, flags)| level.part_actor(id, flags));
+                    let kind = part.map_or(Kind::SpinyEgg, |p| p.0);
+                    let mut egg = Actor::new(kind, self.x, self.y + 16.8);
                     egg.vx = (self.vx.abs() * 0.9).max(0.5) * face;
                     egg.vy = 2.0;
                     egg.dir = face as i32;
                     egg.parent = Some(self.id);
+                    if let Some((_, wings, parachute, big)) = part {
+                        (egg.wings, egg.big) = (wings, big);
+                        if parachute {
+                            egg.vx = 0.0;
+                            egg.mode = Mode::Parachute {
+                                x0: egg.x,
+                                phase: 0.0,
+                            };
+                        }
+                    }
                     return Some(egg);
                 }
             }

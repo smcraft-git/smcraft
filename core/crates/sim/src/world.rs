@@ -2111,6 +2111,7 @@ impl World {
         self.step_effects();
         self.carry_clown_riders();
         self.boss_keys();
+        self.drop_keys();
         self.tally_defeats();
         self.drop_shoes();
         self.despawn();
@@ -3749,6 +3750,12 @@ impl World {
             a.wings = s.wings;
             a.alt = s.alt;
             a.spawn = Some(idx);
+            a.holds = self
+                .level
+                .held
+                .iter()
+                .find(|h| h.0 == idx)
+                .map(|&(_, id, flags)| (id, flags));
             a.home_y = s.y;
             a.pipe = s.pipe;
             if s.parachute {
@@ -7665,6 +7672,46 @@ mod tests {
         let b = w.actors.iter().find(|a| a.kind == Kind::BobOmb).unwrap();
         assert!(matches!(b.mode, Mode::Parachute { .. }), "{:?}", b.mode);
         assert!(b.y > 6.0 * TILE + 8.0, "popped clear of the block: {}", b.y);
+    }
+
+    #[test]
+    fn an_enemy_lets_its_key_go_when_defeated() {
+        let mut lvl = Level::flat(100);
+        lvl.spawns.push(spawn(Kind::Goomba, 150.0, 32.0));
+        lvl.held.push((0, 95, 0));
+        let mut w = World::with_level(lvl);
+        run(&mut w, 0, 2);
+        assert!(!w.actors.iter().any(|a| a.kind == Kind::Key));
+        let g = w
+            .actors
+            .iter_mut()
+            .find(|a| a.kind == Kind::Goomba)
+            .unwrap();
+        g.die_fall(140.0);
+        run(&mut w, 0, 1);
+        assert_eq!(w.actors.iter().filter(|a| a.kind == Kind::Key).count(), 1);
+        run(&mut w, 0, 5);
+        assert_eq!(
+            w.actors.iter().filter(|a| a.kind == Kind::Key).count(),
+            1,
+            "once"
+        );
+    }
+
+    #[test]
+    fn lakitu_throws_its_part() {
+        let mut lvl = Level::flat(100);
+        lvl.spawns.push(spawn(Kind::Lakitu, 200.0, 160.0));
+        lvl.held.push((0, 0, 0));
+        let mut w = World::with_level(lvl);
+        w.player.x = 150.0;
+        run(&mut w, 0, 400);
+        assert!(w.actors.iter().any(|a| a.kind == Kind::Goomba));
+        assert!(
+            !w.actors
+                .iter()
+                .any(|a| matches!(a.kind, Kind::Spiny | Kind::SpinyEgg))
+        );
     }
 
     #[test]

@@ -60,6 +60,7 @@ SMCraft is back in development (it was archived in October 2026).
 - **Blocks hold any part**: enemies, springs, P Switches, keys and the rest come out of ? blocks,
   bricks, hidden blocks, trees and checkpoint flags as themselves, with their wings or parachute;
   vines grow out of blocks. Bill Blasters fire any enemy or object.
+- **Enemies holding a Key** let it go when defeated; **Lakitus throw what they were given**.
 - **Endless**: the map's "New High Score!" panel.
 - **Physics**: 352 player traces recorded in the game match frame by frame (walls, water,
   slopes, items, the raccoon tail and SMW cape, enemies).

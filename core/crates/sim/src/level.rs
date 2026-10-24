@@ -379,6 +379,10 @@ pub struct Level {
     pub spike_blocks: Vec<(i32, i32, u8)>,
     /// Vines (64): climb areas (centre x, bottom, top) in px.
     pub vines: Vec<(f32, f32, f32)>,
+    /// What placed actors hold: (index into `spawns`, child part id, child flags). A Key drops
+    /// when its holder is defeated (bosses keep theirs in their kinds), a Lakitu throws its
+    /// part instead of Spiny eggs.
+    pub held: Vec<(usize, i16, u32)>,
     /// Tile parts of the 2.0 / 3.0 updates (level/v3.rs).
     pub v3: V3Tiles,
     pub liquid: Option<LiquidSpec>,
@@ -707,6 +711,9 @@ pub fn unsupported_features(course: &Course) -> Vec<String> {
                     out.insert(format!("part {} in part {}", o.child_id, o.id));
                 }
             }
+            if o.id == 30 && o.child_id == 8 {
+                out.insert("coins from a Lakitu".to_string());
+            }
             if !SUPPORTED_PARTS.contains(&o.id) {
                 out.insert(format!("part {}", o.id));
             } else if o.flags & 0x400 != 0 && !RIDES_TRACKS.contains(&o.id) {
@@ -909,6 +916,7 @@ impl Level {
             scroll_nodes: Vec::new(),
             pink_coins: Vec::new(),
             vines: Vec::new(),
+            held: Vec::new(),
             v3: V3Tiles::default(),
             tracks: Default::default(),
             creepers: Vec::new(),
@@ -1127,6 +1135,11 @@ impl Level {
                     clown: o.flags & 0x200 != 0,
                     alt: o.flags & 0x4 != 0,
                 });
+                // an enemy holding a Key (95-key.md: the generic child spawn), a Lakitu's part
+                if o.child_id >= 0 && !matches!(o.id, 62 | 77 | 98 | 120..=126) {
+                    lvl.held
+                        .push((lvl.spawns.len() - 1, o.child_id, o.child_flags));
+                }
                 if tower_flags(o.flags) {
                     tower_parts.push(TowerPart {
                         x: ox,
@@ -1962,6 +1975,7 @@ impl Level {
             scroll_nodes: Vec::new(),
             pink_coins: Vec::new(),
             vines: Vec::new(),
+            held: Vec::new(),
             v3: V3Tiles::default(),
             tracks: Default::default(),
             creepers: Vec::new(),
@@ -2053,6 +2067,24 @@ mod tests {
         assert!(course(13, 15).is_empty(), "a Bob-omb blaster");
         assert_eq!(course(5, 7), vec!["part 7 in part 5".to_string()]);
         assert_eq!(course(13, 8), vec!["coins from a Bill Blaster".to_string()]);
+    }
+
+    #[test]
+    fn enemies_hold_their_child_part() {
+        let mut g = object(0, 3, 1, 1, 1, 0);
+        g.child_id = 95;
+        let mut boss = object(98, 9, 1, 2, 2, 0);
+        boss.child_id = 95;
+        let lvl = level(vec![g, boss], 0);
+        let gi = lvl
+            .spawns
+            .iter()
+            .position(|s| s.kind == Kind::Goomba)
+            .unwrap();
+        assert_eq!(
+            lvl.held.iter().map(|h| (h.0, h.1)).collect::<Vec<_>>(),
+            vec![(gi, 95)]
+        );
     }
 
     #[test]
