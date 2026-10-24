@@ -25,6 +25,45 @@ const SIDE_X: f32 = -350.0;
 const SIDE_Y: f32 = 160.0;
 /// A part on a track shows no contents balloon (0x7100e9e400).
 const ON_TRACK: u32 = 0x400;
+/// The part id under which the dummies' pictures are kept in the maker's icons (the wings or
+/// the parachute alone, `Host::attachment_icon`).
+pub const ATTACHMENT: i16 = -1;
+
+/// The wings' picture cut in two: the left wing, the right one (each half of the pair).
+pub fn halves(icon: &crate::host::Icon) -> (crate::host::Icon, crate::host::Icon) {
+    let half = icon.width / 2;
+    let cut = |x0: u32, w: u32| {
+        let mut rgba = Vec::with_capacity((w * icon.height * 4) as usize);
+        for y in 0..icon.height {
+            let a = ((y * icon.width + x0) * 4) as usize;
+            rgba.extend_from_slice(&icon.rgba[a..a + (w * 4) as usize]);
+        }
+        crate::host::Icon {
+            width: w,
+            height: icon.height,
+            rgba,
+        }
+    };
+    (cut(0, half), cut(half, icon.width - half))
+}
+
+/// A picture centred on a square canvas (the dummies are square panes).
+pub fn square(icon: &crate::host::Icon) -> crate::host::Icon {
+    let n = icon.width.max(icon.height).max(1);
+    let (ox, oy) = ((n - icon.width) / 2, (n - icon.height) / 2);
+    let mut rgba = vec![0u8; (n * n * 4) as usize];
+    for y in 0..icon.height {
+        let s = (y * icon.width * 4) as usize;
+        let d = (((y + oy) * n + ox) * 4) as usize;
+        let len = (icon.width * 4) as usize;
+        rgba[d..d + len].copy_from_slice(&icon.rgba[s..s + len]);
+    }
+    crate::host::Icon {
+        width: n,
+        height: n,
+        rgba,
+    }
+}
 
 pub struct Contents {
     /// The container (object index).
@@ -89,7 +128,18 @@ impl MakerFlow {
             self.contents = None;
             return;
         };
-        let picture = self.icon_key_flags(&style, c.child, c.picture_flags());
+        // (the plain picture while the one with the content's flags isn't there: a big part the
+        // icon renderer can't make big)
+        let picture = self
+            .icon_key_flags(&style, c.child, c.picture_flags())
+            .or_else(|| self.icon_key(&style, c.child));
+        let attachment = |flags: u32| {
+            self.icons
+                .get(&(style.clone(), ATTACHMENT, flags))
+                .cloned()
+                .flatten()
+        };
+        let (wings, parachute) = (attachment(WINGS), attachment(PARACHUTE));
         // from the container's top centre [inf: the anchor]
         let fp = mmk_editor::parts::footprint(&o);
         let at = self.to_layout(
@@ -104,9 +154,20 @@ impl MakerFlow {
             "Direction",
             super::attr::direction(at, SIDE_X, SIDE_Y) as f32,
         );
-        // frame 0 shows the dummies, frame 1 hides them [obs data]
-        l.hold("Wing", if flags & WINGS != 0 { 0.0 } else { 1.0 });
-        l.hold("Parachute", if flags & PARACHUTE != 0 { 0.0 } else { 1.0 });
+        // frame 0 shows the dummies, frame 1 hides them [obs data]; the dummies are white
+        // placeholders the game fills with the wing / parachute pictures, so without a picture
+        // they stay hidden
+        let wings = wings.filter(|_| flags & WINGS != 0);
+        let parachute = parachute.filter(|_| flags & PARACHUTE != 0);
+        l.hold("Wing", if wings.is_some() { 0.0 } else { 1.0 });
+        l.hold("Parachute", if parachute.is_some() { 0.0 } else { 1.0 });
+        if let Some(n) = &wings {
+            l.image("P_DummyWingL_00", "PartIcon", &format!("{n}_l"));
+            l.image("P_DummyWingR_00", "PartIcon", &format!("{n}_r"));
+        }
+        if let Some(n) = &parachute {
+            l.image("P_DummyParachute_00", "PartIcon", n);
+        }
         match &picture {
             Some(name) => {
                 l.show("P_Icon_00", true);

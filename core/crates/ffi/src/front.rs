@@ -1015,6 +1015,16 @@ impl Host for FfiHost {
         })
     }
 
+    fn attachment_icon(&mut self, style: &str, flags: u32) -> Option<mmk_front::Icon> {
+        mmk_host::icon::attachment_icon(&self.assets().cache, style, flags).map(|i| {
+            mmk_front::Icon {
+                width: i.width,
+                height: i.height,
+                rgba: i.rgba,
+            }
+        })
+    }
+
     fn set_engine_option(&mut self, name: &str, value: i32) -> bool {
         let e = self.engine();
         if !e.options.set(name, value) {
