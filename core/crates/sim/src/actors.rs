@@ -987,8 +987,12 @@ impl Actor {
                 Some((self.x - 8.0, self.y, self.x + 8.0, self.y + 16.0, false))
             }
             Kind::Seesaw { width } => {
+                // the plank turns about a point 8 px under its top: the top over the pivot is
+                // 8 / cos θ above it [obs: Ryujinx trace W_3010660, the rider's height on a
+                // tilting seesaw]
                 let hw = width as f32 * 8.0;
-                Some((self.x - hw, self.y + 8.0, self.x + hw, self.y + 16.0, true))
+                let top = self.y + 8.0 + 8.0 / self.heading.to_radians().dcos();
+                Some((self.x - hw, self.y + 8.0, self.x + hw, top, true))
             }
             // a hidden block is no solid until it's bumped from below
             Kind::MovingBlock {
@@ -1028,11 +1032,16 @@ impl Actor {
     /// Seesaw (91-seesaw.md): riders' lever arm tilts the plank. Tip speed ω (`speed`) gains
     /// lever / (6·64·W²) per frame (at least 0.0015), the angle advances 2·asin(ω/16); limits
     /// ±45° with bounce e = (W + 3)/36; free damping ω × 0.95 and a slow return to level.
-    /// Rider weight 1 per px of lever arm [inf].
+    /// The player weighs 2 per px of lever arm, from the third frame its centre is over the
+    /// plank (±8·W) (its riders' list lags as the P Switch's does) [obs: Ryujinx trace
+    /// W_3010660, walking onto a 5-tile seesaw: Δω = 2·lever / (384·25) from the third frame
+    /// the centre is on it].
     fn step_seesaw(&mut self, width: u8) {
         let w = width as f32;
-        let lever = if self.ridden {
-            self.target.0 - self.x
+        let on = self.ridden && (self.target.0 - self.x).abs() <= 8.0 * w;
+        self.hops = if on { self.hops.saturating_add(1) } else { 0 };
+        let lever = if self.hops >= 3 {
+            2.0 * (self.target.0 - self.x)
         } else {
             0.0
         };

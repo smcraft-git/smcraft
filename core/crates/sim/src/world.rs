@@ -2039,6 +2039,7 @@ impl World {
             self.player.y = top;
             self.player.ride = donut_ride;
         }
+        self.step_seesaws();
         self.catch_on_platforms(ride_before);
         if self.goal_touch && self.others.is_empty() {
             // the pole grab: nothing else moves from this frame (enemies stop where they are)
@@ -5514,6 +5515,39 @@ impl World {
         }
     }
 
+    /// Seesaws tilt after the player's move, by the rider's lever arm where it now stands, and
+    /// the rider stands on the plank as it now lies [obs: Ryujinx trace W_3010660: the torque
+    /// from the frame's x, the rider's height from the frame's angle].
+    fn step_seesaws(&mut self) {
+        let (px, py) = (self.player.x, self.player.y);
+        let ride = self.player.ride;
+        for i in 0..self.actors.len() {
+            let a = &mut self.actors[i];
+            if !matches!(a.kind, Kind::Seesaw { .. }) {
+                continue;
+            }
+            a.target = (px, py);
+            a.ridden = ride == Some(a.id);
+            let before = a.heading;
+            a.step_spawning(&self.level);
+            let (id, b, slope) = (a.id, a.solid_box(), a.solid_slope());
+            // the rider turns with the plank about its turning point, 8 px under the top
+            let turn = (a.heading - before).to_radians();
+            let (cx, cy) = (a.x, a.y + 8.0);
+            if let Some(s) = self.level.solids.iter_mut().find(|s| s.owner == id)
+                && let Some((x0, y0, x1, y1, _)) = b
+            {
+                (s.x0, s.y0, s.x1, s.y1, s.slope) = (x0, y0, x1, y1, slope);
+                if ride == Some(id) && self.player.on_ground && turn != 0.0 {
+                    let (sn, cs) = turn.dsin_cos();
+                    let (dx, dy) = (self.player.x - cx, self.player.y - cy);
+                    self.player.x = cx + dx * cs - dy * sn;
+                    self.player.y = cy + dx * sn + dy * cs;
+                }
+            }
+        }
+    }
+
     /// Moving solids step before the player; riders are carried by their movement. A spring
     /// launches its rider: 6.0, or 4.43 with the jump button held (the held-jump gravity then
     /// gives the high bounce) (10-spring.md).
@@ -5532,7 +5566,10 @@ impl World {
             if matches!(a.kind, Kind::TrackBlock { .. }) {
                 a.target_facing = self.on_off as i32;
             }
-            a.step_spawning(&self.level);
+            // (a seesaw tilts after the player's move: step_seesaws)
+            if !matches!(a.kind, Kind::Seesaw { .. }) {
+                a.step_spawning(&self.level);
+            }
         }
         self.place_baby_bloopers();
         // fixed objects riding tracks follow their carrier
