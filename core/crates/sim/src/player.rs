@@ -1001,6 +1001,21 @@ impl Player {
         true
     }
 
+    /// Jumping off a Swinging Claw: the Crane state takes jump presses with the ordinary jump
+    /// start (exe 0x71015a06a0 → 0x7101595010 → 0x7101592480) [obs v3.0.3], from a speed held
+    /// at 0 (the state zeroes it every frame): the standing launch, rising with the held-jump
+    /// gravity.
+    pub fn claw_jump(&mut self) {
+        self.vy = self.pu_launch(JUMP_BASE);
+        if self.low_gravity {
+            self.vy = (self.vy * 0.7).min(2.7);
+        }
+        self.in_jump = true;
+        self.jump_count = 0;
+        self.on_ground = false;
+        self.slope = None;
+    }
+
     /// Bounce off an enemy.
     pub fn bounce(&mut self, jump_held: bool) {
         let _ = jump_held; // the held-jump gravity makes the difference
