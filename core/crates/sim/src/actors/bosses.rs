@@ -644,8 +644,10 @@ impl Actor {
     /// 0.03, up to 2.0) toward the player's centre and is held to 1.0 px/f; out of that range
     /// it drifts as Free does (0x71006dd230: speed × 0.95, then a ±0.2 vertical bob in 0.01
     /// steps once below 0.3). The rider faces the player when the player is more than 16 px
-    /// away. Not modelled: water (acceleration × 0.75), the damping on contact, and Bowser
-    /// Jr.'s lean / brake phases on the car (+0x52c).
+    /// away. A Fire car (`clown_fire`) halves the top speed, takes 0.75 of the acceleration,
+    /// charges and fires (actors/clown.rs: the lean / brake phases once read as Bowser Jr.'s
+    /// +0x52c are the Fire car's charge, +0x540 in v3.0.3). Not modelled: water (acceleration
+    /// × 0.75) and the damping on contact.
     fn step_clown(&mut self, level: &Level) {
         let ride = self.clown_ride_height(&level.style);
         let (dx, dy) = (
@@ -653,26 +655,20 @@ impl Actor {
             self.target.1 + 8.0 - (self.y - ride),
         );
         if dx.abs() <= 320.0 && dy.abs() <= 800.0 {
-            let (top, accel) = if self.wings {
+            let steer = if self.wings {
                 (2.0, 0.03)
             } else {
                 (CLOWN_SPEED, CLOWN_ACCEL)
             };
-            let d = dx.dhypot(dy);
-            if d > 0.0 {
-                self.vx += accel * dx / d;
-                self.vy += accel * dy / d;
-            }
-            let v = self.vx.dhypot(self.vy);
-            if v > top {
-                self.vx *= top / v;
-                self.vy *= top / v;
-            }
-            if d > 16.0 && dx != 0.0 {
+            // a Fire car (`clown_fire`) also charges and shoots (actors/clown.rs)
+            let car = (self.x, self.y - ride);
+            let turn = self.clown_chase((dx, dy), steer, car, self.scale());
+            if turn && dx.dhypot(dy) > 16.0 && dx != 0.0 {
                 self.dir = if dx < 0.0 { -1 } else { 1 };
             }
             self.heading = 0.0;
         } else {
+            self.clown_fire_idle();
             self.vx *= 0.95;
             if self.vx.dhypot(self.vy) < 0.3 {
                 // the bob: toward +0.2 or −0.2 by 0.01, turning at each end

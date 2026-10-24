@@ -278,7 +278,16 @@ impl Blocks {
 
     /// A hit on the block at (x, y). `from_below` = the hitter is under the block (side 2);
     /// false = on top (side 3). Returns what happened; the caller clears the grid cell on Broke.
-    pub fn hit(&mut self, x: i32, y: i32, from_below: bool, power: HitPower) -> HitResult {
+    /// `seen`: a note block may give its contents now — the hit came from a side, or its box
+    /// overlaps the camera's view (see the Note arm).
+    pub fn hit(
+        &mut self,
+        x: i32,
+        y: i32,
+        from_below: bool,
+        power: HitPower,
+        seen: bool,
+    ) -> HitResult {
         let Some(b) = self.map.get_mut(&(x, y)) else {
             return HitResult::Nothing;
         };
@@ -342,18 +351,20 @@ impl Blocks {
                     Bump::note_down()
                 });
                 // its contents go at the bump's start, once, and it stays a note block (a coin
-                // pops) [obs 0x710086d480; inf: the area-rectangle test that can hold them back
-                // for a later bump is taken as met]
+                // pops at once) — but only for a side hit or when the block's ±8 px box
+                // overlaps a camera view (the per-area view list DAT_7102c55080 + 0x138, edges
+                // included); otherwise they wait for a later bump [obs v3.0.3 0x710138f990;
+                // v1 0x710086d480]
                 match b.contents {
                     Some(Contents::Coin) => {
                         b.contents = None;
                         HitResult::Coin
                     }
-                    Some(_) => {
+                    Some(_) if seen => {
                         b.release_now = true;
                         HitResult::Bumped
                     }
-                    None => HitResult::Bumped,
+                    _ => HitResult::Bumped,
                 }
             }
             BlockKind::Donut | BlockKind::Cloud | BlockKind::Dotted { .. } => HitResult::Nothing,
@@ -476,17 +487,40 @@ mod tests {
         assert!((path[6] - 6.132).abs() < 1e-3);
     }
 
+    /// A note block bumped out of view keeps its contents for a later bump [obs v3.0.3
+    /// 0x710138f990].
+    #[test]
+    fn note_block_out_of_view_keeps_its_contents() {
+        let mut bl = Blocks::default();
+        bl.map.insert(
+            (0, 0),
+            Block::new(BlockKind::Note, Some(Contents::Mushroom)),
+        );
+        assert_eq!(bl.hit(0, 0, true, HitPower::Bump, false), HitResult::Bumped);
+        let mut out = Vec::new();
+        for _ in 0..30 {
+            out.extend(bl.step());
+        }
+        assert!(out.is_empty());
+        assert_eq!(bl.get(0, 0).unwrap().contents, Some(Contents::Mushroom));
+        assert_eq!(bl.hit(0, 0, false, HitPower::Bump, true), HitResult::Bumped);
+        let out = bl.step();
+        assert_eq!(out.len(), 1);
+        assert!(out[0].note && out[0].down);
+        assert_eq!(bl.get(0, 0).unwrap().kind, BlockKind::Note);
+    }
+
     #[test]
     fn question_block_gives_coin_then_empties() {
         let mut bl = Blocks::default();
         bl.map.insert((3, 4), Block::new(BlockKind::Question, None));
-        assert_eq!(bl.hit(3, 4, true, HitPower::Bump), HitResult::Coin);
+        assert_eq!(bl.hit(3, 4, true, HitPower::Bump, true), HitResult::Coin);
         // the hit frame's step, then the 14 bounce frames
         for _ in 0..15 {
             bl.step();
         }
         assert_eq!(bl.get(3, 4).unwrap().kind, BlockKind::Empty);
-        assert_eq!(bl.hit(3, 4, true, HitPower::Bump), HitResult::Nothing);
+        assert_eq!(bl.hit(3, 4, true, HitPower::Bump, true), HitResult::Nothing);
     }
 
     #[test]
@@ -496,7 +530,7 @@ mod tests {
             (0, 0),
             Block::new(BlockKind::Question, Some(Contents::Mushroom)),
         );
-        assert_eq!(bl.hit(0, 0, true, HitPower::Bump), HitResult::Bumped);
+        assert_eq!(bl.hit(0, 0, true, HitPower::Bump, true), HitResult::Bumped);
         let mut released = None;
         // the bounce starts the frame after the hit: the item 14 frames after it
         for f in 0..=15 {
@@ -512,11 +546,11 @@ mod tests {
     fn brick_breaks_only_when_big() {
         let mut bl = Blocks::default();
         bl.map.insert((0, 0), Block::new(BlockKind::Brick, None));
-        assert_eq!(bl.hit(0, 0, true, HitPower::Bump), HitResult::Bumped);
+        assert_eq!(bl.hit(0, 0, true, HitPower::Bump, true), HitResult::Bumped);
         for _ in 0..15 {
             bl.step();
         }
-        assert_eq!(bl.hit(0, 0, true, HitPower::Break), HitResult::Broke);
+        assert_eq!(bl.hit(0, 0, true, HitPower::Break, true), HitResult::Broke);
         assert!(bl.get(0, 0).is_none());
     }
 
@@ -527,7 +561,7 @@ mod tests {
             .insert((0, 0), Block::new(BlockKind::Brick, Some(Contents::Coin)));
         let mut coins = 0;
         for _ in 0..20 {
-            if bl.hit(0, 0, true, HitPower::Break) == HitResult::Coin {
+            if bl.hit(0, 0, true, HitPower::Break, true) == HitResult::Coin {
                 coins += 1;
             }
             for _ in 0..14 {

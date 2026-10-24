@@ -20,11 +20,16 @@ const SEGMENT_HALF: f32 = 20.0;
 
 /// Before each step: the liquid and the nearest player, as the 3D World enemies see them.
 pub(super) fn sense(a: &mut Actor, liquid: Option<Liquid>, p: &Player) {
-    if !a.kind.is_w3() {
+    // the parachute presets' own falls (actors/chute.rs) look at the liquid too
+    let chute = a.chute || matches!(a.mode, Mode::Parachute { .. });
+    if !a.kind.is_w3() && !chute {
         return;
     }
     a.w3.flooded = liquid.is_some_and(|l| l.spec.full);
     a.w3.liquid = liquid.filter(|l| !l.spec.full).map(|l| (l.y, l.water()));
+    if !a.kind.is_w3() {
+        return;
+    }
     a.w3.player_wet = p.in_water;
     a.w3.player_h = p.hurt_box().3 - p.y;
     // the player flag Skipsqueak watches (+0x488 bit 14) is set by a jump launched off the

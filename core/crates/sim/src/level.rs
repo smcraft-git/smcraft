@@ -397,6 +397,9 @@ pub struct Level {
     /// when its holder is defeated (bosses keep theirs in their kinds), a Lakitu throws its
     /// part instead of Spiny eggs.
     pub held: Vec<(usize, i16, u32)>,
+    /// Placed Spinies and Buzzy Beetles turned upside down (facing field 2, flags & 0x06000000
+    /// = 0x04000000): indices into `spawns`; they walk the ceiling (actors/ceiling.rs).
+    pub ceiling: Vec<usize>,
     /// Tile parts of the 2.0 / 3.0 updates (level/v3.rs).
     pub v3: V3Tiles,
     pub liquid: Option<LiquidSpec>,
@@ -928,6 +931,7 @@ impl Level {
             pink_coins: Vec::new(),
             vines: Vec::new(),
             held: Vec::new(),
+            ceiling: Vec::new(),
             v3: V3Tiles::default(),
             tracks: Default::default(),
             creepers: Vec::new(),
@@ -1150,6 +1154,9 @@ impl Level {
                     clown: o.flags & 0x200 != 0,
                     alt: o.flags & 0x4 != 0,
                 });
+                if matches!(o.id, 25 | 28) && o.flags & 0x0600_0000 == 0x0400_0000 {
+                    lvl.ceiling.push(lvl.spawns.len() - 1);
+                }
                 // an enemy holding a Key (95-key.md: the generic child spawn), a Lakitu's part
                 if o.child_id >= 0 && !matches!(o.id, 62 | 77 | 98 | 120..=126) {
                     lvl.held
@@ -1998,6 +2005,7 @@ impl Level {
             pink_coins: Vec::new(),
             vines: Vec::new(),
             held: Vec::new(),
+            ceiling: Vec::new(),
             v3: V3Tiles::default(),
             tracks: Default::default(),
             creepers: Vec::new(),

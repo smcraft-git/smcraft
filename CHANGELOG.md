@@ -32,6 +32,25 @@ SMCraft is back in development (it was archived in October 2026).
   then he spins in his shell for a while (stomps bounce off) before he comes out; the third stomp
   knocks him out of the car (NSMBU: after his flinch) and the empty car can be ridden.
 - Fix: a Koopa Clown Car whose rider is defeated floats empty and can be ridden.
+- **Fire Koopa Clown Cars shoot with an enemy inside**: every three to four and a half seconds the
+  car slows down, charges and fires a fireball that flies straight ahead (faster when the car is
+  moving that way) until it hits a wall; Bowser, Bowser Jr. and Boom Boom in a Fire car too.
+  Flying one yourself, it fires straight fireballs each time you press or let go of Run (a
+  quick cooldown; three at once as Fire Mario); before, its fireball vanished at once.
+- **Parachutes as in SMM2 for Thwomps, Lava Bubbles, Cheep Cheeps and Porcupuffers**: a Thwomp
+  keeps its parachute folded and opens it each time it drops (then floats down slowly); a Lava
+  Bubble's parachute ends in the lava and it leaps from there; a Cheep Cheep or Porcupuffer lets go
+  of its parachute as soon as it is in water.
+- **Ceiling Spinies and Buzzy Beetles**: placed upside down under a ceiling, or coming out of a
+  downward pipe, they walk along the ceiling, turn at its edges and drop in their shells when you
+  pass underneath (a Spiny's shell keeps its spikes and it walks out again later).
+- **Boo Buddies in a block** come out as a circle of Boos spreading round the block; a part in a
+  block keeps its other form (a lit Bob-omb, a Sledge Bro, a fast Spike Top …).
+- Fix: a note block bounced out of view keeps what it holds for a later bounce, as in SMM2.
+- **Enemies out of blocks and Bill Blasters under water** behave as in SMM2: a Goomba stays put a
+  moment and then swims, a Lava Bubble leaps lower, a Fish Bone glides straight and slows to a
+  stop, a Wiggler swims off at once. A winged red Koopa out of a block now slows its climb as in
+  SMM2 (it used to brake as it does under water).
 - Fix: Munchers hurt on a wall sensor's touch, as in SMM2 (a one-tile gap between Munchers is as
   tight as in the game).
 - **The Course Maker**: SMM2's own maker screens (part palette and part window, styles, themes,

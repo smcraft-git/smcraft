@@ -39,12 +39,15 @@ const CHUTE_FRAMES_DOWN: i32 = 10;
 const HEAD_CLEAR: f32 = 4.0;
 
 /// RedPataPata winged (Out 0x710104aee0 / 0x710104afc0): no gravity, vy ±2.0 (±0.8 more out of a
-/// note block) easing toward ±0.5 by a step that depends on |vy| (thresholds 0.3 / 0.7 / 1.2,
-/// steps 0.006 / 0.009 / 0.012 / 0.024); ends 74 px from where it started, or on touching a
-/// ceiling (up) or the ground (down).
+/// note block) easing toward ±0.5 by 0.06 a frame — in water by a step that depends on |vy|
+/// (thresholds 0.3 / 0.7 / 1.2, steps 0.006 / 0.009 / 0.012 / 0.024; v3.0.3: the in-water test
+/// 0x71012a9180 or the +0x658 bit-31 liquid contact picks the bands, DAT 0x7102318bbc = 0.06
+/// otherwise); ends 74 px from where it started, or on touching a ceiling (up) or the ground
+/// (down).
 const PATA_VY: f32 = 2.0;
 const PATA_NOTE_VY: f32 = 0.8;
 const PATA_GLIDE: f32 = 0.5;
+const PATA_DRY_STEP: f32 = 0.06;
 const PATA_RANGE: f32 = 74.0;
 /// PataTogezo winged out of a downward block (Out 0x7101049540 / 0x71010496a0): vy −1.1 with
 /// the clear time cut to 2 frames (4 big), then gravity +0.03 until it stops falling.
@@ -60,10 +63,21 @@ const FLOAT_STOP: f32 = 0.2;
 /// Pukupuku (Out 0x7101228fa0 / 0x71012290d0): the Default pop with the clear time ×4, then
 /// it hands over whether or not it has landed.
 const CHEEP_CLEAR: i32 = 4;
-/// Bubble (Out 0x710109c4c0 / 0x710109c970): vy 6.0 (6.8 out of a note block), Default
-/// gravity; hands over at the top of its leap [obs; in liquid 3.5 / 5.0, not modelled].
+/// FishBone (Out 0x71010d8850 / 0x71010d88d0, v3.0.3): Pukupuku's, a big one out of a
+/// downward block starting 16 px lower.
+const FISHBONE_BIG_DOWN: f32 = 16.0;
+/// Bubble (Out 0x710109c4c0 / 0x710109c970): vy 6.0 (6.8 out of a note block), 3.5 (5.0) in
+/// liquid (+0x658 bit 31 or the in-water test 0x71012a9180), Default gravity; hands over at
+/// the top of its leap [obs v3.0.3].
 const BUBBLE_VY: f32 = 6.0;
 const BUBBLE_NOTE_VY: f32 = 6.8;
+const BUBBLE_WET_VY: f32 = 3.5;
+const BUBBLE_WET_NOTE_VY: f32 = 5.0;
+/// Kuribo in water (Block vtable 0x71028eaaf0: Out 0x71011a53a0 / 0x71011a5470, v3.0.3): the
+/// Default Out's enter, but its motion never runs — it stays where it starts for 1.5× its clear
+/// time (2.5× out of a note block), then hands over [obs].
+const KURIBO_WET_HOLD: f32 = 1.5;
+const KURIBO_WET_NOTE_HOLD: f32 = 2.5;
 /// MapObjDefault (Out 0x7101370680, velocity 0x7101370a80, end 0x71013709d0): vy 3.0 (4.0
 /// winged out of a note block), −1.0 downward (winged −4.0 without gravity); a winged object
 /// ends at vy ≤ −2 (downward: once vy ≥ 0), others on landing.
@@ -86,7 +100,8 @@ pub enum Preset {
     PataTogezo,
     /// FloatSearch (Boo, Blooper, Stingby): a slowing float, done when nearly still.
     FloatSearch,
-    /// Pukupuku (Cheep Cheep): faces the player, hands over when the clear time ends.
+    /// Pukupuku (Cheep Cheep, Fish Bone): hands over when the clear time ends (a Cheep Cheep
+    /// faces the player first).
     Pukupuku,
     /// Bubble (Lava Bubble): a high leap, handed over at its top.
     Bubble,
@@ -112,9 +127,10 @@ pub fn preset(kind: Kind, wings: bool) -> Preset {
         {
             Preset::PataTogezo
         }
-        // the 3D World Blooper has its own Out (Gesso3W 0x71011037a0) [?: not traced]
+        // (3D World's Blooper, Gesso3W, collides from the start: world.rs `release`)
         Kind::Boo | Kind::Blooper | Kind::Stingby => Preset::FloatSearch,
-        Kind::CheepCheep { .. } => Preset::Pukupuku,
+        // FishBone's Out (0x71010d8850 / 0x71010d88d0, vtable 0x71028cab38) is Pukupuku's
+        Kind::CheepCheep { .. } | Kind::FishBone => Preset::Pukupuku,
         Kind::LavaBubble => Preset::Bubble,
         Kind::PSwitch
         | Kind::Pow
@@ -134,6 +150,8 @@ impl Actor {
     /// (a parachute) must be set.
     pub fn block_out(&mut self, by: f32, down: bool, note: bool) {
         let yb = by + 8.0;
+        // in water (the world senses the liquid into `w3` first)
+        let wet = self.wet();
         let h = self.height();
         let winged = self.wings && !self.chute;
         let preset = preset(self.kind, self.wings);
@@ -208,9 +226,20 @@ impl Actor {
                         self.vy += DOWN_BIG_VY;
                     }
                 }
-                Preset::Pukupuku => self.timer *= CHEEP_CLEAR,
+                Preset::Pukupuku => {
+                    self.timer *= CHEEP_CLEAR;
+                    // a big Fish Bone out of a downward block starts 16 px lower
+                    if self.kind == Kind::FishBone && self.big && down {
+                        self.y -= FISHBONE_BIG_DOWN;
+                    }
+                }
                 Preset::Bubble if !down => {
-                    self.vy = if note { BUBBLE_NOTE_VY } else { BUBBLE_VY };
+                    self.vy = match (wet || self.in_lava(), note) {
+                        (false, false) => BUBBLE_VY,
+                        (false, true) => BUBBLE_NOTE_VY,
+                        (true, false) => BUBBLE_WET_VY,
+                        (true, true) => BUBBLE_WET_NOTE_VY,
+                    };
                 }
                 Preset::MapObj => {
                     self.vy = match (down, winged) {
@@ -226,6 +255,16 @@ impl Actor {
                 _ => {}
             }
         }
+        if wet && !self.chute && matches!(self.kind, Kind::Goomba | Kind::Goombrat) {
+            let k = if note {
+                KURIBO_WET_NOTE_HOLD
+            } else {
+                KURIBO_WET_HOLD
+            };
+            left = (k * self.timer as f32) as i32;
+            self.vy = 0.0;
+            gravity = 0.0;
+        }
         self.on_ground = false;
         self.mode = Mode::BlockOut {
             yb,
@@ -233,6 +272,7 @@ impl Actor {
             gravity,
             down,
             left,
+            wet,
         };
     }
 
@@ -265,16 +305,37 @@ impl Actor {
             mut gravity,
             down,
             mut left,
+            wet,
         } = self.mode
         else {
             return;
         };
+        if wet && !self.chute && matches!(self.kind, Kind::Goomba | Kind::Goombrat) {
+            // a Goomba in water holds still, then hands over (0x71011a5470)
+            self.timer = (self.timer - 1).max(0);
+            left -= 1;
+            if left > 0 {
+                self.mode = Mode::BlockOut {
+                    yb,
+                    y0,
+                    gravity,
+                    down,
+                    left,
+                    wet,
+                };
+            } else {
+                self.end_shot();
+            }
+            return;
+        }
         let winged = self.wings && !self.chute;
         let preset = preset(self.kind, self.wings);
         // FloatSearch eases its speed, RedPataPata its climb (no gravity)
         if preset == Preset::RedPataPata && !self.chute {
             let v = self.vy.abs();
-            let step = if v < 0.3 {
+            let step = if !wet {
+                PATA_DRY_STEP
+            } else if v < 0.3 {
                 0.006
             } else if v < 0.7 {
                 0.009
@@ -346,6 +407,7 @@ impl Actor {
             gravity,
             down,
             left,
+            wet,
         };
         if done {
             if self.kind == Kind::LavaBubble && !self.chute {
@@ -452,9 +514,18 @@ mod tests {
         let mut a = out(Kind::Koopa { red: true }, true, false);
         let y0 = a.y;
         assert_eq!(a.vy, 2.0);
-        run_out(&mut a, &lvl);
+        // 2.0 → 0.5 by 0.06 a frame (25 frames, 31.75 px), then 0.5 a frame to 74 px
+        let n = run_out(&mut a, &lvl);
         assert!(a.y - y0 >= 74.0 && a.y - y0 < 76.0, "{}", a.y - y0);
+        assert!((108..=113).contains(&n), "{n}");
         assert!(a.wings && a.mode == Mode::Normal);
+        // in water it slows by the speed bands: 2.0 → 1.2 at 0.024, then 0.012 …
+        let mut w = Actor::new(Kind::Koopa { red: true }, BX, BY);
+        w.wings = true;
+        w.w3.flooded = true;
+        w.block_out(BY, false, false);
+        let n = run_out(&mut w, &lvl);
+        assert!(n < 60, "{n}");
         // wingless it hops like a Goomba
         assert_eq!(out(Kind::Koopa { red: true }, false, false).vy, 2.5);
     }
@@ -487,6 +558,41 @@ mod tests {
         assert_eq!(a.timer, 24);
         let n = run_out(&mut a, &lvl);
         assert!(n <= 24, "{n}");
+    }
+
+    #[test]
+    fn a_fish_bone_leaves_as_a_cheep_cheep_does() {
+        let lvl = course();
+        let mut a = out(Kind::FishBone, false, false);
+        assert_eq!(a.timer, 24);
+        assert!(run_out(&mut a, &lvl) <= 24);
+        // big, out of a downward block: 16 px lower
+        let mut big = Actor::new(Kind::FishBone, BX, BY);
+        big.big = true;
+        big.block_out(BY, true, false);
+        let mut plain = Actor::new(Kind::Goomba, BX, BY);
+        plain.big = true;
+        plain.block_out(BY, true, false);
+        assert_eq!(big.y, plain.y - 16.0);
+    }
+
+    #[test]
+    fn in_water_a_goomba_holds_still_and_a_lava_bubble_leaps_lower() {
+        let lvl = course();
+        let mut a = Actor::new(Kind::Goomba, BX, BY);
+        a.w3.flooded = true;
+        a.block_out(BY, false, false);
+        let y = a.y;
+        assert_eq!(run_out(&mut a, &lvl), 9, "1.5 x the 6-frame clear time");
+        assert_eq!(a.y, y);
+        let mut b = Actor::new(Kind::LavaBubble, BX, BY);
+        b.w3.flooded = true;
+        b.block_out(BY, false, false);
+        assert_eq!(b.vy, 3.5);
+        let mut c = Actor::new(Kind::LavaBubble, BX, BY);
+        c.w3.flooded = true;
+        c.block_out(BY, false, true);
+        assert_eq!(c.vy, 5.0);
     }
 
     #[test]

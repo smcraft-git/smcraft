@@ -1044,7 +1044,6 @@ impl World {
         let jump = input.held(input::JUMP);
         let run = input.held(input::RUN);
         let jump_pressed = jump && !self.clown_prev.0;
-        let run_pressed = run && !self.clown_prev.1;
         self.clown_prev = (jump, run);
         if jump_pressed && !input.held(input::DOWN) {
             self.player.clown = None;
@@ -1084,12 +1083,7 @@ impl World {
         let before = (car.x, car.y);
         car.collide(&self.level);
         car.moved = (car.x - before.0, car.y - before.1);
-        let (cx, cy, dir, fire) = (
-            car.x,
-            car.y,
-            car.dir,
-            matches!(car.kind, Kind::ClownCar { fire: true }),
-        );
+        let (cx, cy, dir) = (car.x, car.y, car.dir);
         let p = &mut self.player;
         p.x = cx;
         p.y = cy + 14.0;
@@ -1097,12 +1091,19 @@ impl World {
         p.vy = 0.0;
         p.on_ground = true;
         p.facing = dir;
-        if fire && run_pressed {
-            let mut f = Actor::new(Kind::Fireball, cx + dir as f32 * 18.0, cy + 10.0);
-            f.dir = dir;
-            f.vx = 4.0 * dir as f32;
-            self.add_actor(f);
+        // the Fire car shoots with Run (actors/clown.rs `clown_fire_player`)
+        let triple = self.player.form == Form::Fire;
+        let alive = self
+            .actors
+            .iter()
+            .filter(|a| a.kind == Kind::Fireball && a.alt && a.alive())
+            .count();
+        let shots = self.actors[i].clown_fire_player(run, triple, alive);
+        if !shots.is_empty() {
             self.events.push(Event::Fireball);
+        }
+        for f in shots {
+            self.add_actor(f);
         }
     }
 
@@ -2316,9 +2317,17 @@ impl World {
                     .liquid
                     .is_some_and(|l| l.water() && l.covers(a.y + 16.0));
             }
+            if a.kind == Kind::EnemyFire && a.alt {
+                a.ridden = self
+                    .liquid
+                    .is_some_and(|l| l.water() && l.covers(a.y + 4.0));
+            }
             w3::sense(a, self.liquid, &self.player);
             a.pre = (a.x, a.y);
             if let Some(n) = a.step_spawning(&self.level) {
+                born.push(n);
+            }
+            if let Some(n) = a.take_clown_shot() {
                 born.push(n);
             }
             if let Some((x, y, dir)) = rider {
@@ -2866,9 +2875,21 @@ impl World {
 
     /// A hit on a block from below or above by the player or a shell.
     fn hit_block(&mut self, tx: i32, ty: i32, from_below: bool, power: HitPower) {
+        self.hit_block_from(tx, ty, from_below, power, false);
+    }
+
+    /// A block hit; `side`: from the side (a shell, a tail or a sword's tip), which lets a note
+    /// block give its contents even out of view (blocks.rs, the Note arm).
+    fn hit_block_from(&mut self, tx: i32, ty: i32, from_below: bool, power: HitPower, side: bool) {
         self.blocks.turn_blocks = self.style == crate::player::Style::MW;
         let (bx, by) = blocks::origin(tx, ty);
-        match self.blocks.hit(tx, ty, from_below, power) {
+        let (cx, cy) = (self.camera_x, self.camera_y);
+        let seen = side
+            || (bx + 8.0 >= cx
+                && bx - 8.0 <= cx + VIEW_W
+                && by + 8.0 >= cy
+                && by - 8.0 <= cy + VIEW_H);
+        match self.blocks.hit(tx, ty, from_below, power, seen) {
             HitResult::Nothing => {}
             HitResult::Broke => {
                 self.level.set(tx, ty, Cell::Empty);
@@ -3013,10 +3034,30 @@ impl World {
             Contents::Koopa { red } => (Kind::Koopa { red }, false, false, false),
             Contents::YoshiEgg => (Kind::YoshiEgg { red: false }, false, false, false),
         };
+        let alt = matches!(contents, Contents::Part { flags, .. } if flags & 0x4 != 0);
+        if kind == Kind::Boo && alt {
+            // Boo Buddies (TeresaSpread's Block Out 0x710126c0c0 / 0x710126c220, v3.0.3): the
+            // circle's centre stays on the block (at its centre, +8 over the origin) while the
+            // ring spreads from nothing, as a placed one does [obs; a parachute takes
+            // FloatSearch's Out instead, not modelled]
+            for slot in 0..8 {
+                let mut b = Actor::new(Kind::RingBoo { slot }, bx, by);
+                b.big = big;
+                b.alt = true;
+                b.home_x = bx;
+                b.home_y = by + 8.0;
+                b.speed = 0.0;
+                b.heading = 90.0;
+                self.add_actor(b);
+            }
+            return;
+        }
         let mut a = Actor::new(kind, bx, by + r.offset);
         a.dir = 1;
         a.wings = wings;
         a.big = big;
+        // the part's own form (a lit Bob-omb, a Sledge Bro, a fast Spike Top, …)
+        a.alt = alt;
         if kind.is_item() && !parachute {
             // rise 16 px at 0.5 (down: 1.0), no gravity
             a.vy = if r.down { -1.0 } else { 0.5 };
@@ -3032,7 +3073,19 @@ impl World {
                 a.dir = if self.player.x <= bx { -1 } else { 1 };
             }
             a.chute = parachute;
+            // the water variants of the Block Out look at the liquid (actors/block_out.rs)
+            a.w3.flooded = self.liquid.is_some_and(|l| l.spec.full);
+            a.w3.liquid = self
+                .liquid
+                .filter(|l| !l.spec.full)
+                .map(|l| (l.y, l.water()));
             a.block_out(by, r.down, r.note);
+            if kind == Kind::Blooper && self.level.style == "3W" && !parachute {
+                // 3D World's Blooper (Gesso3W, Block vtable 0x71028d40f8: Out 0x71011037a0 /
+                // 0x71011037e0, v3.0.3) floats out as FloatSearch does but with terrain
+                // collision from the start [obs]
+                a.timer = 0;
+            }
             if kind.is_item() {
                 self.events.push(Event::ItemAppear);
             }
@@ -3067,7 +3120,7 @@ impl World {
         let mine: Vec<&Actor> = self
             .actors
             .iter()
-            .filter(|a| a.kind == Kind::Fireball)
+            .filter(|a| a.kind == Kind::Fireball && !a.alt)
             .collect();
         let recent = mine.iter().filter(|a| a.age < 60).count();
         if mine.len() >= 6 || recent >= 2 {
@@ -3186,7 +3239,7 @@ impl World {
             }
         }
         for (tx, ty) in hits {
-            self.hit_block(tx, ty, true, HitPower::Break);
+            self.hit_block_from(tx, ty, true, HitPower::Break, true);
         }
     }
 
@@ -3781,7 +3834,8 @@ impl World {
             // Spiny's stomp row — stamp Damage, stamp_shoe DieFall, stamp_spin DieVanish [obs])
             let stomp = in_window
                 && !a.kind.unstompable()
-                && !(a.shell_of == 2 && self.player.shoe.is_none());
+                && !((a.shell_of == 2 || (a.alt && matches!(a.kind, Kind::Shell { .. })))
+                    && self.player.shoe.is_none());
             // a shoe stomp defeats most enemies, spiny or not (stamp_shoe in EnemyDB)
             let shoe_stomp = self.player.shoe.is_some()
                 && in_window
@@ -4117,10 +4171,24 @@ impl World {
                 .map(|&(_, id, flags)| (id, flags));
             a.home_y = s.y;
             a.pipe = s.pipe;
-            if s.parachute {
+            if self.level.ceiling.contains(&idx) && !s.wings && !s.parachute {
+                a.enter_ceiling();
+            }
+            if s.parachute && Actor::folds_chute(s.kind) {
+                a.chute = true;
+            } else if s.parachute {
                 a.mode = Mode::parachute(false);
             }
             a.rng ^= (idx as u32 + 1).wrapping_mul(0x85eb_ca6b);
+            // a boss carries its car: a Fire car brings its fire record (actors/clown.rs)
+            if s.kind.boss_clown()
+                && s.link >= 0
+                && self.spawns.iter().any(|r| {
+                    matches!(r.spawn.kind, Kind::ClownCar { fire: true }) && r.spawn.link == s.link
+                })
+            {
+                a.clown_fire = Some(crate::actors::ClownFire::default());
+            }
             if s.kind == Kind::RockyWrench {
                 a.home_y = s.y - 8.0;
             }
@@ -4896,7 +4964,7 @@ impl World {
             };
             let tx = ((self.player.x + side as f32 * reach) / TILE).floor() as i32;
             if self.blocks.get(tx, ty).is_some_and(|b| b.bump.is_none()) {
-                self.hit_block(tx, ty, true, HitPower::Break);
+                self.hit_block_from(tx, ty, true, HitPower::Break, true);
             }
         }
     }
@@ -5283,13 +5351,23 @@ impl World {
         }
         let tx = (self.player.x / TILE).floor() as i32;
         let ty = ((self.player.y - 1.0) / TILE).floor() as i32;
-        if self
+        if !self
             .blocks
             .get(tx, ty)
             .is_some_and(|b| b.kind == BlockKind::Note)
-            && self.blocks.hit(tx, ty, false, HitPower::Bump) == HitResult::Bumped
         {
-            self.note_rider = Some((tx, ty));
+            return;
+        }
+        // (the block is under the player, so in view: its contents go at once, downward)
+        match self.blocks.hit(tx, ty, false, HitPower::Bump, true) {
+            HitResult::Bumped => self.note_rider = Some((tx, ty)),
+            HitResult::Coin => {
+                let (bx, by) = blocks::origin(tx, ty);
+                self.effects.push(Effect::coin_pop(bx, by, true));
+                self.events.push(Event::Coin);
+                self.note_rider = Some((tx, ty));
+            }
+            _ => {}
         }
     }
 
@@ -5693,6 +5771,12 @@ impl World {
                     a.chute = f.parachute;
                     a.home_y = my;
                     a.blaster = Some(bi);
+                    // the Shot's water variants look at the liquid (actors/shot.rs)
+                    a.w3.flooded = self.liquid.is_some_and(|l| l.spec.full);
+                    a.w3.liquid = self
+                        .liquid
+                        .filter(|l| !l.spec.full)
+                        .map(|l| (l.y, l.water()));
                     a.launch(b.homing);
                     self.add_actor(a);
                 }
@@ -7095,7 +7179,9 @@ impl World {
             if a.wings && !matches!(a.mode, Mode::DieFall) && visible(a.x, a.y) {
                 out.extend(Self::wing_sprites(a, self.style));
             }
-            if matches!(a.mode, Mode::Parachute { .. }) && visible(a.x, a.y) {
+            if (matches!(a.mode, Mode::Parachute { .. }) || a.thwomp_chute_open())
+                && visible(a.x, a.y)
+            {
                 out.push(Self::model_sprite(
                     "M1_Enemy_parachutecommon",
                     "parachute",
@@ -7544,6 +7630,7 @@ impl World {
                 (
                     match (a.shell_of, a.buzzy, red) {
                         (2, _, _) => "M1_Enemy_togezo",
+                        _ if a.alt => "M1_Enemy_togezo",
                         (3, _, _) => "M1_Enemy_karon",
                         (_, true, _) => "M1_Enemy_met",
                         (_, _, true) => "M1_Enemy_nokonokoB",
@@ -8083,6 +8170,10 @@ impl World {
                 s.y = a.y - h;
             }
         }
+        if a.ceiling {
+            // walking the ceiling upside down (actors/ceiling.rs)
+            s.flip_y = true;
+        }
         if matches!(a.mode, Mode::DokanOut { .. }) || a.in_block() {
             s.layer = 5;
         }
@@ -8478,6 +8569,36 @@ mod tests {
         let b = w.actors.iter().find(|a| a.kind == Kind::BobOmb).unwrap();
         assert!(matches!(b.mode, Mode::Parachute { .. }), "{:?}", b.mode);
         assert!(b.y > 6.0 * TILE, "clear of the block: {}", b.y);
+    }
+
+    /// Boo Buddies in a block come out as a Boo circle spreading round the block's centre
+    /// (TeresaSpread's Block Out); a part's 0x4 form comes out of a block as itself.
+    #[test]
+    fn block_releases_boo_buddies_and_part_forms() {
+        let mut w = hit_block_holding(Contents::Part { id: 41, flags: 0x4 }, None);
+        let ring: Vec<_> = w
+            .actors
+            .iter()
+            .filter(|a| matches!(a.kind, Kind::RingBoo { .. }))
+            .collect();
+        assert_eq!(ring.len(), 8);
+        let (cx, cy) = (3.0 * TILE + 8.0, 5.0 * TILE + 8.0);
+        assert!(ring.iter().all(|b| (b.home_x, b.home_y) == (cx, cy)));
+        w.player.invuln = 1_000_000;
+        run(&mut w, 0, 200);
+        let b = w
+            .actors
+            .iter()
+            .find(|a| matches!(a.kind, Kind::RingBoo { .. }))
+            .unwrap();
+        assert!(
+            (b.speed - 52.0).abs() < 1e-3,
+            "spread to 52 px: {}",
+            b.speed
+        );
+        let w = hit_block_holding(Contents::Part { id: 15, flags: 0x4 }, None);
+        let b = w.actors.iter().find(|a| a.kind == Kind::BobOmb).unwrap();
+        assert!(b.alt, "a lit Bob-omb");
     }
 
     #[test]
@@ -9835,6 +9956,104 @@ mod tests {
         run(&mut w, input::JUMP, 1);
         assert!(w.player.clown.is_none());
         assert!(w.player.vy > 3.0, "{}", w.player.vy);
+    }
+
+    /// A Goomba and a Bowser in Fire Koopa Clown Cars (actors/clown.rs): each car charges
+    /// and fires KoopaClownFire shots that fly level toward the player at 1.5 px/f (plus the
+    /// car's speed) and are put out by terrain.
+    #[test]
+    fn fire_clown_cars_with_enemy_riders_shoot() {
+        for boss in [false, true] {
+            let mut lvl = Level::flat(80);
+            for ty in 4..12 {
+                lvl.set(1, ty, Cell::Solid);
+            }
+            let mut car = spawn(Kind::ClownCar { fire: true }, 300.0, 120.0);
+            car.link = 4;
+            lvl.spawns.push(car);
+            let kind = if boss {
+                Kind::Bowser {
+                    key: false,
+                    clown: true,
+                }
+            } else {
+                Kind::Goomba
+            };
+            let mut rider = spawn(kind, 300.0, 144.0);
+            rider.link = 4;
+            rider.clown = true;
+            lvl.spawns.push(rider);
+            let mut w = World::with_level(lvl);
+            w.player.x = 150.0;
+            w.player.invuln = 1_000_000;
+            let mut seen = Vec::new();
+            for _ in 0..800 {
+                run(&mut w, 0, 1);
+                w.player.x = 150.0;
+                w.player.y = 16.0;
+                for a in &w.actors {
+                    if a.kind == Kind::EnemyFire && a.alt && !seen.contains(&a.id) {
+                        // the first toward the player at the left; later ones as the car faces
+                        let first = seen.is_empty();
+                        seen.push(a.id);
+                        assert!((1.0..2.1).contains(&a.vx.abs()) && a.vy == 0.0, "{}", a.vx);
+                        assert!(!first || a.vx < 0.0, "boss {boss}: {}", a.vx);
+                    }
+                }
+            }
+            assert!(seen.len() >= 3, "boss {boss}: {} shots", seen.len());
+            // the wall at x = 16..32 puts them out
+            for a in &w.actors {
+                if a.kind == Kind::EnemyFire && a.alt {
+                    assert!(a.x > 32.0, "{}", a.x);
+                }
+            }
+        }
+    }
+
+    /// A placed parachute Thwomp waits like any Thwomp, its parachute folded (actors/chute.rs);
+    /// a parachute Cheep Cheep in an underwater course swims at once.
+    #[test]
+    fn own_parachute_presets_spawn_their_way() {
+        let mut lvl = Level::flat(40);
+        let mut t = spawn(
+            Kind::Thwomp {
+                side: false,
+                right: false,
+            },
+            200.0,
+            200.0,
+        );
+        t.parachute = true;
+        lvl.spawns.push(t);
+        let mut c = spawn(Kind::CheepCheep { red: false }, 260.0, 120.0);
+        c.parachute = true;
+        lvl.spawns.push(c);
+        lvl.liquid = Some(crate::level::LiquidSpec {
+            kind: 1,
+            start: f32::MAX,
+            end: f32::MAX,
+            mode: 0,
+            speed: 0,
+            full: true,
+        });
+        let mut w = World::with_level(lvl);
+        w.player.x = 40.0;
+        run(&mut w, 0, 3);
+        let t = w
+            .actors
+            .iter()
+            .find(|a| matches!(a.kind, Kind::Thwomp { .. }))
+            .unwrap();
+        assert_eq!(t.mode, Mode::Normal);
+        assert!(t.chute && !t.thwomp_chute_open());
+        assert_eq!(t.y, 200.0);
+        let c = w
+            .actors
+            .iter()
+            .find(|a| matches!(a.kind, Kind::CheepCheep { .. }))
+            .unwrap();
+        assert_eq!(c.mode, Mode::Normal);
     }
 
     #[test]
