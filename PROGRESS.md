@@ -69,8 +69,9 @@ sway, importer and pack 12, the dev cache already at v12).
   ±8 px bob eased by 0.03, floor / ceiling flips); ✅ Dry Bones flies the red Paratroopa's Fly
   (Karon Wing = NokonokoRed's); ✅ the enemies whose Wing action is their Basic one (Boo,
   Cheep Cheep, Fish Bone, Wiggler, Magikoopa, Bros, Monty Mole, Blooper, Chain Chomp) act as
-  unwinged; ⬜ their wing-only states (Boo PataCharge, Bros WingWalk), Lava Bubble (Bubble
-  Wing), Buzzy / Spike Top (Met Wing). ✅ Bowser's chase jumps (v1.0.0 0x71006ab370: a wall
+  unwinged; ✅ Buzzy / Spike Top (Met Wing: the Spiny's hover helper 0x7100782a80, no wall
+  turn); ⬜ their wing-only states (Boo PataCharge, Bros WingWalk), Lava Bubble (Bubble Wing),
+  the Para-Beetle's PlayerOn ride. ✅ Bowser's chase jumps (v1.0.0 0x71006ab370: a wall
   on his right jumped by kind — obstacle scan 0x71006abfe0, free run of 3 / 5 tiles 0–2 up the
   middle jump, 3–5 the big one; the gap scan 0x71006ab810 and the gap jump's landing speed
   0x71006ac370, |d| / 2 · 0.1 / vy ≤ 1.8; [inf] the overhead collider queries pass). ✅ the

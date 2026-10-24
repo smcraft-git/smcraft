@@ -2205,6 +2205,11 @@ impl Actor {
                 // NokonokoRed's; its Fly enter 0x7100697e40 is the same and its exe 0x7100697ec0
                 // runs NokonokoRed's Fly exe 0x710072b370) [obs v1.0.0]: step_wings
                 Kind::DryBones => {}
+                // the Para-Beetle: the Spiny's hover without its wall turn (actors/fly.rs)
+                Kind::Buzzy | Kind::SpikeTop { .. } if !self.ceiling => {
+                    self.step_para_beetle(level);
+                    return None;
+                }
                 // its own Fly / Turn (actors/wing.rs)
                 Kind::BobOmb if self.phase == 0 => {
                     self.step_winged_bobomb(level);
