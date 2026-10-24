@@ -232,7 +232,8 @@ sway, importer and pack 12, the dev cache already at v12).
   - ✅ more parts in the part window (2026-10-24): Spike, Pokey, Piranha Creeper, Mechakoopa, the
     seven Koopalings, P Block, Dash Block, the SMB2 Mushroom (SMB1), the wearables and the
     ON/OFF Trampoline (3D World); each checked placeable in every style that offers it (a test)
-    and playable · ⬜ the Clear Pipe (its own placement), Lakitu's Cloud (no label found)
+    and playable · ⬜ the Clear Pipe (its own placement); Lakitu's Cloud isn't a part of its own (no name
+    in the game's part list: it comes with Lakitu, parts go into it)
   - ✅ tracks (2026-10-24): the Track part in Gizmos; a press lays a horizontal piece, dragging
     draws on from its end, 2 tiles a piece, 8 ways [inf: the gesture]; a part that rides tracks
     put down on one is attached (flag 0x400); a press on an end opens / closes it; erasing,
