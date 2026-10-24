@@ -55,7 +55,12 @@ final class UILayer {
         O o;
         o.pos = float4(v[i].pos * xf.xy + xf.zw, 0, 1);
         o.uv0 = v[i].uv0; o.uv1 = v[i].uv1;
-        o.color = lin4(v[i].color); o.black = lin4(v[i].black); o.white = lin4(v[i].white);
+        // an NX layout's colours are linear already (mmk_ui FLAG_LINEAR_COLOR → bit 2)
+        if (v[i].flags & 4u) {
+            o.color = float4(v[i].color) / 255.0; o.black = float4(v[i].black) / 255.0; o.white = float4(v[i].white) / 255.0;
+        } else {
+            o.color = lin4(v[i].color); o.black = lin4(v[i].black); o.white = lin4(v[i].white);
+        }
         o.flags = v[i].flags;
         return o;
     }
@@ -201,7 +206,7 @@ final class UILayer {
         for q in quads {
             let t0 = texture(q.tex0), t1 = texture(q.tex1)
             let has: UInt32 = (t0 != nil ? 1 : 0) | (t1 != nil ? 2 : 0)
-            let shaderFlags = (q.flags & 0x000F_F000) | has
+            let shaderFlags = (q.flags & 0x000F_F000) | has | (q.flags & 0x200 != 0 ? 4 : 0)
             let s0 = (q.flags & 0xF) | (q.flags & 0x100 != 0 ? 16 : 0)
             let s1 = ((q.flags >> 4) & 0xF) | (q.flags & 0x100 != 0 ? 16 : 0)
             let blend = (q.flags >> 20) & 0xFFF

@@ -73,8 +73,13 @@ SMCraft is back in development (it was archived in October 2026).
   in the castle and forest: drag the water, lava or poison line's button to make it rise or fall,
   tap it for rising and falling, hold it for the speed. **Custom Scroll**: choose Custom in the
   Autoscroll window, then lay the camera's path (drag the path to add a point, tap a point's
-  square for its speed). Any course can be opened in the maker: someone else's course saves and uploads
+  square for its speed). Both modes draw SMM2's own lines, handles, birds and path marks, and
+  sound as in SMM2. Any course can be opened in the maker: someone else's course saves and uploads
   as a new course, "based on <code> by <maker>".
+- **SMM2's colours on its screens**: buttons, banners and text now show the colours SMM2 shows
+  (the yellow OK and menu buttons were orange), and windows with flipped frames are whole again
+  (the tips' window lost its bottom edge). Import the SMM2 UI again for the maker's new pictures
+  (SMCraft asks for it).
 - **Super Worlds**: play a Super World (its map, lives, progress), made from your library or
   downloaded from TGRCode.
 - **Super World maps drawn like the game's**: each world's theme backdrop and land (water,

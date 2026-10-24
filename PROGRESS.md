@@ -111,14 +111,24 @@ sway, importer and pack 12, the dev cache already at v12).
      the heights 0 … 24 (from 1 in 3D World, 167 vertical); lines together = still (mode / speed
      saved, 1 / 1 at first); a tap on the button 1 ↔ 2, held > 15 frames the speed balloon;
      built: banner, button states, lines / pill / path / button drawn, the balloon, the first-time
-     tip) · ⬜ the water-level actor's sound user, the right column's greyed buttons in the mode;
+     tip) · ✅ the water-level actor's sound user (`<style>_EditLavaEditor`), the eraser greyed
+     in the mode (2026-10-25, branch `makerart`);
      ✅ custom scroll nodes (2026-10-25, maker C13: the start / end units, a tap on a point's
      speed square at + 16 px steps 0 → 1 → 2 → 0 (0x7100eb3300), the start's speed is header
      0x0E; built: Custom in the autoscroll window, its tip, the mode with the band, birds, speed
      squares and arrows; nodes on their own layer, numbered left to right) · ⬜ how the game adds
-     nodes (ours: drag a leg), the band's exact extent (the reference frames show it ~2.5 tiles
-     wider than the camera-centre range), the `Edit_camera` / `Edit_autoscroll` /
-     `Edit_WaterLevelLine` models' textures (not imported: flat shapes stand in), ✅ Mario's Trail (`L_ZanzoBtn_00`, 2026-10-24:
+     nodes (ours: drag a leg), the band's exact rule (ours since `makerart`: the camera-centre
+     range grown 2 tiles across, 2.5 up / down, as the frames' left and bottom edges); ✅ the
+     modes' art (2026-10-25, branch `makerart`, maker C5 / C13: UI importer and pack 8 —
+     **re-import the UI pack** — copies
+     `Edit_WaterLevelLine`, `Edit_dragBtn`, `Edit_EditPanel` (the 13 × 6 icon sheet),
+     `Edit_autoscroll`, `Edit_camera`; the lines, pill, path marks, round button (1.18 × held),
+     drag arrows, birds, speed squares and scroll marks placed as 0x7100effd00 / 0x7100f01ce0 /
+     0x7100eb27e0 / 0x7100fd5c10 do; the markers at the path's unclamped points; faint lines /
+     birds outside the modes; the banner is the layer group's; SMM2 layouts' colours taken as
+     linear (`FLAG_LINEAR_COLOR`: the yellow buttons), window frame flips as texture turns, the
+     tip's dim 200) · ⬜ the scroll bar along the bottom (the frames show only the area button in
+     the modes; ours covers the pill), the game's maker camera height; ✅ Mario's Trail (`L_ZanzoBtn_00`, 2026-10-24:
      maker C12 — 40 snapshots of player 1, one per 22 px of travel; built), the trash can
      (`L_TrashCan_00`: UIEditMainPage part 8 at +0x800, set up in 0x71018cee20; `part(i)`
      0x71018fc060 is virtual; placed from code, the pane sits at 0,0; Act 45 plays

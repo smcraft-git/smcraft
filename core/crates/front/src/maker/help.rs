@@ -16,8 +16,10 @@ use crate::sound::Event;
 
 pub const LAYOUT: &str = "Cmn_HelpWindow_00";
 const POINTER: &str = "Cmn_Pointer_00";
-/// How dark the screen goes round the lit button [obs: the reference frames].
-const DIM: u8 = 110;
+/// How dark the screen goes round the lit button: `Cmn_Spotlight_00`'s `P_BG_00`, black at
+/// alpha 200 [obs data] (with the UI's blending in linear light, as the game's, the course
+/// still shows round the window and hardly through it [obs: the reference frames]).
+const DIM: u8 = 200;
 
 /// The tips: their message label and the key that remembers they were shown.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -101,20 +103,20 @@ impl HelpTip {
     /// The dim round the lit button (its rectangle `target`: centre, size, where the page
     /// has it now) and the arrow over it (drawn under the window).
     pub fn quads(&self, target: Option<([f32; 2], [f32; 2])>) -> Vec<mmk_ui::Quad> {
-        use super::shapes;
+        use super::art;
         let mut q = Vec::new();
         let dim = [0, 0, 0, DIM];
         let Some((c, size)) = target else {
-            shapes::rect(&mut q, -640.0, -360.0, 640.0, 360.0, dim);
+            art::rect(&mut q, -640.0, -360.0, 640.0, 360.0, dim);
             return q;
         };
         let (hw, hh) = (size[0] / 2.0 + 12.0, size[1] / 2.0 + 12.0);
         let (x0, y0, x1, y1) = (c[0] - hw, c[1] - hh, c[0] + hw, c[1] + hh);
-        shapes::rect(&mut q, -640.0, -360.0, 640.0, y0, dim);
-        shapes::rect(&mut q, -640.0, y1, 640.0, 360.0, dim);
-        shapes::rect(&mut q, -640.0, y0, x0, y1, dim);
-        shapes::rect(&mut q, x1, y0, 640.0, y1, dim);
-        shapes::rect(&mut q, x0, y0, x1, y1, [255, 255, 255, 40]);
+        art::rect(&mut q, -640.0, -360.0, 640.0, y0, dim);
+        art::rect(&mut q, -640.0, y1, 640.0, 360.0, dim);
+        art::rect(&mut q, -640.0, y0, x0, y1, dim);
+        art::rect(&mut q, x1, y0, 640.0, y1, dim);
+        art::rect(&mut q, x0, y0, x1, y1, [255, 255, 255, 40]);
         // the arrow: Lsn_Arrow_00 points up, drawn upside down; it bobs 10 units over 30
         // ticks (`Loop`) [obs data]
         let tex = self

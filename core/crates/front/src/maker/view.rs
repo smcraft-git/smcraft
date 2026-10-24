@@ -71,6 +71,7 @@ pub fn overlay(f: &MakerFlow) -> DrawItem {
         }
         f.mode_quads(&mut q);
     } else if f.glove_shown() || f.carrying() {
+        f.faint_mode_quads(&mut q);
         grid(f, &mut q);
         frame(f, &mut q);
         selection(f, &mut q);

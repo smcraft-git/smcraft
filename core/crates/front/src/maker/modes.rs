@@ -22,10 +22,14 @@ use crate::sound::Event;
 
 const LEFT: &str = "L_LeftParts_00";
 const GUIDE: &str = "L_ModeGuide_00";
-/// Where the banner's name and icon go (their panes' x in their parents): the name centred at
-/// about x −250, the icon at −347 [obs: the reference frames].
-const MODE_TEXT_X: f32 = 39.0;
+const ERASER: &str = "L_RightParts_00/L_EraserBtn_00";
+/// Where the banner's icon and name go (their panes' x in their parents): the icon at about
+/// x −347, the name from −313 [obs: the reference frames].
 const LAYER_ICON_X: f32 = -72.4;
+const LAYER_TEXT_X: f32 = 33.7;
+/// The mode base's left end in the guide: `N_Mode_00` 2 + `W_ModeBase_00` 14 (centred), less
+/// half its 506 × 0.7 [obs data]; the layer base (left-anchored) goes there.
+const MODE_BASE_LEFT: f32 = 16.0 - 506.0 * 0.7 / 2.0;
 
 impl MakerFlow {
     /// Leave the Water Level / Custom Scroll mode (presses in progress end as they are).
@@ -63,21 +67,26 @@ impl MakerFlow {
             p.stop(&format!("{GUIDE}/{a}"));
         }
         if let Some(t) = &text {
-            p.text(&format!("{GUIDE}/T_Mode_00"), t);
+            p.text(&format!("{GUIDE}/T_Layer_00"), t);
         }
-        // the frame's colour: the water level's and custom scroll's (TypeMode state 1)
         p.hold(&format!("{GUIDE}/TypeMode"), 1.0);
         p.hold(&format!("{GUIDE}/TypeLayer"), layer as f32);
         p.play(&format!("{GUIDE}/InMode"), tick);
         p.play(&format!("{GUIDE}/InLayer"), tick);
-        // as the reference frames show it: the name on the mode's base with the icon on its
-        // left; no frame round the screen, no second base [obs: the frames; inf: how the game
-        // composes the two groups]
+        // as the reference frames show it: the layer's group — its base (dark orange, (78, 24,
+        // 0) taken as linear as the game takes it, is the frames' banner colour), the icon and
+        // the name to its right — on the mode base's place and width; no mode base, no frame
+        // round the screen [obs: the frames; inf: how the game places the icon and the name]
         p.show(&format!("{GUIDE}/W_Frame_00"), false);
-        p.show(&format!("{GUIDE}/W_LayerBase_00"), false);
-        p.show(&format!("{GUIDE}/T_Layer_00"), false);
-        p.set_translate(&format!("{GUIDE}/T_Mode_00"), [MODE_TEXT_X, 225.0]);
+        p.show(&format!("{GUIDE}/W_ModeBase_00"), false);
+        p.show(&format!("{GUIDE}/T_Mode_00"), false);
+        p.show(&format!("{GUIDE}/T_Layer_00"), true);
         p.set_translate(&format!("{GUIDE}/N_LayerPos_00"), [LAYER_ICON_X, 2.0]);
+        p.set_translate(
+            &format!("{GUIDE}/W_LayerBase_00"),
+            [MODE_BASE_LEFT - LAYER_ICON_X, -2.0],
+        );
+        p.set_translate(&format!("{GUIDE}/T_Layer_00"), [LAYER_TEXT_X, 0.0]);
     }
 
     /// The two mode buttons as the course and the mode are.
@@ -88,6 +97,13 @@ impl MakerFlow {
         let mode = self.mode;
         let tick = self.tick;
         let Some(p) = &mut self.page else { return };
+        // the eraser is greyed in the Water Level mode (nothing there to erase) [obs: the
+        // frames: the right column's third button grey, the others as in editing]
+        if mode == Mode::Water {
+            p.hold_end(&format!("{ERASER}/Invalid"));
+        } else {
+            p.stop(&format!("{ERASER}/Invalid"));
+        }
         let b = format!("{LEFT}/L_WaterLevelBtn_00");
         // water, poison, lava [obs data: the Type frames' boat pictures]
         let ty = match kind {
@@ -291,6 +307,14 @@ impl MakerFlow {
             } else {
                 self.sound(7, "invalid");
             }
+            return true;
+        }
+        // the greyed eraser does nothing
+        if self.mode == Mode::Water
+            && let Some(page) = &mut self.page
+            && crate::menu::hit(page, self.tick, &[format!("{ERASER}/B_Btn_00")], p).is_some()
+        {
+            self.sound(7, "invalid");
             return true;
         }
         let mode = self.mode;

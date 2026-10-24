@@ -147,16 +147,24 @@ fn apply_srt(uv: [[f32; 2]; 4], srt: &TexSrt) -> [[f32; 2]; 4] {
 }
 
 /// Reorder a quad's corner UVs for a window-frame flip code.
+/// A window frame's texture flip (0 none, 1 horizontal, 2 vertical, 3 / 4 / 5 rotated 90 /
+/// 180 / 270) applied to its texture coordinates: a turn of the texture about its centre, so a
+/// frame stretched past its texture (the 4-frame windows' corner + edge, whose coordinates run
+/// beyond 0–1 and clamp) keeps its corner at the window's corner and its edge running away
+/// from it (`Cmn_Window_00`'s bottom edge, the button shadows' `W_Shaow_00`, the balloons).
+/// The first layout version of the Switch's ui2d (SMM2's layouts are 9.0; SMM1's Wii U ones
+/// are 5.2 and older).
+const NX_LAYOUT: u32 = 0x0800_0000;
+
 fn flip_uv(uv: [[f32; 2]; 4], flip: u8) -> [[f32; 2]; 4] {
-    let [tl, tr, bl, br] = uv;
-    match flip {
-        1 => [tr, tl, br, bl],
-        2 => [bl, br, tl, tr],
-        3 => [bl, tl, br, tr],
-        4 => [br, bl, tr, tl],
-        5 => [tr, br, tl, bl],
-        _ => uv,
-    }
+    uv.map(|[u, v]| match flip {
+        1 => [1.0 - u, v],
+        2 => [u, 1.0 - v],
+        3 => [v, 1.0 - u],
+        4 => [1.0 - u, 1.0 - v],
+        5 => [1.0 - v, u],
+        _ => [u, v],
+    })
 }
 
 fn uv_rect(u0: f32, v0: f32, u1: f32, v1: f32) -> [[f32; 2]; 4] {
@@ -957,7 +965,14 @@ impl LayoutPlayer {
 
     /// Evaluate and append this layout's quads (identity placement, full alpha).
     pub fn draw(&self, out: &mut Vec<Quad>) {
+        let start = out.len();
         self.draw_at(&Mtx::IDENTITY, 1.0, &[], out);
+        // an NX layout's colours are linear values ([`crate::FLAG_LINEAR_COLOR`])
+        if self.res.layout.version >= NX_LAYOUT {
+            for q in &mut out[start..] {
+                q.flags |= crate::FLAG_LINEAR_COLOR;
+            }
+        }
     }
 
     /// Convenience: evaluate into a new list.

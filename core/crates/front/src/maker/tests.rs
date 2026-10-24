@@ -1381,8 +1381,8 @@ fn water_handles(m: &MakerFlow) -> ([f32; 2], [f32; 2]) {
     let l = m.editor.liquid();
     let ax = m.liquid_anchor();
     (
-        m.to_layout(ax - 16.0, liquid::line_y(l.end)),
-        m.to_layout(ax + 8.0, liquid::line_y(l.start)),
+        m.to_layout(ax - 16.0, liquid::handle_y(l.end)),
+        m.to_layout(ax + 8.0, liquid::handle_y(l.start)),
     )
 }
 
@@ -1398,7 +1398,7 @@ fn the_water_level_mode_needs_a_liquid_and_back_leaves_it() {
     m.enter_water();
     assert!(m.water_mode() && m.glove_shown());
     if let Some(p) = &m.page {
-        assert!(p.rect("L_ModeGuide_00/T_Mode_00").is_some());
+        assert!(p.rect("L_ModeGuide_00/T_Layer_00").is_some());
     }
     run(&mut m, &mut host, &mut saves, press(Buttons::BACK));
     assert!(!m.water_mode());
@@ -1444,7 +1444,7 @@ fn dragging_the_button_makes_the_liquid_rise_and_a_tap_turns_it_both_ways() {
     m.enter_water();
     // fixed: the button sits on the pill's left end; dragged up it makes the target line
     let (button, _) = water_handles(&m);
-    let up = [button[0], m.to_layout(0.0, liquid::line_y(8))[1]];
+    let up = [button[0], m.to_layout(0.0, liquid::handle_y(8))[1]];
     drag(&mut m, &mut host, &mut saves, button, up, 0);
     assert_eq!(
         m.editor.liquid(),
@@ -1497,24 +1497,24 @@ fn dragging_the_button_makes_the_liquid_rise_and_a_tap_turns_it_both_ways() {
     );
     assert_eq!((m.editor.liquid().mode, m.editor.liquid().end), (0, 2));
     let (button, _) = water_handles(&m);
-    let down = [button[0], m.to_layout(0.0, liquid::line_y(0))[1]];
+    let down = [button[0], m.to_layout(0.0, liquid::handle_y(0))[1]];
     drag(&mut m, &mut host, &mut saves, button, down, 0);
     let l = m.editor.liquid();
     assert_eq!((l.mode, l.speed, l.end), (2, 1, 0), "falls, as it was set");
     // the pill moves the start; reaching the end it takes the end along (still)
     let (_, pill) = water_handles(&m);
-    let above = [pill[0], m.to_layout(0.0, liquid::line_y(5))[1]];
+    let above = [pill[0], m.to_layout(0.0, liquid::handle_y(5))[1]];
     drag(&mut m, &mut host, &mut saves, pill, above, 0);
     let l = m.editor.liquid();
     assert_eq!((l.start, l.end, l.mode), (5, 0, 2));
     let (_, pill) = water_handles(&m);
-    let below = [pill[0], m.to_layout(0.0, liquid::line_y(0))[1]];
+    let below = [pill[0], m.to_layout(0.0, liquid::handle_y(0))[1]];
     drag(&mut m, &mut host, &mut saves, pill, below, 0);
     let l = m.editor.liquid();
     assert_eq!((l.start, l.end, l.mode), (0, 0, 0));
     // (off the scroll bar along the bottom)
     let (_, pill) = water_handles(&m);
-    let up = [pill[0], m.to_layout(0.0, liquid::line_y(4))[1]];
+    let up = [pill[0], m.to_layout(0.0, liquid::handle_y(4))[1]];
     drag(&mut m, &mut host, &mut saves, pill, up, 0);
     assert_eq!(m.editor.liquid().end, 4);
     // the heights stay in the game's range (0 … 24)
@@ -1590,6 +1590,80 @@ fn holding_the_button_opens_the_speed_balloon() {
 }
 
 #[test]
+fn the_modes_show_faintly_outside_and_sound_as_their_actors() {
+    use mmk_editor::settings::Liquid;
+    let (mut host, mut saves) = (MockHost::default(), Saves::default());
+    let mut m = maker(&mut host, &mut saves, MakerStart::New("M1".into()));
+    m.editor.set_theme(9);
+    let rising = Liquid {
+        mode: 1,
+        speed: 1,
+        start: 2,
+        end: 6,
+    };
+    m.editor.set_liquid(rising);
+    // in the parts mode a moving liquid's two lines show, faint (0.4); still water nothing
+    let faint = |m: &MakerFlow| {
+        let mut q = Vec::new();
+        m.faint_mode_quads(&mut q);
+        q
+    };
+    let q = faint(&m);
+    assert_eq!(q.len(), 2);
+    assert!(q.iter().all(|q| q.color[0][3] == 102));
+    m.editor.set_liquid(Liquid {
+        mode: 0,
+        speed: 0,
+        start: 2,
+        end: 2,
+    });
+    assert!(faint(&m).is_empty());
+    // custom autoscroll: the start's and the end's birds, faint
+    m.editor.set_autoscroll(4);
+    let q = faint(&m);
+    assert_eq!(q.len(), 2);
+    assert!(q.iter().all(|q| q.color[0][3] == 102));
+    // in the mode: the two lines at full strength, the pill, where the path leaves it, a mark
+    // on each of the 3 tiles between, the button
+    m.editor.set_liquid(rising);
+    m.enter_water();
+    let mut q = Vec::new();
+    m.mode_quads(&mut q);
+    assert_eq!(q.len(), 2 + 1 + 1 + 3 + 1);
+    assert_eq!(q[0].color[0][3], 255);
+    // the water level's sounds are its actor's (`<style>_EditLavaEditor`)
+    let (button, _) = water_handles(&m);
+    tap_at(&mut m, &mut host, &mut saves, button);
+    assert!(
+        host.edit_sounds
+            .iter()
+            .any(|(u, k)| u == "M1_EditLavaEditor" && k == "change_direction"),
+        "{:?}",
+        host.edit_sounds
+    );
+    // with the UI import: the eraser is greyed in the mode, a click on it does nothing
+    if m.page.is_some() {
+        let tick = m.tick;
+        let b = m
+            .page
+            .as_mut()
+            .and_then(|p| {
+                p.apply(tick);
+                p.rect("L_RightParts_00/L_EraserBtn_00/B_Btn_00")
+            })
+            .expect("the eraser")
+            .center;
+        let click = MakerInput {
+            ui: crate::testing::click(b),
+            ..Default::default()
+        };
+        run(&mut m, &mut host, &mut saves, click);
+        run(&mut m, &mut host, &mut saves, idle());
+        assert!(m.water_mode() && !m.eraser);
+    }
+}
+
+#[test]
 fn custom_scroll_nodes_change_speed_and_the_path_is_the_camera_s() {
     use mmk_editor::settings::ScrollKind;
     let (mut host, mut saves) = (MockHost::default(), Saves::default());
@@ -1601,9 +1675,13 @@ fn custom_scroll_nodes_change_speed_and_the_path_is_the_camera_s() {
     m.enter_scroll();
     assert!(m.scroll_mode());
     let square = |m: &MakerFlow, k: usize| {
-        let pt = m.scroll_points()[k];
+        let pt = m.scroll_marks()[k];
         m.to_layout(pt.x + scroll::SQUARE_DX, pt.y)
     };
+    // the start's marker stands before the camera's clamp: its square at 200 (the game's
+    // frames), the camera's path from 192
+    assert_eq!(m.scroll_marks()[0].x + scroll::SQUARE_DX, 200.0);
+    assert_eq!(m.scroll_points()[0].x, 192.0);
     // the start's square: slow → normal → fast → slow (the header's speed)
     assert_eq!(m.editor.course.header.autoscroll_speed, 0);
     let sq = square(&m, 0);
@@ -1620,7 +1698,7 @@ fn custom_scroll_nodes_change_speed_and_the_path_is_the_camera_s() {
             .any(|(u, k)| u.ends_with("EditAutoScrollCamera") && k == "change_speed")
     );
     // the leg dragged off its tile gets a node there, carried to where the drag ends
-    let pts = m.scroll_points();
+    let pts = m.scroll_marks();
     let on_leg = m.to_layout(pts[0].x + 64.0, pts[0].y);
     let to = m.tile_center((20, 10));
     drag(&mut m, &mut host, &mut saves, on_leg, to, 0);

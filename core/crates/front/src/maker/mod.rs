@@ -32,6 +32,7 @@
 //! description (owner's rule). The course being made is kept as a draft
 //! ([`Host::store_value`] "maker.draft") so the maker reopens on it.
 
+pub mod art;
 pub mod attr;
 pub mod catalog;
 pub mod help;
@@ -39,7 +40,6 @@ pub mod liquid;
 pub mod mission;
 pub mod modes;
 pub mod scroll;
-pub mod shapes;
 pub mod subarea;
 pub mod trail;
 pub mod view;
@@ -3380,9 +3380,21 @@ impl MakerFlow {
     /// The Water Level / Custom Scroll mode's lines and handles (view overlay).
     pub fn mode_quads(&self, q: &mut Vec<mmk_ui::Quad>) {
         match self.mode {
-            Mode::Water => self.liquid_quads(q),
-            Mode::Scroll => self.scroll_quads(q),
+            Mode::Water => self.liquid_quads(q, true),
+            Mode::Scroll => self.scroll_quads(q, true),
             _ => {}
+        }
+    }
+
+    /// Outside the modes, what the game still shows of them, faint: a moving liquid's two
+    /// lines (in the themes with a liquid), the custom scroll's birds (custom autoscroll)
+    /// [obs 0x7100effd00, 0x7100f01ce0, 0x7100eb27e0: const_color0's alpha 0.4].
+    pub fn faint_mode_quads(&self, q: &mut Vec<mmk_ui::Quad>) {
+        if self.water_available() {
+            self.liquid_quads(q, false);
+        }
+        if self.scroll_available() {
+            self.scroll_quads(q, false);
         }
     }
 
@@ -3459,7 +3471,7 @@ impl MakerFlow {
                     self.editor.checkpoint();
                     self.water.drag = Some(liquid::Handle::Target);
                     self.water.held = liquid::HOLD;
-                    let at = self.to_layout(self.liquid_anchor() - 16.0, liquid::line_y(8));
+                    let at = self.to_layout(self.liquid_anchor() - 16.0, liquid::handle_y(8));
                     self.water_hold(at);
                 }
             }
@@ -3469,8 +3481,9 @@ impl MakerFlow {
                 self.editor.set_autoscroll(4);
                 if what == "scroll-nodes" {
                     self.editor.set_custom_scroll_speed(1);
-                    let _ = self.editor.add_scroll_node(30, 12, 2);
-                    let _ = self.editor.add_scroll_node(48, 6, 0);
+                    // (on the first screen: the numbered birds and the turns)
+                    let _ = self.editor.add_scroll_node(17, 10, 2);
+                    let _ = self.editor.add_scroll_node(21, 5, 0);
                 }
                 self.dirty = true;
                 self.update_page();
