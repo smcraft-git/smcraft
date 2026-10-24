@@ -1242,10 +1242,12 @@ impl Level {
                 continue;
             }
             if o.id == 89 {
-                // custom autoscroll node (89-autoscroll-camera.md): number (flags >> 20) & 0xF,
-                // speed (flags >> 18) & 3; the camera centre follows the nodes in order
+                // custom autoscroll node (89-autoscroll-camera.md): number (flags >> 20) & 0x1F,
+                // speed (flags >> 18) & 3; a number past the 12 slots lands in slot 0, the start
+                // [obs v3.0.3 loader 0x710179c8f0]; the camera centre follows the nodes in order
+                let n = ((o.flags >> 20) & 0x1F) as u8;
                 lvl.scroll_nodes.push((
-                    ((o.flags >> 20) & 0xF) as u8,
+                    if n > 11 { 0 } else { n },
                     o.x as f32 / 10.0,
                     o.y as f32 / 10.0,
                     ((o.flags >> 18) & 3) as u8,

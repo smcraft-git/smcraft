@@ -6580,9 +6580,12 @@ impl World {
 
     /// Custom autoscroll (89-autoscroll-camera.md, themes.md §4.3): the view centre starts at
     /// the nearest node not behind it and travels node to node at the speed of each segment's
-    /// start node (setting 0–2 → 0.5 / 1.0 / 2.0 px/f [inf: field + 1 = slow/normal/fast; the
-    /// loader that fills the camera's node table (+0xb8 + area·0x90) wasn't found]),
-    /// easing by max(0.03·|Δ|, 0.01) per frame; it pauses during warps, deaths and the goal.
+    /// start node, easing by max(0.03·|Δ|, 0.01) per frame; it pauses during warps, deaths and
+    /// the goal. The loader stores speed type {3, −1, 1, 2}[setting ^ 2] [obs v3.0.3 0x710179c8f0,
+    /// table 0x7102320600], and the camera's speed for type t is the slow / normal / fast entry
+    /// t − 1 — 0.5 / 1.0 / 2.0 px/f, 0.28 / 0.53 / 1.12 in a vertical area [obs v3.0.3
+    /// 0x71023d74c0; v1.0.0 exec 0x7100b60880] — so settings 0–2 are slow / normal / fast and 3
+    /// (type −1) is speed 0: the camera stops on that segment.
     fn custom_autoscroll(&mut self) {
         let mut nodes = self.level.scroll_nodes.clone();
         nodes.sort_by_key(|n| n.0);
@@ -6606,7 +6609,12 @@ impl World {
         let mut next = next;
         if !paused && next < nodes.len() {
             let from = next.saturating_sub(1);
-            let target = [0.5, 1.0, 2.0][nodes[from].3.min(2) as usize];
+            let speeds = if vertical {
+                [0.28, 0.53, 1.12]
+            } else {
+                [0.5, 1.0, 2.0]
+            };
+            let target = speeds.get(nodes[from].3 as usize).copied().unwrap_or(0.0);
             let dv = target - v;
             v += dv.signum() * (dv.abs() * 0.03).max(0.01).min(dv.abs());
             let (tx, ty) = (nodes[next].1, nodes[next].2);
@@ -10379,6 +10387,20 @@ mod tests {
             (w.camera_x + VIEW_W / 2.0 - 1000.0).abs() < 1.0,
             "stops at the last node"
         );
+    }
+
+    #[test]
+    fn a_custom_autoscroll_node_set_to_3_stops_the_camera() {
+        let mut lvl = Level::flat(200);
+        lvl.autoscroll = 4;
+        lvl.scroll_nodes.push((1, 200.0, 120.0, 3));
+        lvl.scroll_nodes.push((2, 1000.0, 120.0, 0));
+        let mut w = World::with_level(lvl);
+        w.reset_camera();
+        run(&mut w, 0, 200);
+        let x0 = w.camera_x;
+        run(&mut w, 0, 200);
+        assert!((w.camera_x - x0).abs() < 1e-3, "speed 0 past the stop node");
     }
 
     #[test]
