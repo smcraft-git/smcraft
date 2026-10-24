@@ -139,7 +139,9 @@ Everything is on `main` and pushed, except `maker-audio` (pushed as a branch; se
   - ✅ Keys per player (a key door needs the entering player's own); a stomp / springboard
     between players moves the victim's keys to the attacker
   - ✅ Bubble / pop sounds (`<style>_Balloon` `act_balloon_start` / `act_baloon_break`)
-  - ⬜ Not yet: ground-pound knock-flight, the 180-frame warp wait (the world waits instead),
+  - ✅ A ground pound knocks another player flying (vy 4.0, 1.0 / 1.4 away; no harm, no control
+    until landing), and takes their keys
+  - ⬜ Not yet: the 180-frame warp wait (the world waits instead),
     per-player clear conditions, a players screen in SMM2's layouts (the question is a toast)
 
 **G4 — Course Maker for any course** 🔄

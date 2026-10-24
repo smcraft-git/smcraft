@@ -79,6 +79,10 @@ const ESCAPE_VY_SPIN: f32 = 3.428;
 const THROW_VY: f32 = 4.5;
 const THROW_IGNORE: i32 = 10;
 const CARRY_REACH: f32 = 20.0;
+/// A ground pound knocks another player flying (§5.4): up, and away (more when standing).
+const KNOCK_VY: f32 = 4.0;
+const KNOCK_VX_AIR: f32 = 1.0;
+const KNOCK_VX_GROUND: f32 = 1.4;
 const CARRY_DY: f32 = 8.0;
 
 /// A co-op player's situation.
@@ -130,6 +134,8 @@ pub struct Slot {
     prev_spin: bool,
     /// The slot this player is carrying.
     pub carrying: Option<usize>,
+    /// Knocked flying by another's ground pound: no control until landing (§5.4).
+    pub knocked: bool,
     /// Just stomped (no new head contact) and frozen on the ground (frames).
     cooldown: i32,
     freeze: i32,
@@ -455,11 +461,23 @@ impl World {
     /// One tick with an input per player (player 1 first). With one player it is
     /// [`World::step`].
     pub fn step_players(&mut self, inputs: &[Input]) {
-        let input = |k: usize| inputs.get(k).copied().unwrap_or_default();
         if self.others.is_empty() {
-            self.step(input(0));
+            self.step(inputs.first().copied().unwrap_or_default());
             return;
         }
+        // a player knocked flying has no control until they land
+        let masked: Vec<Input> = (0..self.players())
+            .map(|k| {
+                let knocked = self.coop.slots.get(k).is_some_and(|s| s.knocked);
+                if knocked {
+                    Input::default()
+                } else {
+                    inputs.get(k).copied().unwrap_or_default()
+                }
+            })
+            .collect();
+        let inputs = &masked[..];
+        let input = |k: usize| inputs.get(k).copied().unwrap_or_default();
         if self.coop.slots.len() != self.players() {
             let n = self.players();
             self.coop = Coop::new(n);
@@ -656,6 +674,7 @@ impl World {
                 }
             }
             self.pick_up_players(inputs);
+            self.pound_knocks();
             self.pop_bubbles();
             self.head_contact(inputs);
             self.side_push();
@@ -668,6 +687,47 @@ impl World {
         }
         self.goal_wait();
         self.pole_demo();
+    }
+
+    // ------------------------------------------------------------ attacks (§5.4)
+
+    /// A ground-pounding player landing on or diving into another knocks them flying (no harm, no
+    /// power lost); the victim's keys go to the attacker. A knocked player lands to recover.
+    fn pound_knocks(&mut self) {
+        let n = self.players();
+        for k in 0..n {
+            let p = self.slot(k);
+            if self.coop.slots[k].knocked && p.on_ground && p.vy <= 0.0 {
+                self.coop.slots[k].knocked = false;
+            }
+        }
+        for a in 0..n {
+            if !self.touchable(a) || self.slot(a).pound != -1 {
+                continue;
+            }
+            for b in 0..n {
+                if a == b || !self.touchable(b) || self.ignoring(a, b) || self.coop.slots[b].knocked
+                {
+                    continue;
+                }
+                let (pa, pb) = (self.slot(a), self.slot(b));
+                if !overlap(pa.contact_box(), pb.contact_box()) || pa.y < pb.y {
+                    continue;
+                }
+                let dir = if pb.x >= pa.x { 1.0 } else { -1.0 };
+                let speed = if pb.on_ground {
+                    KNOCK_VX_GROUND
+                } else {
+                    KNOCK_VX_AIR
+                };
+                let q = self.slot_mut(b);
+                q.vy = KNOCK_VY;
+                q.vx = dir * speed;
+                q.on_ground = false;
+                self.coop.slots[b].knocked = true;
+                self.take_keys(a, b);
+            }
+        }
     }
 
     // ------------------------------------------------------------ carrying (§5.3)
@@ -1624,6 +1684,30 @@ mod tests {
         }
         assert_eq!(w.coop.slots[1].state, State::Play, "broke free");
         assert_eq!(w.coop.slots[0].carrying, None);
+    }
+
+    #[test]
+    fn a_ground_pound_knocks_another_player_flying_without_harm() {
+        let mut lvl = Level::flat(60);
+        lvl.style = "WU".into();
+        let mut w = World::with_level(lvl);
+        w.set_players(2);
+        run(&mut w, &[NONE, NONE], 5);
+        w.keys = 1;
+        // player 2 dives in a ground pound onto player 1
+        w.others[0].x = w.player.x + 4.0;
+        w.others[0].y = w.player.y + 12.0;
+        w.others[0].vy = -6.0;
+        w.others[0].on_ground = false;
+        w.others[0].pound = -1;
+        w.step_players(&[NONE, NONE]);
+        assert!(w.coop.slots[0].knocked, "knocked");
+        assert!(w.player.vy > 3.0 && w.player.vx < 0.0, "up and away");
+        assert_eq!(w.keys_of(1), 1, "the attacker took the key");
+        // no control while flying, back on landing, unharmed
+        run(&mut w, &[R, NONE], 60);
+        assert!(!w.coop.slots[0].knocked);
+        assert!(w.player.alive());
     }
 
     #[test]
