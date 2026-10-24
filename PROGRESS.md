@@ -315,6 +315,14 @@ Nextendo; `docs/nextendo-network-play.md`, spec `research/specs/network-play.md`
 **G8 — Fidelity: pixel, physics, sound** 🔄
 - 🔄 Physics: 428 / 454 player traces frame-exact → all; enemy and object traces; whole courses
   start to goal
+- 🔄 Pixels, SMB1 against the game (smm2recomp reference frames, update 900; MAE / % pixels off by
+  > 24): ground 0.85 / 0.48 %, underground 0.64 / 0.44 % (night 0.90), snow 0.98 / 0.58 %, water
+  1.77 / 0.82 %, castle 3.99 / 2.93 % (night 4.24), ghost house 12.8 / 47 % (night 28.4), airship
+  35.5 / 32 % (night 30.1), water night 49.3 / 86 %. Found, not fixed: the airship theme's camera
+  sway; the night spotlight (darkness outside a circle round Mario, water / ghost house nights:
+  `LightMaskTable`); SMB1's daytime ghost house backdrop is plain black (we draw the night one);
+  the final colour table (every pixel 1–2 levels off; ramp captures ready). 60 of 90 reference
+  frames captured (all SMB1, most SMB3); tooling `research/tools/pixel-ref/`
 - 🔄 Pixels: per style × theme frames against Ryujinx (2D styles exact; NSMBU / 3D World lighting,
   terrain variants, effects)
 - 🔄 Sound: every object's sounds, mixer behaviour checked against the game's output · keys
