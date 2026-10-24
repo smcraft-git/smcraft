@@ -235,9 +235,9 @@ impl Director {
     }
 
     /// A Course Maker sound: `user`'s `key` (data-driven director only).
-    pub fn edit_sound(&mut self, style: &str, user: &str, key: &str) -> bool {
+    pub fn edit_sound(&mut self, style: &str, user: &str, key: &str, scale: Option<f32>) -> bool {
         match &mut self.imp {
-            Imp::Data(s) => s.edit_sound(style, user, key),
+            Imp::Data(s) => s.edit_sound(style, user, key, scale),
             Imp::Legacy(_) => false,
         }
     }

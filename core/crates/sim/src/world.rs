@@ -31,6 +31,7 @@ mod bosses;
 pub mod coop;
 mod debug;
 mod smm1;
+mod tower;
 use smm1::Smm1Shell;
 mod koopalings;
 mod powerups;
@@ -210,6 +211,8 @@ pub struct World {
     pub camera: Camera,
     pub blocks: Blocks,
     pub actors: Vec<Actor>,
+    /// Stacked parts in play (world/tower.rs).
+    towers: Vec<tower::Tower>,
     pub effects: Vec<Effect>,
     spawns: Vec<SpawnRecord>,
     pub score: u32,
@@ -555,6 +558,7 @@ impl World {
             camera: Camera::default(),
             blocks: Blocks::default(),
             actors: Vec::new(),
+            towers: Vec::new(),
             effects: Vec::new(),
             spawns: Vec::new(),
             score: 0,
@@ -748,6 +752,7 @@ impl World {
             })
             .collect();
         self.actors.clear();
+        self.towers.clear();
         self.escort_down.clear();
         self.effects.clear();
         self.reset_generators();
@@ -814,6 +819,7 @@ impl World {
                         .into_boxed_str(),
                 );
                 self.actors.clear();
+                self.towers.clear();
                 self.escort_down.clear();
                 self.effects.clear();
                 self.reset_generators();
@@ -1142,32 +1148,6 @@ impl World {
         }
         for _ in 0..hits {
             self.events.push(Event::EnemyDown);
-        }
-    }
-
-    /// Stacked parts ride the one below (flag 0x1000, [`Level::stacks`]): a rider keeps its
-    /// place on its base and faces where the base faces while the base is alive; with the base
-    /// gone it is free (falls, walks) [inf: the game's tower rules not read, maker spec C11].
-    fn carry_stack_riders(&mut self) {
-        for k in 0..self.level.stacks.len() {
-            let (r, b) = self.level.stacks[k];
-            let alive_of = |s: usize| {
-                self.actors
-                    .iter()
-                    .position(|a| a.spawn == Some(s) && a.alive())
-            };
-            let (Some(ri), Some(bi)) = (alive_of(r), alive_of(b)) else {
-                continue;
-            };
-            let (rs, bs) = (self.level.spawns[r], self.level.spawns[b]);
-            let (bx, by, dir) = (self.actors[bi].x, self.actors[bi].y, self.actors[bi].dir);
-            let a = &mut self.actors[ri];
-            a.x = bx + (rs.x - bs.x);
-            a.y = by + (rs.y - bs.y);
-            a.vx = 0.0;
-            a.vy = 0.0;
-            a.on_ground = true;
-            a.dir = dir;
         }
     }
 
@@ -2023,6 +2003,12 @@ impl World {
             if a.kind.is_platform() {
                 continue; // already moved before the player
             }
+            // a tower rider: the tower places it; it only idles, or keeps its own action in place
+            let rider = a.stacked.then_some((a.x, a.y, a.dir));
+            if a.stacked && !a.acts_in_tower() {
+                a.age += 1;
+                continue;
+            }
             if a.kind == Kind::Lakitu {
                 a.children = parents.iter().filter(|&&p| p == a.id).count() as u32;
             }
@@ -2048,7 +2034,11 @@ impl World {
             if let Some(n) = a.step_spawning(&self.level) {
                 born.push(n);
             }
+            if let Some((x, y, dir)) = rider {
+                (a.x, a.y, a.dir, a.vx, a.vy) = (x, y, dir, 0.0, 0.0);
+            }
         }
+        self.step_towers();
         self.explosions();
         for n in born {
             self.add_actor(n);
@@ -2091,7 +2081,6 @@ impl World {
         self.player_interactions(jump_held);
         self.step_effects();
         self.carry_clown_riders();
-        self.carry_stack_riders();
         self.boss_keys();
         self.tally_defeats();
         self.drop_shoes();
@@ -2827,7 +2816,8 @@ impl World {
                     }
                     continue;
                 }
-                let walkers = a.kind.is_walker() && b.kind.is_walker();
+                // a tower's riders don't bump walkers: the tower turns them [inf]
+                let walkers = a.kind.is_walker() && b.kind.is_walker() && !a.stacked && !b.stacked;
                 let a_slide = a.mode == Mode::ShellSlide;
                 let b_slide = b.mode == Mode::ShellSlide;
                 match (a_slide, b_slide) {
@@ -3607,6 +3597,18 @@ impl World {
         let touches = |b: (f32, f32, f32, f32), z: (f32, f32, f32, f32)| {
             b.0 <= z.2 && b.2 >= z.0 && b.1 <= z.3 && b.3 >= z.1
         };
+        let spawn_box = |s: &Spawn| {
+            let (cx, cy, hw, hh) = spawn_profile(s.kind, s.big);
+            (s.x + cx - hw, s.y + cy - hh, s.x + cx + hw, s.y + cy + hh)
+        };
+        // a column of stacked parts spawns together, when any of its members is due [inf: the
+        // game queues one tower record covering the whole column]
+        let due = |i: usize| {
+            let r = &self.spawns[i];
+            !r.spawned && !r.alive && !r.killed && touches(spawn_box(&r.spawn), za)
+        };
+        let together = self.tower_columns_to_spawn(&due);
+        let mut fresh: Vec<usize> = Vec::new();
         for idx in 0..self.spawns.len() {
             let rec = &self.spawns[idx];
             let s = rec.spawn;
@@ -3620,10 +3622,11 @@ impl World {
                 }
                 continue;
             }
-            if !touches(sb, za) || rec.alive || rec.killed {
+            if !(touches(sb, za) || together.contains(&idx)) || rec.alive || rec.killed {
                 continue;
             }
             self.spawns[idx].spawned = true;
+            fresh.push(idx);
             // a boss riding a Clown Car draws its own car: skip the linked car object
             let boss_car = matches!(s.kind, Kind::ClownCar { .. })
                 && s.link >= 0
@@ -3716,6 +3719,9 @@ impl World {
                 self.add_actor(a);
             }
             self.spawns[idx].alive = true;
+        }
+        if !fresh.is_empty() {
+            self.form_towers(&fresh);
         }
     }
 
@@ -6250,7 +6256,8 @@ impl World {
             if !visible(a.x, a.y) {
                 continue;
             }
-            if let Some(s) = self.actor_sprite(a) {
+            if let Some(mut s) = self.actor_sprite(a) {
+                s.x += a.sway;
                 out.push(s);
             }
         }

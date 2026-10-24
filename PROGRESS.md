@@ -394,12 +394,20 @@ Nextendo; `docs/nextendo-network-play.md`, spec `research/specs/network-play.md`
 - ⬜ Mid-air shell jumps checked against the recomp's test course; SMM1 course card choice
 
 **G8 — Fidelity: pixel, physics, sound** 🔄
-- 🔄 Stacked parts in play (2026-10-24): every member of a column carries 0x1000 (the 550-course
-  sample: 569 stacks, 2–19 tall, each member right on the one below); a rider keeps its place
-  on its base and its facing while the base lives, then is free [inf] · ⬜ the game's tower
-  rules (a middle member knocked out, stomp order), `Tower_stack` and its pitch; in the maker ✅
-  a carried part dropped on one that stacks goes on top of its column (`mmk_editor::stack`,
-  `Combine`) [inf: the gesture; the palette pen on a part still picks it up]
+- 🔄 Stacked parts (2026-10-24, from the game's tower manager; research objects/stacks.md): ✅
+  play — columns chained as the game does (feet in the row above the lower top, x within 0.2 px
+  of the bottom's; Bill Blasters / Cannons as fixed bases; 128 members at most); the base acts
+  on its own, riders are carried by 0.9 of the lower one's movement, pulled back (±0.009, decay
+  0.005: the column leans), fall onto the lower top (−0.1875, cap 4) and take the base's facing
+  4 frames a member up; a lost member's riders fall onto the one below, a flier above it breaks
+  away; a rider off the lower body (sideways past it − 5, 64 px up / down) or on the ground
+  starts its own column; most riders idle, Piranhas / Bros / Magikoopas … keep acting; drawn
+  sway · ⬜ water gravities for riders, the full leave predicate, what each own tower action
+  does; in the maker ✅ a carried part dropped on one that stacks goes on top of its column
+  (`mmk_editor::stack`) [inf: the gesture] and sounds `Tower_stack` pitched by its row
+  (`MusicalScale` = row mod 28, through `Host::edit_sound`; `Combine` / `p_CancelUnion` turned
+  out to belong to the parts' 0xC0000 bits, not stacks) · ⬜ the editor's height limit (play
+  takes 128 members at most), pulling a member off a column
 - 🔄 Physics: re-recording every trace (2026-10-24; the old 428 / 454 was not a true count — the
   old items / form traces were all small Mario). Re-recorded, current engine: **480 / 480 exact**
   over 42 courses: M1/M3/MW/WU/3W flat 34 each, M1/M3/MW/WU/3W items 34 each, M1/M3/MW/WU/3W

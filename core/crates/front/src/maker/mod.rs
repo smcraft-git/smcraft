@@ -91,6 +91,15 @@ const REPEAT: i32 = 4;
 /// Ticks after a clear / death before test play returns to the maker.
 const CLEAR_TICKS: i32 = 200;
 
+/// An edit sound: the part whose sound user plays it, the key, and its `MusicalScale`.
+type PutSound = (i16, &'static str, Option<f32>);
+
+/// `Tower_stack`'s `MusicalScale`: the stacked part's tile row mod 28 (the sound's pitch curve
+/// rises a semitone a row, 0.5 → 4.0 over 36) [obs 0x7100eb0080].
+fn tower_scale(row: i32) -> f32 {
+    row.max(0).rem_euclid(28) as f32
+}
+
 /// Input for one maker tick.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct MakerInput {
@@ -274,8 +283,9 @@ pub struct MakerFlow {
     /// The host draws the course.
     pub shown: bool,
     test: Option<Test>,
-    /// Edit sounds to play this tick: (course object id, key) (research/specs/maker.md C9).
-    pub sounds: Vec<(i16, &'static str)>,
+    /// Edit sounds to play this tick: (course object id, key, `MusicalScale`)
+    /// (research/specs/maker.md C9).
+    pub sounds: Vec<(i16, &'static str, Option<f32>)>,
     /// The tile the cursor was on when a carry last sounded `move`.
     move_cur: (i32, i32),
     /// The music last asked of the host (None: nothing asked yet, so ask).
@@ -1219,7 +1229,12 @@ impl MakerFlow {
 
     /// Part `part` makes edit sound `key` this tick.
     fn sound(&mut self, part: i16, key: &'static str) {
-        self.sounds.push((part, key));
+        self.sounds.push((part, key, None));
+    }
+
+    /// The sound of a part `put_into` changed: its part, key and pitch.
+    fn put_sound(&mut self, (part, key, scale): PutSound) {
+        self.sounds.push((part, key, scale));
     }
 
     /// The tick's edit sounds, and the music the maker wants: its track of the style and the
@@ -1227,9 +1242,9 @@ impl MakerFlow {
     /// (research/specs/maker.md C9).
     fn play_sounds(&mut self, host: &mut dyn Host) {
         let style = self.style();
-        for (part, key) in std::mem::take(&mut self.sounds) {
+        for (part, key, scale) in std::mem::take(&mut self.sounds) {
             let user = format!("{style}_Edit{}", catalog::edit_user(part));
-            host.edit_sound(&style, &user, key);
+            host.edit_sound(&style, &user, key, scale);
         }
         let want = (self.mode != Mode::Test).then(|| (style, self.editor.theme().0));
         if self.music_sent.as_ref() != Some(&want) {
@@ -1311,11 +1326,10 @@ impl MakerFlow {
                 return;
             }
             if let Tool::Part(p) = self.tool()
-                && let Some(key) = self.put_into(i, p, DEFAULT_FLAGS, false)
+                && let Some(snd) = self.put_into(i, p, DEFAULT_FLAGS, false)
             {
                 self.changed();
-                let into = self.editor.object(i).map_or(7, |o| o.id);
-                self.sound(into, key);
+                self.put_sound(snd);
                 self.drag = Some(Drag::Place {
                     last: self.cur,
                     changed: true,
@@ -1495,12 +1509,11 @@ impl MakerFlow {
             .filter(|&t| t != index)
             // it goes in as it is: its wings, parachute, form and size (the contents
             // balloon draws a child's wings and parachute, maker spec C10)
-            && let Some(key) = self.put_into(t, o.id, DEFAULT_FLAGS | (o.flags & CHILD_KEEPS), true)
+            && let Some(snd) = self.put_into(t, o.id, DEFAULT_FLAGS | (o.flags & CHILD_KEEPS), true)
         {
-            let into = self.editor.object(t).map_or(7, |x| x.id);
             self.editor.erase_object(index);
             self.changed();
-            self.sound(into, key);
+            self.put_sound(snd);
             return;
         }
         if dx == 0 && dy == 0 && held < attr::HOLD {
@@ -1533,37 +1546,44 @@ impl MakerFlow {
     /// Part `part` goes into (or onto) the placed part `i`: a container's contents (blocks,
     /// Bill Blasters, Lakitu, trees, checkpoints, a pipe's), or a Super Mushroom makes it big
     /// [inf: as dropping an item on a part does in the game]; with `stack` (a carried part
-    /// dropped on it) parts that stack make a column. The edit sound key if something changed
-    /// (`Block_in`, `Dokan_in` …, `scaleChange`, `Combine`).
-    fn put_into(
-        &mut self,
-        i: usize,
-        part: i16,
-        child_flags: u32,
-        stack: bool,
-    ) -> Option<&'static str> {
+    /// dropped on it) parts that stack make a column. The sound if something changed: the
+    /// container's `Block_in`, `Dokan_in` …, `scaleChange`, or the stacked part's `Tower_stack`
+    /// pitched by its tile row.
+    fn put_into(&mut self, i: usize, part: i16, child_flags: u32, stack: bool) -> Option<PutSound> {
         let o = self.editor.object(i).cloned()?;
         let key = catalog::put_in_key(o.id, part);
+        let into = |k: &'static str| (o.id, k, None);
         if o.id == 9 {
-            return self.editor.put_in_pipe(i, part).is_ok().then_some(key);
+            return self
+                .editor
+                .put_in_pipe(i, part)
+                .is_ok()
+                .then_some(into(key));
         }
         if o.child_id != part && mmk_editor::rules::check_child(o.id, part).is_ok() {
             return self
                 .editor
                 .try_set_child(i, part, child_flags)
                 .is_ok()
-                .then_some(key);
+                .then_some(into(key));
         }
         if part == 20 && mmk_editor::parts::caps(o.id).big && !o.is_big() {
-            return self.editor.toggle_big(i).is_ok().then_some("scaleChange");
-        }
-        // parts that stack: it goes on top of the column (`Combine`, maker spec C11)
-        if stack && mmk_editor::parts::caps(o.id).stack && mmk_editor::parts::caps(part).stack {
             return self
                 .editor
-                .stack_onto(i, part, child_flags)
+                .toggle_big(i)
                 .is_ok()
-                .then_some("Combine");
+                .then_some(into("scaleChange"));
+        }
+        // parts that stack: it goes on top of the column, sounding `Tower_stack` with
+        // `MusicalScale` = its tile row mod 28 (0x7100eb0080) [obs]; `Combine` belongs to the
+        // parts' 0xC0000 bits, not to stacking (objects/stacks.md §6)
+        if stack && mmk_editor::parts::caps(o.id).stack && mmk_editor::parts::caps(part).stack {
+            let new = self.editor.stack_onto(i, part, child_flags).ok()?;
+            let row = self
+                .editor
+                .object(new)
+                .map_or(0, |n| mmk_editor::parts::footprint(n).y);
+            return Some((part, "Tower_stack", Some(tower_scale(row))));
         }
         None
     }

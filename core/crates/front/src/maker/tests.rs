@@ -1036,10 +1036,20 @@ fn a_goomba_dropped_on_a_goomba_stacks_on_it() {
     for i in column {
         assert_ne!(m.editor.object(i).unwrap().flags & 0x1000, 0);
     }
+    // the stacked Goomba sounds `Tower_stack`, pitched by its tile row (2)
     assert!(
         host.edit_sounds
             .iter()
-            .any(|(u, k)| u == "M1_EditKuribo" && k == "Combine")
+            .any(|(u, k)| u == "M1_EditKuribo" && k == "Tower_stack")
+    );
+    assert_eq!(host.edit_scales, [("Tower_stack".to_string(), 2.0)]);
+}
+
+#[test]
+fn tower_stack_pitch_wraps_every_28_rows() {
+    assert_eq!(
+        [0, 2, 27, 28, 30, -1].map(super::tower_scale),
+        [0.0, 2.0, 27.0, 0.0, 2.0, 0.0]
     );
 }
 
