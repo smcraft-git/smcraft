@@ -13,6 +13,8 @@ mod boo;
 mod bosses;
 mod bros;
 pub use bros::BroWing;
+mod budget;
+pub use budget::{Hold as BudgetHold, Reserve, ThrowBudget};
 mod ceiling;
 mod chute;
 mod claw;
@@ -878,6 +880,8 @@ pub struct Actor {
     pub spring_reach_body: f32,
     /// Bowser under the water-speed rule: the reaches above are the water ones.
     pub spring_slow: bool,
+    /// A thrower's reservation in the area's projectile budget (actors/budget.rs).
+    pub budget: Reserve,
 }
 
 impl Actor {
@@ -970,6 +974,7 @@ impl Actor {
             spring_reach_big: 0.0,
             spring_reach_body: 0.0,
             spring_slow: false,
+            budget: Reserve::default(),
         }
     }
 
@@ -1350,9 +1355,17 @@ impl Actor {
             }
             3 => {
                 self.heading = (self.heading + 0.4).min(10.0);
-                if self.heading >= 10.0 {
-                    self.phase = 4;
-                    self.timer = 47;
+                // up: the throw needs a unit of the area's projectile budget; refused, the
+                // helper tries again in 40 + U[0,30) frames (0x710121e7f0) [obs v3.0.3]
+                if self.pause > 0 {
+                    self.pause -= 1;
+                } else if self.heading >= 10.0 {
+                    if self.budget_request(1) {
+                        self.phase = 4;
+                        self.timer = 47;
+                    } else {
+                        self.pause = 40 + self.rand(30) as i32;
+                    }
                 }
             }
             4 => {
@@ -3536,6 +3549,11 @@ impl Actor {
         // throw timer in `timer`; second hammer pending in `chain`
         if self.timer <= 0 {
             self.timer = 75 + self.rand(30) as i32;
+            // the throw needs a unit of the area's projectile budget: refused, the helper only
+            // redraws its timer (0x7101098560 case 2 → case 1) [obs v3.0.3]
+            if !self.budget_request(1) {
+                return None;
+            }
             if self.rand(100) < 70 {
                 self.chain = 10;
             }
@@ -3731,6 +3749,10 @@ impl Actor {
         }
         if self.timer <= 0 {
             self.timer = 40 + self.rand(40) as i32;
+            // (the Bros' throw helper and its budget request, as the Hammer Bro's)
+            if !self.budget_request(1) {
+                return None;
+            }
             return Some(self.make_hammer());
         }
         self.timer -= 1;

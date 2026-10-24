@@ -199,6 +199,10 @@ impl Actor {
     /// car's speed.
     pub(super) fn clown_fire_idle(&mut self) {
         let vx = self.vx;
+        // (the Chase exit 0x710118d070 lets the budget's unit go)
+        if self.clown_fire.is_some() {
+            self.budget_release();
+        }
         if let Some(cf) = self.clown_fire.as_mut() {
             cf.record(vx);
             cf.fired = false;
@@ -238,20 +242,23 @@ impl Actor {
             self.clown_fire_arm();
         }
         let (vx, vy, dir) = (self.vx, self.vy, self.dir);
-        // the helper's update (0x7101191a20): the cooldown runs, then the charge; on the frame
-        // after a full charge the shot leaves and the cooldown is redrawn. (The area's object
-        // budget, 0x7100de9960, may hold the charge back; not modelled.)
-        let fire = self.clown_fire.as_mut().is_some_and(|cf| {
+        // the helper's update (0x7101191a20): the cooldown runs, then the charge — each frame
+        // of it once the area's projectile budget grants a unit (0x7100de9960), held until the
+        // Chase exit (0x710118d070) [obs v3.0.3]; on the frame after a full charge the shot
+        // leaves and the cooldown is redrawn
+        let ready = self.clown_fire.as_mut().is_some_and(|cf| {
             cf.record(vx);
             cf.timer = (cf.timer - 1).max(0);
             cf.fired = false;
-            if cf.timer >= 1 {
-                return false;
-            }
-            let before = cf.charge;
-            cf.charge = (cf.charge + 1).min(CHARGE);
-            before >= CHARGE
+            cf.timer < 1
         });
+        let fire = ready
+            && self.budget_request(1)
+            && self.clown_fire.as_mut().is_some_and(|cf| {
+                let before = cf.charge;
+                cf.charge = (cf.charge + 1).min(CHARGE);
+                before >= CHARGE
+            });
         let draw = if fire {
             COOLDOWN + self.rand(COOLDOWN as u32) as i32
         } else {

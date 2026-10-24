@@ -174,8 +174,19 @@ impl Actor {
                         _ => w.frames >= JUMP_ED,
                     };
                     if ready {
-                        w.phase = 3;
-                        w.frames = 0;
+                        // the throw needs a unit of the area's projectile budget (0x7101096310);
+                        // refused, slot 0x170: Bros1st waits its 20 frames (0x7101091b90), BrosU
+                        // goes on to the jump decision or the next hop (0x7101095510) [obs v3.0.3]
+                        if self.budget_request(1) {
+                            w.phase = 3;
+                            w.frames = 0;
+                        } else if style == Style::First {
+                            w.phase = 4;
+                            w.frames = FIRST_AFTER;
+                        } else if !self.bro_wing_jump(level, &mut w) {
+                            w.phase = 0;
+                            w.frames = 0;
+                        }
                     }
                 }
                 3 => {
@@ -307,8 +318,9 @@ impl Actor {
         let Some(down) = self.bro_jump_kind(level) else {
             return false;
         };
-        // (the exit 0x7101096c50 clears the wall stop)
+        // (the exit 0x7101096c50 clears the wall stop and lets the budget's unit go)
         w.stuck = false;
+        self.budget_release();
         self.hops = if down { 3 } else { 2 };
         self.vy = if down { 2.5 } else { 6.5 };
         self.vx = 0.0;
