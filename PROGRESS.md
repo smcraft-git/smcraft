@@ -342,7 +342,8 @@ Nextendo; `docs/nextendo-network-play.md`, spec `research/specs/network-play.md`
   (`fire`) ✅; a container's child key is found by name (the 2D styles' pink coins) [inf]; knock-outs
   by what did it (`r_damage_star` / `_shell` / `_tail` / `_quake`, else `r_damage`; the sim records
   the cause), spin-jump stomps (`r_damage_spin`), stomps from Yoshi (`r_damage_ystamp`), a sliding
-  shell's knock-outs climbing its combo (`DownComboCount` along the shell's chain) ✅
+  shell's knock-outs climbing its combo (`DownComboCount` along the shell's chain), enemies and
+  items splashing into and out of the area's liquid (`r_splash_in` / `_out` by `BgWaterType`) ✅
 
 **G9 — Every platform** 🔄
 - 🔄 macOS (Swift app) · 🔄 iOS / iPadOS (built for the Simulator; the owner's iPad) · 🔄 Windows ·

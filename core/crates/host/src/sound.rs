@@ -1527,6 +1527,28 @@ impl Sounds {
                 }
             }
         }
+        // enemies and items crossing the area liquid's surface on screen: their splash in / out
+        if let Some(surface) = world.liquid.as_ref().map(|l| l.y) {
+            let (cx, cy) = (world.camera_x, world.camera_y);
+            let water = PropList::default().with("BgWaterType", liquid_type(world));
+            for (id, s) in &now {
+                let Some(prev) = self.actors.get(id) else {
+                    continue;
+                };
+                let in_view = s.x > cx && s.x < cx + VIEW_W && s.y > cy - 16.0 && s.y < cy + VIEW_H;
+                if !in_view || s.mode == Mode::Dead {
+                    continue;
+                }
+                let key = if prev.y >= surface && s.y < surface {
+                    "r_splash_in"
+                } else if prev.y < surface && s.y >= surface {
+                    "r_splash_out"
+                } else {
+                    continue;
+                };
+                todo.push((s.kind, key, water.clone(), s.x, surface));
+            }
+        }
         // a spin jump makes the enemy it lands on vanish at once: its spin defeat sound
         let spin_stomp = world.player.spinning && world.events.contains(&Event::Stomp);
         if spin_stomp {
