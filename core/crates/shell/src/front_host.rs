@@ -966,8 +966,8 @@ impl Host for ShellHost<'_> {
         front_course::decode(&bytes, || source::key_table(self.data.src())).map(|(_, d, _)| d)
     }
 
-    fn part_icon(&mut self, style: &str, part: i16, _flags: u32) -> Option<mmk_front::Icon> {
-        self.game.part_icon(style, part)
+    fn part_icon(&mut self, style: &str, part: i16, flags: u32) -> Option<mmk_front::Icon> {
+        self.game.part_icon(style, part, flags)
     }
 
     fn set_engine_option(&mut self, name: &str, value: i32) -> bool {

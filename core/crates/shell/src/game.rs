@@ -171,9 +171,10 @@ impl Game {
         }
     }
 
-    /// A picture of part `part` as the engine draws it in `style` (`mmk_host::icon`).
-    pub fn part_icon(&mut self, style: &str, part: i16) -> Option<mmk_front::Icon> {
-        mmk_host::icon::part_icon(&self.cache, style, part).map(|i| mmk_front::Icon {
+    /// A picture of part `part` placed with `flags` as the engine draws it in `style`
+    /// (`mmk_host::icon`).
+    pub fn part_icon(&mut self, style: &str, part: i16, flags: u32) -> Option<mmk_front::Icon> {
+        mmk_host::icon::part_icon(&self.cache, style, part, flags).map(|i| mmk_front::Icon {
             width: i.width,
             height: i.height,
             rgba: i.rgba,

@@ -15,10 +15,12 @@ pub struct Icon {
     pub rgba: Vec<u8>,
 }
 
-/// A picture of part `part` as the engine draws it in `style` (the Course Maker's palette
-/// icons): the part alone in a small course, its sprites copied out of the textures (RGBA,
-/// 3 px per world px, trimmed). None for parts without 2D art or that can't be placed.
-pub fn part_icon(cache: &Cache, style: &str, part: i16) -> Option<Icon> {
+/// A picture of part `part` placed with `flags` (0 or the default flags: as placed; else e.g.
+/// wings 0x2, a parachute 0x8000, the other form 0x4, big 0x4000) as the engine draws it in
+/// `style` (the Course Maker's palette icons and attribute balloon): the part alone in a small
+/// course, its sprites copied out of the textures (RGBA, 3 px per world px, trimmed). None for
+/// parts without 2D art or that can't be placed.
+pub fn part_icon(cache: &Cache, style: &str, part: i16, flags: u32) -> Option<Icon> {
     let mut e = mmk_editor::Editor::new(style);
     let (tx, ty) = (20, 6);
     let placed = match part {
@@ -34,6 +36,17 @@ pub fn part_icon(cache: &Cache, style: &str, part: i16) -> Option<Icon> {
     };
     if !placed {
         return None;
+    }
+    if flags != 0
+        && flags != mmk_editor::DEFAULT_FLAGS
+        && let Some(i) = e.object_at(tx, ty)
+    {
+        if flags & 0x6000 == 0x4000 && !e.object(i).is_some_and(|o| o.is_big()) {
+            e.toggle_big(i).ok()?;
+        }
+        let i = e.object_at(tx, ty)?;
+        let size = e.object(i)?.flags & 0x6000;
+        e.set_flags(i, (flags & !0x6000) | size);
     }
     let r = match e.object_at(tx, ty).and_then(|i| e.object(i)) {
         Some(o) => mmk_editor::parts::footprint(o),
@@ -78,9 +91,9 @@ pub fn part_icon(cache: &Cache, style: &str, part: i16) -> Option<Icon> {
         .into_iter()
         .filter(|s| !scenery.contains(&key(s)))
         .collect();
-    // the part's rectangle (world px), a little margin for what sticks out (wings, the
-    // Koopa's head)
-    let m = 4.0;
+    // the part's rectangle (world px), a little margin for what sticks out (the Koopa's head;
+    // wings at its sides and a parachute above take more)
+    let m = if flags & 0x8002 != 0 { 20.0 } else { 4.0 };
     let (x0, y0) = (r.x as f32 * 16.0 - m, r.y as f32 * 16.0 - m);
     let (x1, y1) = ((r.x + r.w) as f32 * 16.0 + m, (r.y + r.h) as f32 * 16.0 + m);
     let scale = 3.0;

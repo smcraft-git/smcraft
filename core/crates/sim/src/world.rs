@@ -6072,6 +6072,9 @@ impl World {
             }
         }
         for a in &self.actors {
+            if a.wings && !matches!(a.mode, Mode::DieFall) && visible(a.x, a.y) {
+                out.extend(Self::wing_sprites(a));
+            }
             if matches!(a.mode, Mode::Parachute { .. }) && visible(a.x, a.y) {
                 out.push(Self::model_sprite(
                     "M1_Enemy_parachutecommon",
@@ -6308,6 +6311,47 @@ impl World {
             false,
             0,
         ));
+    }
+
+    /// A winged part's two wings: `Enemy_wingcommon`'s left wing (`wait.0` up, `wait.1` down;
+    /// its 16 × 16 texture has the wing in the left half, the quad sits at (0, −4)–(16, 12)
+    /// from the bone) at the left of the part's head, and the same mirrored at the right,
+    /// behind the part [obs data: the model's quad and textures; where the bones sit on each
+    /// part is inf]. They flap while the part moves (still in the maker's view).
+    fn wing_sprites(a: &Actor) -> [Sprite; 2] {
+        let s = if a.big { 2.0 } else { 1.0 };
+        let tex = if (a.age / 8).is_multiple_of(2) {
+            "wait.0"
+        } else {
+            "wait.1"
+        };
+        let (half, top) = (a.half_w(), a.y + a.height());
+        // the sprite's box is centred on the bone; the wing reaches 7 px from it
+        let (w, y) = (16.0 * s, top - 8.0 * s);
+        let left_bone = a.x - half - 6.0 * s;
+        let right_bone = a.x + half + 6.0 * s;
+        [
+            Self::model_sprite(
+                "M1_Enemy_wingcommon",
+                tex,
+                left_bone - w / 2.0,
+                y,
+                w,
+                w,
+                false,
+                39,
+            ),
+            Self::model_sprite(
+                "M1_Enemy_wingcommon",
+                tex,
+                right_bone - w / 2.0,
+                y,
+                w,
+                w,
+                true,
+                39,
+            ),
+        ]
     }
 
     #[allow(clippy::too_many_arguments)]

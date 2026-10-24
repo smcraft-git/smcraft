@@ -30,6 +30,7 @@
 //! description (owner's rule). The course being made is kept as a draft
 //! ([`Host::store_value`] "maker.draft") so the maker reopens on it.
 
+pub mod attr;
 pub mod catalog;
 pub mod mission;
 pub mod view;
@@ -133,6 +134,8 @@ pub enum MakerStart {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Mode {
     Edit,
+    /// A part's attribute balloon (wings, parachute, big, forms).
+    Attr,
     Ring,
     Menu,
     Save,
@@ -154,10 +157,13 @@ enum Drag {
     Erase {
         changed: bool,
     },
-    /// Carrying a part picked up at `from` (its index, grab tile).
+    /// Carrying a part picked up at `from` (its index, grab tile); `held` counts the ticks it
+    /// has been held without moving (−1 once it moved): long enough opens its attribute
+    /// balloon.
     Carry {
         index: usize,
         from: (i32, i32),
+        held: i32,
     },
     /// Dragging the scroll bar's handle.
     Slider,
@@ -263,8 +269,11 @@ pub struct MakerFlow {
     music_sent: Option<Option<(String, u8)>>,
     /// The maker's Mario: where test play starts (None: the course start); area.
     pub mario: Option<(usize, [f32; 2])>,
-    /// Part pictures by (style, part): the UI cache texture name, None when the host had none.
-    icons: std::collections::HashMap<(String, i16), Option<String>>,
+    /// Part pictures by (style, part, flags): the UI cache texture name, None when the host had
+    /// none.
+    icons: std::collections::HashMap<(String, i16, u32), Option<String>>,
+    /// The attribute balloon while open.
+    attr: Option<attr::Balloon>,
     /// The `EditModel` textures found in the import (name → UI texture id).
     textures: std::collections::HashMap<&'static str, u32>,
     /// Changes since the last save.
@@ -343,6 +352,7 @@ impl MakerFlow {
             music_sent: None,
             mario: None,
             icons: Default::default(),
+            attr: None,
             textures: view::TEXTURES
                 .iter()
                 .filter_map(|&n| {
@@ -600,6 +610,10 @@ impl MakerFlow {
                 self.ring_tick(pressed, keys_pressed, click, cx);
                 None
             }
+            Mode::Attr => {
+                self.attr_tick(input, pressed, cx);
+                None
+            }
             Mode::Menu => self.menu_tick(pressed, start_pressed, click, cx),
             Mode::Save => self.save_tick(pressed, click, cx),
             Mode::Window(w) => {
@@ -850,9 +864,26 @@ impl MakerFlow {
                     self.end_drag();
                 }
             }
-            Some(Drag::Carry { index, from }) => {
+            Some(Drag::Carry { index, from, held }) => {
                 if !place_held {
-                    self.drop_carried(cx, index, from);
+                    self.drop_carried(cx, index, from, held);
+                } else if held >= 0 && self.cur == from {
+                    // held still on the part: its attribute balloon opens
+                    let held = held + 1;
+                    self.drag = Some(Drag::Carry { index, from, held });
+                    if held >= attr::HOLD && !self.open_attr(index) {
+                        self.drag = Some(Drag::Carry {
+                            index,
+                            from,
+                            held: -1,
+                        });
+                    }
+                } else if held >= 0 {
+                    self.drag = Some(Drag::Carry {
+                        index,
+                        from,
+                        held: -1,
+                    });
                 }
             }
             Some(Drag::Slider) => {}
@@ -1137,6 +1168,7 @@ impl MakerFlow {
             self.drag = Some(Drag::Carry {
                 index: i,
                 from: (tx, ty),
+                held: 0,
             });
             let id = self.editor.object(i).map_or(7, |o| o.id);
             self.sound(id, "drag");
@@ -1220,7 +1252,7 @@ impl MakerFlow {
 
     /// Drop a carried part at the cursor: the same part, moved by the cursor's travel; where it
     /// can't go, it stays.
-    fn drop_carried(&mut self, cx: &mut crate::Cx, index: usize, from: (i32, i32)) {
+    fn drop_carried(&mut self, cx: &mut crate::Cx, index: usize, from: (i32, i32), held: i32) {
         self.drag = None;
         let (dx, dy) = (self.cur.0 - from.0, self.cur.1 - from.1);
         let Some(o) = self.editor.object(index).cloned() else {
@@ -1240,7 +1272,7 @@ impl MakerFlow {
             self.sound(into, key);
             return;
         }
-        if dx == 0 && dy == 0 {
+        if dx == 0 && dy == 0 && held < attr::HOLD {
             // a press without a move: the part's alternate form, as a tap on a part does
             // [inf]
             let before = o.flags;
@@ -1565,8 +1597,13 @@ impl MakerFlow {
     /// The UI-cache texture name of the part's picture ([`MakerFlow::load_icons`] asks the
     /// host for it).
     fn icon_key(&self, style: &str, part: i16) -> Option<String> {
+        self.icon_key_flags(style, part, DEFAULT_FLAGS)
+    }
+
+    /// The picture of `part` placed with `flags` (wings, a parachute, its other form …).
+    fn icon_key_flags(&self, style: &str, part: i16, flags: u32) -> Option<String> {
         self.icons
-            .get(&(style.to_string(), part))
+            .get(&(style.to_string(), part, flags))
             .cloned()
             .flatten()
     }
@@ -2733,6 +2770,15 @@ impl MakerFlow {
         if let Some(p) = &mut self.page {
             push_layout(out, p, tick);
         }
+        if self.mode == Mode::Attr
+            && let Some(b) = &mut self.attr
+            && let Some(l) = &mut b.layout
+        {
+            push_layout(out, l, tick);
+            let pane = format!("{}/B_Btn_00", attr::button(b.sel));
+            self.cursor.place(l, &pane, tick, 1.0);
+            self.cursor.draw(tick, out);
+        }
         if self.mode == Mode::Menu
             && let Some(m) = &mut self.menu
         {
@@ -2758,7 +2804,8 @@ impl MakerFlow {
     }
 
     /// Captures: the scripted input of this tick added to the real one. Items `tick:what`,
-    /// what = a menu button (confirm, back, up, down, left, right, held for that tick), start,
+    /// what = a menu button (confirm, back, up, down, left, right, pressed and held for that
+    /// tick; with a `~` only held, as a press that goes on), start,
     /// play (the test-play key), a maker key (undo, redo, parts, next, prev, here, eraser,
     /// area), `cursor=x;y` (put the cursor on a tile) or `slot=n`.
     fn scripted(&mut self, input: &MakerInput) -> MakerInput {
@@ -2772,6 +2819,11 @@ impl MakerFlow {
         for what in due {
             if let Some(b) = Buttons::from_name(&what) {
                 i.ui.pressed = i.ui.pressed | b;
+                i.ui.held = i.ui.held | b;
+                continue;
+            }
+            // `confirm~`: held on from an earlier tick (a press that lasts)
+            if let Some(b) = what.strip_suffix('~').and_then(Buttons::from_name) {
                 i.ui.held = i.ui.held | b;
                 continue;
             }
@@ -2879,20 +2931,34 @@ impl MakerFlow {
     /// Hand the host-made part pictures to the UI cache (call before a tick's layout).
     pub fn load_icons(&mut self, host: &mut dyn Host) {
         let style = self.style();
-        let mut wanted: Vec<i16> = self.palette.iter().map(|t| t.part()).collect();
+        let mut wanted: Vec<(i16, u32)> = self
+            .palette
+            .iter()
+            .map(|t| (t.part(), DEFAULT_FLAGS))
+            .collect();
         if self.mode == Mode::Ring {
             for pg in self.ring_pages(self.ring.category) {
-                wanted.extend(pg.iter().map(|e| e.tool.part()));
+                wanted.extend(pg.iter().map(|e| (e.tool.part(), DEFAULT_FLAGS)));
             }
         }
+        // the balloon's pictures: the part as each choice would make it
+        if let Some(b) = &self.attr
+            && let Some(o) = self.editor.object(b.index)
+        {
+            wanted.extend((0..b.options.len()).map(|k| (b.part, b.flags_after(k, o.flags))));
+        }
         let mut any = false;
-        for part in wanted {
-            let k = (style.clone(), part);
+        for (part, flags) in wanted {
+            let k = (style.clone(), part, flags);
             if self.icons.contains_key(&k) {
                 continue;
             }
-            let name = host.part_icon(&style, part, DEFAULT_FLAGS).map(|icon| {
-                let name = format!("{style}_{part}");
+            let name = host.part_icon(&style, part, flags).map(|icon| {
+                let name = if flags == DEFAULT_FLAGS {
+                    format!("{style}_{part}")
+                } else {
+                    format!("{style}_{part}_{flags:x}")
+                };
                 let icon = fit_icon(&icon);
                 let tex = mmk_assets::Mtex {
                     format: mmk_assets::MtexFormat::Rgba8,
@@ -2912,6 +2978,9 @@ impl MakerFlow {
             self.update_page();
             if self.mode == Mode::Ring {
                 self.layout_ring(false);
+            }
+            if self.mode == Mode::Attr {
+                self.layout_attr(false);
             }
         }
     }
