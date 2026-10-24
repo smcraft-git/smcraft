@@ -41,9 +41,12 @@ sway, importer and pack 12, the dev cache already at v12).
      selection (hold a selected part: wings / parachute go to every part that takes them, one
      undo step); a part put into a block keeps its wings / parachute / form / size as the
      contents' flags ✅; the play side ✅ (any part out of a block, dressed: `Contents::Part`,
-     2026-10-24); left: NSMBU / 3D World wing art, the contents balloon (`Edit_BalloonPartsIn_00`, state `cDispInParts`: not
-     built at all); tracks and links.
-  3. Co-op: a players screen in SMM2's layouts.
+     2026-10-24); left: NSMBU / 3D World wing art, the contents balloon (`Edit_BalloonPartsIn_00`, page state 6 `cDispInParts`,
+     request bit 0x800 — maker.md; what opens it: one Ryujinx look, with the trash can and Water
+     Level mode); tracks and links.
+  3. ✅ Co-op players screen: none to build — SMM2 opens the system's controller applet
+     (`nn::hid::ShowControllerSupport`, states `cRunControllerApplet` → `cPlayTogether`); SMCraft's
+     controller step stands in for it.
   3b. Research queue (binary → spec → code), each an agent's task: stacking's tower rules and
      `Tower_stack` (maker C11); the maker's Water Level mode (`L_WaterLevelBtn_00`, mode banner
      "Water / Poison / Lava Level"; fixed / rising and the speed — not in the text, likely
@@ -181,7 +184,8 @@ sway, importer and pack 12, the dev cache already at v12).
   - ✅ Warps (§7): the first into a pipe / door waits inside up to 180 frames while the others
     play on (and may follow); with nobody else free it goes at once; then everyone is taken
     along, also through a warp within the area; a player sinking into a pipe is drawn behind it
-  - ⬜ Not yet: a players screen in SMM2's layouts (the question is a toast) · ✅ the P-door hold for followers (§7.5, 182 [inf])
+  - ✅ No players screen in SMM2's layouts: the game uses the system's controller applet
+    (`ShowControllerSupport`); ours is the controller step · ✅ the P-door hold for followers (§7.5, 182 [inf])
 
 **G4 — Course Maker for any course** 🔄
 - ✅ Editor core (`mmk-editor`): parts, areas, links, tracks, selection, settings, the game's limits
