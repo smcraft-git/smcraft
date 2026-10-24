@@ -312,7 +312,9 @@ Nextendo; `docs/nextendo-network-play.md`, spec `research/specs/network-play.md`
   dots go round). L / R (Q / E) change the difficulty tabs on both menus. Off on the Mods page: the
   button keeps its name and opens SMM2's Endless alone. The map's "New High Score!" panel after a
   clear past the old best (`N_BreakRecord_00`, InRanking / LoopRanking; capture `endless-record`).
-  Endless still open: the goal time bonus, the server's runs and rankings
+  The goal time bonus is counted once, through the course's own time tally (50 a second, as the
+  spec's bonus) [?: whether SMM2 adds it again on top: 0x71012c7bf0]. Endless still open: the
+  server's runs and rankings
 - ✅ One Mods page in the front end (`front/src/mods.rs`, `mods_page.rs`; every platform:
   `mmk-play` desktop / web, Android, the Swift app's front end): SMM2's settings window
   (`Cmn_OptionWindow_00`) over the title, opened from SMM2's round menu button in the title's

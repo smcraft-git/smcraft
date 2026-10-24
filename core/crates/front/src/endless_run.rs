@@ -8,8 +8,9 @@
 //! The map has 32 dots: an endless run goes round it (the course after n clears is dot n mod 32)
 //! [inf, the original's map position rule §4.4 counts history entries the same way]. The
 //! difficulty bands come from the courses' clear rates, else their difficulty values
-//! (`mmk_modes::endless::pick`). Not here yet: the server's runs and the world ranking, the
-//! goal time bonus (the course screens don't hand the timer on).
+//! (`mmk_modes::endless::pick`). Not here yet: the server's runs and the world ranking. The
+//! goal time bonus: the run takes the course's score gain, which holds the goal's time tally
+//! (50 points a second, the spec's bonus) once [?: whether SMM2 adds it again on top].
 
 use std::collections::HashMap;
 
