@@ -1085,6 +1085,24 @@ fn a_goomba_dropped_on_a_goomba_stacks_on_it() {
 }
 
 #[test]
+fn a_parachuting_goomba_does_not_stack() {
+    let (mut host, mut saves) = (MockHost::default(), Saves::default());
+    let mut m = maker(&mut host, &mut saves, MakerStart::New("M1".into()));
+    let base = m.editor.place(0, 20, 1).unwrap();
+    let para = m.editor.place(0, 24, 1).unwrap();
+    m.editor.set_parachute(para, true).unwrap();
+    m.cur = (24, 1);
+    run(&mut m, &mut host, &mut saves, press(Buttons::CONFIRM));
+    m.cur = (20, 1);
+    run(&mut m, &mut host, &mut saves, held(Buttons::CONFIRM));
+    run(&mut m, &mut host, &mut saves, idle());
+    // the game's drop handler keeps riders and parachutes out of columns (0x7100f5ad90)
+    assert_eq!(m.editor.column_from(base).len(), 1);
+    assert_eq!(m.editor.object(base).unwrap().flags & 0x1000, 0);
+    assert!(m.editor.object_at(24, 1).is_some(), "it stays where it was");
+}
+
+#[test]
 fn tower_stack_pitch_wraps_every_28_rows() {
     assert_eq!(
         [0, 2, 27, 28, 30, -1].map(super::tower_scale),
