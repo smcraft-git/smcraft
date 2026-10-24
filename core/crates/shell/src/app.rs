@@ -350,6 +350,8 @@ impl App {
         if each.iter().any(|&b| b != 0) {
             self.touch.hide();
         }
+        // (the web page's host has one player)
+        #[cfg(not(target_arch = "wasm32"))]
         if let Some(f) = self.front.as_mut() {
             f.data.controllers = 1 + each.len() as u32;
         }
