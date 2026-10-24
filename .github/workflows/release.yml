@@ -119,8 +119,11 @@ jobs:
           name: web
           path: dist/SMCraft-web.zip
 
+  # publishes whatever built: GitHub's macOS runners are sometimes not available at all (the job is
+  # cancelled for capacity); then the macOS package is built on a Mac (scripts/make-app.sh) and
+  # added with `gh release upload`
   publish:
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: always() && startsWith(github.ref, 'refs/tags/v') && needs.windows.result == 'success'
     needs: [windows, linux, macos, android, web]
     runs-on: ubuntu-latest
     steps:
