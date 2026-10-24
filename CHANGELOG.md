@@ -205,6 +205,8 @@ SMCraft is back in development (it was archived in October 2026).
   into them, and if he comes back without clearing it he walks back to where he set off from.
   The map is seen through the game's camera (the whole map with the land round it, the view
   dipping as a course is entered).
+- **Toad House minigames in Play Together**: Mario, Luigi, Toad and Toadette play with their own
+  controllers — anyone stops a strip, everyone pumps the balloon, each jumps for the ball.
 - Super World ledges stand on the game's cliffs: land under them only where the land reaches
   (a ladder out of the sea stands in the water), cloud, bush and water-blob cliffs for the
   second kind of ledge.

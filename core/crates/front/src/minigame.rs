@@ -10,8 +10,10 @@
 //!   the animated panes); three misses lose, else 5 / 3 / 1 lives for 0 / 1 / 2 misses.
 //!
 //! The rules are `mmk_modes::minigame`'s; the timings follow the game's sequences (each step
-//! waits for its animation). Play Together: menus have one merged input here, so the first
-//! player plays [departure: the game reads each controller].
+//! waits for its animation). Play Together: two to four players — Mario, Luigi, Toad, Toadette
+//! (`TypeMember`) — each with their own A [obs v3.0.3 0x710197eb10: a press sets its player's
+//! bit]: any of them stops Match & Win's next strip, each pumps with their own animation, each
+//! jumps for Catch & Win's ball and catches it with their own box.
 
 use mmk_modes::Rng;
 use mmk_modes::minigame::{
@@ -96,6 +98,9 @@ struct CatchGame {
     angle: f32,
     /// Caught: where the ball sits from the catcher's box centre.
     held: Option<[f32; 2]>,
+    /// The player who caught it, and the one the Forkball drops at.
+    catcher: usize,
+    target: usize,
 }
 
 enum Game {
@@ -114,6 +119,8 @@ pub struct MinigameScene {
     /// Tick the current wait started.
     at: i32,
     character: usize,
+    /// Play Together's players (1: the player alone, as `character`).
+    players: usize,
     rng: Rng,
     game: Game,
     /// Lives won (paid when the result shows).
@@ -121,13 +128,20 @@ pub struct MinigameScene {
 }
 
 impl MinigameScene {
-    /// `character`: the player's (0 Mario … 3 Toadette); `seed` for the random parts.
-    pub fn new(ui: &Ui, kind: Kind, character: usize, seed: u64) -> Option<Self> {
+    /// `character`: the player's (0 Mario … 3 Toadette); `players`: Play Together's (2–4: the
+    /// four characters in order, `TypeMember` frame players − 2; else `TypeCharacter`
+    /// [obs v3.0.3 0x710197aee0]); `seed` for the random parts.
+    pub fn new(ui: &Ui, kind: Kind, character: usize, players: usize, seed: u64) -> Option<Self> {
         let name = kind.layout();
         let mut l = ui.layout(name)?;
         let character = character.min(3);
+        let players = players.clamp(1, CHARACTERS.len());
         l.play("In", 0);
-        l.hold("TypeCharacter", character as f32);
+        if players > 1 {
+            l.hold("TypeMember", (players - 2) as f32);
+        } else {
+            l.hold("TypeCharacter", character as f32);
+        }
         let mut rng = Rng::new(seed);
         let game = match kind {
             Kind::Match => Game::Match(MatchGame {
@@ -157,6 +171,8 @@ impl MinigameScene {
                     origin: [0.0, 0.0],
                     angle: 0.0,
                     held: None,
+                    catcher: 0,
+                    target: 0,
                 })
             }
         };
@@ -170,6 +186,7 @@ impl MinigameScene {
             phase: Phase::Appear,
             at: 0,
             character,
+            players,
             rng,
             game,
             prize: None,
@@ -179,8 +196,13 @@ impl MinigameScene {
         Some(s)
     }
 
-    fn chara(&self) -> &'static str {
-        CHARACTERS[self.character]
+    /// Player `p`'s character: the player's own alone, else Mario, Luigi, Toad, Toadette.
+    fn chara_of(&self, p: usize) -> &'static str {
+        if self.players > 1 {
+            CHARACTERS[p.min(CHARACTERS.len() - 1)]
+        } else {
+            CHARACTERS[self.character]
+        }
     }
 
     fn sound(&self, key: &str, context: &[&str]) {
@@ -222,15 +244,27 @@ impl MinigameScene {
         }
     }
 
+    /// A frame with one player's input (A is player 1's).
     pub fn step(&mut self, input: &UiInput, script: &mut Script) -> MinigameStep {
-        self.tick += 1;
         let pressed = input.pressed | script.step();
-        let a = pressed.has(Buttons::CONFIRM);
+        self.step_players(pressed.has(Buttons::CONFIRM) as u8)
+    }
+
+    /// Play Together's players in this game (1 alone).
+    pub fn players(&self) -> usize {
+        self.players
+    }
+
+    /// A frame: bit p of `presses` is player p's A this frame.
+    pub fn step_players(&mut self, presses: u8) -> MinigameStep {
+        self.tick += 1;
+        let presses = presses & ((1u8 << self.players) - 1);
+        let a = presses != 0;
         match self.phase {
             Phase::Appear => self.appear(),
             Phase::Play => match self.kind {
                 Kind::Match => self.match_play(a),
-                Kind::Pop => self.pop_play(a),
+                Kind::Pop => self.pop_play(presses),
                 Kind::Catch => self.catch_play(a),
             },
             Phase::Result => {
@@ -262,9 +296,10 @@ impl MinigameScene {
         }
         if let Game::Catch(_) = self.game
             && matches!(self.phase, Phase::Play | Phase::Result)
-            && a
         {
-            self.jump();
+            for p in (0..self.players).filter(|p| presses & (1 << p) != 0) {
+                self.jump(p);
+            }
         }
         self.place_strips();
         MinigameStep::Running
@@ -367,13 +402,14 @@ impl MinigameScene {
 
     // MARK: Pop & Win
 
-    fn pop_play(&mut self, a: bool) {
-        let Game::Pop(p) = &mut self.game else {
-            return;
-        };
-        if a {
-            p.pumps += 1;
-            let anim = format!("{}Pump", self.chara());
+    /// Every player's A is a pump, with their own animation; the pumps add up [obs
+    /// 0x710197fca0].
+    fn pop_play(&mut self, presses: u8) {
+        for k in (0..self.players).filter(|k| presses & (1 << k) != 0) {
+            if let Game::Pop(p) = &mut self.game {
+                p.pumps += 1;
+            }
+            let anim = format!("{}Pump", self.chara_of(k));
             self.play(&anim);
             self.sound(&format!("Anm_{anim}"), &[]);
         }
@@ -443,11 +479,20 @@ impl MinigameScene {
             "PitchingStart_00"
         };
         self.play(start);
+        // the Forkball's mark: a player at random in Play Together [obs 0x7101981f30: +0x37c,
+        // rand32 × players / 2³² per pitch]
+        let target = if self.players > 1 {
+            ((self.rng.next_u32() as u64 * self.players as u64) >> 32) as usize
+        } else {
+            0
+        };
         if let Game::Catch(c) = &mut self.game {
             c.caught = false;
             c.pos = [0.0, 0.0];
             c.angle = 0.0;
             c.held = None;
+            c.catcher = 0;
+            c.target = target;
         }
         self.set_step(Pitching::Windup);
     }
@@ -503,7 +548,7 @@ impl MinigameScene {
         let Some(off) = c.held else {
             return;
         };
-        let body = format!("B_{}_00", self.chara());
+        let body = format!("B_{}_00", self.chara_of(c.catcher));
         if let Some(b) = self.rect(&body) {
             let at = b.center();
             self.place_ball([at[0] + off[0], at[1] + off[1]]);
@@ -559,7 +604,11 @@ impl MinigameScene {
             Pitching::Flight => self.flight(p),
             Pitching::Landing => {
                 self.hold_ball();
-                let jump = format!("{}Jump", self.chara());
+                let catcher = match &self.game {
+                    Game::Catch(c) => c.catcher,
+                    _ => 0,
+                };
+                let jump = format!("{}Jump", self.chara_of(catcher));
                 if !self.layout.is_playing(&jump) || self.done(&jump) {
                     self.banner(p);
                 }
@@ -598,13 +647,24 @@ impl MinigameScene {
         {
             return self.ball_out(false, None);
         }
-        let body = self.rect(&format!("B_{}_00", self.chara()));
-        if let Some(b) = body
-            && mg::caught(center, &b)
-        {
-            let at = b.center();
-            return self.ball_out(true, Some([center[0] - at[0], center[1] - at[1]]));
+        // each player's box in turn: Mario, Luigi, Toad, Toadette [obs 0x71019851b0]
+        for p in 0..self.players {
+            let body = self.rect(&format!("B_{}_00", self.chara_of(p)));
+            if let Some(b) = body
+                && mg::caught(center, &b)
+            {
+                if let Game::Catch(c) = &mut self.game {
+                    c.catcher = p;
+                }
+                let at = b.center();
+                return self.ball_out(true, Some([center[0] - at[0], center[1] - at[1]]));
+            }
         }
+        let target = match &self.game {
+            Game::Catch(c) => c.target,
+            _ => 0,
+        };
+        let body = self.rect(&format!("B_{}_00", self.chara_of(target)));
         let off = ball.max[0] < -640.0
             || ball.min[0] > 640.0
             || ball.max[1] < -360.0
@@ -669,9 +729,10 @@ impl MinigameScene {
         self.set_step(Pitching::Banner);
     }
 
-    /// A: the character jumps (not again while in the air).
-    fn jump(&mut self) {
-        let anim = format!("{}Jump", self.chara());
+    /// Player `p`'s A: their character jumps (not again while in the air) [obs 0x7101981f30:
+    /// the input bits 0–3, the Jump animations in player order].
+    fn jump(&mut self, p: usize) {
+        let anim = format!("{}Jump", self.chara_of(p));
         if self.layout.is_playing(&anim) && !self.done(&anim) {
             return;
         }
@@ -777,7 +838,7 @@ mod tests {
 
     fn scene(kind: Kind) -> Option<MinigameScene> {
         let ui = crate::testing::smm2()?;
-        MinigameScene::new(&ui, kind, 0, 1)
+        MinigameScene::new(&ui, kind, 0, 1, 1)
     }
 
     fn run(s: &mut MinigameScene, frames: usize, press: impl Fn(i32) -> bool) -> Option<u32> {
@@ -894,6 +955,53 @@ mod tests {
             }
         }
         None
+    }
+
+    #[test]
+    fn play_together_pumps_and_catches_with_every_player() {
+        let Some(ui) = crate::testing::smm2() else {
+            return;
+        };
+        // Pop & Win for three: two players' presses in a frame are two pumps
+        let mut s = MinigameScene::new(&ui, Kind::Pop, 0, 3, 1).unwrap();
+        for _ in 0..300 {
+            s.step_players(0);
+        }
+        assert_eq!(s.phase_name(), "play");
+        s.step_players(0b011);
+        assert_eq!(s.state(), "pumps 2");
+        // player 4 isn't playing: their bit counts for nothing
+        s.step_players(0b1000);
+        assert_eq!(s.state(), "pumps 2");
+        assert_eq!(s.chara_of(1), "Luigi");
+        // Catch & Win for two: only Luigi jumps, and his box catches
+        let mut s = MinigameScene::new(&ui, Kind::Catch, 0, 2, 7).unwrap();
+        let mut last: Option<f32> = None;
+        let mut won = None;
+        for _ in 0..12000 {
+            let mut press = 0u8;
+            if let Game::Catch(c) = &s.game
+                && c.step == Pitching::Flight
+                && s.pitch() != Pitch::Forkball
+            {
+                let ball = s.rect("N_ProgramBall_00").map(|b| b.center()[0]);
+                let body = s.rect("B_Luigi_00").map(|b| b.max[0]);
+                if let (Some(x), Some(right), Some(prev)) = (ball, body, last) {
+                    let v = (prev - x).max(1.0);
+                    if x - right <= v * 5.0 && x > right {
+                        press = 0b10;
+                    }
+                }
+                last = ball;
+            } else {
+                last = None;
+            }
+            if let MinigameStep::Done(n) = s.step_players(press) {
+                won = Some(n);
+                break;
+            }
+        }
+        assert!(won.is_some_and(|n| n > 0), "{won:?} {}", s.state());
     }
 
     #[test]

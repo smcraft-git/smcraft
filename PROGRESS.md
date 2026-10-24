@@ -643,8 +643,12 @@ sway, importer and pack 12, the dev cache already at v12).
   Fastball / Changeup / Knuckleball / Forkball / Heater on the game's flights, A jumps, the
   game's catch test on the boxes, 3 misses lose, else 5 / 3 / 1 for 0 / 1 / 2 misses), with
   their animations and sounds; one go per house until a game over. Rules `mmk_modes::minigame`,
-  scenes `mmk_front::minigame`; captures `superworld-minigame0` / `1` / `2`. Left: Play
-  Together's per-player input (menus have one merged input), the controller rumble cues
+  scenes `mmk_front::minigame`; captures `superworld-minigame0` / `1` / `2`. ✅ Play Together
+  (2026-10-25, branch `swmap3`): Mario, Luigi, Toad, Toadette (`TypeMember`), each with their
+  own A (`Host::player_buttons`: the shell and the FFI hand each player's controls over as
+  co-op does): any player stops a strip, each pumps with their own animation, each jumps and
+  catches with their own box, the Forkball aims at a random player. ⬜ the rumble cues
+  (`MW_Minigame_01_Pump`, `_02_Catch`: the hosts have no rumble yet)
 - ✅ Enemy-icon courses that start on contact, point icons by model (icon order confirmed,
   0x710143f150) · ⬜ map ghosts · ✅ co-op: the card's
   Play Together (left onto it, or a click; L / R change worlds), every controller plays, one

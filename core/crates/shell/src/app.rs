@@ -384,6 +384,16 @@ impl App {
         } else {
             crate::input::assign_pads(&each, players)
         };
+        // Play Together outside a course (the Toad House minigames): each player's buttons,
+        // the keyboard's (its left half when split) with player 1's
+        let together: Vec<u32> = if players > 1 {
+            let kb = if split { left } else { self.keys.buttons() };
+            std::iter::once(kb | p1)
+                .chain(extra.iter().copied())
+                .collect()
+        } else {
+            Vec::new()
+        };
         // (on a split keyboard player 2's part menu is ' : the right half has no Start)
         let pad2 = if coop {
             extra.first().copied().unwrap_or(0)
@@ -404,6 +414,7 @@ impl App {
             self.touch.hide();
         }
         if let Some(f) = self.front.as_mut() {
+            f.data.players = together;
             let n = 1 + self.keyboard_split as u32 + each.len() as u32;
             if f.data.controllers != n {
                 log(&format!(

@@ -729,6 +729,12 @@ impl Host for FfiHost {
         1 + self.pads.len() as u32
     }
 
+    fn player_buttons(&mut self, players: usize) -> Vec<u32> {
+        // as a co-op course takes them: the device's own controls are player 1's
+        let (p1, extra) = mmk_front::coop::assign_pads(&self.pads, players);
+        std::iter::once(self.own | p1).chain(extra).collect()
+    }
+
     fn set_run_counters(&mut self, score: u32, coins: u32, lives: u32) {
         self.engine().world.set_run_counters(score, coins, lives);
     }

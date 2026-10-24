@@ -1636,6 +1636,8 @@ pub struct SuperWorldFlow {
     run: Option<SwRun>,
     /// Players of this run (Play Together: 2–4).
     players: u32,
+    /// Play Together in a minigame: each player's buttons last frame (their A presses).
+    held: Vec<u32>,
     leaving: bool,
     /// The game's map models (loaded once; None: the flat map).
     art: Option<Rc<MapArt>>,
@@ -1689,6 +1691,7 @@ impl SuperWorldFlow {
             picks_call: None,
             run: None,
             players: 1,
+            held: Vec::new(),
             leaving: false,
             music: None,
             art: MapArt::load(ui).map(Rc::new),
@@ -2059,7 +2062,31 @@ impl SuperWorldFlow {
                 }
             }
             Stage::Minigame(_, g) => {
-                if let MinigameStep::Done(n) = g.step(ui, &mut self.script) {
+                // Play Together: each player's own A, when the host tells the controllers apart
+                let each = if g.players() > 1 {
+                    cx.host.player_buttons(g.players())
+                } else {
+                    Vec::new()
+                };
+                let step = if each.is_empty() {
+                    g.step(ui, &mut self.script)
+                } else {
+                    let a = crate::host::buttons::JUMP;
+                    let mut presses = 0u8;
+                    for (p, &b) in each.iter().enumerate() {
+                        let before = self.held.get(p).copied().unwrap_or(b);
+                        if b & a != 0 && before & a == 0 {
+                            presses |= 1 << p;
+                        }
+                    }
+                    self.held = each;
+                    // (captures: the script's presses are player 1's)
+                    if (ui.pressed | self.script.step()).has(Buttons::CONFIRM) && presses == 0 {
+                        presses = 1;
+                    }
+                    g.step_players(presses)
+                };
+                if let MinigameStep::Done(n) = step {
                     let run = self.run.as_mut()?;
                     run.progress.add_lives(n);
                     run.persist(cx);
@@ -2154,7 +2181,11 @@ impl SuperWorldFlow {
             .and_then(|s| s.trim().parse().ok())
             .unwrap_or(0usize);
         let seed = cx.host.random();
-        let Some(g) = MinigameScene::new(&self.ui, kind, character, seed) else {
+        let players = self.players.max(1) as usize;
+        // Play Together: the host hands each player's controls over (`player_buttons`)
+        cx.host.set_players(players as u32);
+        self.held.clear();
+        let Some(g) = MinigameScene::new(&self.ui, kind, character, players, seed) else {
             return;
         };
         let map = match std::mem::replace(&mut self.stage, Stage::None) {
@@ -2575,6 +2606,42 @@ mod tests {
             panic!("on the map")
         };
         assert_eq!((m.hop.phase, m.hop.height), (4, PIPE_TOP));
+    }
+
+    #[test]
+    fn play_together_minigames_take_each_players_presses() {
+        let mut host = MockHost {
+            library: library(7),
+            controllers: 2,
+            ..Default::default()
+        };
+        let Some(mut f) = front(&mut host) else {
+            return;
+        };
+        assert!(f.capture(&mut host, "superworld-map", 0, 0));
+        flow(&mut f).players = 2;
+        f.with_cx(&mut host, |cx, s| {
+            if let Screen::SuperWorld(s) = s {
+                s.start_minigame(cx, mmk_modes::minigame::Kind::Pop);
+            }
+        });
+        assert_eq!(
+            host.players.last(),
+            Some(&2),
+            "the host splits the controllers"
+        );
+        assert_eq!(flow(&mut f).minigame().map(|g| g.players()), Some(2));
+        idle(&mut f, &mut host, 300);
+        // player 2's A, held over frames, is one pump; then both together are two
+        let pumps = |f: &mut Front| flow(f).minigame().unwrap().state();
+        host.player_buttons = vec![0, crate::host::buttons::JUMP];
+        idle(&mut f, &mut host, 3);
+        assert_eq!(pumps(&mut f), "pumps 1");
+        host.player_buttons = vec![0, 0];
+        idle(&mut f, &mut host, 1);
+        host.player_buttons = vec![crate::host::buttons::JUMP; 2];
+        idle(&mut f, &mut host, 1);
+        assert_eq!(pumps(&mut f), "pumps 3");
     }
 
     #[test]

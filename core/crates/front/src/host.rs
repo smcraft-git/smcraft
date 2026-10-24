@@ -452,6 +452,14 @@ pub trait Host {
     fn controllers(&mut self) -> u32 {
         1
     }
+    /// Play Together outside a course (the Toad House minigames): each of the `players`
+    /// players' buttons now (engine bits), player 1 first — the device's own controls with
+    /// player 1's controller, then one controller each, as [`crate::coop::assign_pads`] hands
+    /// them out. Empty when the host can't tell them apart (the menus' input is then player
+    /// 1's).
+    fn player_buttons(&mut self, _players: usize) -> Vec<u32> {
+        Vec::new()
+    }
     /// Start the loaded course from a 100 Mario run's counters.
     fn set_run_counters(&mut self, score: u32, coins: u32, lives: u32);
     /// Local time minus UTC (seconds) at `secs` since 1970, for showing dates.
