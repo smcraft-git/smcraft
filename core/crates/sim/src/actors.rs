@@ -619,8 +619,10 @@ pub enum DieCause {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Actor {
-    /// What knocked it out (DieFall), for its defeat sound.
+    /// What knocked it out (DieFall), for its defeat sound; a shell's knock-outs count up
+    /// along its chain (1, 2, …: the defeat sound's combo).
     pub die_cause: DieCause,
+    pub die_combo: u32,
     pub kind: Kind,
     pub mode: Mode,
     pub x: f32,
@@ -714,6 +716,7 @@ impl Actor {
     pub fn new(kind: Kind, x: f32, y: f32) -> Self {
         Self {
             die_cause: DieCause::Other,
+            die_combo: 0,
             kind,
             mode: Mode::Normal,
             x,

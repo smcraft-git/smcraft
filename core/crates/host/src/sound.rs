@@ -102,6 +102,7 @@ struct Snap {
     big: bool,
     phase: u8,
     cause: DieCause,
+    combo: u32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1504,7 +1505,12 @@ impl Sounds {
                             DieCause::Quake => "r_damage_quake",
                             DieCause::Fire | DieCause::Blast | DieCause::Other => "r_damage",
                         };
-                        todo.push((prev.kind, key, props("Die", prev), s.x, s.y));
+                        let mut p = props("Die", prev);
+                        if s.cause == DieCause::Shell {
+                            // a shell's knock-outs: their place along its chain
+                            p.set("DownComboCount", s.combo.max(1) as i32);
+                        }
+                        todo.push((prev.kind, key, p, s.x, s.y));
                         *downs += 1;
                     } else if s.mode == Mode::ShellSlide
                         && prev.mode == Mode::ShellSlide
@@ -1780,6 +1786,7 @@ fn snapshot(world: &World) -> BTreeMap<u32, Snap> {
                     big: a.big,
                     phase: a.phase,
                     cause: a.die_cause,
+                    combo: a.die_combo,
                 },
             )
         })

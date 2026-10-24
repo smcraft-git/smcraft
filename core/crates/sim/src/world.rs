@@ -2727,12 +2727,15 @@ impl World {
                     (true, true) => {
                         let (ax, bx) = (a.x, b.x);
                         a.die_by(bx, DieCause::Shell);
-                        b.die_fall(ax);
+                        b.die_by(ax, DieCause::Shell);
+                        a.die_combo = 1;
+                        b.die_combo = 1;
                     }
                     (true, false) | (false, true) => {
                         let (s, v) = if a_slide { (a, b) } else { (b, a) };
                         let sx = s.x;
                         v.die_by(sx, DieCause::Shell);
+                        v.die_combo = s.chain + 1;
                         scores.push((Self::chain_score(s.chain), v.x, v.y + 24.0));
                         s.chain += 1;
                     }
@@ -7592,6 +7595,41 @@ mod tests {
         assert!(!drop(0.8, false));
         assert!(drop(0.8, true));
         assert!(!drop(3.0, true));
+    }
+
+    #[test]
+    fn a_sliding_shells_knock_outs_count_along_its_chain() {
+        let mut lvl = Level::flat(80);
+        lvl.spawns.push(spawn(Kind::Goomba, 300.0, 32.0));
+        lvl.spawns.push(spawn(Kind::Goomba, 340.0, 32.0));
+        lvl.spawns
+            .push(spawn(Kind::Shell { red: false }, 200.0, 32.0));
+        let mut w = World::with_level(lvl);
+        w.player.x = 100.0;
+        let s = w
+            .actors
+            .iter()
+            .position(|a| matches!(a.kind, Kind::Shell { .. }))
+            .unwrap();
+        w.actors[s].mode = Mode::ShellSlide;
+        w.actors[s].dir = 1;
+        w.actors[s].vx = 3.0;
+        let mut combos = Vec::new();
+        for _ in 0..120 {
+            w.step(Input::default());
+            for a in &w.actors {
+                if a.kind == Kind::Goomba
+                    && a.mode == Mode::DieFall
+                    && !combos.contains(&(a.id, a.die_combo))
+                {
+                    assert_eq!(a.die_cause, DieCause::Shell);
+                    combos.push((a.id, a.die_combo));
+                }
+            }
+        }
+        let mut n: Vec<u32> = combos.iter().map(|c| c.1).collect();
+        n.sort();
+        assert_eq!(n, vec![1, 2]);
     }
 
     #[test]
