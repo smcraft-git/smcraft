@@ -1525,7 +1525,41 @@ pub unsafe extern "C" fn mmk_front_texture_count(front: *const MmkFront, ui: u32
     })
 }
 
-/// Texture `index` of import `ui`; its pixels stay valid while the front end lives.
+/// Changes each time a texture of import `ui` changes its pixels (the run-time glyph sheets,
+/// after `mmk_front_frame`).
+///
+/// # Safety
+/// `front` live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mmk_front_texture_revision(front: *const MmkFront, ui: u32) -> u64 {
+    guard(0, || {
+        unsafe { front.as_ref() }
+            .and_then(|f| f.ui(ui))
+            .map_or(0, |u| u.cache().revision())
+    })
+}
+
+/// The revision at which texture `index` of import `ui` last changed its pixels (0: never):
+/// upload it again when this moves.
+///
+/// # Safety
+/// `front` live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mmk_front_texture_version(
+    front: *const MmkFront,
+    ui: u32,
+    index: usize,
+) -> u64 {
+    guard(0, || {
+        unsafe { front.as_ref() }
+            .and_then(|f| f.ui(ui))
+            .and_then(|u| u.cache().textures.get(index).map(|t| t.version))
+            .unwrap_or(0)
+    })
+}
+
+/// Texture `index` of import `ui`; its pixels stay valid while the front end lives (a glyph
+/// sheet's until its version changes).
 ///
 /// # Safety
 /// `front` live; `out` writable.
@@ -1553,7 +1587,8 @@ pub unsafe extern "C" fn mmk_front_texture(
             let n = &cache.textures[names.len()].name;
             names.push(CString::new(n.replace('\0', " ")).unwrap_or_default());
         }
-        let Some(t) = cache.textures.get(index) else {
+        // (a glyph sheet before its first glyph has no pixels yet)
+        let Some(t) = cache.textures.get(index).filter(|t| t.ready) else {
             return false;
         };
         *out = MmkTextureInfo {

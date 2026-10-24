@@ -383,7 +383,9 @@ final class GameSession: ObservableObject, Identifiable {
                 let which = it.ui
                 guard let l = try? UILayer(device: device, pixelFormat: .bgra8Unorm_srgb,
                                            textureCount: { mmk_front_texture_count(front, which) },
-                                           textureInfo: { i, info in mmk_front_texture(front, which, i, &info) })
+                                           textureInfo: { i, info in mmk_front_texture(front, which, i, &info) },
+                                           textureRevision: { mmk_front_texture_revision(front, which) },
+                                           textureVersion: { i in mmk_front_texture_version(front, which, i) })
                 else { continue }
                 layers[it.ui] = l
                 layer = l

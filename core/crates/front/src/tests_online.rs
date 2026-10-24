@@ -506,3 +506,89 @@ fn tgrcode_listings_bring_names_and_tags() {
     assert_eq!(c.record_holder_name.as_deref(), Some("Bo"));
     assert_eq!(c.tags, [5], "the same tag twice is one tag");
 }
+
+/// Course and maker names in Japanese, Korean and Chinese draw glyphs of their own (rasterised
+/// at run time from the import's scalable fonts), never the replacement glyph.
+#[test]
+fn cjk_names_draw_their_own_glyphs() {
+    let Some(ui) = smm2() else { return };
+    let names = [
+        "スーパーマリオの城",
+        "슈퍼 마리오 월드",
+        "超级马里奥的世界",
+        "超級瑪利歐兄弟",
+    ];
+    let sheet = |ui: &Ui, id: u32| {
+        ui.cache()
+            .textures
+            .get(id as usize)
+            .is_some_and(|t| t.name.starts_with("glyphs/"))
+    };
+    // course names (NX_std), player names (MessageFont), titles (SpecialFont)
+    for name in ["NX_std", "MessageFont", "SpecialFont"] {
+        let font = ui.cache_mut().font(name).unwrap();
+        if font.dynamic.is_none() {
+            // an import from before run-time glyphs (SMM2 UI importer 5)
+            eprintln!("{name}: no scalable fonts in this UI import; skipped");
+            return;
+        }
+        for s in names {
+            for c in s.chars().filter(|&c| c != ' ') {
+                let f = font.for_char(c);
+                assert!(f.draws(c), "{name} {c}");
+                // baked (the English messages have a few kana), else from a glyph sheet
+                assert!(
+                    f.has_char(c) || sheet(&ui, f.glyph(c).texture),
+                    "{name} {c}"
+                );
+            }
+        }
+    }
+    // a course list with those names: a glyph-sheet quad for each character of the visible rows
+    // the sheets lack
+    let mut s = CourseListScene::new(&ui).unwrap();
+    let courses = names
+        .iter()
+        .enumerate()
+        .map(|(k, n)| {
+            WorldCourse::server(&json!({
+                "code": format!("CJK-AAA-AA{k}"), "name": n, "maker": "マリオ",
+                "maker_id": "M1", "plays": 10, "clears": 5, "likes": 1,
+                "uploaded": 1_700_000_000,
+            }))
+            .unwrap()
+        })
+        .collect();
+    s.set_courses(courses, false);
+    let mut sc = Script::default();
+    for _ in 0..30 {
+        s.step(&idle(), &mut sc);
+    }
+    let mut items = Vec::new();
+    s.draw(&mut items);
+    assert!(ui.cache_mut().update_glyphs() || ui.cache().revision() > 0);
+    let quads: Vec<mmk_ui::Quad> = items
+        .into_iter()
+        .flat_map(|i| match i {
+            crate::DrawItem::Layout { quads, .. } => quads,
+            _ => Vec::new(),
+        })
+        .collect();
+    let drawn = quads.iter().filter(|q| sheet(&ui, q.tex0)).count();
+    let course_font = ui.cache_mut().font("NX_std").unwrap();
+    let visible: usize = names
+        .iter()
+        .take(3)
+        .map(|n| n.chars().filter(|&c| !course_font.has_char(c)).count())
+        .sum();
+    assert!(
+        drawn >= visible,
+        "{drawn} glyph quads, {visible} characters"
+    );
+    // and the sheets they use have their pixels
+    let c = ui.cache();
+    for q in quads.iter().filter(|q| sheet(&ui, q.tex0)) {
+        let t = &c.textures[q.tex0 as usize];
+        assert!(t.ready && t.texture.data.len() == 1024 * 1024 * 4);
+    }
+}

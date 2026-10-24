@@ -265,8 +265,14 @@ typedef struct {
 
 MmkUi *mmk_ui_open(const char *dir);   // folder with manifest.json + ui/ (e.g. .../smm1-v208)
 void mmk_ui_free(MmkUi *ui);
-size_t mmk_ui_texture_count(const MmkUi *ui);          // grows as layouts are opened
+// grows as layouts are opened; first puts the glyphs drawn since the last call onto the
+// run-time glyph sheets (call after drawing, before uploading)
+size_t mmk_ui_texture_count(MmkUi *ui);
 bool mmk_ui_texture(MmkUi *ui, size_t index, MmkTextureInfo *out);
+// textures whose pixels change (run-time glyph sheets): the revision moves on each change, and
+// a texture's version is the revision of its last change (0 never); upload it again then
+uint64_t mmk_ui_texture_revision(const MmkUi *ui);
+uint64_t mmk_ui_texture_version(const MmkUi *ui, size_t index);
 
 MmkUiLayout *mmk_ui_layout(MmkUi *ui, const char *name);
 void mmk_ui_layout_free(MmkUiLayout *layout);
@@ -413,6 +419,9 @@ void mmk_front_status(const MmkFront *front, MmkFrontStatus *out);
 // textures of import ui (0 SMM2, 1 SMM1); the list grows as screens open layouts
 size_t mmk_front_texture_count(const MmkFront *front, uint32_t ui);
 bool mmk_front_texture(MmkFront *front, uint32_t ui, size_t index, MmkTextureInfo *out);
+// as mmk_ui_texture_revision / _version (the glyph sheets change after mmk_front_frame)
+uint64_t mmk_front_texture_revision(const MmkFront *front, uint32_t ui);
+uint64_t mmk_front_texture_version(const MmkFront *front, uint32_t ui, size_t index);
 // play a course file with the SMM2 screens (name NULL: the course's own); then status
 // MMK_FRONT_COURSE_DONE when the player leaves it
 bool mmk_front_play_course(MmkFront *front, const char *path, const char *name, bool intro);

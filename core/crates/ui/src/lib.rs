@@ -11,12 +11,13 @@
 pub mod cache;
 pub mod files;
 pub mod font;
+pub mod glyphs;
 pub mod player;
 mod text;
 
 pub use cache::{ARG_PLACEHOLDER, LayoutRes, TexRef, TextureEntry, UiCache, UiError};
 pub use files::{DirFiles, Fetch, MemFiles, UiFiles};
-pub use font::FontRes;
+pub use font::{DynFont, FontRes};
 pub use player::{LayoutPlayer, PaneGlobal, PaneInfo, PaneOverride};
 
 /// `Quad::tex0/tex1` when there is no texture.

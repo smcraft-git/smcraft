@@ -703,3 +703,60 @@ fn shared_message_tables() {
     assert_eq!(c.table_message("GoalTable", "Nope"), None);
     assert_eq!(c.table_message("NoTable", "Goal"), None);
 }
+
+#[test]
+fn characters_the_sheets_lack_are_drawn_at_run_time() {
+    // a font with kana, kanji (simplified and traditional) and hangul: macOS's Arial Unicode
+    // (the test is skipped where it isn't)
+    let Ok(bytes) = std::fs::read("/System/Library/Fonts/Supplemental/Arial Unicode.ttf") else {
+        return;
+    };
+    let mut c = sample_cache();
+    c.use_glyph_fonts(HashMap::from([(
+        "Unicode.ttf".to_string(),
+        ab_glyph::FontVec::try_from_vec(bytes).unwrap(),
+    )]));
+    let font = Font::parse(&sample_font()).unwrap();
+    let face = crate::glyphs::Face {
+        comb: Default::default(),
+        extra: vec![crate::glyphs::Source::new("Unicode.ttf", 1.0, 0)],
+        size: font.width as f32,
+        baseline: font.baseline as f32,
+        cell_h: font.cell_height as u32,
+    };
+    assert!(c.set_font_face("MessageFont", face));
+    let res = c.layout("Sample").unwrap();
+    let mut p = LayoutPlayer::new(res);
+    let sheet = |c: &UiCache, id: u32| {
+        c.textures
+            .get(id as usize)
+            .is_some_and(|t| t.name.starts_with("glyphs/"))
+    };
+    let before = c.textures.len();
+    for s in ["マリオの城", "슈퍼 마리오", "超级马里奥", "超級瑪利歐"] {
+        assert!(p.set_text("T_Label", s));
+        let q = p.draw_list();
+        // no replacement glyph (the baked sheet, texture 0): every character from a glyph sheet
+        assert!(q.iter().all(|q| q.tex0 != 0), "{s}");
+        let drawn = q.iter().filter(|q| sheet(&c, q.tex0)).count();
+        assert_eq!(drawn, s.chars().filter(|&c| c != ' ').count(), "{s}");
+    }
+    // the frame's update puts the pixels on the sheet and keeps an empty one ready
+    let first = c
+        .textures
+        .iter()
+        .position(|t| t.name == "glyphs/0")
+        .unwrap();
+    assert!(!c.textures[first].ready);
+    assert!(c.update_glyphs());
+    let t = &c.textures[first];
+    assert!(t.ready && t.version == c.revision());
+    assert!(t.texture.data.chunks(4).any(|px| px[3] > 128));
+    assert_eq!(c.textures.len(), before + 1, "a spare sheet");
+    assert!(!c.update_glyphs(), "nothing new");
+    // a new character later: the sheet's pixels change (a new version for the renderers)
+    p.set_text("T_Label", "城と森");
+    p.draw_list();
+    assert!(c.update_glyphs());
+    assert_eq!(c.textures[first].version, c.revision());
+}

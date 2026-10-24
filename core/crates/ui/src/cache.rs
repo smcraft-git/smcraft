@@ -14,7 +14,8 @@ use mmk_assets::Mtex;
 use mmk_formats::lyt::{self, Animation, Layout, Pane, PaneKind};
 use serde_json::Value;
 
-use crate::font::FontRes;
+use crate::font::{DynFont, FontRes};
+use crate::glyphs::{self, Face, GlyphAtlas};
 
 #[derive(Debug, thiserror::Error)]
 pub enum UiError {
@@ -39,6 +40,10 @@ pub struct TextureEntry {
     /// False while the pixels are on their way ([`UiCache::take_requests`]): `texture` is then
     /// an empty stand-in of the right size (0 × 0 when not known), not to be drawn.
     pub ready: bool,
+    /// The [`UiCache::revision`] at which a run-time glyph sheet's pixels last changed
+    /// ([`UiCache::update_glyphs`]; 0 for the other textures, whose pixels never change once
+    /// ready): renderers upload the texture again when it moves.
+    pub version: u64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -126,7 +131,7 @@ pub const FALLBACK_FONT: &str = "SpecialFont";
 
 #[derive(Default)]
 pub struct UiCache {
-    files: Option<Box<dyn UiFiles>>,
+    files: Option<Arc<dyn UiFiles>>,
     pub manifest: Value,
     pub textures: Vec<TextureEntry>,
     texture_ids: HashMap<String, u32>,
@@ -140,8 +145,11 @@ pub struct UiCache {
     wanted: Vec<(u32, String)>,
     /// Textures waiting for their pixels (asked for, not provided).
     waiting: usize,
-    /// Bumped each time a texture's pixels arrive.
+    /// Bumped each time a texture's pixels arrive or change.
     revision: u64,
+    /// Glyphs the baked fonts lack, drawn from the import's scalable fonts (SMM2 imports that
+    /// keep them; made with the first font that can use them).
+    atlas: Option<Arc<GlyphAtlas>>,
 }
 
 fn io_error(files: &dyn UiFiles, rel: &str, kind: std::io::ErrorKind) -> UiError {
@@ -231,7 +239,7 @@ impl UiCache {
             }
         }
         Ok(Self {
-            files: Some(files),
+            files: Some(Arc::from(files)),
             manifest,
             message_files,
             ..Default::default()
@@ -347,6 +355,7 @@ impl UiCache {
             name,
             texture,
             ready: true,
+            version: 0,
         });
         out
     }
@@ -369,6 +378,78 @@ impl UiCache {
             name.to_string(),
             Some(Arc::new(FontRes::from_font(name, font, ids))),
         );
+    }
+
+    /// Draw what the fonts lack from these source fonts (file name → font) instead of the
+    /// import's `ui/scalable` files (tests, tools); see [`Self::set_font_face`].
+    pub fn use_glyph_fonts(&mut self, fonts: HashMap<String, ab_glyph::FontVec>) {
+        self.atlas = Some(Arc::new(GlyphAtlas::with_fonts(fonts)));
+    }
+
+    /// Let font `name` (registered with [`Self::add_font`]) draw the characters it lacks at run
+    /// time with `face`. False if there is no such font.
+    pub fn set_font_face(&mut self, name: &str, face: Face) -> bool {
+        let Some(Some(f)) = self.fonts.get(name).cloned() else {
+            return false;
+        };
+        let mut with = (*f).clone();
+        with.dynamic = Some(self.dyn_font(face));
+        self.fonts.insert(name.to_string(), Some(Arc::new(with)));
+        true
+    }
+
+    fn dyn_font(&mut self, face: Face) -> DynFont {
+        let files = self.files.clone();
+        let atlas = self
+            .atlas
+            .get_or_insert_with(|| Arc::new(GlyphAtlas::new(files)))
+            .clone();
+        let face = atlas.add_face(face);
+        // a sheet ready before the first glyph needs one
+        if atlas.sheet_count() == 0 {
+            self.add_glyph_sheet(&atlas);
+        }
+        DynFont { atlas, face }
+    }
+
+    /// A new (empty, not yet drawable) run-time glyph sheet.
+    fn add_glyph_sheet(&mut self, atlas: &GlyphAtlas) {
+        let n = atlas.sheet_count();
+        let r = self.add_texture(
+            format!("glyphs/{n}"),
+            stand_in(glyphs::SHEET_SIZE, glyphs::SHEET_SIZE),
+        );
+        self.textures[r.id as usize].ready = false;
+        atlas.add_sheet(r.id);
+    }
+
+    /// Once a frame, after drawing: copy the run-time glyphs placed since the last call into
+    /// their sheets (textures whose [`TextureEntry::version`] then changes), and keep an empty
+    /// sheet ready. True if a texture changed.
+    pub fn update_glyphs(&mut self) -> bool {
+        let Some(atlas) = self.atlas.clone() else {
+            return false;
+        };
+        // (asked before the frame's notes are cleared)
+        let more = atlas.wants_sheet();
+        let updates = atlas.take_updates();
+        let changed = !updates.is_empty();
+        for u in updates {
+            let Some(e) = self.textures.get_mut(u.texture as usize) else {
+                continue;
+            };
+            if u.clear || e.texture.data.is_empty() {
+                e.texture.data = glyphs::empty_sheet();
+            }
+            glyphs::blit(&mut e.texture.data, &u.blits);
+            self.revision += 1;
+            e.version = self.revision;
+            e.ready = true;
+        }
+        if more {
+            self.add_glyph_sheet(&atlas);
+        }
+        changed
     }
 
     /// Register message texts for a layout (label → text).
@@ -404,6 +485,7 @@ impl UiCache {
             .as_deref()
             .ok_or_else(|| UiError::Invalid(format!("font {name} not registered")))?;
         let v = read_json(files, &format!("ui/fonts/{name}.json"))?;
+        let face = Face::from_json(&v["scalable"]);
         let sheets = v.get("sheets").and_then(Value::as_u64).unwrap_or(0) as usize;
         let size = |i: usize| v["sheet_size"][i].as_u64().unwrap_or(0) as u32;
         let (w, h) = (size(0), size(1));
@@ -415,7 +497,11 @@ impl UiCache {
                     .id,
             );
         }
-        Ok(Arc::new(FontRes::from_json(name, &v, ids)?))
+        let mut font = FontRes::from_json(name, &v, ids)?;
+        if let Some(face) = face {
+            font.dynamic = Some(self.dyn_font(face));
+        }
+        Ok(Arc::new(font))
     }
 
     /// (plain texts, templates) of a layout's message table.

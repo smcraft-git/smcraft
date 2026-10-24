@@ -3,8 +3,9 @@ import Metal
 
 /// Draws layout-player output (`mmk_ui_draw_list`, `mmk_front_frame`) with Metal.
 ///
-/// Owns the GPU copies of the UI textures (uploaded once each, as `mmk_ui_texture` lists them),
-/// one pipeline per blend mode and one sampler per wrap/filter combination. Shading follows
+/// Owns the GPU copies of the UI textures (uploaded once each, as `mmk_ui_texture` lists them,
+/// and again when one changes: the run-time glyph sheets), one pipeline per blend mode and one
+/// sampler per wrap/filter combination. Shading follows
 /// mmk.h: t = combine(tex0, tex1), c = mix(black, white, t) · vertex colour. Material and vertex
 /// colours are authored sRGB values and are linearised in the shader; the target is sRGB.
 @MainActor
@@ -13,6 +14,12 @@ final class UILayer {
     /// The import's texture list so far (it only grows) and one entry of it.
     private let textureCount: () -> Int
     private let textureInfo: (Int, inout MmkTextureInfo) -> Bool
+    /// The list's revision and a texture's version (`mmk_ui_texture_revision` / `_version`).
+    private let textureRevision: () -> UInt64
+    private let textureVersion: (Int) -> UInt64
+    private var revision: UInt64 = 0
+    /// The version each texture was uploaded at.
+    private var versions: [UInt64] = []
     private let library: MTLLibrary
     private let pixelFormat: MTLPixelFormat
     private var textures: [MTLTexture?] = []
@@ -74,12 +81,16 @@ final class UILayer {
     }
     """
 
-    /// Textures from a texture list (`mmk_front_texture_count` / `mmk_front_texture`).
+    /// Textures from a texture list (`mmk_front_texture_count` / `mmk_front_texture`, with
+    /// `mmk_front_texture_revision` / `_version` for the textures that change).
     init(device: MTLDevice, pixelFormat: MTLPixelFormat, textureCount: @escaping () -> Int,
-         textureInfo: @escaping (Int, inout MmkTextureInfo) -> Bool) throws {
+         textureInfo: @escaping (Int, inout MmkTextureInfo) -> Bool,
+         textureRevision: @escaping () -> UInt64, textureVersion: @escaping (Int) -> UInt64) throws {
         self.device = device
         self.textureCount = textureCount
         self.textureInfo = textureInfo
+        self.textureRevision = textureRevision
+        self.textureVersion = textureVersion
         self.pixelFormat = pixelFormat
         library = try device.makeLibrary(source: Self.shaderSource, options: nil)
     }
@@ -87,14 +98,27 @@ final class UILayer {
     /// Textures of an `mmk_ui_open` handle.
     convenience init(device: MTLDevice, ui: OpaquePointer, pixelFormat: MTLPixelFormat) throws {
         try self.init(device: device, pixelFormat: pixelFormat, textureCount: { mmk_ui_texture_count(ui) },
-                      textureInfo: { i, info in mmk_ui_texture(ui, i, &info) })
+                      textureInfo: { i, info in mmk_ui_texture(ui, i, &info) },
+                      textureRevision: { mmk_ui_texture_revision(ui) },
+                      textureVersion: { i in mmk_ui_texture_version(ui, i) })
     }
 
-    /// Upload textures added since the last call (call after opening a layout).
+    /// Upload textures added since the last call (call after opening a layout), and again
+    /// those whose pixels changed (glyph sheets that got new glyphs).
     func syncTextures() {
         let count = textureCount()
+        let rev = textureRevision()
+        if rev != revision {
+            revision = rev
+            for i in 0..<textures.count where textureVersion(i) != versions[i] {
+                var info = MmkTextureInfo()
+                versions[i] = textureVersion(i)
+                textures[i] = textureInfo(i, &info) ? Self.makeTexture(device, info) : nil
+            }
+        }
         while textures.count < count {
             var info = MmkTextureInfo()
+            versions.append(textureVersion(textures.count))
             textures.append(textureInfo(textures.count, &info) ? Self.makeTexture(device, info) : nil)
         }
     }

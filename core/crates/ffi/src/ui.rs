@@ -608,21 +608,55 @@ pub unsafe extern "C" fn mmk_ui_draw_list(
     })
 }
 
-/// Number of textures known to the cache so far.
+/// Number of textures known to the cache so far. First puts the glyphs drawn since the last
+/// call onto the run-time glyph sheets (call it after drawing, before uploading: a sheet's
+/// pixels change, see `mmk_ui_texture_version`).
 ///
 /// # Safety
 /// `ui` must be a live handle.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mmk_ui_texture_count(ui: *const MmkUi) -> usize {
+pub unsafe extern "C" fn mmk_ui_texture_count(ui: *mut MmkUi) -> usize {
     guard(0, || {
-        unsafe { ui.as_ref() }
-            .map(|u| u.cache.textures.len())
+        unsafe { ui.as_mut() }
+            .map(|u| {
+                u.cache.update_glyphs();
+                u.cache.textures.len()
+            })
             .unwrap_or(0)
     })
 }
 
-/// Fill `out` with texture `index` (`model` = "ui", `name` = "<layout>/<texture>" or
-/// "font:<font>/<sheet>"). Pointers stay valid until `mmk_ui_free`.
+/// Changes each time a texture's pixels change (run-time glyph sheets; see
+/// `mmk_ui_texture_version`).
+///
+/// # Safety
+/// `ui` must be a live handle.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mmk_ui_texture_revision(ui: *const MmkUi) -> u64 {
+    guard(0, || {
+        unsafe { ui.as_ref() }
+            .map(|u| u.cache.revision())
+            .unwrap_or(0)
+    })
+}
+
+/// The revision at which texture `index`'s pixels last changed (0: never): upload it again
+/// when this moves (`mmk_ui_texture` gives the new pixels).
+///
+/// # Safety
+/// `ui` must be a live handle.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mmk_ui_texture_version(ui: *const MmkUi, index: usize) -> u64 {
+    guard(0, || {
+        unsafe { ui.as_ref() }
+            .and_then(|u| u.cache.textures.get(index).map(|t| t.version))
+            .unwrap_or(0)
+    })
+}
+
+/// Fill `out` with texture `index` (`model` = "ui", `name` = "<layout>/<texture>",
+/// "font:<font>/<sheet>" or "glyphs/<sheet>"). Pointers stay valid until `mmk_ui_free`, or until
+/// the texture's version changes.
 ///
 /// # Safety
 /// `ui` must be a live handle and `out` writable.
@@ -641,7 +675,8 @@ pub unsafe extern "C" fn mmk_ui_texture(
             u.names
                 .push(CString::new(n.replace('\0', " ")).unwrap_or_default());
         }
-        let Some(t) = u.cache.textures.get(index) else {
+        // (a glyph sheet before its first glyph has no pixels yet)
+        let Some(t) = u.cache.textures.get(index).filter(|t| t.ready) else {
             return false;
         };
         *out = MmkTextureInfo {

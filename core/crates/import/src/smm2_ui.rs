@@ -9,7 +9,10 @@
 //! ui/fonts/<Font>.json, <Font>/sheet_<n>.mtex
 //!                                       bitmap fonts (Font/BmpFont_<region>.szs, BFFNT v4) and
 //!                                       the scalable-font combinations (Font/Fcpx.szs +
-//!                                       Font/ScalableFont.szs), rasterised (`super::smm2_font`)
+//!                                       Font/ScalableFont.szs), rasterised (`super::smm2_font`);
+//!                                       a baked font's `scalable` object says how to draw the
+//!                                       characters it lacks at run time (`mmk_ui::glyphs`)
+//! ui/scalable/<font>.ttf|.otf           the decrypted fonts of Font/ScalableFont.szs those use
 //! ui/messages/<LayoutMsg|CommonMsg|ReferenceMsg>/<File>.json   MSBT tables of the chosen
 //!                                       language (ReferenceMsg: clear conditions, part names …)
 //! ui/textures/MissionIcon/<name>.mtex   the clear-condition icons of every game style
@@ -30,6 +33,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use ab_glyph::FontVec;
 use mmk_assets::Mtex;
@@ -44,7 +48,7 @@ use serde_json::{Value, json};
 use crate::smm1::{font_to_json, to_mtex};
 use crate::{ImportError, Progress, Result, read, write};
 
-pub const SMM2_UI_IMPORTER_VERSION: u32 = 5;
+pub const SMM2_UI_IMPORTER_VERSION: u32 = 6;
 
 #[derive(Clone, Debug)]
 pub struct Smm2UiConfig {
@@ -208,7 +212,10 @@ fn charset(tables: &[(String, Msbt)]) -> BTreeSet<char> {
 }
 
 /// The decrypted scalable fonts of `Font/ScalableFont.szs`, by file name.
-fn scalable_fonts(romfs: &Path, report: &mut Smm2UiReport) -> Result<HashMap<String, FontVec>> {
+fn scalable_fonts(
+    romfs: &Path,
+    report: &mut Smm2UiReport,
+) -> Result<HashMap<String, Arc<FontVec>>> {
     let path = romfs.join("Font/ScalableFont.szs");
     let mut out = HashMap::new();
     let Ok(data) = read(&path) else {
@@ -224,7 +231,7 @@ fn scalable_fonts(romfs: &Path, report: &mut Smm2UiReport) -> Result<HashMap<Str
             .and_then(|plain| FontVec::try_from_vec(plain).map_err(|e| e.to_string()))
         {
             Ok(f) => {
-                out.insert(file, f);
+                out.insert(file, Arc::new(f));
             }
             Err(e) => report.skipped.push(format!("Font/{member}: {e}")),
         }
@@ -504,6 +511,7 @@ pub fn run_smm2_ui(cfg: &Smm2UiConfig, progress: Progress) -> Result<Smm2UiRepor
     let chars = charset(&tables);
     let sources_fonts = scalable_fonts(&cfg.romfs, &mut report)?;
     let mut baked_info = serde_json::Map::new();
+    let mut runtime_fonts: BTreeSet<String> = BTreeSet::new();
     let fcpx_path = cfg.romfs.join("Font/Fcpx.szs");
     match read(&fcpx_path) {
         Ok(data) => {
@@ -522,7 +530,13 @@ pub fn run_smm2_ui(cfg: &Smm2UiConfig, progress: Progress) -> Result<Smm2UiRepor
                         continue;
                     }
                 };
-                let baked = crate::smm2_font::bake(&comb, &sources_fonts, &chars);
+                let baked = crate::smm2_font::bake(
+                    &comb,
+                    &sources_fonts,
+                    &chars,
+                    crate::smm2_font::region_fonts(&stem),
+                );
+                runtime_fonts.extend(baked.face.files().map(str::to_string));
                 for (s, sheet) in baked.sheets.iter().enumerate() {
                     write(
                         &ui.join(format!("fonts/{stem}/sheet_{s}.mtex")),
@@ -536,6 +550,7 @@ pub fn run_smm2_ui(cfg: &Smm2UiConfig, progress: Progress) -> Result<Smm2UiRepor
                     "fonts": comb.fonts.iter().map(|f| f.file.clone()).collect::<Vec<_>>(),
                     "glyphs_from": baked.sources,
                 });
+                doc["scalable"] = baked.face.to_json();
                 write(
                     &ui.join(format!("fonts/{stem}.json")),
                     serde_json::to_string(&doc).unwrap().as_bytes(),
@@ -552,6 +567,15 @@ pub fn run_smm2_ui(cfg: &Smm2UiConfig, progress: Progress) -> Result<Smm2UiRepor
             }
         }
         Err(_) => report.skipped.push("Font/Fcpx.szs: not found".into()),
+    }
+    // the source fonts of the baked fonts, plain, for the characters drawn at run time
+    // (`mmk_ui::glyphs`)
+    let mut scalable_kept = Vec::new();
+    for file in &runtime_fonts {
+        if let Some(f) = sources_fonts.get(file) {
+            write(&out.join(mmk_ui::glyphs::scalable_path(file)), f.as_slice())?;
+            scalable_kept.push(file.clone());
+        }
     }
 
     // --- the title screen's demo courses (still encrypted; the engine decrypts them with the
@@ -658,6 +682,7 @@ pub fn run_smm2_ui(cfg: &Smm2UiConfig, progress: Progress) -> Result<Smm2UiRepor
         "fonts": font_names,
         "fonts_used_by_layouts": fonts_used,
         "baked_fonts": baked_info,
+        "scalable_fonts": scalable_kept,
         "messages": message_files,
         "title_courses": title_courses,
         "mission_icons": mission_icons,
@@ -857,7 +882,7 @@ mod tests {
             .unwrap();
         let comb = Combination::parse(special).unwrap();
         let chars: BTreeSet<char> = "Story Mode 0123".chars().collect();
-        let baked = crate::smm2_font::bake(&comb, &fonts, &chars);
+        let baked = crate::smm2_font::bake(&comb, &fonts, &chars, Vec::new());
         assert!(baked.missing.is_empty(), "{:?}", baked.missing);
         assert_eq!(baked.font.width as f32, comb.size.round());
         let bmp = romfs.join("Font/BmpFont_US.szs");

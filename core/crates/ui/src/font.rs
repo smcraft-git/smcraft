@@ -4,6 +4,7 @@ use mmk_formats::bffnt::{CharWidth, Font};
 use serde_json::Value;
 
 use crate::cache::UiError;
+use crate::glyphs::GlyphAtlas;
 
 /// Metrics + character map of one bitmap font, and the texture ids of its glyph sheets.
 #[derive(Clone, Debug, Default)]
@@ -14,6 +15,22 @@ pub struct FontRes {
     pub sheet_textures: Vec<u32>,
     /// Font used for characters this one lacks (e.g. kana/kanji in user course names).
     pub fallback: Option<std::sync::Arc<FontRes>>,
+    /// Draws the characters the sheets lack from the import's scalable fonts (SMM2), at this
+    /// font's metrics.
+    pub dynamic: Option<DynFont>,
+}
+
+/// A face of the import's run-time glyphs ([`crate::glyphs`]).
+#[derive(Clone)]
+pub struct DynFont {
+    pub atlas: std::sync::Arc<GlyphAtlas>,
+    pub face: u32,
+}
+
+impl std::fmt::Debug for DynFont {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "DynFont(face {})", self.face)
+    }
 }
 
 /// A glyph ready to place: texture, pixel rectangle on the sheet, horizontal metrics.
@@ -35,6 +52,7 @@ impl FontRes {
             font,
             sheet_textures,
             fallback: None,
+            dynamic: None,
         }
     }
 
@@ -96,24 +114,41 @@ impl FontRes {
             font,
             sheet_textures,
             fallback: None,
+            dynamic: None,
         })
     }
 
+    /// The sheets have `c`.
     pub fn has_char(&self, c: char) -> bool {
         self.font.has_char(c)
     }
 
-    /// The font that draws `c`: this one, else the fallback if it has the character, else this
-    /// one (its replacement glyph).
+    /// The font draws `c` with a glyph of its own: from its sheets, or rasterised at run time.
+    pub fn draws(&self, c: char) -> bool {
+        self.has_char(c)
+            || self
+                .dynamic
+                .as_ref()
+                .is_some_and(|d| d.atlas.covers(d.face, c))
+    }
+
+    /// The font that draws `c`: this one, else the fallback if it draws the character, else
+    /// this one (its replacement glyph).
     pub fn for_char(&self, c: char) -> &FontRes {
         match &self.fallback {
-            Some(f) if !self.has_char(c) && f.has_char(c) => f,
+            Some(f) if !self.draws(c) && f.draws(c) => f,
             _ => self,
         }
     }
 
     /// Glyph for `c` (the font's replacement glyph when it has none).
     pub fn glyph(&self, c: char) -> Glyph {
+        if !self.has_char(c)
+            && let Some(d) = &self.dynamic
+            && let Some(g) = d.atlas.glyph(d.face, c)
+        {
+            return g;
+        }
         let g = self.font.glyph(c);
         let cell = self.font.cell(g);
         let width = self.font.char_width(g);
