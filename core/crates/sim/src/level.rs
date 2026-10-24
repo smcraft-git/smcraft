@@ -64,10 +64,11 @@ pub struct Solid {
 }
 
 impl Solid {
-    /// Height of the top surface at x.
+    /// Height of the top surface at x (a sloped top's line goes on past its ends: a foot on it
+    /// holds the player there).
     pub fn top_at(&self, x: f32) -> f32 {
         let cx = (self.x0 + self.x1) / 2.0;
-        self.y1 + self.slope * (x.clamp(self.x0, self.x1) - cx)
+        self.y1 + self.slope * (x - cx)
     }
 }
 

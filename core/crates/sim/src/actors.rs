@@ -14,6 +14,7 @@ mod bosses;
 mod ceiling;
 mod chute;
 mod claw;
+pub mod seesaw;
 pub use claw::{ClawRope, NUDGE as CLAW_NUDGE, REACH as CLAW_REACH};
 mod clown;
 pub use clown::ClownFire;
@@ -845,6 +846,8 @@ pub struct Actor {
     pub fly: Fly,
     /// A Swinging Claw's rope; the actor's own position is the rope's end (actors/claw.rs).
     pub claw: Option<ClawRope>,
+    /// A Seesaw's plank (actors/seesaw.rs).
+    pub plank: Option<seesaw::Plank>,
     /// Bowser's middle jump is a gap jump (its speed set to land past the gap; MiddleJump's
     /// enter 0x71006b0370 flag +0x90).
     pub gap_jump: bool,
@@ -931,6 +934,7 @@ impl Actor {
             spiny_shell: false,
             fly: Fly::default(),
             claw: None,
+            plank: None,
             gap_jump: false,
             wing_rate: 1.0,
         }
@@ -1038,12 +1042,14 @@ impl Actor {
                 Some((self.x - 8.0, self.y, self.x + 8.0, self.y + 16.0, false))
             }
             Kind::Seesaw { width } => {
-                // the plank turns about a point 8 px under its top: the top over the pivot is
-                // 8 / cos θ above it [obs: Ryujinx trace W_3010660, the rider's height on a
-                // tilting seesaw]
-                let hw = width as f32 * 8.0;
-                let top = self.y + 8.0 + 8.0 / self.heading.to_radians().dcos();
-                Some((self.x - hw, self.y + 8.0, self.x + hw, top, true))
+                // the plank turns about a point 8 px under its top (the pivot): the top line is
+                // its ends' line 8 px up, from end to end, its height here taken at the middle
+                // (actors/seesaw.rs) [obs: Ryujinx trace W_3010660: stood on with the centre
+                // 3.6 px past the turned plank's end, on its line]
+                let p = self.plank.unwrap_or_else(|| seesaw::Plank::new(width));
+                let (e, py) = (p.ends, self.y + 8.0);
+                let mid = py + seesaw::HALF + (e[1] + e[3]) * 0.5;
+                Some((self.x + e[0], py, self.x + e[2], mid, true))
             }
             // a hidden block is no solid until it's bumped from below
             Kind::MovingBlock {
@@ -1075,54 +1081,31 @@ impl Actor {
     /// Top-surface slope of a platform (seesaw tilt: `heading` in degrees).
     pub fn solid_slope(&self) -> f32 {
         match self.kind {
-            Kind::Seesaw { .. } => self.heading.to_radians().dtan(),
+            Kind::Seesaw { .. } => self.plank.map_or(0.0, |p| p.slope()),
             _ => 0.0,
         }
     }
 
-    /// Seesaw (91-seesaw.md): riders' lever arm tilts the plank. Tip speed ω (`speed`) gains
-    /// lever / (6·64·W²) per frame (at least 0.0015), the angle advances 2·asin(ω/16); limits
-    /// ±45° with bounce e = (W + 3)/36; free damping ω × 0.95 and a slow return to level.
-    /// The player weighs 2 per px of lever arm, from the third frame its centre is over the
-    /// plank (±8·W) (its riders' list lags as the P Switch's does) [obs: Ryujinx trace
-    /// W_3010660, walking onto a 5-tile seesaw: Δω = 2·lever / (384·25) from the third frame
-    /// the centre is on it].
+    /// Seesaw (91-seesaw.md, actors/seesaw.rs): the riders' torque turns the plank. The player
+    /// weighs 2, from the third frame its centre is over the plank (±8·W) (its riders' list lags
+    /// as the P Switch's does), then as long as it stands on it, a foot past the end too [obs:
+    /// Ryujinx trace W_3010660: on from x 289.5 over an end at 288, still at 370.4 over one at
+    /// 366.8], where it stands after its move.
     fn step_seesaw(&mut self, width: u8) {
-        let w = width as f32;
-        let on = self.ridden && (self.target.0 - self.x).abs() <= 8.0 * w;
+        let on =
+            self.ridden && (self.hops > 0 || (self.target.0 - self.x).abs() <= 8.0 * width as f32);
         self.hops = if on { self.hops.saturating_add(1) } else { 0 };
-        let lever = if self.hops >= 3 {
-            2.0 * (self.target.0 - self.x)
+        let mut plank = self.plank.unwrap_or_else(|| seesaw::Plank::new(width));
+        let tau = if self.hops >= 3 {
+            let (rx, ry) = self.target;
+            seesaw::torque(plank.theta, self.x, self.y + 8.0, rx, ry, 2.0)
         } else {
             0.0
         };
-        if lever.abs() > 0.5 {
-            // positive lever (rider on the right) pushes the right end down (negative angle)
-            let mut a = lever / (6.0 * 64.0 * w * w);
-            if a.abs() < 0.0015 {
-                a = 0.0015 * a.signum();
-            }
-            self.speed -= a;
-        } else {
-            self.speed *= 0.95;
-            let th = self.heading.abs().min(25.0);
-            let back = (0.0025 * th / 25.0).max(0.001);
-            if self.heading > 0.0 {
-                self.speed -= back;
-            } else if self.heading < 0.0 {
-                self.speed += back;
-            }
-            if self.heading.abs() < 0.125 && self.speed.abs() < 0.00075 {
-                self.heading = 0.0;
-                self.speed = 0.0;
-            }
-        }
-        self.speed = self.speed.clamp(-8.0, 8.0);
-        self.heading += (2.0 * (self.speed / 16.0).clamp(-1.0, 1.0).dasin()).to_degrees();
-        if self.heading.abs() > 45.0 {
-            self.heading = 45.0 * self.heading.signum();
-            self.speed = -self.speed * (w + 3.0) / 36.0;
-        }
+        plank.step(width, tau);
+        self.speed = plank.omega;
+        self.heading = (plank.theta as f64 * (360.0 / 4_294_967_296.0)) as f32;
+        self.plank = Some(plank);
     }
 
     /// Lakitu: anchor x (home_x) follows the player by at most max(|player vx|, 0.05) — the
@@ -4573,6 +4556,10 @@ impl Actor {
             (14.0, 0.0)
         } else if basic {
             (hw, -0.1)
+        } else if matches!(self.kind, Kind::Mushroom | Kind::OneUp) {
+            // a walking mushroom turns 0.1 px off a wall [obs: Ryujinx trace W_3010660, one
+            // shut in a one-tile box: x 168.1 / 167.9 by turns, walls at 160 / 176]
+            (hw, 0.1)
         } else {
             (hw, 0.001)
         };

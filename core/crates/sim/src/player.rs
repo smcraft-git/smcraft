@@ -399,6 +399,9 @@ pub struct Player {
     pub on_ice: bool,
     /// Actor id of the moving solid the player stands on.
     pub ride: Option<u32>,
+    /// The ground angle (binary) of a tilted solid it stands on, for its next step along it (a
+    /// Seesaw's plank as it lay two frames before; set by the world).
+    pub solid_angle: u32,
     /// Touched a spike trap this frame while moving into it (the world applies the damage).
     pub spiked: bool,
     /// Below a water surface (set by the world each frame): swim physics.
@@ -617,6 +620,7 @@ impl Player {
             enemy_hit: false,
             on_ice: false,
             ride: None,
+            solid_angle: 0,
             spiked: false,
             in_water: false,
             low_gravity: false,
@@ -1169,7 +1173,7 @@ impl Player {
             SkidPhase::None => {}
         }
 
-        if let Some((steep, rises)) = self.slope {
+        if let Some((steep, rises)) = self.slope.or(self.solid_slope_class()) {
             // §5.2: rows chosen by whether the motion is downhill or uphill
             let moving = if dir != 0 {
                 dir
@@ -2734,6 +2738,26 @@ impl Player {
         level.cell_at(px, py) == Cell::Spike
     }
 
+    /// The slope class of a tilted solid stood on (a Seesaw), for the §5.2 speed rows: its
+    /// ground angle classed as the terrain sensor does it (|θ| under 0x4fd8000 flat, 0xe728000
+    /// 1, 0x19750000 2, 0x268b0000 3, else 4) [obs v3.0.3 0x7101575130 (v1.0.0 0x71009b0010);
+    /// Ryujinx trace W_3010660: running up a Seesaw, the uphill row from the frame its angle
+    /// passes 7.0°], rising to the right for a positive angle.
+    fn solid_slope_class(&self) -> Option<(usize, i32)> {
+        if !self.on_ground || self.ride.is_none() || self.solid_angle == 0 {
+            return None;
+        }
+        let a = self.solid_angle as i32;
+        let class = match a.unsigned_abs() {
+            0..0x4fd_8000 => return None,
+            0x4fd_8000..0xe72_8000 => 1,
+            0xe72_8000..0x1975_0000 => 2,
+            0x1975_0000..0x268b_0000 => 3,
+            _ => 4,
+        };
+        Some((class, if a > 0 { 1 } else { -1 }))
+    }
+
     /// Axis-separated movement against the tile grid using the spec's sensor points.
     fn move_and_collide(&mut self, level: &Level, s: &Sensors) {
         self.slope_prev = self.slope;
@@ -2755,6 +2779,10 @@ impl Player {
                     (0.894_400_9, 0.447_214)
                 };
                 (c, s * rise as f32)
+            }
+            // along a tilted solid (a Seesaw) by its ground angle (actors/seesaw.rs)
+            _ if self.on_ground && self.ride.is_some() && self.solid_angle != 0 => {
+                (crate::fmath::table_sin_cos(self.solid_angle).1, 0.0)
             }
             _ => (1.0, 0.0),
         };

@@ -5642,12 +5642,15 @@ impl World {
         }
     }
 
-    /// Seesaws tilt after the player's move, by the rider's lever arm where it now stands, and
-    /// the rider stands on the plank as it now lies [obs: Ryujinx trace W_3010660: the torque
-    /// from the frame's x, the rider's height from the frame's angle].
+    /// Seesaws tilt after the player's move, by the rider's torque where it now stands, and
+    /// carry their rider by the plank's turn (actors/seesaw.rs) [obs: Ryujinx trace W_3010660
+    /// with the Seesaw watched: the torque from the frame's position before the carry, the
+    /// carry the ends' movement taken at the rider's place along them, the rider's step along
+    /// the plank by the angle it had two frames before].
     fn step_seesaws(&mut self) {
         let (px, py) = (self.player.x, self.player.y);
         let ride = self.player.ride;
+        let mut angle = 0;
         for i in 0..self.actors.len() {
             let a = &mut self.actors[i];
             if !matches!(a.kind, Kind::Seesaw { .. }) {
@@ -5655,24 +5658,24 @@ impl World {
             }
             a.target = (px, py);
             a.ridden = ride == Some(a.id);
-            let before = a.heading;
             a.step_spawning(&self.level);
             let (id, b, slope) = (a.id, a.solid_box(), a.solid_slope());
-            // the rider turns with the plank about its turning point, 8 px under the top
-            let turn = (a.heading - before).to_radians();
-            let (cx, cy) = (a.x, a.y + 8.0);
             if let Some(s) = self.level.solids.iter_mut().find(|s| s.owner == id)
                 && let Some((x0, y0, x1, y1, _)) = b
             {
                 (s.x0, s.y0, s.x1, s.y1, s.slope) = (x0, y0, x1, y1, slope);
-                if ride == Some(id) && self.player.on_ground && turn != 0.0 {
-                    let (sn, cs) = turn.dsin_cos();
-                    let (dx, dy) = (self.player.x - cx, self.player.y - cy);
-                    self.player.x = cx + dx * cs - dy * sn;
-                    self.player.y = cy + dx * sn + dy * cs;
+                if ride == Some(id)
+                    && self.player.on_ground
+                    && let Some(p) = a.plank
+                {
+                    let (dx, dy) = p.carry(self.player.x - a.x);
+                    self.player.x += dx;
+                    self.player.y += dy;
+                    angle = p.prev_angle();
                 }
             }
         }
+        self.player.solid_angle = angle;
     }
 
     /// Moving solids step before the player; riders are carried by their movement. A spring
