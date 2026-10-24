@@ -1297,6 +1297,17 @@ impl Sounds {
                 Event::ConditionCount => {
                     self.object_sfx(world, "p_GoalMission_CountUp", pe);
                 }
+                // co-op: a player goes into a bubble / a bubble pops (the bubble is the
+                // `Balloon` object; SMB1's has only the pop)
+                Event::Bubble | Event::BubblePop => {
+                    let key = if *ev == Event::Bubble {
+                        "act_balloon_start"
+                    } else {
+                        "act_baloon_break"
+                    };
+                    let user = self.user("Balloon");
+                    self.sfx_at(world, &user, key, &PropList::default(), pe, 0);
+                }
                 Event::ConditionMet => {
                     if !self.player_sfx(world, "p_get_missionClear", &[]) {
                         self.object_sfx(world, "p_GoalMission_Bubble_appear", pe);

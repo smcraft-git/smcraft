@@ -68,6 +68,18 @@ const GOAL_NEAR: f32 = 16.0;
 const POLE_DELAY: i32 = 20;
 /// Warps (§7): the followers come out 15 frames apart.
 const WARP_GAP: i32 = 15;
+/// Carrying a player (§5.3, not SMB1): the hold before Jump / Spin frees them, the window after
+/// which 12 presses do, the escape jumps, the throw and its no-contact time; how far in front and
+/// how level the picked-up player stands [inf: the pickup reach].
+const CARRY_HOLD: i32 = 300;
+const CARRY_STRUGGLE: i32 = 240;
+const CARRY_PRESSES: u32 = 12;
+const ESCAPE_VY_JUMP: f32 = 3.628;
+const ESCAPE_VY_SPIN: f32 = 3.428;
+const THROW_VY: f32 = 4.5;
+const THROW_IGNORE: i32 = 10;
+const CARRY_REACH: f32 = 20.0;
+const CARRY_DY: f32 = 8.0;
 
 /// A co-op player's situation.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -92,6 +104,8 @@ pub enum State {
     Pole { slide: i32 },
     /// Taken along through a warp: hidden until the frames run out.
     Follow { t: i32 },
+    /// Held over slot `by`'s head: frames of the hold left, presses counted in the struggle.
+    Carried { by: usize, timer: i32, presses: u32 },
 }
 
 /// The bubble: its bottom-centre, velocity, wobble angle (degrees), dash frames left and
@@ -113,6 +127,9 @@ pub struct Bubble {
 pub struct Slot {
     pub state: State,
     prev_jump: bool,
+    prev_spin: bool,
+    /// The slot this player is carrying.
+    pub carrying: Option<usize>,
     /// Just stomped (no new head contact) and frozen on the ground (frames).
     cooldown: i32,
     freeze: i32,
@@ -149,6 +166,9 @@ pub(super) struct Ctx {
     carry: f32,
     donut_ride: Option<((i32, i32), i32)>,
     pu: powerups::PuWorld,
+    /// Keys held: each player has their own (§7.6); a key door or box needs the entering
+    /// player's.
+    keys: u32,
 }
 
 /// The co-op state of a world (empty with one player).
@@ -305,6 +325,29 @@ impl World {
         swap(&mut self.carry, &mut c.carry);
         swap(&mut self.donut_ride, &mut c.donut_ride);
         swap(&mut self.pu, &mut c.pu);
+        swap(&mut self.keys, &mut c.keys);
+    }
+
+    /// Slot `k`'s keys, wherever it is this moment.
+    pub fn keys_of(&self, k: usize) -> u32 {
+        match self.position_of(k) {
+            0 => self.keys,
+            p => self.coop.ctx[p - 1].keys,
+        }
+    }
+
+    fn keys_mut(&mut self, k: usize) -> &mut u32 {
+        match self.position_of(k) {
+            0 => &mut self.keys,
+            p => &mut self.coop.ctx[p - 1].keys,
+        }
+    }
+
+    /// After a stomp, springboard or attack between players the victim's keys go to the
+    /// attacker (§5.4 [obs 0x710040b7b0]).
+    fn take_keys(&mut self, attacker: usize, victim: usize) {
+        let k = std::mem::take(self.keys_mut(victim));
+        *self.keys_mut(attacker) += k;
     }
 
     /// Swap the players at positions `a` < `b` (with their characters and fields).
@@ -606,9 +649,13 @@ impl World {
                     State::Rescue { to } => self.step_rescue(k, to),
                     State::Spring { .. } => self.step_spring(k, jump(k)),
                     State::Follow { t } => self.step_follow(k, t),
+                    State::Carried { by, timer, presses } => {
+                        self.step_carried(k, by, timer, presses, inputs)
+                    }
                     _ => {}
                 }
             }
+            self.pick_up_players(inputs);
             self.pop_bubbles();
             self.head_contact(inputs);
             self.side_push();
@@ -617,9 +664,115 @@ impl World {
         }
         for k in 0..n {
             self.coop.slots[k].prev_jump = jump(k);
+            self.coop.slots[k].prev_spin = inputs.get(k).is_some_and(|i| i.held(input::SPIN));
         }
         self.goal_wait();
         self.pole_demo();
+    }
+
+    // ------------------------------------------------------------ carrying (§5.3)
+
+    /// Hold Run and press Spin beside a grounded player in front of you (level with you): you
+    /// pick them up. Not in SMB1.
+    fn pick_up_players(&mut self, inputs: &[Input]) {
+        if self.level.style == "M1" {
+            return;
+        }
+        let n = self.players();
+        for a in 0..n {
+            let i = inputs.get(a).copied().unwrap_or_default();
+            let spin_pressed = i.held(input::SPIN) && !self.coop.slots[a].prev_spin;
+            if !spin_pressed || !i.held(input::RUN) || self.coop.slots[a].carrying.is_some() {
+                continue;
+            }
+            let pa = self.slot(a);
+            if !self.free(a) || !pa.on_ground || pa.held.is_some() {
+                continue;
+            }
+            let (ax, ay, facing) = (pa.x, pa.y, pa.facing as f32);
+            let target = (0..n).find(|&b| {
+                let pb = self.slot(b);
+                b != a
+                    && self.free(b)
+                    && pb.on_ground
+                    && (pb.y - ay).abs() <= CARRY_DY
+                    && (pb.x - ax) * facing > 0.0
+                    && (pb.x - ax).abs() <= CARRY_REACH
+            });
+            if let Some(b) = target {
+                self.coop.slots[b].state = State::Carried {
+                    by: a,
+                    timer: CARRY_HOLD,
+                    presses: 0,
+                };
+                self.coop.slots[a].carrying = Some(b);
+            }
+        }
+    }
+
+    /// A carried player rides on the carrier's head. They break free with Jump or Spin once the
+    /// hold runs out, or with 12 presses after its first 60 frames; the carrier letting go of
+    /// Run throws them (Down held: puts them down in front).
+    fn step_carried(&mut self, k: usize, by: usize, timer: i32, presses: u32, inputs: &[Input]) {
+        let i = |j: usize| inputs.get(j).copied().unwrap_or_default();
+        let jump_pressed = i(k).held(input::JUMP) && !self.coop.slots[k].prev_jump;
+        let spin_pressed = i(k).held(input::SPIN) && !self.coop.slots[k].prev_spin;
+        let release = |w: &mut Self, vx: f32, vy: f32, x: Option<f32>| {
+            w.coop.slots[k].state = State::Play;
+            w.coop.slots[by].carrying = None;
+            w.coop.slots[k].ignore = Some((by, THROW_IGNORE));
+            let p = w.slot_mut(k);
+            if let Some(x) = x {
+                p.x = x;
+            }
+            p.vx = vx;
+            p.vy = vy;
+        };
+        // the carrier went down (or into a bubble): dropped where they are
+        if !self.free(by) {
+            release(self, 0.0, 0.0, None);
+            return;
+        }
+        let (cx, cy, top, cvx, cfacing) = {
+            let c = self.slot(by);
+            (c.x, c.y, c.contact_box().3, c.vx, c.facing)
+        };
+        let carrier_run = i(by).held(input::RUN);
+        if !carrier_run {
+            if i(by).held(input::DOWN) {
+                release(self, 0.0, 0.0, Some(cx + cfacing as f32 * 16.0));
+                self.slot_mut(k).y = cy;
+            } else {
+                let vx = cfacing as f32 * 3.0f32.max(cvx.abs() + 1.0);
+                release(self, vx, THROW_VY, None);
+            }
+            return;
+        }
+        let presses =
+            presses + u32::from(timer <= CARRY_STRUGGLE && (jump_pressed || spin_pressed));
+        let timer = timer - 1;
+        let escape = if timer <= 0 && jump_pressed {
+            Some(ESCAPE_VY_JUMP)
+        } else if timer <= 0 && spin_pressed {
+            Some(ESCAPE_VY_SPIN)
+        } else if presses >= CARRY_PRESSES {
+            Some(ESCAPE_VY_JUMP)
+        } else {
+            None
+        };
+        if let Some(vy) = escape {
+            release(self, 0.0, vy, None);
+            return;
+        }
+        self.coop.slots[k].state = State::Carried { by, timer, presses };
+        let p = self.slot_mut(k);
+        p.x = cx;
+        p.y = top;
+        p.vx = 0.0;
+        p.vy = 0.0;
+        p.on_ground = false;
+        p.facing = cfacing;
+        p.drawn_facing = cfacing;
     }
 
     // ------------------------------------------------------------ bubbles
@@ -812,6 +965,7 @@ impl World {
                 );
                 let (ax, bx) = (pa.x, pb.x);
                 self.events.push(Event::Stomp);
+                self.take_keys(a, b);
                 if b_helmet {
                     let p = self.slot_mut(a);
                     p.y = top;
@@ -1398,6 +1552,78 @@ mod tests {
         let vy = launched.expect("launched");
         assert!(vy > 4.0, "the springboard launch: {vy}");
         assert!(w.player.alive(), "nobody is hurt");
+    }
+
+    #[test]
+    fn each_player_has_their_own_keys_and_a_head_stomp_takes_them() {
+        let mut w = World::with_level(Level::flat(60));
+        w.set_players(2);
+        run(&mut w, &[NONE, NONE], 5);
+        // player 1 holds two keys; player 2 none, and they stay apart through the passes
+        w.keys = 2;
+        run(&mut w, &[NONE, NONE], 3);
+        assert_eq!((w.keys_of(0), w.keys_of(1)), (2, 0));
+        // player 2 lands on player 1's head: the keys go to the one on top
+        w.others[0].x = w.player.x;
+        w.others[0].y = w.player.y + 30.0;
+        w.others[0].vy = -2.0;
+        w.others[0].on_ground = false;
+        run(&mut w, &[NONE, NONE], 20);
+        assert_eq!((w.keys_of(0), w.keys_of(1)), (0, 2));
+    }
+
+    #[test]
+    fn holding_run_and_pressing_spin_carries_a_player_then_throws_them() {
+        let carry_world = |style: &str| {
+            let mut lvl = Level::flat(60);
+            lvl.style = style.into();
+            let mut w = World::with_level(lvl);
+            w.set_players(2);
+            run(&mut w, &[NONE, NONE], 5);
+            // player 2 stands just in front of player 1, who faces right
+            w.others[0].x = w.player.x + 12.0;
+            w.player.facing = 1;
+            run(&mut w, &[NONE, NONE], 2);
+            let run_b = Input {
+                buttons: input::RUN,
+            };
+            let grab = Input {
+                buttons: input::RUN | input::SPIN,
+            };
+            w.step_players(&[run_b, NONE]);
+            w.step_players(&[grab, NONE]);
+            w
+        };
+        // SMB1 has no carrying
+        let w = carry_world("M1");
+        assert_eq!(w.coop.slots[1].state, State::Play);
+        // elsewhere player 2 rides on player 1's head while Run is held
+        let mut w = carry_world("M3");
+        assert!(matches!(
+            w.coop.slots[1].state,
+            State::Carried { by: 0, .. }
+        ));
+        let hold = Input {
+            buttons: input::RUN,
+        };
+        run(&mut w, &[hold, NONE], 10);
+        assert!(w.others[0].y > w.player.y + 10.0, "on the head");
+        // letting go of Run throws them
+        w.step_players(&[NONE, NONE]);
+        assert_eq!(w.coop.slots[1].state, State::Play);
+        assert!(w.others[0].vy > 4.0 && w.others[0].vx >= 3.0, "thrown");
+        // a struggle: 12 presses after the first 60 frames break free
+        let mut w = carry_world("WU");
+        let jump = Input {
+            buttons: input::JUMP,
+        };
+        run(&mut w, &[hold, NONE], 61);
+        for _ in 0..12 {
+            w.step_players(&[hold, jump]);
+            w.step_players(&[hold, NONE]);
+        }
+        assert_eq!(w.coop.slots[1].state, State::Play, "broke free");
+        assert_eq!(w.coop.slots[0].carrying, None);
     }
 
     #[test]

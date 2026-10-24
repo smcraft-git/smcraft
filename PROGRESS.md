@@ -131,10 +131,15 @@ Everything is on `main` and pushed, except `maker-audio` (pushed as a branch; se
     (a death is everyone down)
   - ✅ mmk-play: the player count stays across restarts and courses (unloading goes back to
     one); pads by player, the keyboard is player 1 on its own with fewer pads than players
-  - ⬜ The Swift app / FFI front end: still one player (its host reports one controller)
-  - ⬜ Not yet: carrying players, ground-pound knock-flight, keys moving to the attacker, the
-    180-frame warp wait (the world waits instead), bubble / pop sounds (the import has them:
-    `WU_SE_OBJ_CMN_BALLOON_BREAK`; the sound director doesn't map the two events yet),
+  - ✅ The Swift app / FFI front end: the controllers and their buttons from the app (not yet
+    played on a device)
+  - ✅ Carrying a player (not SMB1): Run held + Spin beside a grounded player in front, ridden on
+    the head; free after the 300-frame hold with Jump / Spin, or with 12 presses after 60 frames;
+    letting go of Run throws (vy 4.5, ≥ 3.0 across, 10 frames apart), Down puts down
+  - ✅ Keys per player (a key door needs the entering player's own); a stomp / springboard
+    between players moves the victim's keys to the attacker
+  - ✅ Bubble / pop sounds (`<style>_Balloon` `act_balloon_start` / `act_baloon_break`)
+  - ⬜ Not yet: ground-pound knock-flight, the 180-frame warp wait (the world waits instead),
     per-player clear conditions, a players screen in SMM2's layouts (the question is a toast)
 
 **G4 — Course Maker for any course** 🔄
