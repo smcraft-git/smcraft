@@ -231,12 +231,15 @@ impl Actor {
     /// speed across; once nobody is on it and it rises faster than 0.1 the enemy timer
     /// +0x53c is set to 18, and when it reads 1 FlyMove takes over again from where it is
     /// (enter 0x71011d7280: its bob's base 4 px over it, vertical speed 0).
+    /// A winged Spike Top is stood on the same way (Togemet's Wing vtable 0x7102911e68 shares
+    /// the FlyMove enter / exe; its PlayerOn 0x7101275960 / 0x7101275a30 / 0x7101275aa0 is the
+    /// Buzzy's but for the rider's contact timer, so its spikes still hurt the rider) [obs
+    /// v3.0.3].
     /// [inf: the ride flags' two kinds (the dip is skipped for bit 1 with terrain 16 px over
-    /// its feet); the rider carried by the beetle's last move; a winged Spike Top (Togemet's
-    /// Wing has PlayerOn too) is not stood on; the new Against state (0x71011d7560) not
-    /// entered]
+    /// its feet); the rider carried by the beetle's last move; the new Against state
+    /// (0x71011d7560) not entered]
     pub(super) fn step_para_beetle(&mut self, level: &Level) {
-        if self.hops == BEETLE_FLY && self.ridden && self.kind == Kind::Buzzy {
+        if self.hops == BEETLE_FLY && self.ridden {
             // PlayerOn's enter
             self.hops = BEETLE_RIDDEN;
             self.vy = BEETLE_DIP;

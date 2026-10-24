@@ -3392,9 +3392,13 @@ impl World {
                     }
                     continue;
                 }
-                // a tower's riders don't bump walkers: a rider's Tower context has empty contact
-                // slots (Default Tower vtable 0x7102147cc8 slots 12 / 13 v1.0.0) [obs], so it
-                // never turns on a touch; that a walker meeting a rider doesn't turn either [inf]
+                // a tower's riders don't bump walkers: an enemy's bump component (actor +0x3a0,
+                // made by its vfunc 0x3f0 0x710128d860, vtable 0x71029144d8) is enabled only in
+                // the EnemySys contexts 0, 1, 2, 6, 8, 10, 12, 16 (and 17 / 18), not in the Tower
+                // context 3 (slots 0 / 0x10, 0x7101284ad0 / 0x7101284b70), and a partner in it
+                // is what raises the turn flag +0x528 bit 19 (0x710128a2d0) [obs v3.0.3]; that a
+                // walker meeting a rider doesn't turn either (the pairing needing both enabled)
+                // [inf]
                 let walkers = a.kind.is_walker() && b.kind.is_walker() && !a.stacked && !b.stacked;
                 let a_slide = a.mode == Mode::ShellSlide;
                 let b_slide = b.mode == Mode::ShellSlide;
@@ -3417,10 +3421,13 @@ impl World {
                     // a moving walker (|vx| > 0.001) overlapping another enemy by 0.1 px or
                     // more on its front side raises its touch flag, read by its next update
                     // (Walk turns, Turn stops), when the contact's vertical push (half the
-                    // overlap [inf]) is 4 or more (enemy contact 0x710072bca0) [obs: Ryujinx
-                    // trace W_3051605: a packed row of Goombas; one falling 8.1 px into another's
-                    // height turns it, one 6.75 px in doesn't]; not with one tilted on an
-                    // incline's diagonal (its box turned with it [inf]) [obs: W_3051605, a
+                    // overlap: the collider pair test 0x7100e28af0 / box test 0x7100e28e20
+                    // push each by half the overlap on both axes [obs v3.0.3]) is 4 or more
+                    // [obs: Ryujinx trace W_3051605: a packed row of Goombas; one falling 8.1 px
+                    // into another's height turns it, one 6.75 px in doesn't]; not with one
+                    // tilted on an incline's diagonal (its box turned with it: the collider
+                    // box follows the model's rotation while +0x52c bit 3, 0x7101208390 [obs
+                    // v3.0.3]; that a walker on an incline has it [inf]) [obs: W_3051605, a
                     // Goomba walking up a staircase into one standing on it never turns]
                     (false, false) if walkers => {
                         let (ab, bb) = (a.bbox(), b.bbox());
@@ -3642,8 +3649,29 @@ impl World {
                 i += 1;
                 continue;
             }
+            // a winged Spike Top is stood on too, but its spikes hurt the rider: its PlayerOn exe
+            // 0x7101275a30 doesn't refresh the rider's contact timer (+0x6b0 +0x1f8 + 4 · player,
+            // 18 frames), which the Buzzy's 0x71011d7480 does and which keeps the player's
+            // stomp contact (attack kind 2) from reaching the enemy (0x71011ff860), so the
+            // Spike Top's stomp reaction (Invalid: the spikes) applies [obs v3.0.3] [inf: a
+            // shoe or Yoshi on it]
+            if a.is_para_beetle()
+                && matches!(a.kind, Kind::SpikeTop { .. })
+                && self.player.ride == Some(a.id)
+                && !star
+                && self.player.shoe.is_none()
+                && self.player.hurt()
+            {
+                self.events.push(if self.player.alive() {
+                    Event::PowerDown
+                } else {
+                    Event::Death
+                });
+                return;
+            }
             // a Para-Beetle is stood on: on top no stomp, its sides and bottom still hurt
-            if let (true, Some((_, _, _, y1, _))) = (a.is_para_beetle(), a.solid_box())
+            if let (true, Some((_, _, _, y1, _))) =
+                (a.is_para_beetle() && a.kind == Kind::Buzzy, a.solid_box())
                 && (self.player.ride == Some(a.id) || self.player.y >= y1 - 0.5)
             {
                 i += 1;
@@ -11947,6 +11975,33 @@ mod tests {
             w.player.y,
             b.y
         );
+    }
+
+    #[test]
+    fn a_winged_spike_top_is_stood_on_but_its_spikes_hurt() {
+        let mut lvl = Level::flat(60);
+        let mut s = spawn(Kind::SpikeTop { surface: 0 }, 200.0, 96.0);
+        s.wings = true;
+        lvl.spawns.push(s);
+        let mut w = World::with_level(lvl);
+        w.player.form = Form::Super;
+        run(&mut w, 0, 2);
+        let (bx, by) = (w.actors[0].x, w.actors[0].y);
+        w.player.x = bx;
+        w.player.y = by + 20.0;
+        w.player.on_ground = false;
+        w.player.vy = 0.0;
+        let mut rode = false;
+        let mut dipped = false;
+        for _ in 0..40 {
+            run(&mut w, 0, 1);
+            let b = &w.actors[0];
+            rode |= w.player.ride == Some(b.id);
+            dipped |= b.hops == 1 && b.vy < 0.0;
+        }
+        assert!(rode && dipped, "{rode} {dipped}");
+        assert_eq!(w.player.form, Form::Small, "the spikes hurt the rider");
+        assert!(w.actors[0].wings && w.actors[0].alive());
     }
 
     #[test]

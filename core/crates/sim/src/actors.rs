@@ -956,9 +956,9 @@ impl Actor {
     }
 
     /// The solid surface this actor offers (for platforms): (x0, y0, x1, y1, top_only).
-    /// A flying winged Buzzy Beetle, the one players stand on.
+    /// A flying winged Buzzy Beetle or Spike Top, the ones players stand on (actors/fly.rs).
     pub fn is_para_beetle(&self) -> bool {
-        self.kind == Kind::Buzzy
+        matches!(self.kind, Kind::Buzzy | Kind::SpikeTop { .. })
             && self.wings
             && self.mode == Mode::Normal
             && !self.ceiling
@@ -984,7 +984,7 @@ impl Actor {
                 ))
             }
             // a Para-Beetle is stood on (its body box, from above) (actors/fly.rs)
-            Kind::Buzzy if self.is_para_beetle() => {
+            Kind::Buzzy | Kind::SpikeTop { .. } if self.is_para_beetle() => {
                 let (hw, h) = (self.half_w(), self.height());
                 Some((self.x - hw, self.y, self.x + hw, self.y + h, true))
             }
