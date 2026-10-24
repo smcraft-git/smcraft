@@ -6,7 +6,7 @@
 
 use mmk_formats::smm2::Course;
 
-use crate::actors::{Actor, Effect, FIREBALL_LIFE, FIREBALL_SPEED, Kind, Mode};
+use crate::actors::{Actor, DieCause, Effect, FIREBALL_LIFE, FIREBALL_SPEED, Kind, Mode};
 use crate::blocks::{self, Block, BlockKind, Blocks, Contents, HitPower, HitResult, Release};
 use crate::camera::{self, Camera};
 use crate::input::{self, Input};
@@ -2699,7 +2699,7 @@ impl World {
                                 scores.push((Self::chain_score(0), e.x, e.y + 24.0));
                             }
                         } else if !e.fire_proof() {
-                            e.die_fall(fx);
+                            e.die_by(fx, DieCause::Fire);
                             scores.push((Self::chain_score(0), e.x, e.y + 24.0));
                         }
                     }
@@ -2726,13 +2726,13 @@ impl World {
                 match (a_slide, b_slide) {
                     (true, true) => {
                         let (ax, bx) = (a.x, b.x);
-                        a.die_fall(bx);
+                        a.die_by(bx, DieCause::Shell);
                         b.die_fall(ax);
                     }
                     (true, false) | (false, true) => {
                         let (s, v) = if a_slide { (a, b) } else { (b, a) };
                         let sx = s.x;
-                        v.die_fall(sx);
+                        v.die_by(sx, DieCause::Shell);
                         scores.push((Self::chain_score(s.chain), v.x, v.y + 24.0));
                         s.chain += 1;
                     }
@@ -3177,7 +3177,12 @@ impl World {
                 );
             if (star && a.kind != Kind::EnemyFire) || slide_hit || mega_hit {
                 let px = p.x;
-                self.actors[i].die_fall(px);
+                let cause = if star {
+                    DieCause::Star
+                } else {
+                    DieCause::Other
+                };
+                self.actors[i].die_by(px, cause);
                 let n = self.player.stomp_chain;
                 self.player.stomp_chain += 1;
                 self.add_score(Self::chain_score(n), ax, ay + 24.0);
@@ -3746,7 +3751,7 @@ impl World {
                     if a.kind.is_boss() {
                         a.boss_hit(crate::actors::BossAttack::Blast, bx);
                     } else {
-                        a.die_fall(bx);
+                        a.die_by(bx, DieCause::Blast);
                     }
                 }
             }
@@ -4195,7 +4200,7 @@ impl World {
                 if a.kind.is_v3() {
                     a.v3_tail_hit(px, reach.1);
                 } else {
-                    a.die_fall(px);
+                    a.die_by(px, DieCause::Tail);
                 }
                 hits += 1;
             }
@@ -4356,7 +4361,7 @@ impl World {
         for a in &mut self.actors {
             let in_view = a.x >= v.0 && a.x <= v.2 && a.y >= v.1 && a.y <= v.3;
             if a.kind.is_enemy() && a.alive() && (a.on_ground || (red && in_view)) {
-                a.die_fall(px);
+                a.die_by(px, DieCause::Quake);
             }
         }
         self.events.push(Event::Break);
@@ -4376,7 +4381,7 @@ impl World {
         let mut downs = 0;
         for a in &mut self.actors {
             if a.kind.is_enemy() && a.alive() && a.on_ground {
-                a.die_fall(px);
+                a.die_by(px, DieCause::Quake);
                 downs += 1;
             }
         }

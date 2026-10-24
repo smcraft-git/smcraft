@@ -339,7 +339,9 @@ Nextendo; `docs/nextendo-network-play.md`, spec `research/specs/network-play.md`
   terrain variants, effects)
 - 🔄 Sound: every object's sounds, mixer behaviour checked against the game's output · keys
   (`key_get`, `key_appear`), pink coins (the count's note, the last one's chord) and Burners
-  (`fire`) ✅; a container's child key is found by name (the 2D styles' pink coins) [inf]
+  (`fire`) ✅; a container's child key is found by name (the 2D styles' pink coins) [inf]; knock-outs
+  by what did it (`r_damage_star` / `_shell` / `_tail` / `_quake`, else `r_damage`; the sim records
+  the cause) ✅
 
 **G9 — Every platform** 🔄
 - 🔄 macOS (Swift app) · 🔄 iOS / iPadOS (built for the Simulator; the owner's iPad) · 🔄 Windows ·

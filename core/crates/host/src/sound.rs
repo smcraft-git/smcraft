@@ -26,7 +26,7 @@ use mmk_audio::links::{Layered, Play as Asset, PropList, PropValue, Rng, SoundDb
 use mmk_audio::mixer::{GroupDef, MusicClock, NO_GROUP, SET_BASE, SharedSet, SoundSet};
 use mmk_audio::{Bus, Command, Play, Sound};
 use mmk_sim::World;
-use mmk_sim::actors::{Kind, Mode};
+use mmk_sim::actors::{DieCause, Kind, Mode};
 use mmk_sim::player::Form;
 use mmk_sim::world::{Event, GoalPhase};
 
@@ -101,6 +101,7 @@ struct Snap {
     wings: bool,
     big: bool,
     phase: u8,
+    cause: DieCause,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1488,7 +1489,16 @@ impl Sounds {
                         todo.push((s.kind, "kick", PropList::default(), s.x, s.y));
                         *kicks += 1;
                     } else if prev.mode != Mode::DieFall && s.mode == Mode::DieFall {
-                        todo.push((prev.kind, "r_damage", props("Die", prev), s.x, s.y));
+                        // the knock-out's own sound by what did it (the style may lack it:
+                        // then plain r_damage)
+                        let key = match s.cause {
+                            DieCause::Star => "r_damage_star",
+                            DieCause::Shell => "r_damage_shell",
+                            DieCause::Tail => "r_damage_tail",
+                            DieCause::Quake => "r_damage_quake",
+                            DieCause::Fire | DieCause::Blast | DieCause::Other => "r_damage",
+                        };
+                        todo.push((prev.kind, key, props("Die", prev), s.x, s.y));
                         *downs += 1;
                     } else if s.mode == Mode::ShellSlide
                         && prev.mode == Mode::ShellSlide
@@ -1550,8 +1560,13 @@ impl Sounds {
                 self.sfx_at(world, &user, "r_shoot", &PropList::default(), e, 0);
                 continue;
             }
-            if !self.actor_sfx(world, kind, key, &props, x, y) && key == "r_damage_stamp" {
+            if self.actor_sfx(world, kind, key, &props, x, y) {
+                continue;
+            }
+            if key == "r_damage_stamp" {
                 self.generic_enemy(world, key);
+            } else if key.starts_with("r_damage_") {
+                self.actor_sfx(world, kind, "r_damage", &props, x, y);
             }
         }
     }
@@ -1733,6 +1748,7 @@ fn snapshot(world: &World) -> BTreeMap<u32, Snap> {
                     wings: a.wings,
                     big: a.big,
                     phase: a.phase,
+                    cause: a.die_cause,
                 },
             )
         })

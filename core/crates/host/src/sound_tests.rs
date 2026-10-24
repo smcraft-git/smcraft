@@ -8,7 +8,7 @@ use mmk_audio::mixer::{MusicClock, SET_BASE, SharedSet, shared_set};
 use mmk_audio::{Bus, Command, command_channel};
 use mmk_formats::audio::bwav::{self, BuildChannel, Codec};
 use mmk_sim::World;
-use mmk_sim::actors::{Actor, Kind, Mode};
+use mmk_sim::actors::{Actor, DieCause, Kind, Mode};
 use mmk_sim::player::Form;
 use mmk_sim::world::{Event, GoalPhase};
 use serde_json::json;
@@ -79,7 +79,9 @@ fn db() -> serde_json::Value {
             "M1_Kuribo": {"calls": [
                 {"key": "r_damage_stamp", "kind": "switch", "watch": "ScaleLevel", "children": [1, 2]},
                 {"key": "s_big", "parent": 0, "if": ["==", "Big"], "wave": "Split"},
-                {"key": "s_normal", "parent": 0, "if": ["==", "Normal"], "wave": "Stomp"}
+                {"key": "s_normal", "parent": 0, "if": ["==", "Normal"], "wave": "Stomp"},
+                asset("r_damage", "Down"),
+                asset("r_damage_star", "StarKill")
             ]},
             "M1_koura": {"calls": [asset("kick", "Kick")]},
             "M1_EditKuribo": {"calls": [asset("set", "EditSet"), asset("drag", "EditDrag")]}
@@ -244,6 +246,26 @@ fn stomps_and_kicks_come_from_the_actor_that_changed() {
         ["sfx:Split", "sfx:Kick"],
         "the big Goomba's stomp and the kick, once each"
     );
+}
+
+#[test]
+fn a_knock_out_sounds_by_what_did_it() {
+    let mut r = rig();
+    let mut w = world();
+    for (id, x) in [(7, 100.0), (8, 140.0)] {
+        let mut g = Actor::new(Kind::Goomba, x, 32.0);
+        g.id = id;
+        w.actors.push(g);
+    }
+    r.s.start_course(&w);
+    r.played();
+    // a star's knock-out has its own sound; a fireball's (no key of its own) the plain one
+    w.actors[0].die_by(0.0, DieCause::Star);
+    r.s.after_step(&w);
+    assert_eq!(r.played(), ["sfx:StarKill"]);
+    w.actors[1].die_by(0.0, DieCause::Fire);
+    r.s.after_step(&w);
+    assert_eq!(r.played(), ["sfx:Down"]);
 }
 
 #[test]

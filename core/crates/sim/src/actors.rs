@@ -604,8 +604,23 @@ pub enum Mode {
     Dead,
 }
 
+/// What knocked an actor out (its defeat sound: `r_damage_<cause>`, else `r_damage`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum DieCause {
+    #[default]
+    Other,
+    Fire,
+    Shell,
+    Star,
+    Tail,
+    Quake,
+    Blast,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Actor {
+    /// What knocked it out (DieFall), for its defeat sound.
+    pub die_cause: DieCause,
     pub kind: Kind,
     pub mode: Mode,
     pub x: f32,
@@ -698,6 +713,7 @@ pub struct Actor {
 impl Actor {
     pub fn new(kind: Kind, x: f32, y: f32) -> Self {
         Self {
+            die_cause: DieCause::Other,
             kind,
             mode: Mode::Normal,
             x,
@@ -1372,10 +1388,16 @@ impl Actor {
 
     /// Knock off (DieFall) away from `from_x`.
     pub fn die_fall(&mut self, from_x: f32) {
+        self.die_by(from_x, DieCause::Other);
+    }
+
+    /// Knock off (DieFall) away from `from_x`, by `cause`.
+    pub fn die_by(&mut self, from_x: f32, cause: DieCause) {
         let dir = if self.x < from_x { -1.0 } else { 1.0 };
         self.mode = Mode::DieFall;
         self.vx = DIE_SPEED * dir;
         self.vy = DIE_VY;
+        self.die_cause = cause;
     }
 
     /// Stomp reaction. Returns true if the actor took it (player bounces).
