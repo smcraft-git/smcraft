@@ -76,6 +76,8 @@ pub struct ChallengeFlow {
     pub intro: bool,
     /// The SMM2 menu's header instead of "100 Mario Challenge" (Challenge Modes' ZL / ZR hint).
     pub header: Option<String>,
+    /// The finished run's costume reward, announced after the ending.
+    reward: Option<String>,
 }
 
 /// What a step tells the owner.
@@ -271,6 +273,7 @@ impl ChallengeFlow {
             endless_handoff: None,
             intro: true,
             header: None,
+            reward: None,
         };
         f.make_menu();
         f
@@ -436,8 +439,15 @@ impl ChallengeFlow {
     }
 
     fn ending_finished(&mut self, cx: &mut Cx) {
+        let mut news = Vec::new();
+        if let Some(r) = self.reward.take() {
+            news.push(r);
+        }
         if let Some(u) = self.run.unlocked {
-            cx.toast(&format!("{} is now open!", DIFFICULTIES[u]));
+            news.push(format!("{} is now open!", DIFFICULTIES[u]));
+        }
+        if !news.is_empty() {
+            cx.toast(&news.join(" "));
         }
         self.back_to_select(cx);
     }
@@ -466,6 +476,7 @@ impl ChallengeFlow {
                 self.run.unlocked = self.run.challenge.take_unlock().map(|d| d as usize);
                 self.run.persist(cx);
                 self.report_complete(cx);
+                self.reward = award_costume(cx, self.run.difficulty);
                 if self.smm2() {
                     // an endless run has no ending in SMM2: the menu, with the news [departure]
                     let mut msg = format!(
@@ -475,6 +486,9 @@ impl ChallengeFlow {
                     );
                     if let Some(u) = self.run.unlocked {
                         msg += &format!(" {} is now open!", DIFFICULTIES[u]);
+                    }
+                    if let Some(r) = self.reward.take() {
+                        msg += &format!(" {r}");
                     }
                     cx.toast(&msg);
                     self.back_to_select(cx);
@@ -665,5 +679,86 @@ impl ChallengeFlow {
         if let Some(p) = &mut self.playing {
             p.debug(screen, cx, Some(&mut self.run));
         }
+    }
+}
+
+/// The setting with the costumes won in 100 Mario runs (ids, comma-separated).
+pub const OWNED_COSTUMES_KEY: &str = "costumes.owned";
+
+/// SMM1's Mystery Mushroom reward for a finished 100 Mario run (`difficulty` 0–3): the costume
+/// joins the owned set, and the words announcing it come back (None without the SMM1 import's
+/// costume table).
+fn award_costume(cx: &mut Cx, difficulty: usize) -> Option<String> {
+    use mmk_modes::hundred::{Difficulty, RewardNote, costume_reward};
+    let table = cx.host.costume_categories();
+    if table.is_empty() {
+        return None;
+    }
+    let mut owned: std::collections::BTreeSet<u16> = cx
+        .host
+        .load_value(OWNED_COSTUMES_KEY)
+        .unwrap_or_default()
+        .split(',')
+        .filter_map(|s| s.trim().parse().ok())
+        .collect();
+    let d = Difficulty::ALL[difficulty.min(3)];
+    let roll = cx.host.random();
+    let r = costume_reward(d, &table, &owned, roll);
+    let mut words = Vec::new();
+    if let Some(id) = r.costume {
+        owned.insert(id);
+        let list: Vec<String> = owned.iter().map(u16::to_string).collect();
+        cx.host.store_value(OWNED_COSTUMES_KEY, &list.join(","));
+        let name = cx
+            .host
+            .costumes()
+            .into_iter()
+            .find(|(i, _)| *i == id)
+            .map_or_else(|| format!("costume {id}"), |(_, n)| n);
+        words.push(format!("You got the {name} Mystery Mushroom costume!"));
+    }
+    match r.note {
+        Some(RewardNote::AllOwned) => words.push("You have every costume this level gives.".into()),
+        Some(RewardNote::TryAnotherLevel) => {
+            words.push("No costumes left at this level: try another one.".into())
+        }
+        None => {}
+    }
+    (!words.is_empty()).then(|| words.join(" "))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_finished_run_wins_a_costume_once() {
+        use crate::play::tests::{MockHost, with};
+        let mut host = MockHost {
+            costumes: vec![
+                (0, "Mario".into(), 1),
+                (7, "Peach".into(), 2),
+                (9, "Bowser".into(), 4),
+            ],
+            ..Default::default()
+        };
+        let mut saves = crate::host::Saves::default();
+        // Easy: Mario, the only category-1 costume; Normal still has Peach
+        let words = with(&mut host, &mut saves, |cx| award_costume(cx, 0)).unwrap();
+        assert!(words.contains("Mario"), "{words}");
+        assert!(words.contains("try another"), "{words}");
+        assert_eq!(host.values[OWNED_COSTUMES_KEY], "0");
+        let words = with(&mut host, &mut saves, |cx| award_costume(cx, 1)).unwrap();
+        assert!(
+            words.contains("Peach") && words.contains("every costume"),
+            "{words}"
+        );
+        assert_eq!(host.values[OWNED_COSTUMES_KEY], "0,7");
+        // nothing left (Bowser is amiibo-only)
+        let words = with(&mut host, &mut saves, |cx| award_costume(cx, 3)).unwrap();
+        assert!(!words.contains("You got"), "{words}");
+        // without the SMM1 import: no reward at all
+        let mut bare = MockHost::default();
+        assert_eq!(with(&mut bare, &mut saves, |cx| award_costume(cx, 3)), None);
     }
 }

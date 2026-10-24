@@ -1142,6 +1142,8 @@ pub(crate) mod tests {
         pub library: Vec<CourseEntry>,
         /// Each step counts `restart_in` down while dying (and ends the death at 0).
         pub death_clock: bool,
+        /// SMM1 costumes: (id, name, reward category).
+        pub costumes: Vec<(u16, String, u8)>,
         /// Course Maker: still views shown, courses saved (id given, data), test plays.
         pub shows: u32,
         pub saved: Vec<(Option<String>, Vec<u8>)>,
@@ -1170,6 +1172,15 @@ pub(crate) mod tests {
             false
         }
         fn unload_course(&mut self) {}
+        fn costumes(&mut self) -> Vec<(u16, String)> {
+            self.costumes
+                .iter()
+                .map(|(i, n, _)| (*i, n.clone()))
+                .collect()
+        }
+        fn costume_categories(&mut self) -> Vec<(u16, u8)> {
+            self.costumes.iter().map(|(i, _, c)| (*i, *c)).collect()
+        }
         fn step_course(&mut self, _: Option<u32>) {
             self.steps += 1;
             if self.death_clock && self.status.dying {

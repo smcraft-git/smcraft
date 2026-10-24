@@ -939,6 +939,10 @@ impl Host for ShellHost<'_> {
         self.game.cache.costumes()
     }
 
+    fn costume_categories(&mut self) -> Vec<(u16, u8)> {
+        self.game.cache.costume_categories()
+    }
+
     fn set_course_world(&mut self, source: &str) -> bool {
         self.data.backend = Backend::from_setting(
             Some(source),

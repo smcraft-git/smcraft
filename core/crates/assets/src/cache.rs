@@ -317,6 +317,20 @@ impl Cache {
             .collect()
     }
 
+    /// Every SMM1 costume's reward category (the costume table's `Rare`; with or without art).
+    pub fn costume_categories(&self) -> Vec<(u16, u8)> {
+        self.merged
+            .iter()
+            .chain(std::iter::once(&self.manifest))
+            .filter(|m| m["kind"] == "smm1-sprites")
+            .flat_map(|m| m["costumes"].as_array().cloned().unwrap_or_default())
+            .filter_map(|c| {
+                let id = u16::try_from(c["id"].as_u64()?).ok()?;
+                Some((id, u8::try_from(c["rare"].as_u64()?).ok()?))
+            })
+            .collect()
+    }
+
     /// Index of a texture by model and texture name.
     pub fn texture_index(&self, model: &str, name: &str) -> Option<usize> {
         self.by_name

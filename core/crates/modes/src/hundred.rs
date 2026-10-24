@@ -255,9 +255,100 @@ impl Run {
     }
 }
 
+/// What finishing a 100 Mario run awards besides the ending (SMM1's Mystery Mushroom reward,
+/// smm1-100mario-code.md §7; 100 Mario only, never 10 Mario).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CostumeReward {
+    /// The costume won, if any was left to win.
+    pub costume: Option<u16>,
+    /// The note that follows when this level's pool is (now) empty.
+    pub note: Option<RewardNote>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RewardNote {
+    /// Every costume any level gives is owned ("all costumes at this level", Msg_0052).
+    AllOwned,
+    /// This level has none left, a harder one still does ("try changing the level", Msg_0051).
+    TryAnotherLevel,
+}
+
+/// Costume categories a level's reward draws from: categories 1 (Easy), 2 (Normal), 3 (Expert)
+/// and 6 (Super Expert) up to the level's own; 0, 4, 5 and 7 never come from 100 Mario [obs
+/// 0x021f2428].
+fn rewardable(category: u8, d: Difficulty) -> bool {
+    let ceiling = match d {
+        Difficulty::Easy => 1,
+        Difficulty::Normal => 2,
+        Difficulty::Expert => 3,
+        Difficulty::SuperExpert => 6,
+    };
+    !matches!(category, 0 | 4 | 5 | 7) && category <= ceiling
+}
+
+/// SMM1's reward pick: among the costumes of `table` (id, category) not in `owned` whose
+/// category the level draws from, one chosen uniformly by `roll`. With fewer than two
+/// candidates the pool is empty afterwards, and a note says whether any level still has one.
+pub fn costume_reward(
+    d: Difficulty,
+    table: &[(u16, u8)],
+    owned: &std::collections::BTreeSet<u16>,
+    roll: u64,
+) -> CostumeReward {
+    let candidates: Vec<u16> = table
+        .iter()
+        .filter(|&&(id, c)| !owned.contains(&id) && rewardable(c, d))
+        .map(|&(id, _)| id)
+        .collect();
+    let costume =
+        (!candidates.is_empty()).then(|| candidates[(roll % candidates.len() as u64) as usize]);
+    let note = (candidates.len() < 2).then(|| {
+        let any_left = table.iter().any(|&(id, c)| {
+            Some(id) != costume && !owned.contains(&id) && matches!(c, 1 | 2 | 3 | 6)
+        });
+        if any_left {
+            RewardNote::TryAnotherLevel
+        } else {
+            RewardNote::AllOwned
+        }
+    });
+    CostumeReward { costume, note }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn costume_rewards_follow_smm1s_pools() {
+        use std::collections::BTreeSet;
+        // (id, category): one Easy, two Normal, an Expert, a Super Expert, an amiibo-only (4)
+        let table = [(0, 1), (1, 2), (2, 2), (3, 3), (4, 6), (5, 4)];
+        let none = BTreeSet::new();
+        // Easy draws only category 1, and that was the last Easy one
+        let r = costume_reward(Difficulty::Easy, &table, &none, 7);
+        assert_eq!(r.costume, Some(0));
+        assert_eq!(r.note, Some(RewardNote::TryAnotherLevel));
+        // Normal draws Easy and Normal costumes, uniformly by the roll
+        let got: BTreeSet<u16> = (0..9)
+            .filter_map(|roll| costume_reward(Difficulty::Normal, &table, &none, roll).costume)
+            .collect();
+        assert_eq!(got, BTreeSet::from([0, 1, 2]));
+        // Super Expert draws every pool but never category 4; the last one left says so
+        let owned = BTreeSet::from([0, 1, 2, 3]);
+        let r = costume_reward(Difficulty::SuperExpert, &table, &owned, 3);
+        assert_eq!(r.costume, Some(4));
+        assert_eq!(r.note, Some(RewardNote::AllOwned));
+        let owned = BTreeSet::from([0, 1, 2, 3, 4]);
+        let r = costume_reward(Difficulty::Expert, &table, &owned, 0);
+        assert_eq!(
+            r,
+            CostumeReward {
+                costume: None,
+                note: Some(RewardNote::AllOwned)
+            }
+        );
+    }
 
     fn course(id: u32) -> CourseRef {
         CourseRef {

@@ -539,6 +539,11 @@ pub trait Host {
     fn costumes(&mut self) -> Vec<(u16, String)> {
         Vec::new()
     }
+    /// Every SMM1 costume's reward category (id, category), for 100 Mario's Mystery Mushroom
+    /// reward; empty without the SMM1 import (no reward then).
+    fn costume_categories(&mut self) -> Vec<(u16, u8)> {
+        Vec::new()
+    }
     /// Course World's source changed on the Mods page (`tgrcode`, `server`, `library`): use
     /// it from now on. False: the host can't switch (it applies at the next start).
     fn set_course_world(&mut self, _source: &str) -> bool {
