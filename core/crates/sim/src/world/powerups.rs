@@ -589,7 +589,7 @@ impl World {
             let tx = ((px + crate::player::SWORD_REACH * f) / TILE).floor() as i32;
             let ty = ((py + 8.0) / TILE).floor() as i32;
             if self.blocks.get(tx, ty).is_some_and(|b| b.bump.is_none()) {
-                self.hit_block(tx, ty, true, HitPower::Break);
+                self.hit_block_from(tx, ty, true, HitPower::Break, true);
             }
         }
     }

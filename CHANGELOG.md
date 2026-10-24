@@ -44,6 +44,7 @@ SMCraft is back in development (it was archived in October 2026).
   pass underneath (a Spiny's shell keeps its spikes and it walks out again later).
 - **Boo Buddies in a block** come out as a circle of Boos spreading round the block; a part in a
   block keeps its other form (a lit Bob-omb, a Sledge Bro, a fast Spike Top …).
+- Fix: a note block bounced out of view keeps what it holds for a later bounce, as in SMM2.
 - Fix: Munchers hurt on a wall sensor's touch, as in SMM2 (a one-tile gap between Munchers is as
   tight as in the game).
 - **The Course Maker**: SMM2's own maker screens (part palette and part window, styles, themes,

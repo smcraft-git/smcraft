@@ -2747,8 +2747,20 @@ impl World {
 
     /// A hit on a block from below or above by the player or a shell.
     fn hit_block(&mut self, tx: i32, ty: i32, from_below: bool, power: HitPower) {
+        self.hit_block_from(tx, ty, from_below, power, false);
+    }
+
+    /// A block hit; `side`: from the side (a shell, a tail or a sword's tip), which lets a note
+    /// block give its contents even out of view (blocks.rs, the Note arm).
+    fn hit_block_from(&mut self, tx: i32, ty: i32, from_below: bool, power: HitPower, side: bool) {
         let (bx, by) = blocks::origin(tx, ty);
-        match self.blocks.hit(tx, ty, from_below, power) {
+        let (cx, cy) = (self.camera_x, self.camera_y);
+        let seen = side
+            || (bx + 8.0 >= cx
+                && bx - 8.0 <= cx + VIEW_W
+                && by + 8.0 >= cy
+                && by - 8.0 <= cy + VIEW_H);
+        match self.blocks.hit(tx, ty, from_below, power, seen) {
             HitResult::Nothing => {}
             HitResult::Broke => {
                 self.level.set(tx, ty, Cell::Empty);
@@ -3086,7 +3098,7 @@ impl World {
             }
         }
         for (tx, ty) in hits {
-            self.hit_block(tx, ty, true, HitPower::Break);
+            self.hit_block_from(tx, ty, true, HitPower::Break, true);
         }
     }
 
@@ -4781,7 +4793,7 @@ impl World {
             };
             let tx = ((self.player.x + side as f32 * reach) / TILE).floor() as i32;
             if self.blocks.get(tx, ty).is_some_and(|b| b.bump.is_none()) {
-                self.hit_block(tx, ty, true, HitPower::Break);
+                self.hit_block_from(tx, ty, true, HitPower::Break, true);
             }
         }
     }

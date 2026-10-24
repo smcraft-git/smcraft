@@ -55,7 +55,9 @@ sway, importer and pack 12, the dev cache already at v12).
   "v3.0.3 check": placed upside down — 58 in the sample — or out of a down pipe at normal size,
   they walk the ceiling and drop as their shells on a player below; Togezo Basic 0x7102913c70);
   ✅ Boo Buddies out of a block (TeresaSpread Block Out 0x71029106e0: the circle spreads round the
-  block; 41-boo.md); a block's part keeps its 0x4 form (lit Bob-omb, Sledge Bro …); the Super World map's ledge cliffs (field atlas
+  block; 41-boo.md); a block's part keeps its 0x4 form (lit Bob-omb, Sledge Bro …); ✅ note blocks'
+  contents rule checked (v3.0.3 0x710138f990, 23-note-block.md: given at bump start on a side hit
+  or when the block is in a camera view, else kept for a later bump); the Super World map's ledge cliffs (field atlas
   rows 6–7), map ghosts, the goal's AppearGoalPoint / cannon and Passable states, the map music
   (branch `swmap` drew the map with the game's models); ✅ the Cursed Key and Phanto (2026-10-25,
   research 95-key.md; co-op: Phanto hurts only the player in front [inf]); ✅ SMM1 UI sounds for
@@ -110,7 +112,7 @@ sway, importer and pack 12, the dev cache already at v12).
      Bubble, MapObj = Item, Hacchin = CloudShot; the red blaster's 320-frame lock-out; Bullet
      Bill at the muzzle's height), Parachute swing direction and wall hold. Left: liquid
      variants (Kuribo / Pukupuku / Bubble / FishBone / Hanachan / RedPataPata in water), Block
-     sideways (multiplayer) spreads and note blocks' contents, Gesso3W / Hanachan / FishBone /
+     sideways (multiplayer) spreads and ✅ note blocks' contents, Gesso3W / Hanachan / FishBone /
      ✅ TeresaSpread Block Out, KutsuKuribo, ✅ Togezo's ceiling mode, the winged coin's own pipe
      state 8, ✅ Bubble / Thwomp / Porcupuffer / Wiggler / Cheep Cheep own Parachute Falls, the
      parachute body sway (drawn), DokanOutBig's 0.5 → 0.7 scale and other draw-only scales;
