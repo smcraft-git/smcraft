@@ -153,7 +153,7 @@ pub fn run_all(course: &[u8], script: &[Input], start: &Start) -> Result<(String
 // Physics test courses
 
 pub const STYLES: [&str; 5] = ["M1", "M3", "MW", "WU", "3W"];
-pub const KINDS: [&str; 25] = [
+pub const KINDS: [&str; 26] = [
     "flat",
     "wall",
     "slope",
@@ -179,12 +179,13 @@ pub const KINDS: [&str; 25] = [
     "cpipeg",
     "mushstart",
     "cpipev",
+    "cpiped",
 ];
 
 /// Kinds made in SMB1 only (the terrain they test is the same in every style).
 const M1_ONLY: [&str; 2] = ["slopejoin", "mushstart"];
 /// Kinds made in 3D World only (clear pipes are a 3D World part).
-const W3_ONLY: [&str; 3] = ["cpipe", "cpipeg", "cpipev"];
+const W3_ONLY: [&str; 4] = ["cpipe", "cpipeg", "cpipev", "cpiped"];
 
 /// Where the items / form courses keep their power-up: the ? block's tile column and its row
 /// above the floor (the capture walks there first; no test script gets that far).
@@ -530,6 +531,21 @@ pub fn build_course(name: &str) -> Result<Vec<u8>, String> {
             let slot = e.clear_pipes().last().map(|p| p.0).ok_or("no pipe")?;
             e.draw_clear_pipe(slot, mmk_editor::clearpipe::PipeEnd::End, (8, 10))
                 .map_err(err)?;
+        }
+        "cpiped" => {
+            // a clear pipe from a downward mouth 3 tiles over the floor at x 7–8 (in with Up held
+            // in a jump): up, a bend right, a bend down, out of a downward mouth at x 11–12 onto
+            // the floor; a Super Mushroom at x 18 walking right into the side mouth of a straight
+            // pipe at x 20..23
+            floor(&mut e, 0, len - 1)?;
+            use mmk_formats::smm2::clear_pipe::Dir;
+            let slot = e.place_clear_pipe((8, 5), Dir::Up).map_err(err)?;
+            for t in [(7, 7), (9, 8), (10, 8), (11, 7), (11, 5)] {
+                e.draw_clear_pipe(slot, mmk_editor::clearpipe::PipeEnd::End, t)
+                    .map_err(err)?;
+            }
+            clear_pipe(&mut e, (20, 3), &[(23, 2)])?;
+            e.place(20, 18, up(1)).map_err(err)?;
         }
         "cpipeg" => {
             // a Goomba at x 22 walking left into the right mouth of a straight 8-tile pipe at

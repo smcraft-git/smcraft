@@ -262,8 +262,6 @@ pub struct ClearPipes {
     left_at: Option<u64>,
     /// This tick's sound cues (cleared with the events).
     pub cues: Vec<Cue>,
-    /// Out of a downward mouth (x, y): the body starts inside the pipe's last tiles.
-    drop: Option<(f32, f32)>,
     /// The player came out this frame: its own update runs on, without input.
     pub(super) out_step: bool,
 }
@@ -563,9 +561,13 @@ impl World {
             }
         }
         if t.leg == Some(Leg::Down) {
+            // out of a downward mouth the head is set at the mouth, the body below the pipe
+            // [obs: Ryujinx trace X_cpiped: small, out of a mouth at y 80 with the feet at 64.1,
+            // then that frame's fall step]
             let pts = &self.level.clear_pipe_paths.pipes[t.pipe];
             let end = if t.back { pts[0] } else { pts[pts.len() - 1] };
-            self.cpipe.drop = Some(end);
+            let head = p.sensors().head_y;
+            p.y = end.1 - head;
         }
         self.cpipe.player = None;
         self.cpipe.left_at = Some(self.tick);
@@ -581,43 +583,6 @@ impl World {
         // its speed still 0]
         self.cpipe.out_step = true;
         false
-    }
-
-    /// Before the player's own update: out of a downward mouth, the body starts inside the
-    /// pipe's last tiles; the game's terrain sensors meet faces, not insides, so nothing pushes
-    /// it until it has dropped clear [inf: the BG check is by edges]. The mouth's cells within
-    /// the body are lifted for the update (`clear_pipe_unlift` puts them back).
-    pub(super) fn clear_pipe_lift(&mut self) -> Vec<(i32, i32)> {
-        let Some((mx, my)) = self.cpipe.drop else {
-            return Vec::new();
-        };
-        let p = &self.player;
-        let head = p.y + p.sensors().head_y;
-        if head <= my || p.control != Control::Normal {
-            self.cpipe.drop = None;
-            return Vec::new();
-        }
-        let (c0, r0, r1) = (
-            (mx / 16.0) as i32 - 1,
-            (my / 16.0) as i32,
-            (head / 16.0) as i32,
-        );
-        let mut lifted = Vec::new();
-        for tx in c0..c0 + 2 {
-            for ty in r0..=r1 {
-                if self.level.cell(tx, ty).is_solid() {
-                    self.level.set(tx, ty, crate::level::Cell::Empty);
-                    lifted.push((tx, ty));
-                }
-            }
-        }
-        lifted
-    }
-
-    pub(super) fn clear_pipe_unlift(&mut self, lifted: Vec<(i32, i32)>) {
-        for (tx, ty) in lifted {
-            self.level.set(tx, ty, crate::level::Cell::Solid);
-        }
     }
 
     /// The player's drawn pose inside: centred on the path (the sprite's origin is the feet),
@@ -1133,13 +1098,15 @@ mod tests {
         run_until(&mut w, 0, 10, |w| w.player.on_ground);
         assert_eq!(w.player.y, 208.0, "stands on the mouth");
         run_until(&mut w, input::DOWN, 5, |w| w.cpipe.player.is_some());
-        // heading down: rolled −90° (facing right), lets go 8 px under the mouth
+        // heading down: rolled −90° (facing right), lets go with the head at the mouth and a
+        // fall step
         w.step(hold(0));
         assert_eq!(w.cpipe.player.unwrap().roll, 0xc000_0000);
         run_until(&mut w, 0, 60, |w| w.cpipe.player.is_none());
         assert_eq!(w.player.x, 176.0);
+        let head = w.player.sensors().head_y;
         assert!(
-            (w.player.y - (112.0 - 8.1 - 0.25)).abs() < 1e-4,
+            (w.player.y - (112.0 - head - 0.25)).abs() < 1e-4,
             "{}",
             w.player.y
         );
