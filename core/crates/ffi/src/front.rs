@@ -952,11 +952,13 @@ impl Host for FfiHost {
         crate::decode_course_data(&bytes, Some(self.assets())).map(|(d, _)| d)
     }
 
-    fn part_icon(&mut self, style: &str, part: i16, _flags: u32) -> Option<mmk_front::Icon> {
-        mmk_host::icon::part_icon(&self.assets().cache, style, part).map(|i| mmk_front::Icon {
-            width: i.width,
-            height: i.height,
-            rgba: i.rgba,
+    fn part_icon(&mut self, style: &str, part: i16, flags: u32) -> Option<mmk_front::Icon> {
+        mmk_host::icon::part_icon(&self.assets().cache, style, part, flags).map(|i| {
+            mmk_front::Icon {
+                width: i.width,
+                height: i.height,
+                rgba: i.rgba,
+            }
         })
     }
 

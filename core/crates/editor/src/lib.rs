@@ -9,6 +9,7 @@
 //! 1/10 px, default flags 0x06000040. Everything written here was checked against how the 550
 //! sample courses encode the same thing (research/specs/maker.md, private).
 
+pub mod attr;
 pub mod autotile;
 pub mod links;
 pub mod parts;
@@ -326,6 +327,9 @@ impl Editor {
         let Some(o) = self.object(index) else { return };
         let caps = parts::caps(o.id);
         if (bits & 0x2 != 0 && !caps.wings) || (bits & 0x8000 != 0 && !caps.parachute) {
+            return;
+        }
+        if bits & 0x8000 != 0 && o.flags & attr::NO_PARACHUTE != 0 {
             return;
         }
         if bits & 0x4 != 0 && parts::forms(o.id) < 2 {

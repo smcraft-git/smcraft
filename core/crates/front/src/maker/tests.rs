@@ -788,3 +788,150 @@ fn the_maker_plays_its_music_and_the_parts_sounds() {
     with(&mut host, &mut saves, |cx| m.leave(cx.host));
     assert_eq!(host.music[n..], [None]);
 }
+
+/// Hold confirm on the part under the cursor for `ticks` ticks (the press, then held).
+fn hold_on_part(m: &mut MakerFlow, host: &mut MockHost, saves: &mut Saves, ticks: i32) {
+    run(m, host, saves, press(Buttons::CONFIRM));
+    for _ in 0..ticks {
+        run(m, host, saves, held(Buttons::CONFIRM));
+    }
+}
+
+#[test]
+fn holding_a_part_still_opens_its_balloon_and_wings_and_a_parachute_go_on() {
+    let (mut host, mut saves) = (MockHost::default(), Saves::default());
+    let mut m = maker(&mut host, &mut saves, MakerStart::New("M1".into()));
+    let g = m.editor.place(0, 12, 3).unwrap();
+    m.cur = (12, 3);
+    // a short hold is still a pick-up
+    hold_on_part(&mut m, &mut host, &mut saves, 5);
+    assert!(m.carrying() && m.attr_options_shown().is_none());
+    // held still long enough: the balloon, with the Goomba's attributes
+    for _ in 0..attr::HOLD {
+        run(&mut m, &mut host, &mut saves, held(Buttons::CONFIRM));
+    }
+    let shown = m.attr_options_shown().expect("the balloon is open");
+    use mmk_editor::attr::Attr;
+    assert_eq!(
+        shown,
+        [
+            Attr::Form(false),
+            Attr::Form(true),
+            Attr::Big(true),
+            Attr::Wings(true),
+            Attr::Parachute(true)
+        ]
+    );
+    assert!(!m.carrying(), "the hold no longer carries the part");
+    // the press ends (choosing nothing), right twice from the first new choice (the other
+    // form) to the wings, confirm
+    run(&mut m, &mut host, &mut saves, idle());
+    assert!(
+        m.attr_options_shown().is_some(),
+        "still open after the release"
+    );
+    host.edit_sounds.clear();
+    run(&mut m, &mut host, &mut saves, press(Buttons::RIGHT));
+    run(&mut m, &mut host, &mut saves, press(Buttons::RIGHT));
+    run(&mut m, &mut host, &mut saves, press(Buttons::CONFIRM));
+    run(&mut m, &mut host, &mut saves, idle());
+    assert!(m.attr_options_shown().is_none(), "the choice closes it");
+    let f = m.editor.object(g).unwrap().flags;
+    assert_eq!(f & 0x2, 0x2, "winged");
+    assert_eq!(f & 0x8004, 0, "nothing else changed");
+    assert!(
+        host.edit_sounds
+            .iter()
+            .any(|(u, k)| u == "M1_EditKuribo" && k == "voice_getWing"),
+        "{:?}",
+        host.edit_sounds
+    );
+    // again: now it offers the wings off and the parachute on; back closes without a change
+    hold_on_part(&mut m, &mut host, &mut saves, attr::HOLD);
+    let shown = m.attr_options_shown().unwrap();
+    assert!(shown.contains(&Attr::Wings(false)) && shown.contains(&Attr::Parachute(true)));
+    run(&mut m, &mut host, &mut saves, idle());
+    run(&mut m, &mut host, &mut saves, press(Buttons::BACK));
+    assert!(m.attr_options_shown().is_none());
+    assert_eq!(m.editor.object(g).unwrap().flags, f);
+    // the parachute (the last button)
+    hold_on_part(&mut m, &mut host, &mut saves, attr::HOLD);
+    run(&mut m, &mut host, &mut saves, idle());
+    for _ in 0..4 {
+        run(&mut m, &mut host, &mut saves, press(Buttons::RIGHT));
+    }
+    run(&mut m, &mut host, &mut saves, press(Buttons::LEFT));
+    host.edit_sounds.clear();
+    run(&mut m, &mut host, &mut saves, press(Buttons::CONFIRM));
+    run(&mut m, &mut host, &mut saves, idle());
+    assert_eq!(m.editor.object(g).unwrap().flags & 0x8002, 0x8002);
+    assert!(
+        host.edit_sounds
+            .iter()
+            .any(|(u, k)| u == "M1_EditKuribo" && k == "p_EquipPara")
+    );
+    // one undo step takes the parachute off again, another the wings
+    run(&mut m, &mut host, &mut saves, keys(keys::UNDO));
+    run(&mut m, &mut host, &mut saves, idle());
+    assert_eq!(m.editor.object(g).unwrap().flags & 0x8002, 0x2);
+    run(&mut m, &mut host, &mut saves, keys(keys::UNDO));
+    run(&mut m, &mut host, &mut saves, idle());
+    assert_eq!(m.editor.object(g).unwrap().flags & 0x8002, 0);
+}
+
+#[test]
+fn the_balloon_offers_only_what_the_part_can_carry() {
+    use mmk_editor::attr::Attr;
+    let (mut host, mut saves) = (MockHost::default(), Saves::default());
+    let mut m = maker(&mut host, &mut saves, MakerStart::New("M1".into()));
+    // a Hard Block: wings, no parachute
+    m.editor.place(6, 12, 3).unwrap();
+    m.cur = (12, 3);
+    hold_on_part(&mut m, &mut host, &mut saves, attr::HOLD);
+    assert_eq!(m.attr_options_shown(), Some(vec![Attr::Wings(true)]));
+    run(&mut m, &mut host, &mut saves, idle());
+    run(&mut m, &mut host, &mut saves, press(Buttons::BACK));
+    // a Goomba on a track: the parachute is offered greyed, and refused
+    let g = m.editor.place(0, 20, 3).unwrap();
+    m.editor.set_flags(g, DEFAULT_FLAGS | 0x400);
+    m.cur = (20, 3);
+    hold_on_part(&mut m, &mut host, &mut saves, attr::HOLD);
+    let opts = m.editor.attr_options(g);
+    let para = opts
+        .iter()
+        .find(|o| o.attr == Attr::Parachute(true))
+        .unwrap();
+    assert!(!para.enabled);
+    assert!(
+        opts.iter()
+            .any(|o| o.attr == Attr::Wings(true) && o.enabled)
+    );
+    run(&mut m, &mut host, &mut saves, idle());
+    // from the first new choice (the other form) to the last
+    for _ in 0..3 {
+        run(&mut m, &mut host, &mut saves, press(Buttons::RIGHT));
+    }
+    run(&mut m, &mut host, &mut saves, press(Buttons::CONFIRM));
+    assert!(
+        m.attr_options_shown().is_some(),
+        "a greyed choice keeps it open"
+    );
+    assert_eq!(m.editor.object(g).unwrap().flags & 0x8000, 0);
+    run(&mut m, &mut host, &mut saves, press(Buttons::BACK));
+    // a part with nothing to choose (24: one form, no wings, no parachute, no big size): the
+    // hold just carries it
+    let n = m.editor.place(24, 30, 3).unwrap();
+    assert!(m.editor.attr_options(n).is_empty());
+    m.cur = (30, 3);
+    hold_on_part(&mut m, &mut host, &mut saves, attr::HOLD + 4);
+    assert!(m.attr_options_shown().is_none() && m.carrying());
+    run(&mut m, &mut host, &mut saves, idle());
+    // moving while held is a carry, never a balloon
+    m.cur = (12, 3);
+    run(&mut m, &mut host, &mut saves, press(Buttons::CONFIRM));
+    m.cur = (13, 3);
+    for _ in 0..attr::HOLD + 4 {
+        run(&mut m, &mut host, &mut saves, held(Buttons::CONFIRM));
+    }
+    assert!(m.attr_options_shown().is_none() && m.carrying());
+}

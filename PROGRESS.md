@@ -185,10 +185,26 @@ sway, importer and pack 12, the dev cache already at v12).
   - ✅ dragging the start (its height) and the goal (its height, the course's length);
     stretching parts by their right column / top row; multigrab (select, carry, copy, erase);
     the sub-area turns vertical from the scroll bar
+  - ✅ wings and parachutes (2026-10-24; `research/specs/maker.md` C10, from the v3.0.3 binary:
+    there is no Wing / Parachute part): a placed part held still for 16 ticks opens its
+    attribute balloon `Edit_BalloonPartsChange_00` over it (turned away from the screen's
+    edges) — its forms (the current one checked), big / small, wings on / off, parachute on /
+    off, each button the part's picture as the choice would make it (`Host::part_icon` with
+    flags), greyed when a part limit forbids it; d-pad / confirm / back or taps. Editor core
+    `mmk_editor::attr` (`attr_options`, `apply_attr`, `set_wings`, `set_parachute`): wings and
+    parachutes only on parts that can carry them, no parachute on a part riding a Clown Car,
+    track or Lakitu's Cloud or stacked (the game's 0x31600 mask), limits re-checked (a winged
+    block counts with the enemies). Sounds `voice_getWing` / `lose_wing` / `p_EquipPara` /
+    `p_RemovePara` / `scaleChange` / `p_AttributeChange` + the balloon's UI keys. Wings drawn
+    on winged actors in the maker's view, its icons and play (`Enemy_wingcommon`, flapping
+    while they move); parachutes were drawn already. One undo step per choice.
+    ⬜ multigrab selections (the game applies the choice to every selected part), the "what is
+    inside" balloon with its dummy wings / parachute, wings on the NSMBU / 3D World models
+    (their own textures; SMB1 art stands in), parts that drop wings / parachute with their
+    other form (vtables not resolved), winged Bill Blasters in play
   - ⬜ custom autoscroll and its nodes, water level, the sub-area set-up window, the vertical
-    scroll bar, the part variants balloon (Fast Conveyor …), wings / parachutes / tracks /
-    doors' partners placed by hand, pipes turned by their mouth, the trash can, Mario's Trail,
-    co-op making
+    scroll bar, the part variants balloon (Fast Conveyor …), tracks / doors' partners placed
+    by hand, pipes turned by their mouth, the trash can, Mario's Trail, co-op making
   - ✅ maker music and part sounds (2026-10-24; `research/specs/maker.md` C9): the style's
     `BGM_<Theme>_Edit` for the area's theme while editing (a theme / style switch changes it,
     test play stops it before the course's own starts, back it plays again, leaving the maker
