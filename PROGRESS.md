@@ -37,8 +37,11 @@ sway, importer and pack 12, the dev cache already at v12).
      table (ramps ready), NSMBU's background lighting.
   2. Maker: ✅ wings / parachutes (the attribute balloon, merged 2026-10-24), ✅ over a multigrab
      selection (hold a selected part: wings / parachute go to every part that takes them, one
-     undo step); left: NSMBU / 3D World wing art, the contents balloon's dummies; tracks and
-     links.
+     undo step); a part put into a block keeps its wings / parachute / form / size as the
+     contents' flags ✅; left: play side — a winged / parachuted item coming out of a block
+     (`blocks::Contents` keeps only the 0x4 form; its behaviour wants the binary), NSMBU / 3D
+     World wing art, the contents balloon (`Edit_BalloonPartsIn_00`, state `cDispInParts`: not
+     built at all); tracks and links.
   3. Co-op: a players screen in SMM2's layouts; the P-door hold for followers.
   4. Super Worlds' 3D map and Toad Houses; airship sway; the colour table; NSMBU / 3D World pixels.
   5. iPad / Android device runs; the macOS package; live Network Play once the ID and key arrive.
