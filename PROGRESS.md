@@ -357,8 +357,13 @@ Nextendo; `docs/nextendo-network-play.md`, spec `research/specs/network-play.md`
   31–77 before: the start sign 3× too big — a model without an SMB1 picture is drawn at its own
   size —, Mini Mario's face / eyes / hands misplaced — parts in files of their own are modelled
   in the model's axes —, Mini Mario stretched by Mario's animations — retargeted, its own rest
-  translations). Left in 3D World: the background lighting (ours too dark / blue), the ground's
-  texture (pebbled dirt, ours flat stripes), the player's turn angle. Done since the revival: start sign, 2D drop
+  translations). Left in 3D World, measured (mean RGB, ref vs ours, 3W ground): the sky top
+  (67, 105, 218) vs (204, 213, 253) — our sky-material model is wrong (desert's comes out green);
+  the field's dirt too dark (185, 167, 47) vs (140, 112, 51); the far scenery too blue (109, 152,
+  146) vs (69, 115, 176) — the distance fogs too strong or the wrong colour. Halving the exposure
+  made everything worse (not overexposure). Next: the sky material and the light-map lighting
+  from the game's shaders / `bagllmap` data; the ground's texture (pebbled dirt, ours flat
+  stripes); the player's turn angle (ours more side-on). Done since the revival: start sign, 2D drop
   shadow (wgpu + Swift), animated blocks / coins (importer 10), night darkness (importer 12, wgpu
   + Swift), SceneDB backdrops for every style and night, night field art, airship sway and sky
   drift. Open: the final colour table (every pixel 1–2 levels off: ramp backdrops ready in
