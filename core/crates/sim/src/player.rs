@@ -463,6 +463,8 @@ pub struct Player {
     /// tail's air mode since the first flap or wag of this air time (+0x488 bit 15).
     tail_flying: bool,
     flap_again: bool,
+    /// The cape glide ended into Fall this frame (no float on Fall's first frame).
+    cape_fall_start: bool,
     /// The attack counter at the start of this frame's countdown and of the last frame's.
     attack_start: i32,
     prev_attack: i32,
@@ -678,6 +680,7 @@ impl Player {
             tail_flying: false,
             tail_state: 0,
             attack_start: 0,
+            cape_fall_start: false,
             prev_attack: 0,
             flap_again: false,
             tail_air: false,
@@ -1868,6 +1871,7 @@ impl Player {
                 }
             }
         }
+        let cape_fall_start = std::mem::take(&mut self.cape_fall_start);
         // raccoon flaps (vy 1.5, no gravity, 18 frames) and slow fall (≥ −1.0, 15 frames); the
         // cape glides (≥ −1.0) while jump is held
         if !self.on_ground && !self.in_water {
@@ -1896,6 +1900,7 @@ impl Player {
                 && jump
                 && self.vy < 0.0
                 && !(self.prev_attack == 1 && self.attack == 0)
+                && !cape_fall_start
             {
                 // (the frame an air cape spin ends is Fall's first, whose begin sets max fall
                 // −4: no float that frame [obs: Ryujinx trace MW_form cape_spin_air])
@@ -2661,11 +2666,17 @@ impl Player {
                     self.cape = if self.vy > 0.0 {
                         CapeState::Rise(0)
                     } else if run {
+                        // (MantFlying's enter zeroes the air accel: this frame's air move is
+                        // undone; the cape object's update runs on the entry frame too: its
+                        // 8-frame step count is already 7 at the next [obs v3.0.3 0x71015d0700;
+                        // Ryujinx traces MW_form cape_fly_back, cape_fly_dive: stage 2 sixteen
+                        // frames after the entry])
+                        self.vx = vx0;
                         CapeState::Fly {
                             stage: 0,
                             target: 2,
                             mode: 0,
-                            counter: 8,
+                            counter: 7,
                             quick: false,
                             lift: 0.0,
                         }
@@ -2696,7 +2707,10 @@ impl Player {
                 mut lift,
             } => {
                 if !run && stage == 0 {
+                    // (into Fall, whose first frame has no float [obs: Ryujinx trace MW_form
+                    // cape_fly_back: −3.06 → −3.40, then −1.0])
                     self.cape = CapeState::None;
+                    self.cape_fall_start = true;
                     return;
                 }
                 // the glide steers by itself: undo this frame's air control and turning
