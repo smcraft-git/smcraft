@@ -353,6 +353,9 @@ pub struct Level {
     /// Conveyor belts: left tile, right tile (inclusive), row, speed (px/frame, + = right).
     pub conveyors: Vec<(i32, i32, i32, f32)>,
     pub burners: Vec<Burner>,
+    /// Stacked parts (flag 0x1000 on every member of a column, the bottom one too): each rider
+    /// spawn and the spawn it stands on, bottom first.
+    pub stacks: Vec<(usize, usize)>,
     pub firebars: Vec<FireBar>,
     pub cannons: Vec<Cannon>,
     /// Snake blocks: leftmost tile, row, length, fast, head on the left, path node codes.
@@ -575,6 +578,25 @@ fn block_kind(id: i16) -> Option<BlockKind> {
     })
 }
 
+/// Stacked spawns paired with the one each stands on: the nearest stacked spawn below it in
+/// the same column (data: every member of a stack carries 0x1000 and sits right on the one
+/// below), bottom first.
+fn stack_pairs(spawns: &[Spawn], stacked: &[usize]) -> Vec<(usize, usize)> {
+    let mut pairs: Vec<(usize, usize)> = stacked
+        .iter()
+        .filter_map(|&r| {
+            let s = &spawns[r];
+            stacked
+                .iter()
+                .filter(|&&b| b != r && (spawns[b].x - s.x).abs() < 1.0 && spawns[b].y < s.y)
+                .max_by(|&&a, &&b| spawns[a].y.total_cmp(&spawns[b].y))
+                .map(|&b| (r, b))
+        })
+        .collect();
+    pairs.sort_by(|a, b| spawns[a.0].y.total_cmp(&spawns[b.0].y));
+    pairs
+}
+
 impl Level {
     /// Build area 0 (main) or 1 (sub) of a course.
     pub fn from_course(course: &Course, area_index: usize) -> Self {
@@ -603,6 +625,7 @@ impl Level {
             blasters: Vec::new(),
             conveyors: Vec::new(),
             burners: Vec::new(),
+            stacks: Vec::new(),
             firebars: Vec::new(),
             cannons: Vec::new(),
             snakes: Vec::new(),
@@ -635,6 +658,8 @@ impl Level {
             autoscroll: h.autoscroll_type,
             timer: course.header.timer,
         };
+        // spawns of stacked parts (their columns are paired up at the end)
+        let mut stacked: Vec<usize> = Vec::new();
 
         // liquid by theme: underwater = all water; castle = lava; forest = water (poison at night)
         let height = |b: u8| b as f32 * TILE + 12.0;
@@ -985,6 +1010,9 @@ impl Level {
                     clown: o.flags & 0x200 != 0,
                     alt: o.flags & 0x4 != 0,
                 });
+                if o.flags & 0x1000 != 0 {
+                    stacked.push(lvl.spawns.len() - 1);
+                }
                 continue;
             }
             if v3::place_tile(&mut lvl, o, tx, ty) {
@@ -1478,6 +1506,7 @@ impl Level {
         if lvl.autoscroll == 4 {
             lvl.finish_custom_scroll(course, area_index);
         }
+        lvl.stacks = stack_pairs(&lvl.spawns, &stacked);
         lvl
     }
 
@@ -1766,6 +1795,7 @@ impl Level {
             blasters: Vec::new(),
             conveyors: Vec::new(),
             burners: Vec::new(),
+            stacks: Vec::new(),
             firebars: Vec::new(),
             cannons: Vec::new(),
             snakes: Vec::new(),
@@ -1836,6 +1866,42 @@ mod tests {
         );
         // the middle aim points along the facing: left, right, down
         assert_eq!([f(0, 1), f(1, 1), f(2, 1)], [180.0, 0.0, 270.0]);
+    }
+
+    #[test]
+    fn a_stack_of_goombas_rides_its_bottom_one() {
+        // three Goombas in a column, every one flagged as stacked; a lone one beside them
+        let lvl = level(
+            vec![
+                object(0, 20, 1, 1, 1, 0x1000),
+                object(0, 20, 2, 1, 1, 0x1000),
+                object(0, 20, 3, 1, 1, 0x1000),
+                object(0, 24, 1, 1, 1, 0),
+            ],
+            0,
+        );
+        assert_eq!(lvl.stacks, [(1, 0), (2, 1)], "bottom first");
+        // in play, on flat ground: the column moves as one
+        let mut flat = Level::flat(60);
+        for k in 0..3 {
+            flat.spawns.push(Spawn {
+                y: 32.0 + 16.0 * k as f32,
+                ..lvl.spawns[k]
+            });
+        }
+        flat.stacks = lvl.stacks.clone();
+        let mut w = crate::World::with_level(flat);
+        for _ in 0..240 {
+            w.step(crate::input::Input::default());
+        }
+        let at = |s: usize| w.actors.iter().find(|a| a.spawn == Some(s)).unwrap();
+        let (a, b, c) = (at(0), at(1), at(2));
+        assert!(
+            (a.x - 20.0 * 16.0 - 8.0).abs() > 8.0,
+            "the bottom one walked"
+        );
+        assert_eq!((b.x, b.y - a.y), (a.x, 16.0), "the middle one rides it");
+        assert_eq!((c.x, c.y - b.y), (b.x, 16.0), "the top one rides that");
     }
 
     #[test]

@@ -1145,6 +1145,32 @@ impl World {
         }
     }
 
+    /// Stacked parts ride the one below (flag 0x1000, [`Level::stacks`]): a rider keeps its
+    /// place on its base and faces where the base faces while the base is alive; with the base
+    /// gone it is free (falls, walks) [inf: the game's tower rules not read, maker spec C11].
+    fn carry_stack_riders(&mut self) {
+        for k in 0..self.level.stacks.len() {
+            let (r, b) = self.level.stacks[k];
+            let alive_of = |s: usize| {
+                self.actors
+                    .iter()
+                    .position(|a| a.spawn == Some(s) && a.alive())
+            };
+            let (Some(ri), Some(bi)) = (alive_of(r), alive_of(b)) else {
+                continue;
+            };
+            let (rs, bs) = (self.level.spawns[r], self.level.spawns[b]);
+            let (bx, by, dir) = (self.actors[bi].x, self.actors[bi].y, self.actors[bi].dir);
+            let a = &mut self.actors[ri];
+            a.x = bx + (rs.x - bs.x);
+            a.y = by + (rs.y - bs.y);
+            a.vx = 0.0;
+            a.vy = 0.0;
+            a.on_ground = true;
+            a.dir = dir;
+        }
+    }
+
     /// Enemies riding a Koopa Clown Car stay on top of it (same link id, flag 0x200); the car
     /// chases the player while it has a rider.
     fn carry_clown_riders(&mut self) {
@@ -2058,6 +2084,7 @@ impl World {
         self.player_interactions(jump_held);
         self.step_effects();
         self.carry_clown_riders();
+        self.carry_stack_riders();
         self.boss_keys();
         self.tally_defeats();
         self.drop_shoes();
