@@ -2484,20 +2484,29 @@ impl Actor {
                 } else if self.wall && self.turn_lock == 0 {
                     self.turn();
                 }
-                // a red Koopa turns at ledges: after the move, the floor is probed |foot sensor
-                // half-width| + 0.1 ahead (the enemy sensor row 0x71023cd258: feet ±3.8; big ×2
-                // [inf]); off the floor, it faces back and walks back from the next frame (this
-                // frame's move stands) [obs: Ryujinx trace M1_koopa, a red Koopa pacing a 1-wide
-                // pillar between x 323.5 and 332.5, its facing flipping on those frames]
+                // a red Koopa turns at ledges: after the move, the floor is probed at its foot
+                // sensor's end, 4 px ahead (the walkers' BG sensor records, ids 0–3 of the table
+                // 0x71023cb8b0: feet ±4; big: the record's flags bit 0 clear, +4 a side) [obs
+                // v3.0.3]; an end exactly on a cell edge still stands on the cell it is leaving
+                // (with the edge open 10 of the 580 traces break) [obs: traces]; off the floor,
+                // it faces back and walks back from the next frame (this frame's move stands)
+                // [obs: Ryujinx trace M1_koopa, a red Koopa pacing a 1-wide pillar between x
+                // 323.5 and 332.5, its facing flipping on those frames]
                 if self.kind.ledge_turner()
                     && was_on_ground
                     && self.on_ground
                     && !self.wall
                     && self.turn_lock == 0
                 {
-                    let reach = 3.8 * if self.big { 2.0 } else { 1.0 } + 0.1;
+                    let reach = if self.big { 8.0 } else { 4.0 };
                     let px = self.x + self.dir as f32 * reach;
-                    let below = level.cell_at(px, self.y - 1.0);
+                    // (the sensor's end on a cell edge still touches the cell it leaves)
+                    let cx = if self.dir > 0 {
+                        (px / TILE).ceil() - 1.0
+                    } else {
+                        (px / TILE).floor()
+                    };
+                    let below = level.cell_at(cx * TILE + TILE * 0.5, self.y - 1.0);
                     let slope = level.slope_at(px).is_some_and(|(s, _)| s >= self.y - 8.0);
                     if below == Cell::Empty && !slope {
                         self.dir = -self.dir;
@@ -4984,6 +4993,30 @@ mod tests {
         assert_eq!(red.dir, -1);
         assert!(red.on_ground);
         assert!(!green.on_ground || green.mode == Mode::Dead);
+    }
+
+    #[test]
+    fn a_red_koopas_ledge_probe_on_the_cell_edge_still_stands() {
+        // ground ends at x 480: the foot sensor's end 4 px ahead turns it once past 480 (a
+        // twentieth of a pixel is enough), not when exactly on it
+        let level = Level::flat(30);
+        let probe = |x: f32| {
+            let mut a = Actor::new(Kind::Koopa { red: true }, x, 32.0);
+            a.on_ground = true;
+            a.dir = 1;
+            a.step(&level, 0.0);
+            (a.x, a.dir)
+        };
+        let (x, dir) = probe(476.0);
+        assert!(x + 4.0 > 480.0 && x + 4.0 < 480.6, "{x}");
+        assert_eq!(dir, -1);
+        let step = probe(476.0).0 - 476.0;
+        let (x, dir) = probe(476.0 - step);
+        assert_eq!(x, 476.0);
+        assert_eq!(dir, 1, "on the edge it stands");
+        let (x, dir) = probe(476.05 - step);
+        assert!((x - 476.05).abs() < 1e-3);
+        assert_eq!(dir, -1);
     }
 
     #[test]
