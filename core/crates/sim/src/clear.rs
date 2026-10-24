@@ -129,6 +129,15 @@ pub enum Goal {
     Unsupported(u8),
 }
 
+/// The action conditions' state of one player (local co-op keeps one per player: a rule broken
+/// by one player leaves the others able to clear).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct ActionState {
+    pub violated: bool,
+    left_ground: bool,
+    ground_frames: u32,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct ClearCondition {
     pub goal: Goal,
@@ -280,6 +289,13 @@ impl ClearCondition {
                 self.violated = true;
             }
         }
+    }
+
+    /// Exchange the action conditions' state with another player's (co-op passes).
+    pub fn swap_action(&mut self, other: &mut ActionState) {
+        std::mem::swap(&mut self.violated, &mut other.violated);
+        std::mem::swap(&mut self.left_ground, &mut other.left_ground);
+        std::mem::swap(&mut self.ground_frames, &mut other.ground_frames);
     }
 
     /// Is the goal open? `star`, `form`: the player's state when touching it (form 0 small,

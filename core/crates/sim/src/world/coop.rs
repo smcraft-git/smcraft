@@ -175,6 +175,8 @@ pub(super) struct Ctx {
     /// Keys held: each player has their own (§7.6); a key door or box needs the entering
     /// player's.
     keys: u32,
+    /// Action conditions (no damage, no landing, …) are broken per player (§8).
+    action: crate::clear::ActionState,
 }
 
 /// The co-op state of a world (empty with one player).
@@ -187,6 +189,8 @@ pub struct Coop {
     ctx: Vec<Ctx>,
     /// An extra player's pass is running.
     pub(super) extra: bool,
+    /// Where the running extra pass's events begin in `World::events`.
+    pub(super) pass_events: usize,
     /// The course was (re)built during this tick.
     pub(super) reset: bool,
     /// The slot that went down last (it carries the all-down death sequence).
@@ -332,6 +336,7 @@ impl World {
         swap(&mut self.donut_ride, &mut c.donut_ride);
         swap(&mut self.pu, &mut c.pu);
         swap(&mut self.keys, &mut c.keys);
+        self.clear.swap_action(&mut c.action);
     }
 
     /// Slot `k`'s keys, wherever it is this moment.
@@ -339,6 +344,14 @@ impl World {
         match self.position_of(k) {
             0 => self.keys,
             p => self.coop.ctx[p - 1].keys,
+        }
+    }
+
+    /// Has slot `k` broken the course's action condition (no damage, no landing, …)?
+    pub fn violated_of(&self, k: usize) -> bool {
+        match self.position_of(k) {
+            0 => self.clear.violated,
+            p => self.coop.ctx[p - 1].action.violated,
         }
     }
 
@@ -580,12 +593,16 @@ impl World {
         self.step_yoshi_rider();
         self.check_checkpoints();
         self.player_interactions(jump_held);
-        if self
-            .events
+        // this player's action conditions (their own events, their own landings)
+        if self.events[self.coop.pass_events.min(self.events.len())..]
             .iter()
             .any(|e| matches!(e, Event::PowerDown | Event::Death))
         {
             self.clear.damaged();
+        }
+        self.clear.ground(self.player.on_ground);
+        if self.held_by.is_some() {
+            self.clear.held_by_claw();
         }
         if self.player.in_water {
             self.clear.in_water();
@@ -1708,6 +1725,22 @@ mod tests {
         run(&mut w, &[R, NONE], 60);
         assert!(!w.coop.slots[0].knocked);
         assert!(w.player.alive());
+    }
+
+    #[test]
+    fn a_rule_broken_by_one_player_leaves_the_others_able_to_clear() {
+        let mut w = World::with_level(Level::flat(60));
+        w.clear.goal = crate::clear::Goal::NoLanding;
+        w.set_players(2);
+        run(&mut w, &[NONE, NONE], 5);
+        // only player 2 jumps and lands
+        let jump = Input {
+            buttons: input::JUMP,
+        };
+        run(&mut w, &[NONE, jump], 3);
+        run(&mut w, &[NONE, NONE], 90);
+        assert!(w.violated_of(1), "player 2 landed");
+        assert!(!w.violated_of(0), "player 1 never left the ground");
     }
 
     #[test]

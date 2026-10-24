@@ -1641,6 +1641,9 @@ impl World {
             self.events.clear();
             self.fx.clear();
             self.tick += 1;
+        } else {
+            // this pass's own events start here (the lead's came before)
+            self.coop.pass_events = self.events.len();
         }
 
         // death sequence: the world is frozen; restart when the fall ends

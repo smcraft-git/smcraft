@@ -141,8 +141,10 @@ Everything is on `main` and pushed, except `maker-audio` (pushed as a branch; se
   - ✅ Bubble / pop sounds (`<style>_Balloon` `act_balloon_start` / `act_baloon_break`)
   - ✅ A ground pound knocks another player flying (vy 4.0, 1.0 / 1.4 away; no harm, no control
     until landing), and takes their keys
-  - ⬜ Not yet: the 180-frame warp wait (the world waits instead),
-    per-player clear conditions, a players screen in SMM2's layouts (the question is a toast)
+  - ✅ Action conditions per player (no damage / landing / claw / water): one player breaking
+    the rule leaves the others able to clear; each pass checks only its own events
+  - ⬜ Not yet: the 180-frame warp wait (the world waits instead), a players screen in SMM2's
+    layouts (the question is a toast)
 
 **G4 — Course Maker for any course** 🔄
 - ✅ Editor core (`mmk-editor`): parts, areas, links, tracks, selection, settings, the game's limits
