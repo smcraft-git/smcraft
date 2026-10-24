@@ -23,6 +23,8 @@ const EXCL_OWNER: u32 = 0x9000_0000;
 const TREE_OWNER: u32 = 0x9800_0000;
 /// Solid ids of Piranha Creeper stalk boxes (actor index × 128 + box).
 const CREEPER_OWNER: u32 = 0x9C00_0000;
+/// A held player's feet hang this far under the claw's end (the catch's hold point) [inf].
+const CLAW_HANG: f32 = 24.0;
 use crate::fmath::DetMath;
 use crate::player::{Control, Form, Player, Pose, STAR_FRAMES};
 use crate::render::{Sprite, SpriteImage};
@@ -582,7 +584,7 @@ fn spawn_profile(kind: Kind, big: bool) -> (f32, f32, f32, f32) {
         Kind::ClownCar { .. } => (0.0, 16.0, 32.0, 32.0),
         Kind::Lift { falling: true, .. } | Kind::LavaLift { .. } => (0.0, 0.0, 64.0, 128.0),
         Kind::Lift { .. } | Kind::Trampoline { .. } => (0.0, 0.0, 80.0, 128.0),
-        Kind::Seesaw { .. } => (0.0, 0.0, 128.0, 128.0),
+        Kind::Seesaw { .. } | Kind::Claw => (0.0, 0.0, 128.0, 128.0),
         Kind::Key => (0.0, 8.0, 128.0, 128.0),
         Kind::Star => (0.0, 8.0, 8.0, 128.0),
         Kind::YoshiEgg { .. } => (0.0, 8.0, 22.0, 22.0),
@@ -4261,11 +4263,6 @@ impl World {
             if s.kind == Kind::Magikoopa {
                 a.timer = 30;
             }
-            if s.kind == Kind::Claw {
-                // pivot at the top centre of the 3×4 object
-                a.home_x = s.x;
-                a.home_y = s.y + 64.0;
-            }
             if let Kind::ChainChomp { chained: true } = s.kind {
                 // the stake stays at the placement; the Chomp starts beside it
                 a.home_x = s.x;
@@ -4282,6 +4279,10 @@ impl World {
                     a.rail_off = (s.x - p.0, s.y - p.1);
                     a.rail = Some(r);
                 }
+            }
+            if s.kind == Kind::Claw {
+                // the rope and its pivot 48 px up, with the creation's step (actors/claw.rs)
+                a.claw_start();
             }
             // enemies face the player (left if player.x ≤ x); items face right; a Twister
             // starts facing left
@@ -4340,12 +4341,14 @@ impl World {
         }
     }
 
-    /// Remove actors whose culling box (half-size 32 × 32, big 48, a sliding shell 160 × 32;
-    /// 0x7100792c90) grown by 80 px misses the view; dead ones stay dead.
+    /// Remove actors whose culling box (half-size 32 × 32, big 48, a sliding shell 160 × 32, a
+    /// Swinging Claw 256 × 1024; 0x7100792c90) grown by 80 px misses the view; dead ones stay dead.
     fn despawn(&mut self) {
         let v = self.zone(DESPAWN_MARGIN, DESPAWN_MARGIN);
         for a in &mut self.actors {
             let (hx, hy) = match (a.mode, a.big) {
+                // a claw's own box (its init writes +0x294) [obs v3.0.3 0x71013e7780]
+                _ if a.kind == Kind::Claw => (256.0, 1024.0),
                 (Mode::ShellSlide, _) => (160.0, 32.0),
                 (_, true) => (48.0, 48.0),
                 _ => (32.0, 32.0),
@@ -4618,41 +4621,61 @@ impl World {
         fb.start + fb.dir * (turn * 360.0) as f32
     }
 
-    /// Swinging claws (105-swinging-claw.md): grab the player when the claw tip is within 46 px
-    /// and the vertical offset is in (−8, 10); the player hangs from the tip until jump is
-    /// pressed, then leaves with the tip's velocity; 30-frame re-grab cooldown.
+    /// Swinging claws (105-swinging-claw.md): the catch takes a player whose hold point is
+    /// under 46 px from the pivot and within (−8, 10) of the claw's height [obs v3.0.3
+    /// 0x71013e87c0]; the claw's end goes to it and the player's speed into the rope. The player
+    /// hangs from the end, their left / right nudging the rope ±0.05 a frame (0x71013e8bf0),
+    /// until jump is pressed, then leaves with the end's motion; 30-frame re-grab cooldown. The
+    /// hold point (the player's Crane record offsets) is taken 24 px over the feet [inf].
     fn claws(&mut self, input: Input) {
         if let Some(id) = self.held_by {
-            let Some(c) = self.actors.iter().find(|a| a.id == id) else {
+            let Some(c) = self.actors.iter_mut().find(|a| a.id == id) else {
                 self.held_by = None;
                 self.player.control = Control::Normal;
                 return;
             };
             let (tx, ty) = c.claw_tip();
-            let (vx, vy) = (tx - self.player.x, ty - 24.0 - self.player.y);
+            let (vx, vy) = (tx - self.player.x, ty - CLAW_HANG - self.player.y);
             self.player.x = tx;
-            self.player.y = ty - 24.0;
+            self.player.y = ty - CLAW_HANG;
+            let (hx, hy) = (c.home_x, c.home_y);
+            if let Some(rope) = c.claw.as_mut() {
+                let nudge = match (input.held(input::LEFT), input.held(input::RIGHT)) {
+                    (false, true) => crate::actors::CLAW_NUDGE,
+                    (true, false) => -crate::actors::CLAW_NUDGE,
+                    _ => 0.0,
+                };
+                if nudge != 0.0 {
+                    rope.vx = (rope.vx + nudge).max(-7.0);
+                }
+                rope.hold((tx, ty), (hx, hy));
+            }
             if input.held(input::JUMP) && !self.prev_jump_claw {
                 self.player.control = Control::Normal;
                 self.player.vx = vx.clamp(-3.0, 3.0);
                 self.player.vy = vy.max(0.0) + 3.0;
                 self.player.on_ground = false;
-                if let Some(c) = self.actors.iter_mut().find(|a| a.id == id) {
-                    c.timer = 30;
-                }
+                c.timer = 30;
                 self.held_by = None;
             }
         } else if self.player.control == Control::Normal {
             let p = &self.player;
-            let grab = self.actors.iter().find(|a| {
+            let (hx, hy) = (p.x, p.y + CLAW_HANG);
+            let grab = self.actors.iter_mut().find(|a| {
                 if a.kind != Kind::Claw || a.timer > 0 {
                     return false;
                 }
-                let (tx, ty) = a.claw_tip();
-                let dy = p.y + 16.0 - (ty - 8.0);
-                (p.x - tx).abs() < 23.0 && dy > -8.0 && dy < 10.0
+                let dy = a.y - hy;
+                let d = ((a.home_x - hx).powi(2) + (a.home_y - hy).powi(2)).sqrt();
+                dy < 10.0 && dy > -8.0 && d < crate::actors::CLAW_REACH
             });
             if let Some(c) = grab {
+                c.x = hx;
+                c.y = hy;
+                let (px, py) = (c.home_x, c.home_y);
+                if let Some(rope) = c.claw.as_mut() {
+                    rope.catch((hx, hy), (px, py), (p.vx, p.vy));
+                }
                 self.held_by = Some(c.id);
                 self.player.control = Control::Demo;
                 self.player.vx = 0.0;

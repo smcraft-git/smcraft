@@ -19,6 +19,10 @@ SMCraft is back in development (it was archived in October 2026).
   Chomp flies back onto its stake along the game's curve; a Red Yoshi's Egg is the one with the
   big flag; a custom autoscroll node set to "stop" stops the camera, and vertical custom
   autoscroll uses the game's vertical speeds.
+- **Swinging Claws swing as in SMM2**: the claw hangs on its rope 48 px under the pivot and an
+  empty one starts at rest, swaying by itself in a slowly growing swing (it was a wide 60°
+  pendulum); a caught player's speed carries into the swing and left / right nudge it. Claws are
+  set up as the course starts, like the game's.
 
 - **Import once, then no dump or keys.** SMCraft reads your NSPs and `prod.keys` itself (no
   hactool, nothing extracted) and writes its own asset pack; the game runs from the pack alone.

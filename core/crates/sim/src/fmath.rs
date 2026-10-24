@@ -87,9 +87,76 @@ pub fn table_sin_cos(angle: u32) -> (f32, f32) {
     (s + ds * f, c + f * dc)
 }
 
+/// The game's arctangent table entry i (0 ≤ i ≤ 129): atan(i / 128) as a binary angle,
+/// rounded down [obs v3.0.3 table 0x71023395c8: all 129 stored entries are
+/// ⌊atan(i/128)·2³¹/π⌋, each with its step to the next as f32].
+fn atan_entry(i: u32) -> i32 {
+    libm::floor(libm::atan(i as f64 / 128.0) * 2_147_483_648.0 / std::f64::consts::PI) as i32
+}
+
+/// atan(t) for 0 ≤ t ≤ 1 as a binary angle, the game's way: table entry ⌊128·t⌋ plus its
+/// step times the fraction, truncated [obs v3.0.3 0x710027eed0].
+fn table_atan(t: f32) -> i32 {
+    let i = (t * 128.0) as i32;
+    let (a, b) = (atan_entry(i as u32), atan_entry(i as u32 + 1));
+    a.wrapping_add(((t * 128.0 - i as f32) * (b - a) as f32) as i32)
+}
+
+/// The angle of (x, y) as a 32-bit binary angle (0 along +x, 0x4000_0000 along +y), from the
+/// arctangent table by octant; (0, 0) gives 0 [obs v3.0.3 0x7100d5db50].
+pub fn table_atan2(y: f32, x: f32) -> u32 {
+    if y == 0.0 && x == 0.0 {
+        return 0;
+    }
+    let a = if x >= 0.0 {
+        if y < 0.0 {
+            let y = -y;
+            if x < y {
+                table_atan(x / y).wrapping_add(0xc000_0000u32 as i32)
+            } else {
+                table_atan(y / x).wrapping_neg()
+            }
+        } else if y <= x {
+            table_atan(y / x)
+        } else {
+            0x4000_0000 - table_atan(x / y)
+        }
+    } else if y < 0.0 {
+        if x <= y {
+            table_atan(y / x) ^ i32::MIN
+        } else {
+            (-0x4000_0000i32).wrapping_sub(table_atan(x / y))
+        }
+    } else {
+        let x = -x;
+        if x < y {
+            table_atan(x / y).wrapping_add(0x4000_0000)
+        } else {
+            i32::MIN.wrapping_sub(table_atan(y / x))
+        }
+    };
+    a as u32
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_arctangent_table_is_the_games() {
+        // the 129 entries the game stores, summed, and a few of them
+        let sum: i64 = (0..=128).map(|i| atan_entry(i) as i64).sum();
+        assert_eq!(sum, 38_663_763_629);
+        assert_eq!(atan_entry(3), 16_018_128);
+        assert_eq!(atan_entry(128), 0x2000_0000);
+        assert_eq!(atan_entry(129) - atan_entry(128), 2_659_773);
+        assert_eq!(table_atan2(0.0, 1.0), 0);
+        assert_eq!(table_atan2(1.0, 0.0), 0x4000_0000);
+        assert_eq!(table_atan2(-1.0, 0.0), 0xc000_0000);
+        assert_eq!(table_atan2(0.0, -1.0), 0x8000_0000);
+        assert_eq!(table_atan2(1.0, 1.0), 0x2000_0000);
+        assert_eq!(table_atan2(-1.0, -1.0), 0xa000_0000);
+    }
 
     #[test]
     fn close_to_the_platform_and_fixed_bits() {
