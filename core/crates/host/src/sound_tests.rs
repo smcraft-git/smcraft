@@ -49,6 +49,8 @@ fn db() -> serde_json::Value {
         // (after the switch's children: their indices stay)
         asset("BGM_Plain_Edit", "PlainEdit"),
         asset("BGM_Castle_Edit", "CastleEdit"),
+        asset("BGM_Play_CharaLink", "LinkDay"),
+        asset("FanfareDown_CharaLink", "LinkDown"),
     ];
     json!({
         "version": 1,
@@ -278,6 +280,27 @@ fn a_knock_out_sounds_by_what_did_it() {
     w.events = vec![Event::Stomp];
     r.s.after_step(&w);
     assert_eq!(r.played(), ["sfx:SpinKill"]);
+}
+
+#[test]
+fn the_master_sword_plays_links_music_and_fanfare() {
+    let mut r = rig();
+    let mut w = world();
+    r.s.start_course(&w);
+    r.played();
+    w.player.form = Form::Link;
+    r.s.after_step(&w);
+    assert_eq!(r.played(), ["music:LinkDay"]);
+    w.player.form = Form::Super;
+    r.s.after_step(&w);
+    assert_eq!(r.played(), ["music:PlainDay"]);
+    w.player.form = Form::Link;
+    r.s.after_step(&w);
+    r.played();
+    w.events = vec![Event::Death];
+    w.player.kill();
+    r.s.after_step(&w);
+    assert_eq!(r.played(), ["music:LinkDown"]);
 }
 
 #[test]

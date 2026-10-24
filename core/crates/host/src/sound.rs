@@ -133,6 +133,9 @@ pub struct Sounds {
     night: bool,
     hurry: bool,
     over: Over,
+    /// The form whose own music plays instead of the course's (SMB1: the Master Sword's Link,
+    /// the Superball Flower, the SMB2 Mushroom): its key suffix.
+    chara: Option<&'static str>,
     star_on: bool,
     p_on: bool,
     /// The theme track playing (or interrupted): its key, and where it was when interrupted.
@@ -189,6 +192,7 @@ impl Sounds {
             theme: 0,
             night: false,
             hurry: false,
+            chara: None,
             over: Over::None,
             star_on: false,
             p_on: false,
@@ -689,11 +693,56 @@ impl Sounds {
     /// The theme track key; the day track where the style has no night one (3D World has no
     /// night themes).
     fn theme_key(&self) -> String {
+        if let Some(c) = self.chara {
+            let key = if self.hurry {
+                format!("BGM_PlayHurry_Chara{c}")
+            } else {
+                format!("BGM_Play_Chara{c}")
+            };
+            if self.lib.db.has_key(&self.music_user(), &key) {
+                return key;
+            }
+        }
         let night = bgm_key(self.theme, self.night, self.hurry);
         if self.night && !self.lib.db.has_key(&self.music_user(), &night) {
             bgm_key(self.theme, false, self.hurry)
         } else {
             night
+        }
+    }
+
+    /// `base`, or its version for the form with its own music (`<base>_Chara<form>`) when the
+    /// data has one.
+    fn chara_key(&self, base: &str) -> String {
+        match self.chara {
+            Some(c) => {
+                let key = format!("{base}_Chara{c}");
+                if self.lib.db.has_key(&self.music_user(), &key) {
+                    key
+                } else {
+                    base.to_string()
+                }
+            }
+            None => base.to_string(),
+        }
+    }
+
+    /// The form's own music: taking the Master Sword, the Superball Flower or the SMB2 Mushroom
+    /// in an SMB1 course plays that form's track until it is lost [obs: the
+    /// `BGM_Play_Chara<form>` keys of the SMB1 course music].
+    fn observe_chara(&mut self, world: &World) {
+        let chara = match world.player.form {
+            Form::Link => Some("Link"),
+            Form::Superball => Some("SuperBall"),
+            Form::Smb2 => Some("USA"),
+            _ => None,
+        };
+        if chara == self.chara {
+            return;
+        }
+        self.chara = chara;
+        if world.player.alive() && self.over == Over::None && !self.fanfare {
+            self.course_music();
         }
     }
 
@@ -802,6 +851,7 @@ impl Sounds {
         }
         self.hurry = world.time >= 0 && world.time <= 100 * 60;
         self.over = Over::None;
+        self.chara = None;
         self.star_on = false;
         self.p_on = false;
         self.saved = None;
@@ -993,6 +1043,7 @@ impl Sounds {
         self.observe_player(world);
         self.observe_blocks(world);
         self.observe_objects(world);
+        self.observe_chara(world);
 
         let pe = Self::player_emitter(world);
         let events = world.events.clone();
@@ -1213,7 +1264,8 @@ impl Sounds {
                         handle: H_AMBIENT,
                         fade: 0,
                     });
-                    self.play_music("FanfareDown", 0, None);
+                    let down = self.chara_key("FanfareDown");
+                    self.play_music(&down, 0, None);
                     self.fanfare = true;
                     self.over = Over::None;
                 }
@@ -1377,7 +1429,8 @@ impl Sounds {
             match self.costume.sound(world, "goal") {
                 Some(id) => self.play_id(world, id, true),
                 None => {
-                    self.play_music("FanfareGoal", 0, None);
+                    let goal = self.chara_key("FanfareGoal");
+                    self.play_music(&goal, 0, None);
                 }
             }
         }
