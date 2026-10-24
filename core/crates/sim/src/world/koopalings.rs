@@ -205,3 +205,271 @@ impl World {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::super::*;
+    use crate::actors::koopaling_who as who;
+
+    fn spawn(kind: Kind, x: f32, y: f32, link: i16, clown: bool) -> Spawn {
+        Spawn {
+            kind,
+            x,
+            y,
+            big: false,
+            wings: false,
+            pipe: None,
+            parachute: false,
+            rail: None,
+            link,
+            clown,
+            alt: false,
+        }
+    }
+
+    const C_MOVE: u8 = 40;
+    const C_DAMAGE: u8 = 41;
+    const C_DAMAGE_ANIM: u8 = 42;
+    const C_SHELL_IN: u8 = 43;
+    const C_SHELL_MOVE: u8 = 44;
+    const C_SHELL_OUT: u8 = 45;
+
+    /// A Koopaling (`who`, holding a Key) in a Koopa Clown Car floating at x = 200 in `style`;
+    /// the player parked at the left, invulnerable.
+    fn car_world(who: u8, style: &str) -> World {
+        let mut lvl = Level::flat(80);
+        lvl.style = style.to_string();
+        lvl.spawns
+            .push(spawn(Kind::ClownCar { fire: false }, 200.0, 80.0, 4, false));
+        lvl.spawns.push(spawn(
+            Kind::Koopaling {
+                who,
+                key: true,
+                clown: true,
+            },
+            200.0,
+            104.0,
+            4,
+            true,
+        ));
+        let mut w = World::with_level(lvl);
+        w.player.x = 40.0;
+        w.player.invuln = 1_000_000;
+        run(&mut w, 2);
+        w
+    }
+
+    fn run(w: &mut World, frames: usize) {
+        for _ in 0..frames {
+            w.step(Input { buttons: 0 });
+        }
+    }
+
+    fn koop(w: &World) -> &Actor {
+        w.actors
+            .iter()
+            .find(|a| matches!(a.kind, Kind::Koopaling { .. }))
+            .expect("koopaling")
+    }
+
+    fn car(w: &World) -> &Actor {
+        w.actors
+            .iter()
+            .find(|a| matches!(a.kind, Kind::ClownCar { .. }))
+            .expect("car")
+    }
+
+    /// Projectiles fired so far (`seen` collects their ids).
+    fn shots(w: &World, seen: &mut Vec<u32>) -> usize {
+        for a in &w.actors {
+            if matches!(a.kind, Kind::KoopalingShot { .. }) && !seen.contains(&a.id) {
+                seen.push(a.id);
+            }
+        }
+        seen.len()
+    }
+
+    /// Drop the player onto the Koopaling's head (then park him again).
+    fn stomp(w: &mut World) {
+        let (x, top) = (koop(w).x, koop(w).y + koop(w).height());
+        w.player.x = x;
+        w.player.y = top + 2.0;
+        w.player.vy = -2.0;
+        w.player.on_ground = false;
+        run(w, 1);
+        w.player.x = 40.0;
+        w.player.y = 32.0;
+        w.player.vy = 0.0;
+    }
+
+    #[test]
+    fn a_koopaling_rides_its_car_and_fires_from_it() {
+        let mut w = car_world(who::LARRY, "M1");
+        let (k, c) = (koop(&w), car(&w));
+        assert!(k.koopaling_in_car());
+        assert_eq!(k.koopaling_state(), C_MOVE);
+        assert_eq!(
+            (k.x, k.y),
+            (c.x, c.y + 24.0),
+            "24 px above the car's origin"
+        );
+        assert_eq!(c.phase, 1, "the car chases");
+        // the first volley after [100,150) frames, throw_st 5, the 30-frame hold and the
+        // throw_ed shot frame 3
+        let mut first = None;
+        let mut seen = Vec::new();
+        for f in 0..260 {
+            run(&mut w, 1);
+            assert_eq!(koop(&w).y, car(&w).y + 24.0);
+            if shots(&w, &mut seen) > 0 {
+                first = Some(f + 2);
+                break;
+            }
+        }
+        let first = first.expect("fires from the car");
+        assert!((100 + 38..150 + 42).contains(&first), "{first}");
+        // one shot per volley at 3 HP: none for the next 100 frames
+        for _ in 0..100 {
+            run(&mut w, 1);
+            shots(&w, &mut seen);
+        }
+        assert_eq!(seen.len(), 1);
+        assert!(car(&w).x < 200.0, "the car has flown toward the player");
+    }
+
+    #[test]
+    fn a_stomp_stops_the_car_and_the_koopaling_ducks_into_his_shell() {
+        let mut w = car_world(who::LARRY, "M1");
+        run(&mut w, 30);
+        stomp(&mut w);
+        assert_eq!(koop(&w).koopaling_hp(), 2);
+        assert_eq!(koop(&w).koopaling_state(), C_DAMAGE);
+        assert!(koop(&w).koopaling_guarded());
+        let at = car(&w).x;
+        // squash 4 + 3, 18, ducking 10, 36 hidden, 10 back up in the shell
+        let mut n = 1;
+        while koop(&w).koopaling_state() == C_DAMAGE {
+            assert_eq!(car(&w).phase, 3, "stopped");
+            assert_eq!(car(&w).x, at);
+            run(&mut w, 1);
+            n += 1;
+            assert!(n < 200);
+        }
+        assert!((78..=84).contains(&n), "{n}");
+        assert_eq!(koop(&w).koopaling_state(), C_SHELL_MOVE);
+        run(&mut w, 1);
+        assert_eq!(car(&w).phase, 1, "chasing again");
+        // stomps bounce off the shell
+        stomp(&mut w);
+        assert_eq!(koop(&w).koopaling_hp(), 2);
+        run(&mut w, 300);
+        assert_eq!(koop(&w).koopaling_state(), C_SHELL_OUT);
+        run(&mut w, 25);
+        assert_eq!(koop(&w).koopaling_state(), C_MOVE);
+        assert!(!koop(&w).koopaling_guarded());
+    }
+
+    #[test]
+    fn the_third_stomp_knocks_him_out_of_the_car_and_frees_it() {
+        let mut w = car_world(who::LUDWIG, "M3");
+        for hp in [2, 1] {
+            stomp(&mut w);
+            assert_eq!(koop(&w).koopaling_hp(), hp);
+            for _ in 0..600 {
+                if !koop(&w).koopaling_guarded() {
+                    break;
+                }
+                run(&mut w, 1);
+            }
+        }
+        stomp(&mut w);
+        assert!(!koop(&w).alive(), "knocked out at once outside NSMBU");
+        run(&mut w, 2);
+        assert_eq!(car(&w).phase, 0, "the empty car floats (Free)");
+        assert_eq!(
+            w.actors.iter().filter(|a| a.kind == Kind::Key).count() + w.keys as usize,
+            1,
+            "his Key drops"
+        );
+    }
+
+    #[test]
+    fn nsmbu_flinches_in_the_car_then_spins_in_the_shell() {
+        let mut w = car_world(who::LEMMY, "WU");
+        assert!(koop(&w).lemmy_ball().is_none(), "no ball in the car");
+        stomp(&mut w);
+        assert_eq!(koop(&w).koopaling_state(), C_DAMAGE_ANIM);
+        run(&mut w, 59);
+        assert_eq!(koop(&w).koopaling_state(), C_DAMAGE_ANIM);
+        assert_eq!(car(&w).phase, 3);
+        run(&mut w, 1);
+        assert_eq!(koop(&w).koopaling_state(), C_SHELL_IN);
+        run(&mut w, 16);
+        assert_eq!(koop(&w).koopaling_state(), C_SHELL_MOVE);
+        run(&mut w, 300 + 30);
+        assert_eq!(koop(&w).koopaling_state(), C_MOVE);
+        // at 0 HP NSMBU flinches first, then falls out
+        koop_mut(&mut w).v3.hp = 1;
+        stomp(&mut w);
+        assert_eq!(koop(&w).koopaling_state(), C_DAMAGE_ANIM);
+        assert!(koop(&w).alive());
+        run(&mut w, 61);
+        assert!(!koop(&w).alive());
+    }
+
+    #[test]
+    fn lemmy_throws_his_balls_from_the_car_five_at_1_hp() {
+        let mut w = car_world(who::LEMMY, "M1");
+        koop_mut(&mut w).v3.hp = 1;
+        // the first volley: 5 balls back to back, then a pause of [60,90) frames
+        let mut seen = Vec::new();
+        let mut at = Vec::new();
+        for f in 0..900 {
+            run(&mut w, 1);
+            if shots(&w, &mut seen) > at.len() {
+                at.push(f);
+            }
+        }
+        assert!(at.len() >= 6, "{at:?}");
+        // within the volley one throw apart: throw_ed after the shot frame (60 − 4), throw_st
+        // 5 + 1, the hold 30, throw_ed to the shot frame 4
+        assert!(
+            at[1..5].iter().zip(&at[..4]).all(|(b, a)| b - a == 96),
+            "{at:?}"
+        );
+        assert!(at[5] - at[4] >= 96 + 60, "{at:?}");
+        assert!(w.actors.iter().any(|a| a.kind
+            == Kind::KoopalingShot {
+                what: crate::actors::koopaling_shot::BALL
+            }));
+    }
+
+    #[test]
+    fn without_a_car_he_falls_out() {
+        let mut lvl = Level::flat(80);
+        lvl.spawns.push(spawn(
+            Kind::Koopaling {
+                who: who::IGGY,
+                key: false,
+                clown: true,
+            },
+            200.0,
+            104.0,
+            9,
+            true,
+        ));
+        let mut w = World::with_level(lvl);
+        w.player.x = 40.0;
+        w.player.invuln = 1_000_000;
+        run(&mut w, 120);
+        assert!(!koop(&w).koopaling_in_car());
+        assert!(koop(&w).on_ground && koop(&w).y < 40.0, "{}", koop(&w).y);
+    }
+
+    fn koop_mut(w: &mut World) -> &mut Actor {
+        w.actors
+            .iter_mut()
+            .find(|a| matches!(a.kind, Kind::Koopaling { .. }))
+            .expect("koopaling")
+    }
+}

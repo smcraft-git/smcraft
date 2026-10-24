@@ -735,8 +735,6 @@ pub fn unsupported_features(course: &Course) -> Vec<String> {
                 out.insert(format!("part {} on a track", o.id));
             } else if o.flags & 0x4 != 0 && !ALT_FORMS.contains(&o.id) {
                 out.insert(format!("alternate form of part {}", o.id));
-            } else if let Some(why) = v3::unsupported(o) {
-                out.insert(why);
             } else if o.flags & 0x2 != 0 && o.id == 13 {
                 // winged Bill Blasters fly as actors: not yet
                 out.insert(format!("wings on part {}", o.id));

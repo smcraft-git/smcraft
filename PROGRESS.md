@@ -37,9 +37,12 @@ sway, importer and pack 12, the dev cache already at v12).
   offset to ours (the same courses whose backdrops are off) [inf]; captures of the track tiles in play and of NSMBU / 3D World wings (the mesh
   planner maps `M1_Enemy_wingcommon` to `<style>_Enemy_wingcommon`), a look at Water Level mode
   and custom scroll in the recomp (`research/tools/maker-look`: touch taps / drags by script).
-- **Agent queue** (when a helper slot frees): a Koopaling in a Clown Car (its own Clown context:
-  the template's states are registered in 0x71010685f0 as virtual slots — find the Koopaling's
-  vtable, as the contexts agent did for Block); the Super World map's ledge cliffs (field atlas
+- **Agent queue** (when a helper slot frees): ✅ a Koopaling in a Clown Car (2026-10-25, branch
+  `kclown`, research 120-koopalings.md "In a Koopa Clown Car": KoKoopaDefault's Clown vtable
+  0x71028b6120 shared by all seven — Lemmy / Roy override only the setup; Move fires the
+  controller's timed volleys, a hit stops the car (KoopaJrStop) while he ducks in and comes back
+  in his shell for 300 frames, HP only in Move; tgr2 273/273; left: the Fire car's own fireballs
+  with an enemy rider, NSMBU's shell yaw spin); the Super World map's ledge cliffs (field atlas
   rows 6–7), map ghosts, the goal's AppearGoalPoint / cannon and Passable states, the map music
   (branch `swmap` drew the map with the game's models); ✅ the Cursed Key and Phanto (2026-10-25,
   research 95-key.md; co-op: Phanto hurts only the player in front [inf]); ✅ SMM1 UI sounds for

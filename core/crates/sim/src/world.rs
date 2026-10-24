@@ -1231,10 +1231,19 @@ impl World {
     }
 
     /// Enemies riding a Koopa Clown Car stay on top of it (same link id, flag 0x200); the car
-    /// chases the player while it has a rider.
+    /// chases the player while it has a rider. The car places its rider (0x71006d6ca0) 24 px
+    /// above its origin (the default ride offset, which the Koopalings' Clown context keeps
+    /// [obs 0x71011b55f0: Lemmy's −24]), 16 px more per extra unit of the car's scale. A car
+    /// whose rider is gone goes back to Free (Chase exe 0x710118bc60 finds no rider → state 1)
+    /// and can be boarded. A Koopaling hit in the car stops it: while his link record's mode is
+    /// 4 (his Damage / DamagePlayAnim) the car is in KoopaJrStop (0x7101190b10 → state 8,
+    /// exe 0x710118f8b0: velocity 0) [obs]. A Koopaling whose car is destroyed (or missing)
+    /// leaves the Clown context and falls.
     fn carry_clown_riders(&mut self) {
         let spawns = &self.level.spawns;
         let mut moves = Vec::new();
+        let mut carless = Vec::new();
+        let mut ridden = vec![false; self.actors.len()];
         for (ri, r) in self.actors.iter().enumerate() {
             let Some(rs) = r.spawn else { continue };
             let Some(rspawn) = spawns.get(rs) else {
@@ -1258,16 +1267,46 @@ impl World {
             });
             if let Some(ci) = car {
                 moves.push((ri, ci));
+                ridden[ci] = true;
+            } else if r.koopaling_in_car() {
+                // only a car that is gone for good (defeated, or no such car) frees him; one
+                // not spawned yet or despawned leaves him waiting where he is
+                let gone = !spawns.iter().enumerate().any(|(k, s)| {
+                    matches!(s.kind, Kind::ClownCar { .. })
+                        && s.link == rspawn.link
+                        && !self.spawns.get(k).is_some_and(|rec| rec.killed)
+                });
+                if gone {
+                    carless.push(ri);
+                }
+            }
+        }
+        for ri in carless {
+            self.actors[ri].koopaling_leave_car();
+        }
+        for (ci, c) in self.actors.iter_mut().enumerate() {
+            if matches!(c.kind, Kind::ClownCar { .. }) && matches!(c.phase, 1 | 3) && !ridden[ci] {
+                c.phase = 0;
             }
         }
         for (ri, ci) in moves {
-            let (cx, cy) = (self.actors[ci].x, self.actors[ci].y);
-            if self.actors[ci].phase == 0 {
-                self.actors[ci].phase = 1;
+            let stop = self.actors[ri].koopaling_stops_car();
+            let car = &mut self.actors[ci];
+            match car.phase {
+                0 | 1 if stop => {
+                    car.phase = 3;
+                    car.vx = 0.0;
+                    car.vy = 0.0;
+                }
+                0 => car.phase = 1,
+                3 if !stop => car.phase = 1,
+                _ => {}
             }
+            let (cx, cy) = (car.x, car.y);
+            let ride = 24.0 + 16.0 * (if car.big { 2.0 } else { 1.0 } - 1.0);
             let r = &mut self.actors[ri];
             r.x = cx;
-            r.y = cy + 24.0;
+            r.y = cy + ride;
             r.vx = 0.0;
             r.vy = 0.0;
             r.on_ground = true;
@@ -7581,6 +7620,10 @@ impl World {
         }
         if a.kind.is_v3() {
             s.y = a.y + a.v3_draw_dy();
+        }
+        if a.koopaling_in_car() {
+            // behind the car's rim (the car is drawn at layer 40)
+            s.layer = 39;
         }
         if matches!(a.kind, Kind::Piranha { .. }) {
             // in a pipe: behind the pipe; a down-facing pipe hangs the plant upside down

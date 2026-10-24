@@ -232,7 +232,8 @@ pub enum Kind {
         contents: Option<crate::blocks::Contents>,
     },
     /// Koopa Clown Car (42; `fire` = the Fire Koopa Clown Car). Phases: 0 empty (floats),
-    /// 1 an enemy rides it (chases the player), 2 the player flies it (the world drives it).
+    /// 1 an enemy rides it (chases the player), 2 the player flies it (the world drives it),
+    /// 3 stopped while its Koopaling rider is hit (KoopaJrStop).
     ClownCar {
         fire: bool,
     },
@@ -3307,6 +3308,7 @@ impl Actor {
     /// Koopa Clown Car (42-koopa-clown-car.md). Empty: velocity × 0.95 with a ±0.2 bob in 0.01
     /// steps. With an enemy rider: homes on the player at up to 1.0 px/f, accelerating 0.02.
     /// Flown by the player: moved by the world (`World::fly_clown_car`). Bob speed in `heading`.
+    /// Stopped (KoopaJrStop, exe 0x710118f8b0): velocity 0 every frame [obs].
     fn step_clown_car(&mut self, level: &Level) {
         match self.phase {
             0 => {
@@ -3334,6 +3336,10 @@ impl Actor {
                 }
                 self.dir = if dx < 0.0 { -1 } else { 1 };
                 self.collide(level);
+            }
+            3 => {
+                self.vx = 0.0;
+                self.vy = 0.0;
             }
             _ => {}
         }

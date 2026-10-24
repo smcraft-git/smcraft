@@ -13,6 +13,13 @@
 //! the moves left before the next attack; `v3.count2` shots fired in the volley; `v3.cool` the
 //! attack cooldown; `v3.home` the spawn x; `v3.turn` the current gravity; `pause` frames the
 //! player has been behind; `v3.holding` = in the shell (no HP loss).
+//!
+//! In a Koopa Clown Car (flag 0x200) a Koopaling runs the Clown context instead (states
+//! `C_MOVE` …; see "In a Koopa Clown Car" below): the car (a separate `Kind::ClownCar` actor,
+//! moved and stopped by `World::carry_clown_riders`) places it. There `timer` is the volley
+//! timer or the state timer, `v3.sub` the step of the volley sequencer or of Damage / ShellOut,
+//! `v3.clock` the throw_st_wait hold, `v3.count2` the shots of the volley, and `v3.speed` /
+//! `v3.turn` the body's x / y scale (the squash, ducking into the car).
 
 use super::v3::{V3Look, angle_diff, anim_key, style_ix};
 use super::{Actor, ENEMY_GRAVITY, Kind, MAX_FALL, Mode};
@@ -77,6 +84,19 @@ mod st {
     pub const APPEAR_FROM: u8 = 30;
     pub const JUMP_KEEP: u8 = 31;
     pub const JUMP_KEEP_END: u8 = 32;
+    // the Clown context (in a Koopa Clown Car), init 0x71010685f0
+    pub const C_MOVE: u8 = 40;
+    /// SMB1 / SMB3 / SMW: the squash, ducking into the car, coming back in the shell.
+    pub const C_DAMAGE: u8 = 41;
+    /// NSMBU (DamagePlayAnim): the 60-frame flinch (or the defeat).
+    pub const C_DAMAGE_ANIM: u8 = 42;
+    /// NSMBU: shell_in.
+    pub const C_SHELL_IN: u8 = 43;
+    pub const C_SHELL_MOVE: u8 = 44;
+    /// SMB1 / SMB3 / SMW: out of the shell by ducking into the car again.
+    pub const C_SHELL_OUT: u8 = 45;
+    /// NSMBU (ShellOutPlayAnim): shell_out.
+    pub const C_SHELL_OUT_ANIM: u8 = 46;
 }
 
 /// `v3.flags` bits.
@@ -89,6 +109,8 @@ mod fl {
     pub const HIDDEN: u8 = 4;
     /// The last Wait followed an attack (10 % of those get a short random Wait).
     pub const ATTACKED: u8 = 8;
+    /// Rides a Koopa Clown Car (the Clown context).
+    pub const IN_CAR: u8 = 16;
 }
 
 pub const KOOPALING_HP: u8 = 3;
@@ -108,6 +130,29 @@ const JUMP_G: [f32; 5] = [-0.23, -0.1, -0.23, -0.23, -0.23];
 /// 0x71023cb57c].
 const LEDGE_VY_M3: [f32; 7] = [2.1, 3.0, 3.2, 3.9, 4.3, 4.7, 5.1];
 const LEDGE_VY: [f32; 3] = [3.0, 4.0, 5.0];
+/// In the car: frames between volleys by HP 3 / 2 / 1, [100,150), [80,120), [60,90) (the Move
+/// state's arguments to the controller's timed sequencer 0x7101144450 / 0x7101144560) [obs
+/// 0x7101068aa0, 0x7101068ba0].
+const CAR_GAP: [(i32, i32); 3] = [(100, 150), (80, 120), (60, 90)];
+/// ShellMove: 300 frames in the shell [obs 0x7101069660].
+const CAR_SHELL_FRAMES: i32 = 300;
+/// NSMBU DamagePlayAnim: 60 frames [obs 0x7101069300].
+const CAR_DAMAGE_ANIM: i32 = 60;
+/// NSMBU in the car (the `_clown` animations, which the controller's slot 43 picks in the Clown
+/// and Cloud contexts [obs 0x7101123950]): throw_st_clown and throw_ed_clown lengths per
+/// Koopaling (Lemmy, Morton, Larry, Wendy, Iggy, Roy, Ludwig) [obs anims WU_Enemy_<name>].
+const CAR_THROW_WU: [(i32, i32); 7] = [
+    (25, 25),
+    (29, 27),
+    (25, 24),
+    (37, 56),
+    (24, 35),
+    (29, 25),
+    (21, 28),
+];
+/// NSMBU shell_in_clown (Larry, Wendy: shell_in) and shell_out_clown lengths [obs anims].
+const CAR_SHELL_IN_WU: [i32; 7] = [16, 16, 15, 16, 14, 14, 14];
+const CAR_SHELL_OUT_WU: i32 = 30;
 
 /// Model base name per Koopaling.
 const NAMES: [&str; 7] = ["lemmy", "morton", "larry", "wendy", "iggy", "roy", "ludwig"];
@@ -167,9 +212,24 @@ impl Actor {
         self.phase
     }
 
-    /// In the shell (no HP loss) or flinching: hits bounce off.
+    /// In the shell (no HP loss) or flinching: hits bounce off. In the car only the Move state
+    /// takes hits: Damage / DamagePlayAnim skip them (Clown slot 10 0x71010689e0), the other
+    /// states set the no-damage flag +0x528 0x100000 or show the shell model [obs].
     pub fn koopaling_guarded(&self) -> bool {
+        if self.koopaling_in_car() {
+            return self.phase != st::C_MOVE || self.v3.hp == 0;
+        }
         self.v3.holding || self.phase == st::DAMAGE || self.v3.hp == 0
+    }
+
+    /// Rides a Koopa Clown Car (the Clown context).
+    pub fn koopaling_in_car(&self) -> bool {
+        matches!(self.kind, Kind::Koopaling { .. }) && self.v3.flags & fl::IN_CAR != 0
+    }
+
+    /// In the car's Damage / DamagePlayAnim: the car stops (KoopaJrStop) [obs 0x7101190b10].
+    pub fn koopaling_stops_car(&self) -> bool {
+        self.koopaling_in_car() && matches!(self.phase, st::C_DAMAGE | st::C_DAMAGE_ANIM)
     }
 
     /// Under the ground (Roy): not drawn, not touchable.
@@ -207,6 +267,9 @@ impl Actor {
         self.v3.fire = FIRE_COUNTER[self.big as usize];
         self.v3.flags &= !fl::ON_BALL; // Lemmy's ball pops (Damage enter) [obs]
         self.v3.shots = 0;
+        if self.koopaling_in_car() {
+            return self.kl_car_hit(from_x, st_ix);
+        }
         if stomp {
             self.vy = self.vy.min(0.0);
         } else {
@@ -254,6 +317,14 @@ impl Actor {
         self.v3.count = 1 + self.rand(2) as u8;
         self.v3.turn = ENEMY_GRAVITY;
         self.v3.style = style_ix(level) as u8;
+        self.dir = self.v3_toward();
+        if self.kl_clown_part() {
+            // placed in a car: the Clown context from the start (Lemmy has no ball there; his
+            // Clown enter 0x71011b5460 pops one he rides)
+            self.v3.flags |= fl::IN_CAR;
+            self.kl_car_move();
+            return;
+        }
         if self.kl_who() == who::LEMMY {
             self.v3.flags |= fl::ON_BALL;
             self.v3.len = if style_ix(level) == 3 { 1.5 } else { 1.0 };
@@ -261,8 +332,12 @@ impl Actor {
         if self.kl_who() == who::MORTON {
             self.morton_reroll(style_ix(level), false);
         }
-        self.dir = self.v3_toward();
         self.kl_enter(if self.on_ground { st::WAIT } else { st::FALL });
+    }
+
+    /// The part rides a Koopa Clown Car (flag 0x200).
+    fn kl_clown_part(&self) -> bool {
+        matches!(self.kind, Kind::Koopaling { clown: true, .. })
     }
 
     fn kl_enter(&mut self, s: u8) {
@@ -392,17 +467,21 @@ impl Actor {
         if self.phase == 0 {
             self.kl_setup(level);
         }
-        if self.v3.cool > 0 {
-            self.v3.cool -= 1;
-        }
-        if self.v3.clock > 0 {
-            self.v3.clock -= 1;
-        }
         if self.v3.pop > 0.0 {
             self.v3.pop = (self.v3.pop - 0.07).max(0.0);
             if self.v3.pop <= 1.0 {
                 self.v3.pop = 0.0;
             }
+        }
+        if self.koopaling_in_car() {
+            self.kl_car(sti);
+            return None;
+        }
+        if self.v3.cool > 0 {
+            self.v3.cool -= 1;
+        }
+        if self.v3.clock > 0 {
+            self.v3.clock -= 1;
         }
         // turn to face a player who has been behind for 10 frames during the Wait [obs]
         if self.phase == st::WAIT {
@@ -797,6 +876,373 @@ impl Actor {
             self.v3.sub = 0;
             self.v3.clock = 0;
         }
+    }
+
+    // ------------------------------------------------------------ in a Koopa Clown Car
+
+    // The Clown context action (120-koopalings.md "In a Koopa Clown Car"): KoKoopaDefault's
+    // Clown vtable 0x71028b6120 (factory 0x7101065b70) serves Larry, Wendy, Iggy, Morton and
+    // Ludwig; Lemmy's 0x71028efca0 and Roy's 0x7102909500 override only the context setup
+    // (Lemmy's ball pops, Roy's dive search is cleared) and share every state handler [obs].
+    // The Koopaling does not move itself in it: the car places it (its own movement step is
+    // skipped, as in the generic Clown context 0x71005ef670) and does the flying.
+
+    /// Move (enter 0x7101068aa0): the volley sequencer starts over [obs 0x7101144450].
+    fn kl_car_move(&mut self) {
+        self.phase = st::C_MOVE;
+        self.vx = 0.0;
+        self.vy = 0.0;
+        self.v3.holding = false;
+        self.v3.speed = 1.0;
+        self.v3.turn = 1.0;
+        self.v3.sub = 0;
+        self.v3.anim = 0;
+        self.v3.count2 = 0;
+        self.pause = 0;
+        self.kl_car_gap();
+    }
+
+    /// The random wait before the next volley, by the HP now [obs 0x7101144560 step 4].
+    fn kl_car_gap(&mut self) {
+        let (lo, hi) = CAR_GAP[hp_ix(self.v3.hp)];
+        self.timer = lo + self.rand((hi - lo) as u32) as i32;
+    }
+
+    /// Shots per volley (controller slot 22): 1 / 2 / 3 at 3 / 2 / 1 HP; Lemmy 1 / 3 / 5;
+    /// Wendy and Ludwig 1. Roy's 0x710124dd20 gives 1 only in the Basic and Wing contexts, so
+    /// in the car he fires the base volley [obs 0x7101143190, 0x71011bbe20, 0x71012bf210,
+    /// 0x71011c28a0].
+    fn kl_car_volley(&self) -> u8 {
+        let h = hp_ix(self.v3.hp);
+        match self.kl_who() {
+            who::WENDY | who::LUDWIG => 1,
+            who::LEMMY => [1, 3, 5][h],
+            _ => [1, 2, 3][h],
+        }
+    }
+
+    /// The throw_st_wait hold before each shot (controller slot 25): 30; Ludwig 10 (NSMBU 0)
+    /// [obs 0x71011431d0, 0x710124dd50 (30 outside Basic / Wing), 0x71011c28b0].
+    fn kl_car_hold(&self, sti: usize) -> i32 {
+        match self.kl_who() {
+            who::LUDWIG if sti == 3 => 0,
+            who::LUDWIG => 10,
+            _ => 30,
+        }
+    }
+
+    /// (throw_st length, shot frame, throw_ed length) in the car.
+    fn kl_car_throw(&self, sti: usize) -> (i32, i32, i32) {
+        let (shot_at, len) = self.kl_attack_anim(sti);
+        if sti == 3 {
+            let (st_len, ed_len) = CAR_THROW_WU[self.kl_who().min(6) as usize];
+            (st_len, shot_at, ed_len)
+        } else {
+            (5, shot_at, len)
+        }
+    }
+
+    /// A hit that costs HP in the car (shared handler 0x7101143410 → 0x7101144110: in the
+    /// Clown context with HP left, or in NSMBU, it only flags the hit, and Clown slot 10
+    /// 0x71010689e0 moves to Damage, NSMBU DamagePlayAnim). There is no knock-back and no
+    /// Shell context. At 0 HP in SMB1 / SMB3 / SMW the defeat path 0x7101143d90 knocks him out
+    /// of the car at once (DieFall) [obs].
+    fn kl_car_hit(&mut self, from_x: f32, sti: usize) -> (bool, bool) {
+        let down = self.v3.hp == 0;
+        if down && sti != 3 {
+            self.die_fall(from_x);
+            return (true, true);
+        }
+        self.vx = 0.0;
+        self.vy = 0.0;
+        self.v3.anim = 0;
+        self.v3.sub = 0;
+        if sti == 3 {
+            self.phase = st::C_DAMAGE_ANIM;
+            self.timer = CAR_DAMAGE_ANIM;
+        } else {
+            // Damage enter 0x7101068c90: anim damage, scale (1.1, 0.75), then 4 frames
+            self.phase = st::C_DAMAGE;
+            self.v3.speed = 1.1;
+            self.v3.turn = 0.75;
+            self.timer = 4;
+        }
+        (true, down)
+    }
+
+    /// The car is gone: back to the ground machine (the Clown context's exit 0x7101068960).
+    pub fn koopaling_leave_car(&mut self) {
+        self.v3.flags &= !fl::IN_CAR;
+        self.v3.holding = false;
+        self.v3.speed = 0.0;
+        self.v3.turn = ENEMY_GRAVITY;
+        self.v3.sub = 0;
+        if self.kl_who() == who::MORTON {
+            self.morton_reroll(self.v3.style as usize, false);
+        }
+        self.kl_enter(st::FALL);
+    }
+
+    /// Body scale x / y in the car (1 elsewhere).
+    fn kl_car_scale(&self) -> (f32, f32) {
+        if self.koopaling_in_car() {
+            (self.v3.speed, self.v3.turn)
+        } else {
+            (1.0, 1.0)
+        }
+    }
+
+    /// Both scale axes toward `to` by `step`; true once there (the scale easing of Damage exe
+    /// 0x7101068d80 and ShellOut exe 0x7101069910).
+    fn kl_car_ease(&mut self, to: f32, step: f32) -> bool {
+        let ease = |v: f32| {
+            if (to - v).abs() <= step {
+                to
+            } else {
+                v + step.copysign(to - v)
+            }
+        };
+        self.v3.speed = ease(self.v3.speed);
+        self.v3.turn = ease(self.v3.turn);
+        self.v3.speed == to && self.v3.turn == to
+    }
+
+    /// A state timer that ends on the frame it reaches 0.
+    fn kl_car_tick(&mut self) -> bool {
+        if self.timer > 0 {
+            self.timer -= 1;
+        }
+        self.timer <= 0
+    }
+
+    fn kl_car(&mut self, sti: usize) {
+        let w = self.kl_who().min(6) as usize;
+        self.vx = 0.0;
+        self.vy = 0.0;
+        self.v3.anim += 1;
+        match self.phase {
+            st::C_MOVE => self.kl_car_sequencer(sti),
+            st::C_DAMAGE => match self.v3.sub {
+                // 4 frames squashed; back to 1 by 0.1 a frame; 18 frames; down to 0.01 by
+                // 0.1 (ducked into the car); 36 frames; the shell model (controller slot 18 is
+                // 1 for all, 0x71011236f0); back to 1 by 0.1 → ShellMove [obs 0x7101068d80]
+                0 | 2 | 4 => {
+                    if self.kl_car_tick() {
+                        if self.v3.sub == 4 {
+                            self.v3.holding = true;
+                        }
+                        self.v3.sub += 1;
+                    }
+                }
+                1 => {
+                    if self.kl_car_ease(1.0, 0.1) {
+                        self.v3.sub = 2;
+                        self.timer = 18;
+                    }
+                }
+                3 => {
+                    if self.kl_car_ease(0.01, 0.1) {
+                        self.v3.sub = 4;
+                        self.timer = 36;
+                    }
+                }
+                _ => {
+                    if self.kl_car_ease(1.0, 0.1) {
+                        self.kl_car_shell();
+                    }
+                }
+            },
+            st::C_DAMAGE_ANIM => {
+                // 60 frames; at 0 HP the Die context, else ShellIn [obs 0x7101069410]
+                if self.kl_car_tick() {
+                    if self.v3.hp == 0 {
+                        self.die_fall(self.x - self.dir as f32);
+                    } else {
+                        self.phase = st::C_SHELL_IN;
+                        self.v3.anim = 0;
+                    }
+                }
+            }
+            st::C_SHELL_IN => {
+                // shell_in(_clown) to its end [obs 0x71010695d0]
+                if self.v3.anim >= CAR_SHELL_IN_WU[w] {
+                    self.kl_car_shell();
+                }
+            }
+            st::C_SHELL_MOVE => {
+                // 300 frames in the shell (NSMBU: spinning, yaw +18°/frame, not drawn: the
+                // engine has no yaw for sprites) → ShellOut / ShellOutPlayAnim (controller
+                // slot 48 0x71011239c0: NSMBU) [obs 0x7101069710]
+                if self.kl_car_tick() {
+                    self.v3.anim = 0;
+                    self.v3.sub = 0;
+                    if sti == 3 {
+                        self.v3.holding = false;
+                        self.phase = st::C_SHELL_OUT_ANIM;
+                    } else {
+                        self.phase = st::C_SHELL_OUT;
+                    }
+                }
+            }
+            st::C_SHELL_OUT => match self.v3.sub {
+                // down to 0.01 by 0.15; 4 frames; out of the shell; back to 1 by 0.1 → Move
+                // [obs 0x7101069890 / 0x7101069910]
+                0 => {
+                    if self.kl_car_ease(0.01, 0.15) {
+                        self.v3.sub = 1;
+                        self.timer = 4;
+                    }
+                }
+                1 => {
+                    if self.kl_car_tick() {
+                        self.v3.holding = false;
+                        self.v3.sub = 2;
+                    }
+                }
+                _ => {
+                    if self.kl_car_ease(1.0, 0.1) {
+                        self.kl_car_move();
+                    }
+                }
+            },
+            st::C_SHELL_OUT_ANIM => {
+                // shell_out_clown (30 frames) to its end → Move [obs 0x7101069d20]
+                if self.v3.anim >= CAR_SHELL_OUT_WU {
+                    self.kl_car_move();
+                }
+            }
+            _ => self.kl_car_move(),
+        }
+        // outside Move the car turns its rider toward the player once he is more than 16 px
+        // away (Chase 0x710118bc60: in Move the rider's link flag 0x20 leaves it to the
+        // sequencer) [obs]
+        if self.phase != st::C_MOVE && self.alive() {
+            let (dx, dy) = (self.target.0 - self.x, self.target.1 - self.y);
+            if dx.dhypot(dy) > 16.0 && dx != 0.0 {
+                self.dir = if dx < 0.0 { -1 } else { 1 };
+            }
+        }
+    }
+
+    /// The shell model is on: ShellMove for 300 frames [obs 0x7101069660].
+    fn kl_car_shell(&mut self) {
+        self.phase = st::C_SHELL_MOVE;
+        self.v3.holding = true;
+        self.v3.speed = 1.0;
+        self.v3.turn = 1.0;
+        self.v3.sub = 0;
+        self.v3.anim = 0;
+        self.timer = CAR_SHELL_FRAMES;
+    }
+
+    /// Move's volley: the controller's timed sequencer 0x7101144560. Step 0 waits for the
+    /// timer (and, before the first shot of a volley, for the Koopaling to be in view); 1 plays
+    /// throw_st; 2 holds throw_st_wait (slot 25); 3 plays throw_ed until its shot frame (slot
+    /// 27) and fires (0x7101144bb0, slot 28 projectiles); 4 waits for throw_ed's end, then the
+    /// next shot of the volley follows at once (timer 0) or the timer is drawn again. Outside
+    /// steps 3 and 4 the Koopaling turns to a player who has been on the other side for 10
+    /// frames [obs].
+    fn kl_car_sequencer(&mut self, sti: usize) {
+        if self.v3.sub < 3 {
+            if self.v3_toward() != self.dir {
+                self.pause += 1;
+                if self.pause >= 10 {
+                    self.dir = -self.dir;
+                    self.pause = 0;
+                }
+            } else {
+                self.pause = 0;
+            }
+        } else {
+            self.pause = 0;
+        }
+        let n = self.kl_car_volley();
+        let (st_len, shot_at, ed_len) = self.kl_car_throw(sti);
+        match self.v3.sub {
+            0 => {
+                let waiting = !self.kl_car_tick();
+                let mid = n >= 2 && self.v3.count2 > 0;
+                if !waiting && (mid || self.v3_in_view()) {
+                    self.v3.sub = 1;
+                    self.v3.anim = 0;
+                    self.v3.clock = self.kl_car_hold(sti);
+                }
+            }
+            1 => {
+                if self.v3.anim >= st_len {
+                    self.v3.sub = 2;
+                }
+            }
+            2 => {
+                if self.v3.clock > 0 {
+                    self.v3.clock -= 1;
+                }
+                if self.v3.clock <= 0 {
+                    self.v3.sub = 3;
+                    self.v3.anim = 0;
+                }
+            }
+            3 => {
+                if self.v3.anim > shot_at {
+                    self.v3.shots = 1;
+                    self.v3.count2 += 1;
+                    self.v3.sub = 4;
+                }
+            }
+            _ => {
+                if self.v3.anim >= ed_len {
+                    self.v3.sub = 0;
+                    if self.v3.count2 < n {
+                        self.timer = 0;
+                    } else {
+                        self.v3.count2 = 0;
+                        self.kl_car_gap();
+                    }
+                }
+            }
+        }
+    }
+
+    /// The body's texture in the car, if it has its own.
+    fn kl_car_tex(&self, t: i32) -> Option<&'static str> {
+        let n = self.v3.anim;
+        let shell = anim_key(
+            &[
+                (0, "shell.0"),
+                (4, "shell.1"),
+                (8, "shell.2"),
+                (12, "shell.3"),
+            ],
+            16,
+            t,
+            true,
+        );
+        Some(match self.phase {
+            _ if self.v3.holding || self.phase == st::C_SHELL_IN => shell,
+            st::C_DAMAGE | st::C_DAMAGE_ANIM => "damage.0",
+            st::C_MOVE => match self.v3.sub {
+                1 => anim_key(
+                    &[(0, "throw_st.0"), (2, "throw_st.1"), (4, "throw_st.2")],
+                    5,
+                    n,
+                    false,
+                ),
+                2 => anim_key(
+                    &[(0, "throw_st.0"), (2, "throw_st.1"), (4, "throw_st.2")],
+                    6,
+                    t,
+                    true,
+                ),
+                3 | 4 => anim_key(
+                    &[(0, "throw_ed.0"), (2, "throw_ed.1"), (4, "throw_ed.2")],
+                    6,
+                    n,
+                    true,
+                ),
+                _ => return None,
+            },
+            _ => return None,
+        })
     }
 
     // ------------------------------------------------------------ Iggy / Lemmy walks
@@ -1356,7 +1802,13 @@ impl Actor {
         }
         let model = MODELS[self.kl_who().min(6) as usize];
         let n = self.v3.anim;
+        let car = if self.koopaling_in_car() {
+            self.kl_car_tex(t)
+        } else {
+            None
+        };
         let tex = match self.phase {
+            _ if car.is_some() => car.unwrap_or("wait.0"),
             _ if self.v3.holding || self.phase == st::SHELL_IN => anim_key(
                 &[
                     (0, "shell.0"),
@@ -1432,12 +1884,16 @@ impl Actor {
         // the SMB1 frames are 40 × 40, the shell 32 × 32 (sprite sizes are the art's)
         let s = if self.v3.pop > 1.0 { self.v3.pop } else { 1.0 };
         let size = if tex.starts_with("shell") { 32.0 } else { 40.0 };
-        Some((model, tex, size * s, size * s, face))
+        let (sx, sy) = self.kl_car_scale();
+        Some((model, tex, size * s * sx, size * s * sy, face))
     }
 
     /// Where Lemmy's ball is drawn (centre) and its radius, while he rides it.
     pub fn lemmy_ball(&self) -> Option<(f32, f32, f32)> {
         if self.kl_who() != who::LEMMY {
+            return None;
+        }
+        if self.kl_clown_part() && self.phase == 0 || self.koopaling_in_car() {
             return None;
         }
         // as placed (not set up yet) he stands on his ball too

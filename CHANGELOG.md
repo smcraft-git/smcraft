@@ -27,6 +27,11 @@ SMCraft is back in development (it was archived in October 2026).
   and walk, the wipe), the 100 Marios on the course card, the pause menu's style sound, course
   clear and the skip countdown, all from your SMM1 dump's own sound data (import SMM1 again:
   `mmk import-smm1`).
+- **Koopalings in Koopa Clown Cars**: the car chases you while the Koopaling fires volleys of
+  his magic (Lemmy his balls, Wendy her rings) from it; a stomp stops the car while he ducks in,
+  then he spins in his shell for a while (stomps bounce off) before he comes out; the third stomp
+  knocks him out of the car (NSMBU: after his flinch) and the empty car can be ridden.
+- Fix: a Koopa Clown Car whose rider is defeated floats empty and can be ridden.
 - Fix: Munchers hurt on a wall sensor's touch, as in SMM2 (a one-tile gap between Munchers is as
   tight as in the game).
 - **The Course Maker**: SMM2's own maker screens (part palette and part window, styles, themes,
