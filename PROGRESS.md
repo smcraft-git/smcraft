@@ -409,8 +409,10 @@ Nextendo; `docs/nextendo-network-play.md`, spec `research/specs/network-play.md`
   out to belong to the parts' 0xC0000 bits, not stacks) · ⬜ the editor's height limit (play
   takes 128 members at most), pulling a member off a column
 - 🔄 Physics: re-recording every trace (2026-10-24; the old 428 / 454 was not a true count — the
-  old items / form traces were all small Mario). Re-recorded, current engine: **480 / 480 exact**
-  over 42 courses: M1/M3/MW/WU/3W flat 34 each, M1/M3/MW/WU/3W items 34 each, M1/M3/MW/WU/3W
+  old items / form traces were all small Mario). Re-recorded, current engine: **481 / 481 exact**
+  over 43 courses (2026-10-24 physics7: the shell courses now compare the shell too, which showed
+  3 carried-shell throws off; and object traces: the player plus every simulated actor matched to
+  a recorded game object, found by scans while the game is paused in the trace hook): M1/M3/MW/WU/3W flat 34 each, M1/M3/MW/WU/3W items 34 each, M1/M3/MW/WU/3W
   slope 4 each, M1/M3/MW/WU/3W wall 4 each, M1/M3/MW/WU/3W water 2 each, M3/MW/WU/3W form 16 each
   (WU: the Propeller Mushroom can't be collected at the title screen, so the capture makes the
   Super player a Propeller one, form +0x4a8 = 3),
@@ -433,11 +435,21 @@ Nextendo; `docs/nextendo-network-play.md`, spec `research/specs/network-play.md`
   (vy 0.5, +0.7 to 3.0, 38 frames; the fall keeps the rising air control while going up); a side
   kick slides the shell that frame, and a shell slides on past the course's left edge (its
   leftmost column continues); the Cat's air scratch keeps normal gravity and its Down-held pound
-  is the normal ground pound (the dive taken on Down with a direction [inf]). 3D World
+  is the normal ground pound (the dive taken on Down with a direction [inf]); a carried shell
+  (SMB3 / SMW / NSMBU) sits 11 px ahead and 1 up (NSMBU 8.909 and 4), stays in the hands 5 frames
+  of the Throw state after Run is let go (NSMBU 6), then flies at 2.5 + 0.35·|vx| (≤ 4) with vy
+  0.2, moving twice that frame from 3 px ahead; M1 hit (a running kick through two Goombas that
+  spawn as the view comes near, the wall bounce, a jump over it; player, shell and both Goombas
+  exact): the camera's horizontal follower is 0.3 × distance with no player-speed term (the game's
+  view rect found in memory, within 0.0002 px), objects reaching last frame's spawn zone appear and
+  act in the same frame, a walker placed on the ground walks from its first frame, a knocked-off
+  enemy keeps its speeds on the hit frame and is removed once 40 px below the view, and a shell's
+  side hit reaches the block in front of it (it turns a frame later). 3D World
   slide-end stoop
   3 frames confirmed. 3D World recording works with a local Ryujinx fix (a zero-sized guest
   texture with 2 levels made Metal abort under MoltenVK). ⬜ still to record: the Cat dive's real
-  trigger, shells hitting enemies and blocks, other objects; whole courses start to goal
+  trigger, shells hitting blocks, more styles of the hit course, blocks hit from below, other
+  objects; whole courses start to goal
 - 🔄 Pixels against the game (smm2recomp reference frames of `mmk ref-courses`, all 90, update
   900; MAE / % pixels off by > 24; `research/tools/pixel-ref/pixref.py`, 2026-10-24):
 

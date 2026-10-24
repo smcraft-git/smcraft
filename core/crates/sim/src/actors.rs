@@ -639,6 +639,8 @@ pub struct Actor {
     pub age: u32,
     /// Frames during which a just-kicked shell cannot hurt the kicker.
     pub kick_lock: i32,
+    /// DieFall speeds taken on the next update (die_by).
+    pub die_pending: Option<(f32, f32)>,
     /// A kick's slide speed (signed), taken up by the shell's next update: the kick message
     /// is handled a frame later [obs: Ryujinx trace M1_koopa koopa_kick, vx still 0 on the
     /// kick frame, moving at the kick speed from the next].
@@ -749,6 +751,7 @@ impl Actor {
             turn_lock: 0,
             age: 0,
             kick_lock: 0,
+            die_pending: None,
             kick_speed: 0.0,
             bounce_pending: false,
             chain: 0,
@@ -1422,8 +1425,10 @@ impl Actor {
     pub fn die_by(&mut self, from_x: f32, cause: DieCause) {
         let dir = if self.x < from_x { -1.0 } else { 1.0 };
         self.mode = Mode::DieFall;
-        self.vx = DIE_SPEED * dir;
-        self.vy = DIE_VY;
+        // the knock-off speeds are set when the hit is taken, on the next frame's update: on the
+        // hit frame the actor still shows its old speeds [obs: Ryujinx trace M1_hit, Goombas hit
+        // by a shell keep vx −0.5 / vy 0 that frame, then move (1.5, 3.9 − 0.24375)]
+        self.die_pending = Some((DIE_SPEED * dir, DIE_VY));
         self.die_cause = cause;
     }
 
@@ -1718,12 +1723,19 @@ impl Actor {
                 }
             }
             Mode::DieFall => {
+                // gone once it has fallen 40 px below the view's bottom, at its next update [obs:
+                // Ryujinx trace M1_hit, two Goombas knocked off by a shell last move to y −43.9
+                // and are removed the frame after; at −39.9 they go on]
+                if self.y < self.camera.1 - 40.0 {
+                    self.mode = Mode::Dead;
+                    return None;
+                }
+                if let Some((vx, vy)) = self.die_pending.take() {
+                    (self.vx, self.vy) = (vx, vy);
+                }
                 self.vy = (self.vy + DIE_GRAVITY).max(MAX_FALL);
                 self.x += self.vx;
                 self.y += self.vy;
-                if self.y < -4.0 * TILE {
-                    self.mode = Mode::Dead;
-                }
             }
             Mode::Normal => spawned = self.step_normal(level, player_x),
             Mode::Thrown => self.step_thrown(level),

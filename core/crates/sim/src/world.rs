@@ -313,6 +313,9 @@ pub struct World {
     pub main_char: usize,
     /// Run held this frame (carrying).
     run_held: bool,
+    /// Frames of the player's Throw state left before a carried shell leaves the hands (Run let
+    /// go while carrying one).
+    throw_wait: Option<u8>,
     /// Key-door pairs unlocked: (area, warp id >> 1).
     unlocked_doors: std::collections::BTreeSet<(usize, u8)>,
     /// Warp-box pairs unlocked with a key, and pairs used up (single player: a box vanishes
@@ -622,6 +625,7 @@ impl World {
             yoshi_fire_cd: 0,
             yoshi_prev_run: false,
             run_held: false,
+            throw_wait: None,
             unlocked_doors: Default::default(),
             unlocked_boxes: Default::default(),
             gone_boxes: Default::default(),
@@ -1211,12 +1215,49 @@ impl World {
             return;
         }
         let p = &self.player;
-        let (x, y, facing, pvx) = (p.x + p.facing as f32 * 11.0, p.y + 2.0, p.facing, p.vx);
+        // the carried spot [obs: Ryujinx traces M3/MW/WU_shell shell_run, a Buzzy shell held
+        // while running]: 11 px ahead and 1 up in SMB3 / SMW; NSMBU's hands hold it 8.909 ahead
+        // and 4 up (3D World taken as NSMBU [inf])
+        let (dx, dy) = if matches!(
+            self.style,
+            crate::player::Style::WU | crate::player::Style::W3
+        ) {
+            (8.908_783, 4.0)
+        } else {
+            (11.0, 1.0)
+        };
+        let (x, y, facing, pvx) = (p.x + p.facing as f32 * dx, p.y + dy, p.facing, p.vx);
         let crate_held = matches!(self.actors[i].kind, Kind::Crate { .. } | Kind::Stone);
         let heavy = self.actors[i].kind == Kind::Stone;
-        let release = !self.run_held
+        let shell = self.actors[i].mode == Mode::ShellWait && !crate_held;
+        // Run let go with a shell in the hands: the Throw state (cState_Throw, v1 0x71009c8c50)
+        // sets its timer to 20 and lets go once it is under 15 (execute 0x71009c8de0 →
+        // 0x71009c7a70), so the shell stays in the hands 5 more frames [obs: M3/MW traces; NSMBU's
+        // let go one frame later, 6]
+        let mut thrown = false;
+        if shell && !self.run_held && self.player.alive() {
+            let wait = self.throw_wait.get_or_insert(
+                if matches!(
+                    self.style,
+                    crate::player::Style::WU | crate::player::Style::W3
+                ) {
+                    6
+                } else {
+                    5
+                },
+            );
+            if *wait > 0 {
+                *wait -= 1;
+            } else {
+                thrown = true;
+            }
+        } else {
+            self.throw_wait = None;
+        }
+        let release = thrown
             || !self.player.alive()
-            || (self.actors[i].mode != Mode::ShellWait && !crate_held);
+            || (self.actors[i].mode != Mode::ShellWait && !crate_held)
+            || (crate_held && !self.run_held);
         if release && crate_held {
             // thrown forward [obs]: the map-object carry action's release message (slot
             // 0x7100852140, release kind 1) launches at (|thrower speed| + 3, or + 1 when the
@@ -1245,7 +1286,29 @@ impl World {
         if release {
             self.actors[i].held = false;
             self.player.held = None;
-            if self.actors[i].mode == Mode::ShellWait && self.player.alive() {
+            self.throw_wait = None;
+            if thrown {
+                // the release message, kind 5 (throw; Shell context enter v1 0x71005f4ca0):
+                // 2.5 + 0.35·|thrower speed| when the thrower moves the throw's way (at most 4),
+                // else 2.5; vy 0.2 [obs: 2.5 + 0.35 × 2.790 = 3.4765 in M3_shell shell_run]. On
+                // the throw frame the shell moves twice from 3 px ahead of where the hands held
+                // it last [obs: x + 3 + 2·vx, y + 0.0125 − 0.175 in M3/MW/WU shell_run]
+                let level = &self.level;
+                let a = &mut self.actors[i];
+                let mut speed = 2.5;
+                if pvx * facing as f32 > 0.0 {
+                    speed = (2.5 + 0.35 * pvx.abs()).min(4.0);
+                }
+                a.kick(facing, pvx);
+                a.vx = speed * facing as f32;
+                a.x += 3.0 * facing as f32;
+                a.vy = (0.2 + crate::actors::ENEMY_GRAVITY).max(crate::actors::MAX_FALL);
+                a.collide(level);
+                if a.wall {
+                    a.bounce_pending = true;
+                }
+                self.events.push(Event::Kick);
+            } else if self.actors[i].mode == Mode::ShellWait && self.player.alive() {
                 self.actors[i].x = x;
                 self.actors[i].kick(facing, pvx);
                 self.events.push(Event::Kick);
@@ -1946,6 +2009,11 @@ impl World {
             return;
         }
 
+        // objects reaching the spawn zone of last frame's view appear now and act this frame [obs:
+        // Ryujinx trace M1_hit hit_combo, a Goomba first seen one step into its walk, on the
+        // frame after the view's zone reached it]
+        self.activate();
+
         // blocks, actors, effects
         for r in self.blocks.step() {
             self.release(r);
@@ -2122,7 +2190,6 @@ impl World {
         self.check_goal();
         self.update_camera();
         self.autoscroll_push();
-        self.activate();
     }
 
     /// The escort Toad knocked out doesn't fail the run [obs ChaseKinopio states, init
@@ -2746,8 +2813,9 @@ impl World {
         let mut hits = Vec::new();
         for a in &self.actors {
             if a.mode == Mode::ShellSlide && a.wall {
-                // the shell has already reversed: the wall is behind its new direction
-                let wx = a.x - a.dir as f32 * (a.half_w() + 1.0);
+                // the shell stands flush against the wall (its sides 6 px out) and turns back
+                // the next frame: the block is just ahead of it
+                let wx = a.x + a.dir as f32 * 7.0;
                 let tx = (wx / TILE).floor() as i32;
                 let ty = ((a.y + 8.0) / TILE).floor() as i32;
                 hits.push((tx, ty));
@@ -3691,6 +3759,11 @@ impl World {
             } else {
                 1
             };
+            // a walker placed on the ground starts in its walk (the Basic enter picks Walk on the
+            // ground flag, 0-goomba.md), moving on its first frame [obs: Ryujinx trace M1_hit]
+            if a.kind.is_walker() && self.level.cell_at(a.x, a.y - 1.0).is_solid() {
+                a.on_ground = true;
+            }
             if s.kind == Kind::Blooper && s.alt {
                 let id = self.next_id;
                 self.add_actor(a.clone());
@@ -7509,13 +7582,21 @@ mod tests {
         let mut w = World::with_level(lvl);
         assert_eq!(w.actors.len(), 1);
         let mut stomped = false;
-        for i in 0..200 {
-            // walk, then jump once the goomba is close
-            let near = w.actors[0].x - w.player.x < 40.0;
-            let jump = if near && i % 2 == 0 { input::JUMP } else { 0 };
-            w.step(Input {
-                buttons: input::RIGHT | jump,
-            });
+        let mut hop = 0;
+        for _ in 0..300 {
+            // wait for the goomba, then a short hop (Jump held 8 frames) once it is close
+            if hop == 0 && w.actors[0].x - w.player.x < 20.0 {
+                hop = 1;
+            }
+            let jump = if (1..=8).contains(&hop) {
+                input::JUMP
+            } else {
+                0
+            };
+            if hop > 0 {
+                hop += 1;
+            }
+            w.step(Input { buttons: jump });
             if w.events.contains(&Event::Stomp) {
                 stomped = true;
                 assert!(w.player.vy > 3.0);
@@ -8630,10 +8711,13 @@ mod tests {
                 a.held && (a.x - (w.player.x + 11.0)).abs() < 0.01,
                 "in front of the player"
             );
+            // Run let go: the Throw state holds it 5 more frames, then throws it
+            run(&mut w, 0, 5);
+            assert!(w.player.held.is_some(), "still in the hands");
             run(&mut w, 0, 1);
             assert!(w.player.held.is_none());
             assert_eq!(w.actors[0].mode, Mode::ShellSlide);
-            assert!(w.actors[0].vx > 0.0, "kicked forward");
+            assert!(w.actors[0].vx > 0.0, "thrown forward");
         }
     }
 
