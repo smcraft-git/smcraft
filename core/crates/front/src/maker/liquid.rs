@@ -7,9 +7,10 @@
 //! - draw 0x7100effd00, in themes 2 and 9 only: the handles stand at 31/48 of the view across
 //!   (0.6458, `DAT_71023191a4`); the start line's pill there, the end's round button and the
 //!   path 16 px to its left. The button's icon: ↕ when the mode is 2, else ↑ / ↓ by where the
-//!   end is; the path a speed mark (1 / 2 / 3) on every tile between the lines;
+//!   end is; the path a speed mark (1 / 2 / 3) on every tile between the lines, turned over
+//!   when the liquid falls; outside the mode only the lines, faint (0x7100f01ce0);
 //! - hit boxes 0x7100f013d0: the button ±8 px round (anchor − 16, end), the pill ±24 × ±8 round
-//!   (anchor, start);
+//!   (anchor, start) (heights as the middle of their tile row, [`handle_y`]);
 //! - press 0x7100f00710 ("touch", an undo step); drag 0x7100f008a0: the button sets the end
 //!   height, the pill the start height, and the end goes with the start when they were together
 //!   or the start passes the end; heights 0 (1 in 3D World) … 24 (167 vertical);
@@ -19,13 +20,14 @@
 //!   mode 1 ↔ 2 ("change_direction"), else "set"; held still more than 15 frames the button
 //!   opens the speed balloon (slow / medium / fast, `Lyt_E_WaterSpeed_00…02`).
 //!
-//! The lines are drawn as wavy lines (yellow while the liquid stays, white when it moves), the
-//! handles and the path as flat shapes ([`super::shapes`]) [obs: the reference frames].
+//! The pictures are the models' and the editor's icon sheet's ([`super::art`]): one yellow
+//! wavy line while the liquid stays, the start's thick white one and the end's double one when
+//! it moves, the yellow pill, the round button, the speed marks.
 
 use mmk_editor::settings::Liquid;
 use mmk_ui::Quad;
 
-use super::shapes::{self, Rgba};
+use super::art::{self, Rgba};
 use super::{MakerFlow, Mode, VIEW_W, view};
 use crate::layout::Layout;
 use crate::menu::{Buttons, hit};
@@ -36,16 +38,39 @@ pub const ANCHOR: f32 = 31.0 / 48.0;
 /// A press held this long without a change opens the speed balloon (more than 15 frames)
 /// [obs 0x7100f008a0: the press timer +0x364 > 0xf].
 pub const HOLD: i32 = 16;
-/// The edit sounds' part (the water-level actor's own sound user is not resolved: the
-/// ground's stands in [inf]).
-const SOUND_PART: i16 = 7;
+/// The edit sounds' part: the water-level actor's own user `<style>_EditLavaEditor` (part 101
+/// in the edit users' table; its keys `touch`, `move`, `set`, `change_direction`,
+/// `change_speed` [obs data: audio/sound.json]).
+const SOUND_PART: i16 = 101;
 /// The speed balloon (the attribute balloon's layout with the speed pictures) [inf: its frame
 /// and buttons look as that balloon's in the reference frames].
 const BALLOON: &str = super::attr::LAYOUT;
 
-/// The liquid's surface at height `h` (world px) [themes.md §3: h × 16 + 12].
-pub fn line_y(h: u8) -> f32 {
-    h as f32 * 16.0 + 12.0
+/// The handles' centre for height `h` (world px): the middle of row `h` (the edit actor at a
+/// tile's middle, the handles at its y + h · 16 [obs 0x7100effd00, 0x7100f013d0; the frames:
+/// the pill's middle on a tile's]).
+pub fn handle_y(h: u8) -> f32 {
+    h as f32 * 16.0 + 8.0
+}
+
+/// The models' pictures [obs 0x7100eff460, 0x7100f01ce0]: the lines (start apart, end apart,
+/// both together), the pill.
+const LINE_START: &str = "Edit_WaterLevelLine.00";
+const LINE_STILL: &str = "Edit_WaterLevelLine.01";
+const LINE_END: &str = "Edit_WaterLevelLine.02";
+const PILL: &str = "WaterLevelBtn.00";
+/// The held button's size: drawn nearer the camera (z 17352 for 13853) it shows 1.18 times
+/// its tile [obs: the frames, 87 px round at 5 px a world px; inf: the projection].
+const HELD_SCALE: f32 = 1.18;
+
+/// The drag arrow's picture at `tick` (`Arrow_wait`, 66 frames: .0, .2 from 50, .1 from 54, .2
+/// from 62) [obs `Edit_dragBtn`].
+fn drag_arrow(tick: i32) -> &'static str {
+    match tick.rem_euclid(66) {
+        0..50 => "dragArrow.0",
+        54..62 => "dragArrow.1",
+        _ => "dragArrow.2",
+    }
 }
 
 /// What a press holds.
@@ -125,9 +150,9 @@ impl MakerFlow {
         let [x, y] = self.to_world(p);
         let l = self.editor.liquid();
         let ax = self.liquid_anchor();
-        let handle = if (x - (ax - 16.0)).abs() <= 8.0 && (y - line_y(l.end)).abs() <= 8.0 {
+        let handle = if (x - (ax - 16.0)).abs() <= 8.0 && (y - handle_y(l.end)).abs() <= 8.0 {
             Handle::Target
-        } else if (x - ax).abs() <= 24.0 && (y - line_y(l.start)).abs() <= 8.0 {
+        } else if (x - ax).abs() <= 24.0 && (y - handle_y(l.start)).abs() <= 8.0 {
             Handle::Level
         } else {
             return false;
@@ -150,7 +175,8 @@ impl MakerFlow {
         self.water.held += 1;
         let [_, y] = self.to_world(p);
         let (lo, hi) = self.editor.liquid_range();
-        let h = ((y - 12.0) / 16.0).round().clamp(lo as f32, hi as f32) as u8;
+        // the tile row under the press [obs 0x7100f008a0: the cursor's tile]
+        let h = (y / 16.0).floor().clamp(lo as f32, hi as f32) as u8;
         let mut l = self.editor.liquid();
         let apart = l.start != l.end;
         match handle {
@@ -246,7 +272,7 @@ impl MakerFlow {
     pub(super) fn layout_speed_balloon(&mut self, opening: bool) {
         let tick = self.tick;
         let l = self.editor.liquid();
-        let at = self.to_layout(self.liquid_anchor() - 16.0, line_y(l.end));
+        let at = self.to_layout(self.liquid_anchor() - 16.0, handle_y(l.end));
         let Some(b) = &mut self.water.balloon else {
             return;
         };
@@ -400,138 +426,85 @@ impl MakerFlow {
 
     // ------------------------------------------------------------ drawing
 
-    /// The lines, the pill, the path and the button over the course.
-    pub(super) fn liquid_quads(&self, q: &mut Vec<Quad>) {
+    /// The lines, the pill, the path and the button over the course (`in_mode`: the Water
+    /// Level mode; outside it only the two lines of a moving liquid, faint) [obs 0x7100effd00,
+    /// 0x7100f01ce0].
+    pub(super) fn liquid_quads(&self, q: &mut Vec<Quad>, in_mode: bool) {
         let l = self.editor.liquid();
         let ax = self.liquid_anchor();
         let apart = l.start != l.end;
-        let s = super::SCALE;
-        let phase = self.to_layout(0.0, 0.0)[0];
-        let dark: Rgba = [96, 30, 24, 255];
-        let line = |q: &mut Vec<Quad>, h: u8, color: Rgba, double: bool| {
-            let y = self.to_layout(0.0, line_y(h))[1];
-            let (amp, period) = (1.6 * s, 16.0 * s);
-            if double {
-                for dy in [2.0 * s, -0.4 * s] {
-                    shapes::wave(q, -640.0, 640.0, y + dy, amp, period, phase, 0.9 * s, dark);
-                    shapes::wave(
-                        q,
-                        -640.0,
-                        640.0,
-                        y + dy,
-                        amp,
-                        period,
-                        phase,
-                        0.45 * s,
-                        color,
-                    );
-                }
-            } else {
-                shapes::wave(q, -640.0, 640.0, y, amp, period, phase, 1.5 * s, dark);
-                shapes::wave(q, -640.0, 640.0, y, amp, period, phase, 0.8 * s, color);
-            }
-        };
-        let white: Rgba = [255, 255, 255, 255];
-        let yellow: Rgba = [255, 204, 0, 255];
-        if apart {
-            line(q, l.start, white, true);
-            line(q, l.end, white, true);
-        } else {
-            line(q, l.start, yellow, false);
-        }
-        // the path: a dotted line from the pill to the button with the speed marks on each
-        // tile between
-        let [px, y0] = self.to_layout(ax - 16.0, line_y(l.start));
-        let [_, y1] = self.to_layout(ax - 16.0, line_y(l.end));
-        if apart {
-            let up = y1 > y0;
-            let (lo, hi) = (y0.min(y1), y0.max(y1));
-            let mut y = lo + 2.0 * s;
-            while y < hi - 2.0 * s {
-                shapes::disc(q, [px, y], 0.55 * s, dark);
-                shapes::disc(q, [px, y], 0.35 * s, white);
-                y += 2.0 * s;
-            }
-            let n = l.start.abs_diff(l.end);
-            for k in 1..n {
-                let y = y0 + (y1 - y0) * k as f32 / n as f32;
-                speed_mark(q, [px, y], l.speed.clamp(1, 3), up, s);
-            }
-        }
-        // the pill on the start line, its little circle where the path starts
-        let [cx, cy] = self.to_layout(ax, line_y(l.start));
-        let (hw, hh) = (24.0 * s, 8.0 * s);
-        shapes::rounded(
-            q,
-            cx - hw - 4.0,
-            cy - hh - 4.0,
-            cx + hw + 4.0,
-            cy + hh + 4.0,
-            hh + 4.0,
-            dark,
-        );
-        shapes::rounded(
-            q,
-            cx - hw - 1.5,
-            cy - hh - 1.5,
-            cx + hw + 1.5,
-            cy + hh + 1.5,
-            hh + 1.5,
-            white,
-        );
-        shapes::rounded(q, cx - hw, cy - hh, cx + hw, cy + hh, hh, yellow);
-        shapes::disc(q, [px, cy], 2.2 * s, dark);
-        shapes::disc(q, [px, cy], 1.6 * s, white);
-        shapes::disc(q, [px, cy], 1.0 * s, yellow);
-        if !apart {
+        if !in_mode && !apart {
             return;
         }
-        // the round button on the end line: ↑ / ↓ (rises or falls), ↕ (rises and falls)
-        let c = [px, y1];
-        shapes::disc(q, c, 9.5 * s, dark);
-        shapes::disc(q, c, 7.5 * s, yellow);
-        let icon: Rgba = [80, 30, 20, 255];
-        let a = 4.2 * s;
-        let arrow = |q: &mut Vec<Quad>, dir: f32| {
-            shapes::seg(q, c, [c[0], c[1] + dir * a], 1.6 * s, icon);
-            shapes::tri(
-                q,
-                [c[0] - 2.6 * s, c[1] + dir * (a - 2.2 * s)],
-                [c[0] + 2.6 * s, c[1] + dir * (a - 2.2 * s)],
-                [c[0], c[1] + dir * (a + 0.8 * s)],
-                icon,
-            );
-        };
-        if l.mode == 2 {
-            arrow(q, 1.0);
-            arrow(q, -1.0);
+        // the lines (const_color0's alpha: 1 in the mode, 0.4 outside): the start's thick
+        // white, the end's double white; together, one yellow
+        let alpha = if in_mode { 255 } else { 102 };
+        let white: Rgba = [255, 255, 255, 255];
+        if apart {
+            self.row_strip(q, LINE_START, l.start as f32 * 16.0, alpha, white);
+            self.row_strip(q, LINE_END, l.end as f32 * 16.0, alpha, white);
         } else {
-            let dir = if l.end > l.start { 1.0 } else { -1.0 };
-            shapes::seg(q, [c[0], c[1] - dir * a * 0.7], c, 1.6 * s, icon);
-            arrow(q, dir);
+            self.row_strip(
+                q,
+                LINE_STILL,
+                l.start as f32 * 16.0,
+                alpha,
+                [255, 204, 0, 255],
+            );
         }
-        // the drag arrows above and below the button while it is held (`Edit_dragBtn`)
-        if self.water.drag == Some(Handle::Target) {
-            for dir in [1.0f32, -1.0] {
-                let b = [c[0], c[1] + dir * 11.0 * s];
-                let t = [c[0], c[1] + dir * 32.0 * s];
-                shapes::seg(q, b, t, 3.0 * s, dark);
-                shapes::seg(q, b, t, 1.8 * s, yellow);
-                let tip = [t[0], t[1] + dir * 3.0 * s];
-                shapes::tri(
-                    q,
-                    [t[0] - 4.2 * s, t[1] - dir * 1.0 * s],
-                    [t[0] + 4.2 * s, t[1] - dir * 1.0 * s],
-                    [tip[0], tip[1] + dir * 1.0 * s],
-                    dark,
-                );
-                shapes::tri(
-                    q,
-                    [t[0] - 3.2 * s, t[1] - dir * 0.2 * s],
-                    [t[0] + 3.2 * s, t[1] - dir * 0.2 * s],
-                    tip,
-                    yellow,
-                );
+        if !in_mode {
+            return;
+        }
+        // the pill, its model's quad round (anchor, start · 16): 64 × 32 from 8.05 below
+        let y = l.start as f32 * 16.0;
+        self.model(
+            q,
+            PILL,
+            art::Place::span(ax - 32.0, y - 8.05, ax + 32.0, y + 23.95),
+            255,
+            [255, 204, 0, 255],
+        );
+        // the path: where it leaves the pill, then a speed mark on every tile between the
+        // lines, turned upside down when the liquid falls
+        let px = ax - 16.0;
+        if apart {
+            self.icon(q, art::icon::PATH_START, [px, handle_y(l.start)], 1.0, 0.0);
+            let mark = match l.speed {
+                1 => art::icon::MARK_SLOW,
+                2 => art::icon::MARK_MEDIUM,
+                _ => art::icon::MARK_FAST,
+            };
+            let (dir, turn) = if l.end > l.start {
+                (1.0, 0.0)
+            } else {
+                (-1.0, std::f32::consts::PI)
+            };
+            for k in 1..l.start.abs_diff(l.end) {
+                let at = [px, handle_y(l.start) + dir * 16.0 * k as f32];
+                self.icon(q, mark, at, 1.0, turn);
+            }
+        }
+        // the round button on the end line: ↕ rises and falls, else ↑ / ↓, ○ still; held, it
+        // comes up towards the camera (bigger) [obs: the frames]
+        let id = if l.mode == 2 {
+            art::icon::BOTH
+        } else if l.end > l.start {
+            art::icon::UP
+        } else if l.end < l.start {
+            art::icon::DOWN
+        } else {
+            art::icon::STILL
+        };
+        let held = self.water.drag == Some(Handle::Target);
+        let c = [px, handle_y(l.end)];
+        self.icon(q, id, c, if held { HELD_SCALE } else { 1.0 }, 0.0);
+        // its drag arrows above and below while it is held (not with the balloon open): 16 × 32
+        // from 8 to 40 px off its centre, the lower one turned over
+        if held && self.water.balloon.is_none() {
+            let name = drag_arrow(self.tick);
+            for (dir, turn) in [(1.0, 0.0), (-1.0, std::f32::consts::PI)] {
+                let p = art::Place::new([c[0], c[1] + dir * 24.0], [8.0, 16.0]).turned(turn);
+                self.model(q, name, p, 255, [255, 204, 0, 255]);
             }
         }
     }
@@ -539,36 +512,5 @@ impl MakerFlow {
     /// The speed balloon's layout, while open.
     pub(super) fn speed_balloon_layout(&mut self) -> Option<&mut Layout> {
         self.water.balloon.as_mut().and_then(|b| b.layout.as_mut())
-    }
-}
-
-/// A speed mark on the path: one orange (slow), two red (medium) or three blue (fast)
-/// triangles pointing the way the liquid goes [obs: `Lyt_E_WaterSpeed_00…02`, the reference
-/// frames].
-fn speed_mark(q: &mut Vec<Quad>, c: [f32; 2], speed: u8, up: bool, s: f32) {
-    let fill: Rgba = match speed {
-        1 => [248, 178, 92, 255],
-        2 => [232, 32, 24, 255],
-        _ => [24, 104, 240, 255],
-    };
-    let dir = if up { 1.0 } else { -1.0 };
-    let n = speed as f32;
-    for k in 0..speed {
-        let y = c[1] + (k as f32 - (n - 1.0) / 2.0) * 1.6 * s * dir;
-        let (w, h) = (2.6 * s, 1.7 * s);
-        shapes::tri(
-            q,
-            [c[0] - w - 0.6 * s, y - h / 2.0 * dir - 0.4 * s * dir],
-            [c[0] + w + 0.6 * s, y - h / 2.0 * dir - 0.4 * s * dir],
-            [c[0], y + h / 2.0 * dir + 0.7 * s * dir],
-            [96, 30, 24, 255],
-        );
-        shapes::tri(
-            q,
-            [c[0] - w, y - h / 2.0 * dir],
-            [c[0] + w, y - h / 2.0 * dir],
-            [c[0], y + h / 2.0 * dir],
-            fill,
-        );
     }
 }

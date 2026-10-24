@@ -255,7 +255,8 @@ typedef struct {
     uint8_t white[4];           // material colour for texture value 1
     uint32_t tex0, tex1;        // mmk_ui_texture index, or MMK_TEXTURE_NONE
     uint32_t flags;             // bits 0-7 wrap s0,t0,s1,t1 (2 bits each: 0 clamp, 1 repeat, 2 mirror)
-                                // bit 8 linear filter; 12-15 colour combine, 16-19 alpha combine
+                                // bit 8 linear filter; bit 9 the colours are linear values
+                                // (an SMM2 layout's), not sRGB; 12-15 colour combine, 16-19 alpha combine
                                 // (0 tex1, 1 multiply, 2 add, 5 subtract, 15 tex0 only);
                                 // 20-23 blend op (0 off, 1 add, 2 sub, 3 rev sub, 4 min, 5 max),
                                 // 24-27 src factor, 28-31 dst factor (0 zero, 1 one, 2 dst colour,

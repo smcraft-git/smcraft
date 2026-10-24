@@ -404,6 +404,63 @@ fn window_with_one_frame_draws_content_corners_and_edges() {
     assert!(close(q[2].pos[0], [42.0, 25.0]));
 }
 
+#[test]
+fn an_nx_layout_s_colours_are_linear() {
+    // SMM2's layouts (9.0) take their colours as linear values; SMM1's (5.2) as sRGB
+    let mut c = UiCache::in_memory();
+    for (name, version) in [("Nx", 0x0900_0000), ("WiiU", 0x0502_0000)] {
+        let mut l = layout(
+            name,
+            vec![picture("P_A", 0, [0.0, 0.0], [8.0, 8.0], vec![])],
+        );
+        l.version = version;
+        add(&mut c, l);
+    }
+    let flags = |c: &mut UiCache, name: &str| {
+        LayoutPlayer::new(c.layout(name).unwrap()).draw_list()[0].flags
+    };
+    assert_ne!(flags(&mut c, "Nx") & crate::FLAG_LINEAR_COLOR, 0);
+    assert_eq!(flags(&mut c, "WiiU") & crate::FLAG_LINEAR_COLOR, 0);
+}
+
+#[test]
+fn a_flipped_stretched_frame_keeps_its_corner_at_the_window_corner() {
+    // four frames, the right ones flipped horizontally (`Cmn_Window_00`, the button shadows):
+    // the bottom edge (frame 3) runs from the left frame to the right corner, its texture's
+    // corner at the right end and the edge clamped out to the left
+    let mut c = UiCache::in_memory();
+    let frame = |flip| WindowFrame { material: 0, flip };
+    let w = Pane {
+        kind: PaneKind::Window(Window {
+            frame_size: [8, 8, 8, 8],
+            flags: 3,
+            content: Picture {
+                vertex_colors: [[255; 4]; 4],
+                material: 0,
+                tex_coords: vec![],
+            },
+            frames: vec![frame(0), frame(1), frame(0), frame(1)],
+            ..Default::default()
+        }),
+        name: "W".into(),
+        size: [100.0, 50.0],
+        ..Default::default()
+    };
+    add(&mut c, layout("W", vec![w]));
+    let q = LayoutPlayer::new(c.layout("W").unwrap()).draw_list();
+    assert_eq!(q.len(), 5);
+    let bottom = &q[4];
+    assert!(close(bottom.pos[1], [50.0, -17.0]), "{:?}", bottom.pos);
+    // right end: the texture's outer column (u 0, mirrored); left end: past the inner one
+    assert!(close(bottom.uv0[1], [0.0, 0.0]), "{:?}", bottom.uv0);
+    assert!(bottom.uv0[0][0] > 1.0, "{:?}", bottom.uv0);
+    // the turns of a unit square are still the corner swaps
+    let r = flip_uv(UNIT_UV, 3);
+    assert_eq!(r, [UNIT_UV[2], UNIT_UV[0], UNIT_UV[3], UNIT_UV[1]]);
+    let r = flip_uv(UNIT_UV, 5);
+    assert_eq!(r, [UNIT_UV[1], UNIT_UV[3], UNIT_UV[0], UNIT_UV[2]]);
+}
+
 fn part_pane(name: &str, sub: &str, props: Vec<mmk_formats::lyt::PartProperty>) -> Pane {
     Pane {
         kind: PaneKind::Part(Part {

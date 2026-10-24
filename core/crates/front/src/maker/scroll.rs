@@ -2,14 +2,19 @@
 //! the path the camera follows with autoscroll set to custom (main area only).
 //!
 //! The path runs from the start unit (a grey bird marked "S") through the numbered nodes
-//! (part 89, EditAutoScrollCamera; up to 10) to the end unit ("G"); each point has a speed
-//! square to its right for the leg after it, and the legs carry arrows in that speed's look
-//! (slow ▶ yellow, normal ▶▶ red, fast ▶▶▶ blue). The band the camera's centre can reach is
-//! lit, the rest of the course dims [obs: the reference frames; 89-autoscroll-camera.md].
+//! (part 89, EditAutoScrollCamera; up to 10, yellow birds) to the end unit ("G"); each point
+//! has a speed square to its right for the leg after it, and the legs carry dotted marks in
+//! that speed's look (slow ▶ yellow, normal ▶▶ red, fast ▶▶▶ blue). The band the camera can
+//! take is lit, the rest of the course dims [obs: the reference frames;
+//! 89-autoscroll-camera.md]. The markers stand where the points are before the camera's clamp
+//! (the start at x 184 on a new course) [obs: the frames]; the pictures are the game's
+//! (`Edit_camera`, `Edit_autoscroll`, the icon sheet's squares, [`super::art`]).
 //!
 //! From the game's edit actor [obs]:
 //! - the models: "camera_model" (`Edit_camera`) with the animation LocalizationS on the start
 //!   unit (node number 0), LocalizationG on the end (11), "count" on the others (0x7100eb2070);
+//!   drawn 8 px left of the point, the speed square (icon 0x34 / 0x35 / 0x36) 16 px right of
+//!   it, only in the mode (0x7100eb27e0); the marks a tile apart along each leg (0x7100fd5c10);
 //! - a press within ±8 px of the point + (16, 0) is on its speed square (0x7100eb30e0); its tap
 //!   (release without a drag) steps the speed field (flags >> 18) & 3: 0 → 1 → 2 → 0, an undo
 //!   step and "change_speed" (0x7100eb3300); other presses go to the part's common edit
@@ -24,15 +29,27 @@
 use mmk_editor::settings::{ScrollKind, ScrollPoint, VIEW_H, VIEW_W};
 use mmk_ui::Quad;
 
-use super::shapes::{self, Rgba};
-use super::{MakerFlow, Mode, view};
+use super::art::{self, Rgba};
+use super::{MakerFlow, Mode};
 
 /// The edit sounds' part: the nodes' own user (`<style>_EditAutoScrollCamera`).
 pub const SOUND_PART: i16 = 89;
 /// The speed square sits this far right of its point (world px) [obs 0x7100eb30e0].
 pub const SQUARE_DX: f32 = 16.0;
-/// The grey bird's texture (made from the custom-autoscroll icon `Lyt_E_ScrollIcon_04`).
-const BIRD: &str = "ScrollBirdGrey";
+/// The bird's model stands 8 px left of its point, on a 39 × 48 quad [obs 0x7100eb27e0,
+/// `camera_model`'s shape].
+const BIRD_DX: f32 = -8.0;
+const BIRD_HALF: [f32; 2] = [19.5, 24.0];
+/// The path marks' pictures by the leg's speed (`Edit_autoscroll_01` / `05` / `09`; the one
+/// before them, without the dots ahead, for a leg's last mark) [obs 0x7100fd5c10: the table
+/// 0x71023c6fa0], and the distances to the next bird that end a leg (40) and make its last
+/// mark (58).
+const MARKS: [usize; 3] = [1, 5, 9];
+const STOP: f32 = 40.0;
+const LAST: f32 = 58.0;
+/// The lit band reaches past the view-centre range by this much (world px) [inf: the frames].
+const BAND_X: f32 = 32.0;
+const BAND_Y: f32 = 40.0;
 
 /// What a press holds.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -71,21 +88,25 @@ impl MakerFlow {
         self.leave_mode();
         self.mode = Mode::Scroll;
         self.scroll = ScrollEdit::default();
-        self.bird_texture();
         self.show_mode_guide("Mode_Disp_ManualScrl", 1);
         self.update_mode_buttons();
     }
 
-    /// The path's points (world px).
+    /// The path's points as the camera follows them (world px).
     pub fn scroll_points(&self) -> Vec<ScrollPoint> {
         self.editor.scroll_path()
+    }
+
+    /// Where the path's markers stand (world px): the points before the camera's clamp.
+    pub fn scroll_marks(&self) -> Vec<ScrollPoint> {
+        self.editor.scroll_marks()
     }
 
     /// A press at layout point `p` (`erase`: the eraser or the erase button): on a speed
     /// square, a node or a leg it is taken (true).
     pub(super) fn scroll_press(&mut self, p: [f32; 2], erase: bool) -> bool {
         let [x, y] = self.to_world(p);
-        let pts = self.scroll_points();
+        let pts = self.scroll_marks();
         let near = |a: [f32; 2], r: f32| (x - a[0]).abs() <= r && (y - a[1]).abs() <= r;
         let tile = self.tile_at(p);
         // speed squares first (start and nodes), then the nodes' birds, then the legs
@@ -211,54 +232,27 @@ impl MakerFlow {
         }
     }
 
-    /// The grey bird: the custom-autoscroll icon in greys (the game's `Edit_camera` model,
-    /// whose textures the import doesn't have) [inf: its look from the reference frames].
-    fn bird_texture(&mut self) -> Option<u32> {
-        let mut cache = self.ui.cache_mut();
-        if let Some(t) = cache.texture_file(view::GROUP, BIRD) {
-            return Some(t.id);
-        }
-        let src = cache.texture_file(view::GROUP, "Lyt_E_ScrollIcon_04")?;
-        let m = cache.texture_data(src.id)?.clone();
-        let rgba = match m.format {
-            mmk_assets::MtexFormat::Rgba8 => m.data.clone(),
-            mmk_assets::MtexFormat::Bc7 => mmk_formats::bc7::decode(&m.data, m.width, m.height),
-            _ => return None,
-        };
-        let mut grey = rgba;
-        for px in grey.as_chunks_mut::<4>().0 {
-            let l = 0.3 * px[0] as f32 + 0.59 * px[1] as f32 + 0.11 * px[2] as f32;
-            // light grey body, darker wing, the outline kept white
-            let v = (110.0 + l * 0.42).min(250.0) as u8;
-            px[0] = v;
-            px[1] = v;
-            px[2] = (v as u16 + 10).min(255) as u8;
-        }
-        let tex = mmk_assets::Mtex {
-            format: mmk_assets::MtexFormat::Rgba8,
-            variant: mmk_assets::MtexVariant::Srgb,
-            width: m.width,
-            height: m.height,
-            channel_select: [2, 3, 4, 5],
-            data: grey,
-        };
-        Some(cache.add_texture_file(view::GROUP, BIRD, tex).id)
-    }
-
     // ------------------------------------------------------------ drawing
 
-    /// The band, the path, the birds and the speed squares over the course.
-    pub(super) fn scroll_quads(&self, q: &mut Vec<Quad>) {
-        let s = super::SCALE;
+    /// The band, the path, the birds and the speed squares over the course (`in_mode`: the
+    /// Custom Scroll mode; outside it only the birds, faint) [obs 0x7100eb27e0, 0x7100fd5c10].
+    pub(super) fn scroll_quads(&self, q: &mut Vec<Quad>, in_mode: bool) {
+        let pts = self.scroll_marks();
+        if !in_mode {
+            self.birds(q, &pts, 102);
+            return;
+        }
+        // the lit band (where the path can take the camera: the view-centre range, reaching
+        // 2 tiles further across and 2.5 further up and down [inf: its left and bottom edges
+        // in the frames]), the rest of the course dims
         let a = &self.editor.course.main.header;
-        // the lit band: where the camera's centre can go (the area less half a view all round)
         let [bx0, by0] = self.to_layout(
-            a.boundary_left as f32 + VIEW_W / 2.0,
-            a.boundary_bottom as f32 + VIEW_H / 2.0,
+            a.boundary_left as f32 + VIEW_W / 2.0 - BAND_X,
+            a.boundary_bottom as f32 + VIEW_H / 2.0 - BAND_Y,
         );
         let [bx1, by1] = self.to_layout(
-            a.boundary_right as f32 - VIEW_W / 2.0,
-            a.boundary_top as f32 - VIEW_H / 2.0,
+            a.boundary_right as f32 - VIEW_W / 2.0 + BAND_X,
+            a.boundary_top as f32 - VIEW_H / 2.0 + BAND_Y,
         );
         let (bx0, by0, bx1, by1) = (
             bx0.clamp(-640.0, 640.0),
@@ -267,79 +261,75 @@ impl MakerFlow {
             by1.clamp(-360.0, 360.0),
         );
         let dim: Rgba = [0, 0, 0, 96];
-        shapes::rect(q, -640.0, -360.0, 640.0, by0, dim);
-        shapes::rect(q, -640.0, by1, 640.0, 360.0, dim);
-        shapes::rect(q, -640.0, by0, bx0, by1, dim);
-        shapes::rect(q, bx1, by0, 640.0, by1, dim);
-        shapes::rect(q, bx0, by0, bx1, by1, [255, 255, 255, 40]);
-        let pts = self.scroll_points();
-        let dark: Rgba = [96, 30, 24, 255];
-        let white: Rgba = [255, 255, 255, 255];
-        // the legs: dots, and an arrow on every tile
+        art::rect(q, -640.0, -360.0, 640.0, by0, dim);
+        art::rect(q, -640.0, by1, 640.0, 360.0, dim);
+        art::rect(q, -640.0, by0, bx0, by1, dim);
+        art::rect(q, bx1, by0, 640.0, by1, dim);
+        art::rect(q, bx0, by0, bx1, by1, [255, 255, 255, 40]);
+        // the legs: a mark every tile from the square on, the last one (within 58 px of the
+        // next bird) without the dots ahead; the leg ends within 40 px of it [obs 0x7100fd5c10]
         for w in pts.windows(2) {
-            let a = self.to_layout(w[0].x + SQUARE_DX, w[0].y);
-            let b = self.to_layout(w[1].x, w[1].y);
-            let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
+            let from = [w[0].x + SQUARE_DX, w[0].y];
+            let to = [w[1].x + BIRD_DX, w[1].y];
+            let (dx, dy) = (to[0] - from[0], to[1] - from[1]);
             let len = (dx * dx + dy * dy).sqrt();
-            if len < 1.0 {
+            if len < STOP {
                 continue;
             }
             let u = [dx / len, dy / len];
-            let tile = 16.0 * s;
-            let start = 9.0 * s;
-            let mut d = start;
-            while d < len - 6.0 * s {
-                let c = [a[0] + u[0] * d, a[1] + u[1] * d];
-                if ((d - start) / tile).fract() < 0.01 {
-                    arrows(q, c, u, w[0].speed, s);
-                } else {
-                    shapes::disc(q, c, 0.75 * s, dark);
-                    shapes::disc(q, c, 0.5 * s, white);
+            let turn = art::angle_of(u);
+            let speed = w[0].speed.min(2) as usize;
+            let (mut at, mut left) = (from, len);
+            loop {
+                let last = left < LAST;
+                at = [at[0] + u[0] * 16.0, at[1] + u[1] * 16.0];
+                let mark = MARKS[speed] - last as usize;
+                let p = art::Place::new(at, [8.0, 8.0]).turned(turn);
+                self.model(
+                    q,
+                    &format!("Edit_autoscroll_{mark:02}"),
+                    p,
+                    255,
+                    [255, 204, 0, 255],
+                );
+                left = ((to[0] - at[0]).powi(2) + (to[1] - at[1]).powi(2)).sqrt();
+                if last || left < STOP {
+                    break;
                 }
-                d += tile / 4.0;
             }
         }
-        // the points: the bird (S, the node's number, G) and the speed square
-        let bird = self
-            .ui
-            .cache_mut()
-            .texture_file(view::GROUP, BIRD)
-            .map(|t| t.id);
-        let mut number = 0;
+        self.birds(q, &pts, 255);
+        // the speed squares (not the end's)
         for pt in &pts {
-            let c = self.to_layout(pt.x, pt.y);
-            let label = match pt.kind {
-                ScrollKind::Start => "S".to_string(),
-                ScrollKind::End => "G".to_string(),
+            if pt.kind != ScrollKind::End {
+                let id = match pt.speed {
+                    0 => art::icon::SQUARE_SLOW,
+                    1 => art::icon::SQUARE_NORMAL,
+                    _ => art::icon::SQUARE_FAST,
+                };
+                self.icon(q, id, [pt.x + SQUARE_DX, pt.y], 1.0, 0.0);
+            }
+        }
+    }
+
+    /// The birds (`Edit_camera`'s `camera_model`, 8 px left of their point): S on the start
+    /// (`LocalizationS`), the node's number on each node (`count`, numbered left to right), G
+    /// on the end (`LocalizationG`); at `alpha` (const_color0's: 1 in the mode, 0.4 outside)
+    /// [obs 0x7100eb2070, 0x7100eb27e0].
+    fn birds(&self, q: &mut Vec<Quad>, pts: &[ScrollPoint], alpha: u8) {
+        let mut number = 0;
+        for pt in pts {
+            let frame = match pt.kind {
+                ScrollKind::Start => 0,
+                ScrollKind::End => 11,
                 ScrollKind::Node(_) => {
                     number += 1;
-                    number.to_string()
+                    number.min(10)
                 }
             };
-            let (w, h) = (17.0 * s, 17.0 * s);
-            let at = [c[0] - 6.0 * s, c[1] + 1.5 * s];
-            match bird {
-                Some(t) => q.push(view::quad(
-                    [at[0] - w, at[1] - h, at[0] + w, at[1] + h],
-                    t,
-                    [0.0, 0.0, 1.0, 1.0],
-                    [255; 4],
-                )),
-                None => {
-                    shapes::disc(q, at, 8.0 * s, white);
-                    shapes::disc(q, at, 7.0 * s, [150, 150, 160, 255]);
-                }
-            }
-            shapes::text(
-                q,
-                [at[0] - 1.0 * s, at[1] - 3.0 * s],
-                &label,
-                1.3 * s,
-                [60, 60, 66, 255],
-            );
-            if pt.kind != ScrollKind::End {
-                speed_square(q, self.to_layout(pt.x + SQUARE_DX, pt.y), pt.speed, s);
-            }
+            let p = art::Place::new([pt.x + BIRD_DX, pt.y], BIRD_HALF);
+            let name = format!("Edit_camera.{frame:02}");
+            self.model(q, &name, p, alpha, [150, 150, 160, 255]);
         }
     }
 }
@@ -355,75 +345,4 @@ fn seg_dist(p: [f32; 2], a: [f32; 2], b: [f32; 2]) -> f32 {
     };
     let (cx, cy) = (a[0] + dx * t - p[0], a[1] + dy * t - p[1]);
     (cx * cx + cy * cy).sqrt()
-}
-
-/// A speed's colours: (fill, glyph).
-fn speed_colors(speed: u8) -> (Rgba, Rgba) {
-    match speed {
-        0 => ([255, 204, 0, 255], [70, 26, 20, 255]),
-        1 => ([240, 86, 86, 255], [96, 20, 20, 255]),
-        _ => ([70, 140, 250, 255], [16, 40, 110, 255]),
-    }
-}
-
-/// `n` play triangles of `size` pointing along `u`, `step` apart, centred on `c`.
-fn play_glyph(
-    q: &mut Vec<Quad>,
-    c: [f32; 2],
-    u: [f32; 2],
-    n: u8,
-    size: f32,
-    step: f32,
-    color: Rgba,
-) {
-    let v = [-u[1], u[0]];
-    for k in 0..n {
-        let off = (k as f32 - (n as f32 - 1.0) / 2.0) * step;
-        let o = [c[0] + u[0] * off, c[1] + u[1] * off];
-        let p = |a: f32, b: f32| [o[0] + u[0] * a + v[0] * b, o[1] + u[1] * a + v[1] * b];
-        shapes::tri(
-            q,
-            p(-size / 2.0, size / 2.0),
-            p(-size / 2.0, -size / 2.0),
-            p(size / 2.0, 0.0),
-            color,
-        );
-    }
-}
-
-/// The leg's arrow mark of a speed: ▶ yellow, ▶▶ red, ▶▶▶ blue, outlined.
-fn arrows(q: &mut Vec<Quad>, c: [f32; 2], u: [f32; 2], speed: u8, s: f32) {
-    let (fill, _) = speed_colors(speed);
-    let n = speed.min(2) + 1;
-    let step = 3.6 * s;
-    play_glyph(q, c, u, n, 6.4 * s, step, [96, 30, 24, 255]);
-    play_glyph(q, c, u, n, 4.6 * s, step, fill);
-}
-
-/// A point's speed square: a dark-edged rounded square in the speed's colour with its ▶.
-fn speed_square(q: &mut Vec<Quad>, c: [f32; 2], speed: u8, s: f32) {
-    let (fill, glyph) = speed_colors(speed);
-    let h = 7.5 * s;
-    shapes::rounded(
-        q,
-        c[0] - h,
-        c[1] - h,
-        c[0] + h,
-        c[1] + h,
-        1.6 * s,
-        [96, 30, 24, 255],
-    );
-    let h2 = h - 1.2 * s;
-    shapes::rounded(
-        q,
-        c[0] - h2,
-        c[1] - h2,
-        c[0] + h2,
-        c[1] + h2,
-        1.0 * s,
-        [255, 255, 255, 255],
-    );
-    let h3 = h2 - 0.9 * s;
-    shapes::rect(q, c[0] - h3, c[1] - h3, c[0] + h3, c[1] + h3, fill);
-    play_glyph(q, c, [1.0, 0.0], speed.min(2) + 1, 4.6 * s, 3.4 * s, glyph);
 }

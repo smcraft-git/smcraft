@@ -356,6 +356,18 @@ impl Editor {
     /// clamped to 104…328, + 4, speed header 0x0E; the end likewise at max(right − 160, 160)
     /// − 24 from goal_y; every point clamped to the view-centre range.
     pub fn scroll_path(&self) -> Vec<ScrollPoint> {
+        self.scroll_points(true)
+    }
+
+    /// Where the custom scroll's markers stand in the Course Maker: the points of
+    /// [`Editor::scroll_path`] before the clamp to the view-centre range (the start unit at x
+    /// 184 on a new course, where the camera starts at 192) [obs: the reference frames,
+    /// research/specs/maker.md C13].
+    pub fn scroll_marks(&self) -> Vec<ScrollPoint> {
+        self.scroll_points(false)
+    }
+
+    fn scroll_points(&self, clamp: bool) -> Vec<ScrollPoint> {
         let a = &self.course.main.header;
         let (left, right) = (a.boundary_left as f32, a.boundary_right as f32);
         let (bottom, top) = (a.boundary_bottom as f32, a.boundary_top as f32);
@@ -414,9 +426,11 @@ impl Editor {
             y: y(h.goal_y),
             speed: 0,
         });
-        for p in &mut v {
-            p.x = span(p.x, x0, x1);
-            p.y = span(p.y, y0, y1);
+        if clamp {
+            for p in &mut v {
+                p.x = span(p.x, x0, x1);
+                p.y = span(p.y, y0, y1);
+            }
         }
         v
     }
@@ -630,6 +644,20 @@ mod tests {
         assert_eq!(path[0].speed, 1, "the start's speed is the header's");
         assert_eq!(path[1].kind, ScrollKind::Node(a));
         assert_eq!(path.last().unwrap().kind, ScrollKind::End);
+        // the markers stand where the path is before the clamp: the start at 184 (the camera
+        // from 192), the end 184 from the right; the nodes where they are (this one above
+        // the camera's highest centre)
+        let marks = e.scroll_marks();
+        assert_eq!(marks.len(), path.len());
+        assert_eq!(marks[0].x, 184.0);
+        assert_eq!(path[0].x, 192.0);
+        let right = e.area().header.boundary_right as f32;
+        assert_eq!(marks.last().unwrap().x, right - 184.0);
+        assert_eq!(
+            (marks[1].x, marks[1].y),
+            (30.0 * 16.0 + 8.0, 20.0 * 16.0 + 8.0)
+        );
+        assert!(path[1].y < marks[1].y);
         // a node moved past the other changes places on the path; speed and removal
         e.move_scroll_node(a, 80, 6).unwrap();
         let nodes = e.scroll_nodes();

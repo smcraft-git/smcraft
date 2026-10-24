@@ -28,7 +28,7 @@ pub const TEXTURE_NONE: u32 = u32::MAX;
 /// Shading (done by the renderer): `t = combine(sample(tex0, uv0), sample(tex1, uv1))` (a missing
 /// texture samples as 1), `c = mix(black, white, t)` per channel, `out = c * color` (per-vertex
 /// colour, pane alpha already folded into its alpha), blended with the quad's blend mode.
-/// Colours are 8-bit sRGB-encoded values as authored.
+/// Colours are 8-bit sRGB-encoded values as authored, except with [`FLAG_LINEAR_COLOR`].
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Quad {
@@ -52,6 +52,12 @@ pub const SHIFT_WRAP_S1: u32 = 4;
 pub const SHIFT_WRAP_T1: u32 = 6;
 /// Linear filtering (otherwise nearest).
 pub const FLAG_LINEAR: u32 = 1 << 8;
+/// The colours (`color`, `black`, `white`) are linear values, not sRGB-encoded: the Switch's
+/// layout shader takes a layout's colours as they are and its target encodes them, so an
+/// SMM2 layout's (255, 155, 0) shows as (255, 205, 0) — the game's yellow buttons, authored
+/// orange [obs: the reference frames, `Cmn_MainBtn_00`'s `W_Btn_00`]. Set on every quad of
+/// an NX layout (version 8 and later); SMM1's Wii U layouts keep sRGB colours.
+pub const FLAG_LINEAR_COLOR: u32 = 1 << 9;
 /// tex0/tex1 colour combine mode (4 bits): 0 replace (tex1), 1 modulate, 2 add, 5 subtract,
 /// 15 = no second texture (use tex0).
 pub const SHIFT_COMBINE_COLOR: u32 = 12;

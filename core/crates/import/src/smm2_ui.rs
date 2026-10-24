@@ -21,8 +21,9 @@
 //!                                       game puts them into `Cmn_GameSkin_00`, e.g. Course
 //!                                       World's course rows)
 //! ui/textures/EditModel/<name>.mtex     the Course Maker's model textures (glove cursor, grid,
-//!                                       part frame, selection rectangle, no-build zones) and
-//!                                       the theme pictures (`Model/Edit_*`, `Lyt_Edit_Icon`)
+//!                                       part frame, selection rectangle, no-build zones, the
+//!                                       Water Level and Custom Scroll modes' art) and the theme
+//!                                       pictures (`Model/Edit_*`, `Lyt_Edit_Icon`)
 //! ui/sound/sounds.json, <sound>.wav     the layouts' button and animation sounds
 //!                                       (`super::smm2_ui_sound`)
 //! courses/title_course_data_<n>.bcd     the title screen's demo courses (as in the RomFS)
@@ -48,7 +49,7 @@ use serde_json::{Value, json};
 use crate::smm1::{font_to_json, to_mtex};
 use crate::{ImportError, Progress, Result, read, write};
 
-pub const SMM2_UI_IMPORTER_VERSION: u32 = 7;
+pub const SMM2_UI_IMPORTER_VERSION: u32 = 8;
 
 #[derive(Clone, Debug)]
 pub struct Smm2UiConfig {
@@ -263,19 +264,30 @@ const ICON_MODELS: [(&str, &str); 2] = [
 ];
 
 /// Texture group of the Course Maker's own models: the glove cursor, the grid, the frame round
-/// the part under the cursor, the selection rectangle, the no-build zones, and the left
-/// column's theme pictures.
+/// the part under the cursor, the selection rectangle, the no-build zones, the left column's
+/// theme pictures, and the Water Level / Custom Scroll modes' lines, handles, path marks and
+/// birds.
 pub const EDIT_MODELS: &str = "EditModel";
 
 /// The Course Maker models whose textures go to [`EDIT_MODELS`] (`Pack/*.pack` members in
-/// v3.0.3, `Lyt_Edit_Icon` loose in `Model/`).
-const EDIT_MODEL_FILES: [&str; 6] = [
+/// v3.0.3, `Lyt_Edit_Icon` loose in `Model/`). The last five are the modes' (research/specs/
+/// maker.md C13): `Edit_WaterLevelLine` (the liquid's wavy lines `Edit_WaterLevelLine.00…02`,
+/// the start pill `WaterLevelBtn.00`), `Edit_dragBtn` (the drag arrows), `Edit_EditPanel` (one
+/// 13 × 6 sheet of 128-px icons: the speed squares, the round buttons, the path marks),
+/// `Edit_autoscroll` (the scroll path's marks `Edit_autoscroll_00…11`) and `Edit_camera` (the
+/// birds `Edit_camera.00…20`: S, 1–10, G and the other languages' letters).
+const EDIT_MODEL_FILES: [&str; 11] = [
     "Edit_mainCursor",
     "Edit_grid",
     "Edit_SelectCursor",
     "Edit_RectangCursor",
     "Edit_BanArea",
     "Lyt_Edit_Icon",
+    "Edit_WaterLevelLine",
+    "Edit_dragBtn",
+    "Edit_EditPanel",
+    "Edit_autoscroll",
+    "Edit_camera",
 ];
 
 /// The icon models `<style><suffix>` of the five styles.
@@ -869,6 +881,50 @@ mod tests {
         assert!(l.root.find("L_QuestBtn_00").is_some());
         assert_eq!(l.groups.len(), 1);
         assert_eq!(l.groups[0].children[0].name, "G_Btn_00");
+    }
+
+    /// Every Course Maker model of [`EDIT_MODEL_FILES`] is found and its textures convert,
+    /// the modes' art among them (owner's dump; skipped when absent).
+    #[test]
+    fn owner_dump_edit_models() {
+        let Some(romfs) = owner_romfs() else {
+            eprintln!("SMM2 RomFS not present; skipping");
+            return;
+        };
+        let wanted: Vec<String> = EDIT_MODEL_FILES
+            .iter()
+            .map(|m| format!("{m}.Nin_NX_NVN.zs"))
+            .collect();
+        let found = models(&romfs, &wanted);
+        assert_eq!(found.len(), wanted.len());
+        let mut names = BTreeSet::new();
+        for (name, data) in found {
+            let d = archive::unwrap(data).unwrap();
+            let blobs: Vec<Vec<u8>> = match Sarc::parse(d.clone()) {
+                Ok(s) => s.files().map(|(_, b)| b.to_vec()).collect(),
+                Err(_) => vec![d],
+            };
+            for blob in blobs {
+                let Some(b) = bntx::find_embedded(&blob) else {
+                    continue;
+                };
+                for t in bntx::parse(b).unwrap() {
+                    assert!(bntx_to_mtex(&t).is_some(), "{name}/{}", t.name);
+                    names.insert(t.name.clone());
+                }
+            }
+        }
+        for t in [
+            "Edit_WaterLevelLine.02",
+            "WaterLevelBtn.00",
+            "dragArrow.0",
+            "Edit_EditPanel",
+            "Edit_autoscroll_11",
+            "Edit_camera.00",
+            "Edit_camera.20",
+        ] {
+            assert!(names.contains(t), "{t}");
+        }
     }
 
     /// The scalable fonts decrypt and the combinations parse (owner's dump; skipped when absent).

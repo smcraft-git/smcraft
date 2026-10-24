@@ -1,7 +1,8 @@
 //! Layout-player output (`mmk_ui::Quad`, SMM1 / SMM2 screens) on wgpu: the port of the Swift
 //! app's `UILayer.swift`, with the same shading (mmk.h): `t = combine(tex0, tex1)`,
 //! `out = mix(black, white, t) · vertex colour`, colours authored as sRGB and linearised in the
-//! shader; the target is an sRGB view. One pipeline per blend mode, one sampler per wrap/filter
+//! shader (an NX layout's taken as linear, `mmk_ui::FLAG_LINEAR_COLOR`); the target is an sRGB
+//! view. One pipeline per blend mode, one sampler per wrap/filter
 //! combination, one draw per run of quads sharing textures, samplers and blend.
 
 use std::collections::{HashMap, HashSet};
@@ -38,9 +39,15 @@ fn vs(@location(0) pos: vec2<f32>, @location(1) uv0: vec2<f32>, @location(2) uv1
     o.pos = vec4<f32>(pos, 0.0, 1.0);
     o.uv0 = uv0;
     o.uv1 = uv1;
-    o.color = lin4(color);
-    o.black = lin4(black);
-    o.white = lin4(white);
+    if ((flags & 4u) != 0u) {
+        o.color = color;
+        o.black = black;
+        o.white = white;
+    } else {
+        o.color = lin4(color);
+        o.black = lin4(black);
+        o.white = lin4(white);
+    }
     o.flags = flags;
     return o;
 }
@@ -385,7 +392,14 @@ impl UiLayer {
                 continue;
             }
             let (h0, h1) = (self.has(q.tex0), self.has(q.tex1));
-            let shader_flags = (q.flags & 0x000F_F000) | h0 as u32 | (h1 as u32) << 1;
+            let shader_flags = (q.flags & 0x000F_F000)
+                | h0 as u32
+                | (h1 as u32) << 1
+                | if q.flags & mmk_ui::FLAG_LINEAR_COLOR != 0 {
+                    4
+                } else {
+                    0
+                };
             let linear = if q.flags & mmk_ui::FLAG_LINEAR != 0 {
                 16
             } else {

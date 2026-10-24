@@ -57,7 +57,7 @@ enum Cmd {
     /// size and CRC32 of the contents.
     Sarc { file: PathBuf },
     /// Export the textures inside a BFRES/BNTX file (wrappers removed) as PNG for inspection.
-    /// RGBA8 only; block-compressed textures are listed but not written.
+    /// RGBA8 and BC7 only; other block-compressed textures are listed but not written.
     Textures { file: PathBuf, out: PathBuf },
     /// List the sounds in a BARS, a BWAV, or a SARC pack of BARS (wrappers removed): one JSON line
     /// per sound. SMM1's files too: a BFWAV, a BFSTM, a bank (SARC of BFWAV + AMTA) or
@@ -432,11 +432,12 @@ enum Cmd {
         file: PathBuf,
         #[arg(long)]
         member: Option<String>,
-        /// Also print every curve of every skeletal animation.
+        /// Also print every curve of every skeletal animation, the shapes' positions and UVs,
+        /// and the material animations' texture patterns.
         #[arg(long)]
         curves: bool,
     },
-    /// Write a texture as PNG for inspection: an engine `.mtex` file, a Wii U `.bflim`, or one
+    /// Write a texture as PNG for inspection: an engine `.mtex` file (BC7 too), a Wii U `.bflim`, or one
     /// glyph sheet of a `.bffnt` (`--sheet`, optional GX2 `--swizzle` 0-7 to experiment).
     TexPng {
         file: PathBuf,
@@ -540,12 +541,21 @@ fn export_textures(file: &PathBuf, out: &std::path::Path) -> Result<(), String> 
                 "format": format!("{:?}", t.format), "variant": format!("{:?}", t.variant),
                 "channels": t.channel_select });
             println!("{info}");
-            if t.format == bntx::PixelFormat::Rgba8 {
+            let rgba = match t.format {
+                bntx::PixelFormat::Rgba8 => Some(t.data.clone()),
+                bntx::PixelFormat::Bc7 => Some(mmk_formats::bc7::decode(
+                    &t.data,
+                    t.width as u32,
+                    t.height as u32,
+                )),
+                _ => None,
+            };
+            if let Some(rgba) = rgba {
                 write_png(
                     &out.join(format!("{}.png", t.name)),
                     t.width,
                     t.height,
-                    &t.data,
+                    &rgba,
                 )
                 .map_err(|e| e.to_string())?;
             }
@@ -684,7 +694,14 @@ fn tex_png(
             "bc3" => PixelKind::Bc3,
             "bc4" => PixelKind::Bc4,
             "bc5" => PixelKind::Bc5,
+            // BC7 decoded here to RGBA8
+            "bc7" => PixelKind::Rgba8,
             other => return Err(format!("{other} not supported")),
+        };
+        let data = if m.format.name() == "bc7" {
+            mmk_formats::bc7::decode(&m.data, m.width, m.height)
+        } else {
+            m.data
         };
         Image {
             width: m.width,
@@ -692,7 +709,7 @@ fn tex_png(
             kind,
             srgb: false,
             channel_select: m.channel_select,
-            data: m.data,
+            data,
         }
     } else if data.starts_with(b"FFNT") {
         let f = mmk_formats::bffnt::Font::parse(&data).map_err(e)?;
@@ -832,13 +849,21 @@ fn dump_bfres(file: &PathBuf, member: Option<&str>, curves: bool) -> Result<Valu
                     "sampler_assign": x.sampler_assign.iter().map(|(a, b)| (a.clone(), json!(b)))
                         .collect::<serde_json::Map<_, _>>(),
                 })).collect::<Vec<_>>(),
-                "shapes": m.shapes.iter().map(|s| json!({
-                    "name": s.name, "material": s.material, "bone": s.bone, "skin": s.skin_count,
-                    "vertices": s.vertex_count,
-                    "attributes": s.attributes.iter().map(|a| format!("{}:{:#06x}", a.name, a.format)).collect::<Vec<_>>(),
-                    "lods": s.lods.iter().map(|l| json!([l.primitive, l.indices.len()])).collect::<Vec<_>>(),
-                    "skin_bones": s.skin_bones,
-                })).collect::<Vec<_>>(),
+                "shapes": m.shapes.iter().map(|s| {
+                    let mut v = json!({
+                        "name": s.name, "material": s.material, "bone": s.bone, "skin": s.skin_count,
+                        "vertices": s.vertex_count,
+                        "attributes": s.attributes.iter().map(|a| format!("{}:{:#06x}", a.name, a.format)).collect::<Vec<_>>(),
+                        "lods": s.lods.iter().map(|l| json!([l.primitive, l.indices.len()])).collect::<Vec<_>>(),
+                        "skin_bones": s.skin_bones,
+                    });
+                    if curves {
+                        // the rest-pose positions (model space) and the first UV set
+                        v["positions"] = json!(m.shape_positions(s));
+                        v["uv0"] = json!(s.attribute("_u0").map(|a| a.values.iter().map(|x| [x[0], x[1]]).collect::<Vec<_>>()));
+                    }
+                    v
+                }).collect::<Vec<_>>(),
             })
         })
         .collect();
@@ -872,7 +897,17 @@ fn dump_bfres(file: &PathBuf, member: Option<&str>, curves: bool) -> Result<Valu
     let fmaa: Vec<Value> = f
         .material_anims
         .iter()
-        .map(|a| json!({"name": a.name, "frames": a.frame_count, "textures": a.textures.len()}))
+        .map(|a| {
+            let mut v = json!({"name": a.name, "frames": a.frame_count, "textures": a.textures.len()});
+            if curves {
+                v["looping"] = json!(a.looping);
+                v["texture_names"] = json!(a.textures);
+                v["targets"] = a.targets.iter().map(|t| json!({"material": t.material,
+                    "param_tracks": t.param_tracks,
+                    "patterns": t.patterns.iter().map(|p| json!([p.sampler, format!("{:?}", p.track)])).collect::<Vec<_>>()})).collect();
+            }
+            v
+        })
         .collect();
     Ok(
         json!({"name": f.name, "models": models, "skeletal_anims": ska, "visibility_anims": vis,

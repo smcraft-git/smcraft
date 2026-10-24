@@ -82,7 +82,7 @@ pub fn find_import(prefix: &str, exclude: Option<&str>, legacy: &str) -> Option<
 /// with the importer's own versions (`mmk_import::IMPORTER_VERSION`,
 /// `SMM2_UI_IMPORTER_VERSION`; the importer's tests check the two agree).
 pub const GAME_PACK_VERSION: u32 = 14;
-pub const UI_PACK_VERSION: u32 = 7;
+pub const UI_PACK_VERSION: u32 = 8;
 
 /// An import's `importer_version` from its manifest (0 when unreadable).
 pub fn pack_version(dir: &Path) -> u32 {
