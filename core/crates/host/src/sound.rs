@@ -1500,6 +1500,11 @@ impl Sounds {
                 Event::DonutShake => {
                     self.object_sfx(world, "chikuwa_shake", pe);
                 }
+                Event::LakituCoins => {
+                    // NSMBU's only: the coin's `jugem_out` [obs data]
+                    let user = self.user("Coin");
+                    self.sfx_at(world, &user, "jugem_out", &PropList::default(), pe, 0);
+                }
                 Event::VineSprout => {
                     let user = self.user("Ivy");
                     for key in ["block_out", "tsuta_appear"] {

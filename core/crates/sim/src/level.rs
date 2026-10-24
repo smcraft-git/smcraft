@@ -723,9 +723,6 @@ pub fn unsupported_features(course: &Course) -> Vec<String> {
             {
                 out.insert(format!("part {} in part {}", o.child_id, o.id));
             }
-            if o.id == 30 && o.child_id == 8 {
-                out.insert("coins from a Lakitu".to_string());
-            }
             if !SUPPORTED_PARTS.contains(&o.id) {
                 out.insert(format!("part {}", o.id));
             } else if o.flags & 0x400 != 0 && !RIDES_TRACKS.contains(&o.id) {

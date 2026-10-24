@@ -67,7 +67,8 @@ SMCraft is back in development (it was archived in October 2026).
   barrel (gliding for winged ones, Boos and Bloopers slowing to a stop, parachutes opening after
   the shot), three times as fast from the red blaster; each blaster keeps as many alive as the
   game allows. Fix: only coin blasters fire at random intervals.
-- **Enemies holding a Key** let it go when defeated; **Lakitus throw what they were given**.
+- **Enemies holding a Key** let it go when defeated; **Lakitus throw what they were given**,
+  coins as a ten-coin burst.
 - **Tracks drawn with the game's own track tiles** (straights, bends, joints, open and closed
   ends) instead of a plain line.
 - **Endless**: the map's "New High Score!" panel.

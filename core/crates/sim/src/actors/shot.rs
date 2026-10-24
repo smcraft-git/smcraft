@@ -26,6 +26,9 @@ const COIN_FAST: f32 = 3.0;
 /// the third it creeps along the floor at ±0.34 (+0xda0, 0x7101c8a574 / 0x7101c8a1bc) [obs].
 const COIN_BOUNCE: [f32; 3] = [2.0, 1.0, 0.0];
 const COIN_CREEP: f32 = 0.34;
+/// A Lakitu's coin: its thrown arc lasts 50 frames, falling at most 1.5 px/f (8-coin.md).
+const THROWN_FRAMES: i32 = 50;
+pub(super) const THROWN_FALL: f32 = -1.5;
 /// Shot coins pushed 3 px further out of the muzzle (Shot enter 0x7100848b70) [obs].
 pub const COIN_PUSH: f32 = 3.0;
 
@@ -173,6 +176,17 @@ impl Actor {
             fast,
             landed: false,
         };
+    }
+
+    /// A coin of a Lakitu's TenCoin burst (slot 0–9; `r` 0…1 from the course generator): the
+    /// Coin's Jugem `cState_Thrown` enter (0x7100847c20): 2.0 × {0.9, 1.3, 0.45}[slot] across
+    /// (slot ≥ 3: 0.9), vy 2.0 (slot 0) or 2.0 + 0.5·r; 50 frames of its arc [obs v1.0.0].
+    pub fn coin_thrown(&mut self, slot: usize, r: f32) {
+        const K: [f32; 3] = [0.9, 1.3, 0.45];
+        self.vx = 2.0 * K.get(slot).copied().unwrap_or(0.9) * self.dir as f32;
+        self.vy = if slot == 0 { 2.0 } else { 2.0 + 0.5 * r };
+        self.timer = THROWN_FRAMES;
+        self.thrown = true;
     }
 
     /// Past the barrel: can touch the player and other actors once 8 px (16 big) from the

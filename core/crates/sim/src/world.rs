@@ -104,6 +104,8 @@ pub enum Event {
     Thaw,
     /// A vine sprouted from a block.
     VineSprout,
+    /// A Lakitu threw a coin burst (`jugem_out`).
+    LakituCoins,
     /// A donut block began to shake under the player / dropped / came back.
     DonutShake,
     DonutFall,
@@ -172,6 +174,8 @@ struct CoinBurst {
     sent: u8,
     wait: u8,
     blaster: usize,
+    /// Thrown by a Lakitu (Jugem context): 10 coins 2 a frame, or 3 at once when winged.
+    lakitu: bool,
 }
 
 /// Goal pole demo (27-goal.md, GoalPole M1).
@@ -2105,6 +2109,23 @@ impl World {
         self.step_towers();
         self.explosions();
         for n in born {
+            if n.kind == Kind::FloatCoin && n.parent.is_some() {
+                // a Lakitu's coin is a TenCoin burst too (8-coin.md "Thrown by Lakitu")
+                self.coin_bursts.push(CoinBurst {
+                    x: n.x,
+                    y: n.y,
+                    dir: n.dir,
+                    fast: false,
+                    wings: n.wings,
+                    parachute: false,
+                    sent: 0,
+                    wait: 0,
+                    blaster: usize::MAX,
+                    lakitu: true,
+                });
+                self.events.push(Event::LakituCoins);
+                continue;
+            }
             self.add_actor(n);
         }
         self.koopaling_world();
@@ -5091,6 +5112,7 @@ impl World {
                     sent: 0,
                     wait: 0,
                     blaster: bi,
+                    lakitu: false,
                 }),
                 Some(f) => {
                     let mut a = Actor::new(f.kind, mx, my);
@@ -5123,7 +5145,9 @@ impl World {
     fn step_coin_bursts(&mut self) {
         let mut bursts = std::mem::take(&mut self.coin_bursts);
         for c in &mut bursts {
-            let n = if c.wings {
+            let n = if c.lakitu {
+                if c.wings { 3 } else { 2 }
+            } else if c.wings {
                 if c.wait > 0 {
                     c.wait -= 1;
                     0
@@ -5137,6 +5161,13 @@ impl World {
             for _ in 0..n.min(COIN_BURST - c.sent) {
                 let mut a = Actor::new(Kind::FloatCoin, c.x, c.y);
                 a.dir = c.dir;
+                if c.lakitu {
+                    let r = self.course_rand(1000) as f32 / 1000.0;
+                    a.coin_thrown(c.sent as usize, r);
+                    self.add_actor(a);
+                    c.sent += 1;
+                    continue;
+                }
                 a.wings = c.wings;
                 a.chute = c.parachute;
                 a.blaster = Some(c.blaster);
@@ -7903,6 +7934,43 @@ mod tests {
         run(&mut w, 0, 62);
         let g = w.actors.iter().find(|a| a.kind == Kind::Goomba).unwrap();
         assert!(g.vx < -1.4 && g.vx > -1.5, "1.5 px/f: {}", g.vx);
+    }
+
+    #[test]
+    fn lakitu_throws_coins_as_a_burst_that_stops_after_its_arc() {
+        let mut lvl = Level::flat(100);
+        lvl.spawns.push(spawn(Kind::Lakitu, 200.0, 160.0));
+        lvl.held.push((0, 8, 0));
+        let mut w = World::with_level(lvl);
+        w.player.x = 150.0;
+        let mut seen = 0;
+        for _ in 0..400 {
+            run(&mut w, 0, 1);
+            let n = w
+                .actors
+                .iter()
+                .filter(|a| a.kind == Kind::FloatCoin)
+                .count();
+            if n > 0 {
+                seen = seen.max(n);
+            }
+            if seen >= 10 {
+                break;
+            }
+        }
+        assert_eq!(seen, 10, "ten coins");
+        run(&mut w, 0, 60);
+        let coins: Vec<_> = w
+            .actors
+            .iter()
+            .filter(|a| a.kind == Kind::FloatCoin)
+            .collect();
+        assert!(
+            coins
+                .iter()
+                .all(|c| !c.thrown && c.vx == 0.0 && c.vy == 0.0)
+        );
+        assert!(!coins.is_empty());
     }
 
     #[test]

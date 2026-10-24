@@ -713,6 +713,8 @@ pub struct Actor {
     pub chute: bool,
     /// The part it holds (`Level::held`): id, flags.
     pub holds: Option<(i16, u32)>,
+    /// A coin thrown by a Lakitu, still in its arc (`coin_thrown`).
+    pub thrown: bool,
     /// Counted toward a "defeat N" clear condition.
     pub tallied: bool,
     /// Carried by the player: the world positions it; it doesn't step on its own.
@@ -796,6 +798,7 @@ impl Actor {
             derailed: false,
             chute: false,
             holds: None,
+            thrown: false,
             tallied: false,
             held: false,
             camera: (0.0, 0.0),
@@ -2078,7 +2081,18 @@ impl Actor {
             Kind::Yoshi { .. } => self.step_yoshi(level),
             Kind::StyleItem => self.step_style_item(level),
             Kind::FloatCoin => {
-                if self.wings {
+                if self.thrown {
+                    // a Lakitu's coin: its arc (gravity −0.14, falling at most 1.5) for 50
+                    // frames (cState_Thrown exe 0x7100847f90), then the Wing context with speed,
+                    // vy and gravity 0: it stays where it is [inf: the helper's exe unread]
+                    self.vy = (self.vy - 0.14).max(shot::THROWN_FALL);
+                    self.x += self.vx;
+                    self.y += self.vy;
+                    self.timer -= 1;
+                    if self.timer <= 0 {
+                        (self.thrown, self.vx, self.vy) = (false, 0.0, 0.0);
+                    }
+                } else if self.wings {
                     self.wing_bob(16.0);
                 }
             }
