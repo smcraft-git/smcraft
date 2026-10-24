@@ -35,15 +35,27 @@ SMCraft is back in development (it was archived in October 2026).
   switches between it and the 100 Mario Challenge with ZL / ZR.
 - **Play Together (local co-op)** for up to four players with SMM2's rules: bubbles, shared
   lives (a life goes when everyone is down), anyone at the goal clears, the first into a pipe
-  waits for the others; also for 100 Mario and
-  Endless runs.
+  waits for the others, carrying and throwing each other, ground-pound knocks, each player's own
+  keys and clear-condition state; also for 100 Mario and Endless runs.
 - **Network Play screens** (co-op and versus) over Nextendo matchmaking, tested against a local
   server: the match plays a Course World course (TGRCode) picked by whoever opened it, or one of
-  the import's Story Mode courses.
+  the import's Story Mode courses; the other players show their names.
 - **A Mods page** on the title screen with every mod option (SMM1 extras, the recomp's mods, Course
   World's source).
 - **100 Mario: SMM1's Mystery Mushroom reward**: a finished run wins a costume.
-- **Lanky Mario's own sounds** (jump, float, growth), keys' and pink coins' sounds, Burners.
+- **Sound**: Lanky Mario's own sounds; keys, pink coins, Burners; knock-outs by what did them;
+  the update power-ups' sounds and course music; splashes; boss jumps; 3D World's voices,
+  footsteps, donut, blinking and spike blocks; helmets, a locked key door, a broken clear
+  condition; the Course Maker's music and part sounds (moving, stacking, wings, the start and
+  goal).
+- **Course Maker**: wings and parachutes (hold a part still for its balloon, on a whole
+  selection too), stacking enemies, TGRCode courses open in the maker, the Swift app's maker
+  keys.
+- **Stacked enemies** move together as in the game.
+- **Endless**: the map's "New High Score!" panel.
+- **Physics**: 352 player traces recorded in the game match frame by frame (walls, water,
+  slopes, items, the raccoon tail and SMW cape, enemies).
 - **Pictures closer to the game**: the start sign, the 2D styles' drop shadow, animated
-  ? blocks, bricks and coins, SMB1's black daytime ghost house.
+  ? blocks, bricks and coins, SMB1's black daytime ghost house, night darkness, every style's
+  own backdrops, the airship's sway, 3D World's sky, lighting and fogs, Mini Mario.
 - Release packages for Windows, Linux (x64, arm64), macOS, Android and the web.
