@@ -461,8 +461,23 @@ sway, importer and pack 12, the dev cache already at v12).
     taken the pair is refused, nothing moves it (0x7100eca770; 0x7100e9b840 is the grid snap;
     2026-10-25) · ⬜ the trash can (`Edit_TrashCan_00`: a one-time-anim part, `Act` = the 45-frame
     eat with `se_ui_edit_trash` + `SE_DropErase`; its trigger not found statically — maker spec
-    C16, a capture to take), co-op making (rules in C16; `Edit_PartsMenu_00` is player 2's part
-    menu, `UIEditShare2PMenuCtrl`, not a variant chooser)
+    C16, a capture to take) · ✅ co-op making (2026-10-25, branch `coopmake`; maker spec C16,
+    `maker::coop`): `L_MultiEditBtn_00` → `Edit_MultiEditWindow_00` → with two controllers (the
+    system set-up asks for exactly two, 0x7100e363a0) both cursors at the view's middle ±16 px
+    and the undo history emptied and off (0x710103e490; every history call skipped in edit mode
+    2); player 2's green glove (`Edit_mainCursor2P`, import group `EditModel2P`), pad only, its
+    own part, drags, erase and put through the same edit code (the cursors trade places);
+    `Edit_PartsMenu_00` by its glove with the game's order (12 pages / 3D World's 11 of palette
+    ids, 0x7101922b20 / 0x71019228e0; the ids' names from 0x7102cd5e08), steps across pages and
+    round, categories by their first page, the `PartsMenu2P_*` sounds; a part one cursor holds
+    isn't grabbed (0x7100f99260) or erased (0x7100fb57f0) by the other, its index followed
+    through the other's edits; balloons player 1's; co-op test play for two players (play mode
+    4, 0x710103f540); hosts hand player 2's controller over (`FrontInput::pad2`,
+    `mmk_front_coop_pad`) and leave it out of the menus; captures `maker-coop`,
+    `maker-coop-on`, `-menu`, `-carry`, `--front-script p2:…` · ⬜ the camera with two cursors
+    (not found: the view follows the moving cursor, the other is kept inside [inf]), which host
+    buttons stand for the Joy-Con's SL / SR / menu button, icicles in the 2P menu (no icicle
+    part yet)
   - ✅ the vertical scroll bar for vertical sub-areas (`N_SlideBarV_00`: its handle by the view's
     height, pressed / dragged to scroll; captures `maker-vertical`, `maker-subarea`)
   - ✅ the sub-area's orientation window (`Edit_SubAreaWindow_00`: Horizontal / Vertical) when
