@@ -537,8 +537,8 @@ mod tests {
             .unwrap()
     }
 
-    /// Drop the player onto the still shell from straight above: SMM2 (as the engine has it)
-    /// kicks and bounces; SMM1 kicks without a bounce (0x0234c294).
+    /// Drop the player onto the still shell from straight above: both kick it without a
+    /// bounce (SMM1 0x0234c294; SMM2 [obs: Ryujinx trace M1_koopa koopa_kick]).
     #[test]
     fn landing_on_a_still_shell() {
         for smm1 in [false, true] {
@@ -556,11 +556,7 @@ mod tests {
                 }
             }
             let vy = kicked.expect("kicked");
-            if smm1 {
-                assert!(vy < 1.0, "SMM1: no bounce ({vy})");
-            } else {
-                assert!(vy > 3.0, "SMM2 engine: bounce ({vy})");
-            }
+            assert!(vy < 1.0, "no bounce ({vy}, smm1 = {smm1})");
         }
     }
 
@@ -580,7 +576,8 @@ mod tests {
             });
             let s = shell(&w);
             assert_eq!(s.mode, crate::actors::Mode::ShellSlide, "smm1 = {smm1}");
-            assert!(s.vx > 0.0);
+            // (SMM2: the slide speed is taken up by the shell's next update)
+            assert!(s.vx > 0.0 || s.kick_speed > 0.0);
             assert!(s.kick_lock >= 14, "airborne window ({})", s.kick_lock);
         }
     }
