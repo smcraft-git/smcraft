@@ -5083,9 +5083,13 @@ impl World {
             if *main > 0 || *cool > 0 {
                 continue;
             }
-            // a winged coin's blaster waits 380 frames (0x17c, 0x710069e530) [obs]
+            // a winged coin's blaster waits 380 frames (0x17c), the red blaster's homing Bullet
+            // Bill (KillerSearch) 770 (0x302) (0x710069e530) [obs; its extra 320-frame lock-out
+            // is not, its rule unread]
             let base = if coins.is_some_and(|f| f.wings) {
                 380
+            } else if b.homing && b.contents.is_none() {
+                770
             } else {
                 190
             };
@@ -7934,6 +7938,19 @@ mod tests {
         run(&mut w, 0, 62);
         let g = w.actors.iter().find(|a| a.kind == Kind::Goomba).unwrap();
         assert!(g.vx < -1.4 && g.vx > -1.5, "1.5 px/f: {}", g.vx);
+    }
+
+    #[test]
+    fn the_red_blasters_homing_bill_comes_every_770_frames() {
+        for (alt, cool) in [(true, 770), (false, 190)] {
+            let mut w = blaster_world(None, alt);
+            let mut n = 0;
+            while !w.actors.iter().any(|a| a.kind == Kind::BulletBill) && n < 400 {
+                run(&mut w, 0, 1);
+                n += 1;
+            }
+            assert_eq!(w.blaster_timers[0].1, cool, "the cooldown after a shot");
+        }
     }
 
     #[test]
