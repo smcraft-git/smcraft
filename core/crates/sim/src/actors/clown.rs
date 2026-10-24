@@ -46,6 +46,11 @@ const PLAYER_COOLDOWN: i32 = 12;
 const PLAYER_COOLDOWN_LONG: i32 = 50;
 const PLAYER_MAX: usize = 8;
 pub const PLAYER_SHOT_SPEED: f32 = 3.625;
+/// The charged shot (ChargeShot enter / exe 0x7100ddf380 / 0x7100ddf610): 4.0 px/f along its
+/// angle (the sine table 0x71023385b8 × 4) plus the inherited speed, no life count; terrain
+/// ends it in ChargeExplode (0x7100ddf950: a 3-frame burst snapped to the tile it hit,
+/// sweeping the tile and its neighbours with hit kind 2, 0x7100e22210) [obs v3.0.3].
+pub const CHARGE_SHOT_SPEED: f32 = 4.0;
 /// Hard cap on a shot's flight (it has no timer of its own; it ends on terrain or off
 /// screen) [inf].
 pub const SHOT_LIFE: i32 = 600;
@@ -287,8 +292,8 @@ impl Actor {
 
     /// A player flying the Fire car (the helper's player branch, 0x7101191a20) [obs v3.0.3]:
     /// each change of the fire input (`held`: Run) fires when the cooldown is out, unless the
-    /// input was held 60 frames — that release is the charged shot (ChargeShot, state 3;
-    /// [inf: its flight not traced, fired here as a PlayerShot]). The cooldown is then 12
+    /// input was held 60 frames — that release is the charged shot (ChargeShot, state 3:
+    /// `phase` 1, faster and without a life count). The cooldown is then 12
     /// frames with none of its shots out, else 50; at most 8 are out (`alive`). A shot is one
     /// PlayerShot, or three at 0° / +15° / −15° when the player's +0x4a8 is 2 ([inf]: Fire
     /// form). Returns the shots: `Kind::Fireball` with `alt` (actors.rs: 3.625 px/f along its
@@ -338,8 +343,14 @@ impl Actor {
                 );
                 f.alt = true;
                 f.dir = dir;
-                f.vx = PLAYER_SHOT_SPEED * cs * s + inherit;
-                f.vy = PLAYER_SHOT_SPEED * sn;
+                let v = if charged {
+                    f.phase = 1;
+                    CHARGE_SHOT_SPEED
+                } else {
+                    PLAYER_SHOT_SPEED
+                };
+                f.vx = v * cs * s + inherit;
+                f.vy = v * sn;
                 f.timer = SHOT_LIFE;
                 f
             })
@@ -466,13 +477,18 @@ mod tests {
             let shots = a.clown_fire_player(held, false, 0);
             if !shots.is_empty() {
                 assert_eq!(shots[0].kind, Kind::Fireball);
-                assert!(shots[0].alt && (shots[0].vx - 3.625).abs() < 1e-4);
-                fired.push(f);
+                let v = if shots[0].phase == 1 { 4.0 } else { 3.625 };
+                assert!(shots[0].alt && (shots[0].vx - v).abs() < 1e-4);
+                fired.push((f, shots[0].phase));
             }
         }
         // the press; the release 5 frames later is inside the 12-frame cooldown; the next press;
         // the release after a 60-frame hold (the charged shot)
-        assert_eq!(fired, vec![0, 35, 105]);
+        assert_eq!(
+            fired.iter().map(|f| f.0).collect::<Vec<_>>(),
+            vec![0, 35, 105]
+        );
+        assert_eq!(fired.iter().map(|f| f.1).collect::<Vec<_>>(), vec![0, 0, 1]);
         let three = {
             let mut b = fire_car();
             b.clown_fire_player(true, true, 0)

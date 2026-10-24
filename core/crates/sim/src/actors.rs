@@ -2333,8 +2333,12 @@ impl Actor {
             }
             Kind::Fireball if self.alt => {
                 // a Fire Koopa Clown Car's PlayerShot (exe 0x7100ddf010, v3.0.3): straight at
-                // its launch speed, put out by terrain, at most 600 frames [obs]
-                self.timer -= 1;
+                // its launch speed, put out by terrain, at most 600 frames [obs]; the charged
+                // one (`phase` 1, ChargeShot 0x7100ddf610) has no life count and bursts on
+                // terrain (its burst's tile hits are not modelled)
+                if self.phase != 1 {
+                    self.timer -= 1;
+                }
                 self.x += self.vx;
                 self.y += self.vy;
                 if level.cell_at(self.x, self.y + 4.0).is_solid() || self.timer <= 0 {

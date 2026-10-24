@@ -5840,10 +5840,13 @@ impl World {
                 a.wings = c.wings;
                 a.chute = c.parachute;
                 if let Some((gi, dir, px, py)) = c.pipe {
-                    // the Coin's Dokan context: a table launch from the mouth; a winged or
-                    // parachute coin slides out as any part [inf: their own states]
+                    // the Coin's Dokan context: a table launch from the mouth; a winged coin
+                    // out of a side pipe is fired as from a blaster (actors/dokan.rs); other
+                    // winged or parachute coins slide out as any part [inf: their own states]
                     a.generator = Some(gi);
-                    if c.wings || c.parachute {
+                    if c.wings && !c.parachute && matches!(dir, PipeDir::Left | PipeDir::Right) {
+                        a.coin_side_dokan(dir, px, py);
+                    } else if c.wings || c.parachute {
                         a.dokan_out(dir, px, py, c.dir < 0);
                     } else {
                         a.coin_dokan(c.sent as usize, dir, px, py);

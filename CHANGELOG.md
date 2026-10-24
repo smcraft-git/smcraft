@@ -51,6 +51,17 @@ SMCraft is back in development (it was archived in October 2026).
   moment and then swims, a Lava Bubble leaps lower, a Fish Bone glides straight and slows to a
   stop, a Wiggler swims off at once. A winged red Koopa out of a block now slows its climb as in
   SMM2 (it used to brake as it does under water).
+- **The P-Balloon and the 3D World wearables out of a block** glide up to the block top as in
+  SMM2 (slower under water) instead of rising like a mushroom, and can't be taken until they
+  are out; a winged one hops. **A winged or parachuted coin in a block** pops up and floats back
+  a little before it flies (or drifts down), and can only be collected once clear of the block.
+  A **winged coin out of a side pipe** flies straight out as from a Bill Blaster.
+- **Wigglers and Spinies out of a block under water**: a Wiggler can be touched at once and
+  drifts out until it slows; a Spiny drops out curled up and stops sooner. On land, both hand
+  over as soon as they reach water.
+- **Side Thwomps with a parachute** wait in place like Thwomps; when one charges, the parachute
+  opens and it carries on slowly. The **Fire Koopa Clown Car's charged shot** (hold Run a second
+  and let go) flies faster than its fireballs and keeps going until it hits a wall.
 - Fix: Munchers hurt on a wall sensor's touch, as in SMM2 (a one-tile gap between Munchers is as
   tight as in the game).
 - **The Course Maker**: SMM2's own maker screens (part palette and part window, styles, themes,

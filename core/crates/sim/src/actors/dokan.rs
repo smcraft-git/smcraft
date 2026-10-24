@@ -193,6 +193,19 @@ impl Actor {
         self.mode = Mode::DokanOut { tx, ty, state };
     }
 
+    /// A winged coin out of a side pipe (Coin Dokan enter 0x7101367620: a wing and no
+    /// parachute, the pipe's +0xb18 < 2) skips DokanOut: facing the pipe's way (+0x26c =
+    /// +0xb18) it is switched straight into EnemySys context 8, Killer (`cEnemySysState_Killer`
+    /// in the context list 0x7101286ee0), and leaves as a blaster's winged coin: 1.5 px/f, no
+    /// gravity, 16 px, then its wing flight [obs v3.0.3]. It starts at the mouth, at the
+    /// side slide's height [inf: DokanOut's placement does not run].
+    pub fn coin_side_dokan(&mut self, dir: PipeDir, px: f32, py: f32) {
+        let (sx, _) = out_dir(dir);
+        (self.x, self.y) = (px, py - 8.0);
+        self.dir = if sx < 0.0 { -1 } else { 1 };
+        self.coin_shot(0, false);
+    }
+
     /// A coin of a pipe's TenCoin burst (slot 0–9) leaves the mouth: it bounces like a shot
     /// coin from here on and never leaves that state (exe 0x71013679c0, bounce 0x71013a23b0).
     pub fn coin_dokan(&mut self, slot: usize, dir: PipeDir, px: f32, py: f32) {
@@ -588,5 +601,24 @@ mod tests {
         a.dokan_out(PipeDir::Up, PX, PY, false);
         run(&mut a, &lvl);
         assert_eq!((a.vy, a.phase), (6.0, 3));
+    }
+
+    #[test]
+    fn a_winged_coin_flies_straight_out_of_a_side_pipe() {
+        let lvl = Level::flat(100);
+        let mut c = Actor::new(Kind::FloatCoin, 0.0, 0.0);
+        c.wings = true;
+        c.coin_side_dokan(PipeDir::Left, PX, 6.0 * TILE);
+        assert_eq!((c.x, c.y, c.vx, c.vy), (PX, 6.0 * TILE - 8.0, -1.5, 0.0));
+        assert!(matches!(c.mode, Mode::Shot { .. }));
+        let mut n = 0;
+        while matches!(c.mode, Mode::Shot { .. }) && n < 100 {
+            c.step(&lvl, 0.0);
+            n += 1;
+        }
+        // 16 px at 1.5 px/f, level; then the wing flight from there
+        assert!((11..=12).contains(&n), "{n}");
+        assert_eq!(c.y, 6.0 * TILE - 8.0);
+        assert!(c.wings && c.mode == Mode::Normal && c.dir == -1);
     }
 }
