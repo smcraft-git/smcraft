@@ -653,7 +653,10 @@ sway, importer and pack 12, the dev cache already at v12).
   0x710143f150) · ⬜ map ghosts · ✅ co-op: the card's
   Play Together (left onto it, or a click; L / R change worlds), every controller plays, one
   shared life counter
-- ⬜ Super World maker (later)
+- ⬜ Super World maker (later; its rules are written up in `super-worlds.md` §8, 2026-10-25: the
+  limits, what makes a world valid — start to castle, the castle's course —, the parts, the
+  theme menu's order, the edit states, Worldbot's slots and the one-upload rule; left [?]: what
+  makes a world ready for upload)
 
 **G6 — Network Play through Nextendo** 🔄 (works end to end on a local server; live waits for
 Nextendo; `docs/nextendo-network-play.md`, spec `research/specs/network-play.md`)
