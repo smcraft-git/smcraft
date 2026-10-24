@@ -146,8 +146,34 @@ final class InputState {
         if held(.spin) { b |= UInt32(MMK_BTN_SPIN) }
         if held(.pause) { b |= UInt32(MMK_BTN_START) }
 
-        for c in GCController.controllers() {
-            guard let g = c.extendedGamepad else { continue }
+        for p in padButtons { b |= p }
+        #if os(iOS)
+        b |= TouchInput.buttons
+        #endif
+        return MmkInput(buttons: b)
+    }
+
+    /// The device's own controls (keyboard / touch), without the pads: player 1's in co-op.
+    var ownButtons: UInt32 {
+        var b: UInt32 = 0
+        if held(.left) { b |= UInt32(MMK_BTN_LEFT) }
+        if held(.right) { b |= UInt32(MMK_BTN_RIGHT) }
+        if held(.up) { b |= UInt32(MMK_BTN_UP) }
+        if held(.down) { b |= UInt32(MMK_BTN_DOWN) }
+        if held(.jump) { b |= UInt32(MMK_BTN_JUMP) }
+        if held(.run) { b |= UInt32(MMK_BTN_RUN) }
+        if held(.spin) { b |= UInt32(MMK_BTN_SPIN) }
+        #if os(iOS)
+        b |= TouchInput.buttons
+        #endif
+        return b
+    }
+
+    /// Each connected game controller's engine buttons, in connection order (co-op players).
+    var padButtons: [UInt32] {
+        GCController.controllers().compactMap { c -> UInt32? in
+            guard let g = c.extendedGamepad else { return nil }
+            var b: UInt32 = 0
             let x = g.leftThumbstick.xAxis.value, y = g.leftThumbstick.yAxis.value
             if g.dpad.left.isPressed || x < -0.4 { b |= UInt32(MMK_BTN_LEFT) }
             if g.dpad.right.isPressed || x > 0.4 { b |= UInt32(MMK_BTN_RIGHT) }
@@ -157,11 +183,8 @@ final class InputState {
             if padHeld(.run, g) { b |= UInt32(MMK_BTN_RUN) }
             if padHeld(.spin, g) { b |= UInt32(MMK_BTN_SPIN) }
             if padHeld(.pause, g) { b |= UInt32(MMK_BTN_START) }
+            return b
         }
-        #if os(iOS)
-        b |= TouchInput.buttons
-        #endif
-        return MmkInput(buttons: b)
     }
 
     /// The 100 Mario skip key is held (Settings: "Skip course", default − / Tab, controller −).
