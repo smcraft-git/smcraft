@@ -153,9 +153,10 @@ pub fn run_all(course: &[u8], script: &[Input], start: &Start) -> Result<(String
 // Physics test courses
 
 pub const STYLES: [&str; 5] = ["M1", "M3", "MW", "WU", "3W"];
-pub const KINDS: [&str; 14] = [
+pub const KINDS: [&str; 20] = [
     "flat", "wall", "slope", "water", "items", "form", "enemy", "koopa", "shell", "hit",
-    "shellbrk", "shellq", "blocks", "bigblk",
+    "shellbrk", "shellq", "blocks", "bigblk", "spring", "note", "donut", "lift", "pswitch",
+    "bobomb",
 ];
 
 /// Where the items / form courses keep their power-up: the ? block's tile column and its row
@@ -167,6 +168,10 @@ pub fn course_names() -> Vec<String> {
     let mut v = Vec::new();
     for s in STYLES {
         for k in KINDS {
+            // (3D World has no Note Blocks)
+            if s == "3W" && k == "note" {
+                continue;
+            }
             v.push(format!("{s}_{k}"));
         }
     }
@@ -334,6 +339,46 @@ pub fn build_course(name: &str) -> Result<Vec<u8>, String> {
                     e.paint_ground(bx + 4, up(y)).map_err(err)?;
                 }
             }
+        }
+        "spring" => {
+            // a Trampoline on the floor at x 14
+            floor(&mut e, 0, len - 1)?;
+            e.place(10, 14, up(1)).map_err(err)?;
+        }
+        "note" => {
+            // a Note Block on the floor at x 14 (a one-tile step) and one 3 tiles up at x 24
+            // (to hit from below)
+            floor(&mut e, 0, len - 1)?;
+            e.place(23, 14, up(1)).map_err(err)?;
+            e.place(23, 24, up(4)).map_err(err)?;
+        }
+        "donut" => {
+            // a row of three Donut Blocks 2 tiles up at x 14..16 over the floor
+            floor(&mut e, 0, len - 1)?;
+            for x in 14..=16 {
+                e.place(21, x, up(3)).map_err(err)?;
+            }
+        }
+        "lift" => {
+            // a 3-wide Lift 3 tiles up at x 16..18 (it paces ±48 px about its spawn)
+            floor(&mut e, 0, len - 1)?;
+            let (_, lh) = mmk_editor::default_size(11);
+            e.place_sized(11, 16, up(4), 3, lh, mmk_editor::DEFAULT_FLAGS)
+                .map_err(err)?;
+        }
+        "pswitch" => {
+            // a P Switch on the floor at x 14 and a 3-high wall of Brick Blocks at x 20 (coins
+            // while the switch runs)
+            floor(&mut e, 0, len - 1)?;
+            e.place(18, 14, up(1)).map_err(err)?;
+            for y in 1..=3 {
+                e.place(4, 20, up(y)).map_err(err)?;
+            }
+        }
+        "bobomb" => {
+            // a Bob-omb at x 40, out of the spawn zone until the view comes near
+            floor(&mut e, 0, len - 1)?;
+            e.place(15, 40, up(1)).map_err(err)?;
         }
         "items" | "form" => {
             // the power-up in a ? block 4 tiles up, far enough right that no test reaches it:

@@ -641,6 +641,8 @@ pub struct Actor {
     pub kick_lock: i32,
     /// DieFall speeds taken on the next update (die_by).
     pub die_pending: Option<(f32, f32)>,
+    /// DieFall updates so far.
+    pub die_frames: u16,
     /// An item touched by the player: 1 = touched at the end of last frame (this update moves it
     /// once more, without landing, and takes it), 2 = taken (the world collects it), 3 = gone.
     pub taken: u8,
@@ -755,6 +757,7 @@ impl Actor {
             age: 0,
             kick_lock: 0,
             die_pending: None,
+            die_frames: 0,
             taken: 0,
             kick_speed: 0.0,
             bounce_pending: false,
@@ -1761,10 +1764,13 @@ impl Actor {
                 // gone once it has fallen 40 px below the view's bottom, at its next update [obs:
                 // Ryujinx trace M1_hit, two Goombas knocked off by a shell last move to y −43.9
                 // and are removed the frame after; at −39.9 they go on]
-                if self.y < self.camera.1 - 40.0 {
+                // 3D World: gone after 24 frames of the fall, wherever it is [obs: Ryujinx trace
+                // 3W_hit, two Kuribo3W knocked off by a shell]
+                if self.y < self.camera.1 - 40.0 || (level.style == "3W" && self.die_frames >= 24) {
                     self.mode = Mode::Dead;
                     return None;
                 }
+                self.die_frames += 1;
                 if let Some((vx, vy)) = self.die_pending.take() {
                     (self.vx, self.vy) = (vx, vy);
                 }
@@ -2116,7 +2122,13 @@ impl Actor {
                     self.step_wings(level, player_x);
                     return None;
                 }
-                let speed = WALK_SPEED;
+                // 3D World's Goomba (Kuribo3W) walks at 0.3 (0-goomba.md, Basic slot 54 →
+                // DAT_7101c8aeb0) [obs: Ryujinx trace 3W_hit, −0.3 a frame]
+                let speed = if self.kind == Kind::Goomba && level.style == "3W" {
+                    0.3
+                } else {
+                    WALK_SPEED
+                };
                 if self.alt && self.kind == Kind::BobOmb && self.age <= 1 {
                     // the alternate Bob-omb starts lit and keeps walking (15-bob-omb.md)
                     self.phase = 3;

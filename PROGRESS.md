@@ -409,8 +409,8 @@ Nextendo; `docs/nextendo-network-play.md`, spec `research/specs/network-play.md`
   out to belong to the parts' 0xC0000 bits, not stacks) · ⬜ the editor's height limit (play
   takes 128 members at most), pulling a member off a column
 - 🔄 Physics: re-recording every trace (2026-10-24; the old 428 / 454 was not a true count — the
-  old items / form traces were all small Mario). Re-recorded, current engine: **486 / 486 exact**
-  over 45 courses (2026-10-24 physics7: the shell courses now compare the shell too, which showed
+  old items / form traces were all small Mario). Re-recorded, current engine: **493 / 493 exact**
+  over 51 courses (2026-10-24 physics7: the shell courses now compare the shell too, which showed
   3 carried-shell throws off; and object traces: the player plus every simulated actor matched to
   a recorded game object, found by scans while the game is paused in the trace hook): M1/M3/MW/WU/3W flat 34 each, M1/M3/MW/WU/3W items 34 each, M1/M3/MW/WU/3W
   slope 4 each, M1/M3/MW/WU/3W wall 4 each, M1/M3/MW/WU/3W water 2 each, M3/MW/WU/3W form 16 each
@@ -451,7 +451,9 @@ Nextendo; `docs/nextendo-network-play.md`, spec `research/specs/network-play.md`
   the blocks' update: one more), its item appears at the block's last offset (+0.429) and doesn't
   move that frame, a mushroom stands on the frame it comes out, stands on its centre ±1 with
   inclusive column edges, is taken in its own update the frame after the touch (one more fall
-  step, no landing) and the player grows a frame after that. 3D World
+  step, no landing) and the player grows a frame after that; hit in all five styles (3D World's Kuribo3W walks
+  at 0.3 and a knocked-off one is gone after 24 frames), shellbrk (the shell into a Brick Block)
+  M1 / M3. 3D World
   slide-end stoop
   3 frames confirmed. 3D World recording works with a local Ryujinx fix (a zero-sized guest
   texture with 2 levels made Metal abort under MoltenVK). ⬜ still to record: the Cat dive's real
