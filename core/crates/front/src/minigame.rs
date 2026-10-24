@@ -317,6 +317,9 @@ impl MinigameScene {
                 self.sound("Anm_Fail", &[]);
             }
         }
+        if self.kind == Kind::Catch {
+            self.play("OutGuide");
+        }
     }
 
     // MARK: Match & Win
