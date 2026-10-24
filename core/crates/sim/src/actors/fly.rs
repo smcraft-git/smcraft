@@ -157,6 +157,12 @@ impl Actor {
         }
     }
 
+    /// Into the flight with the bob at its top (angle 180°): a Lakitu's coin after its throw.
+    pub(super) fn fly_from_top(&mut self) {
+        self.fly = Fly::start(self.x, self.y, false);
+        self.fly.angle.1 = 0x8000_0000;
+    }
+
     /// 3D World: the move redone through the terrain, and the helper's reactions to what it met.
     fn fly_terrain(&mut self, level: &Level, x0: f32, y0: f32) {
         let (tx, ty) = (self.x, self.y);
@@ -181,6 +187,65 @@ impl Actor {
             self.fly.base.1 = self.y;
         }
         self.vy = self.y - y0;
+    }
+}
+
+/// The winged Spiny (PataTogezo Wing, FlyMove / Turn) [obs v3.0.3 start 0x7101281880, hover
+/// 0x7101281fb0]: a placed one sets off left; it flies level toward 0.5·dir (0.75 for the
+/// alternate), the speed eased by max(0.02, 0.03·|vx|) a frame, with no gravity, bobbing about a
+/// height 4 px above where it took wing (vy steps 0.004 toward it, |vy| ≤ 0.18); a ceiling sends
+/// it down at 0.18. It meets terrain in 3D World only (bgcheck `InvalidPata`), where a wall turns
+/// it with an 8-frame lock (no acceleration meanwhile). Not modelled: its spike volley every 230
+/// frames (0x710127cda0) and 3D World's pressed-down fall.
+const PATA_SPEED: f32 = 0.5;
+const PATA_SPEED_ALT: f32 = 0.75;
+const PATA_ACCEL: f32 = 0.02;
+const PATA_ACCEL_K: f32 = 0.03;
+const PATA_ABOVE: f32 = 4.0;
+const PATA_BOB: f32 = 0.004;
+const PATA_BOB_MAX: f32 = 0.18;
+const PATA_TURN_LOCK: i32 = 8;
+
+impl Actor {
+    pub(super) fn step_pata_togezo(&mut self, level: &Level) {
+        if !self.fly.on {
+            self.fly = Fly::start(self.x, self.y + PATA_ABOVE, false);
+            if self.spawn.is_some() {
+                self.dir = -1;
+            }
+            self.vy = 0.0;
+            self.turn_lock = 0;
+        }
+        if self.turn_lock > 0 {
+            self.turn_lock -= 1;
+        } else {
+            let target = if self.alt { PATA_SPEED_ALT } else { PATA_SPEED } * self.dir as f32;
+            let accel = (PATA_ACCEL_K * self.vx.abs()).max(PATA_ACCEL);
+            self.vx += (target - self.vx).clamp(-accel, accel);
+        }
+        self.vy = if self.y >= self.fly.base.1 {
+            (self.vy - PATA_BOB).max(-PATA_BOB_MAX)
+        } else {
+            (self.vy + PATA_BOB).min(PATA_BOB_MAX)
+        };
+        if level.style != "3W" {
+            self.x += self.vx;
+            self.y += self.vy;
+            return;
+        }
+        let (y0, vy) = (self.y, self.vy);
+        self.wall = false;
+        self.collide(level);
+        if vy > 0.0 && self.y < y0 + vy - 1e-4 {
+            self.vy = -PATA_BOB_MAX;
+        } else {
+            self.vy = vy;
+        }
+        if self.wall && self.turn_lock == 0 {
+            self.dir = -self.dir;
+            self.vx = self.vx.abs() * self.dir as f32;
+            self.turn_lock = PATA_TURN_LOCK;
+        }
     }
 }
 
@@ -277,6 +342,43 @@ mod tests {
                 assert_eq!(a.dir, -1, "turned at the wall");
             }
         }
+    }
+
+    #[test]
+    fn a_winged_spiny_sets_off_left_and_bobs_about_4_px_above_its_start() {
+        let lvl = level("M1");
+        let mut a = Actor::new(Kind::Spiny, 300.0, 64.0);
+        a.wings = true;
+        a.spawn = Some(0);
+        let (mut lo, mut hi) = (f32::MAX, f32::MIN);
+        for t in 0..400 {
+            a.step_pata_togezo(&lvl);
+            if t > 100 {
+                (lo, hi) = (lo.min(a.y), hi.max(a.y));
+            }
+        }
+        assert_eq!(a.dir, -1);
+        assert!((a.vx + 0.5).abs() < 1e-4, "{}", a.vx);
+        // vy swings ±0.18 in steps of 0.004 about the height 4 px up
+        assert!(lo < 68.0 && hi > 68.0 && hi - lo < 20.0, "{lo} {hi}");
+        assert!(a.vy.abs() <= 0.18 + 1e-6);
+    }
+
+    #[test]
+    fn a_lakitu_coin_flies_on_after_its_arc_bobbing_down_first() {
+        let lvl = level("M1");
+        let mut a = Actor::new(Kind::FloatCoin, 200.0, 200.0);
+        a.coin_thrown(0, 0.0);
+        for _ in 0..50 {
+            a.step(&lvl, 0.0);
+        }
+        assert!(!a.thrown && a.fly.on);
+        let (x0, y0) = (a.x, a.y);
+        for _ in 0..32 {
+            a.step(&lvl, 0.0);
+        }
+        assert!((a.x - (x0 + 0.625 * 32.0)).abs() < 1e-3, "{} {x0}", a.x);
+        assert!((a.y - (y0 - 16.0)).abs() < 1e-3, "{} {y0}", a.y);
     }
 
     #[test]

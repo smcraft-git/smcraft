@@ -2146,6 +2146,10 @@ impl Actor {
                 Kind::Bowser { .. } | Kind::BoomBoom { .. } | Kind::BowserJr { .. } => {}
                 k if k.is_w3() => {} // their own wing behaviour (actors/w3.rs)
                 k if k.is_v3() => {} // their own wing behaviour (actors/v3.rs)
+                Kind::Spiny => {
+                    self.step_pata_togezo(level);
+                    return None;
+                }
                 // the shared fly helper (actors/fly.rs); a track carries a winged part itself
                 k if k.flies_winged() && !self.thrown && self.rail.is_none() => {
                     let slow = self.wet();
@@ -2241,15 +2245,20 @@ impl Actor {
             Kind::FloatCoin => {
                 if self.thrown {
                     // a Lakitu's coin: its arc (gravity −0.14, falling at most 1.5) for 50
-                    // frames (cState_Thrown exe 0x7100847f90), then the Wing context with speed,
-                    // vy and gravity 0: it stays where it is [inf: the helper's exe unread]
+                    // frames (cState_Thrown exe 0x7100847f90), then the Wing context with the
+                    // bob's angle at 180° (+0xdb4 = 0x80000000): the shared flight, 0.625 px/f
+                    // its way, the bob starting down (actors/fly.rs) [obs v1.0.0]
                     self.vy = (self.vy - 0.14).max(shot::THROWN_FALL);
                     self.x += self.vx;
                     self.y += self.vy;
                     self.timer -= 1;
                     if self.timer <= 0 {
                         (self.thrown, self.vx, self.vy) = (false, 0.0, 0.0);
+                        self.fly_from_top();
                     }
+                } else if self.fly.on {
+                    let slow = self.wet();
+                    self.step_fly(level, slow);
                 }
             }
             Kind::ClownCar { .. } => return self.step_clown_car(level),
@@ -4351,7 +4360,7 @@ impl Actor {
     }
 
     /// Generic winged flight for the enemies without a wing behaviour of their own here (each
-    /// has its own EnemyDB Wing action: PataTogezo, Teresa, Bubble, …) [inf, from the winged
+    /// has its own EnemyDB Wing action: Teresa, Bubble, Pukupuku, …) [inf, from the winged
     /// Thwomp]: drift ±0.3 px/frame (turning at walls), bob vy = 0.15·sin(2°·t). The items,
     /// coins, map objects and blocks fly with the shared fly helper (actors/fly.rs).
     fn step_generic_wings(&mut self, level: &Level) {

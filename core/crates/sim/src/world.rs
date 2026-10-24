@@ -8939,7 +8939,7 @@ mod tests {
     }
 
     #[test]
-    fn lakitu_throws_coins_as_a_burst_that_stops_after_its_arc() {
+    fn lakitu_throws_coins_as_a_burst_that_flies_on_after_its_arc() {
         let mut lvl = Level::flat(100);
         lvl.spawns.push(spawn(Kind::Lakitu, 200.0, 160.0));
         lvl.held.push((0, 8, 0));
@@ -8967,10 +8967,11 @@ mod tests {
             .iter()
             .filter(|a| a.kind == Kind::FloatCoin)
             .collect();
+        // past the arc each flies 0.625 px/f its way (the shared flight)
         assert!(
             coins
                 .iter()
-                .all(|c| !c.thrown && c.vx == 0.0 && c.vy == 0.0)
+                .all(|c| !c.thrown && c.fly.on && (c.vx.abs() - 0.625).abs() < 1e-4)
         );
         assert!(!coins.is_empty());
     }
