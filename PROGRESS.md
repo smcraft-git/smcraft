@@ -1383,9 +1383,12 @@ a portable Rust shell runs the game everywhere, the Swift app stays as the Apple
   0x71015b0d40), enemies' and items' DrawDokan (walked into a side mouth, 16 px; the EnemyDB rows'
   offset y / rotate type / out type; out at 4 px/f easing to 0.5, 10 frames, re-entry 16 px ahead;
   0x71012100e0, cDrawDokan 0x71028b3d20), the sounds `route_dokan_in` / `_move` / `_out`, riders
-  drawn in front, rolled (Sprite.roll) or at 66 % (items) · ⬜ the block test's ray filters and the
-  player's own block callback [inf: the enemies' rays], the BgUnit's own mouth faces (full tiles
-  here), the in-pipe player scale table, carrying / Yoshi / boxes through pipes, multiplayer screen
+  drawn in front, rolled (Sprite.roll) or at 66 % (items); the blocked tests (the player's: room
+  for the body, 0x71015acf60; enemies': 14 px rays, a mouth just ahead is no block); the pipes
+  render again in the maker and play (their materials' colour combiner came out fully transparent:
+  a pale glass stand-in for the game's own clear-pipe shader, host `clear_pipe_glass` [inf]) ·
+  ⬜ the block rays' terrain filters, the BgUnit's own mouth faces (full tiles here), the game's
+  clear-pipe shader (fresnel / refraction), the in-pipe player scale table, carrying / Yoshi / boxes through pipes, multiplayer screen
   edges, the Screw spin about the vertical (not drawn); captures: `research/specs/objects/
   93-clear-pipe.md` "How to verify"
 - ✅ Fire Bars, Burners, airship Cannons and Bill Blasters on tracks: a carrier actor rides the

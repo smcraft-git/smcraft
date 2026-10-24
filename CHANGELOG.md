@@ -15,6 +15,8 @@ SMCraft is back in development (it was archived in October 2026).
   and items that walk into a mouth ride through too and shoot out of the other end. Riders are
   drawn in front of the pipe, turned along it (items shrunk), with the pipe's in / along / out
   sounds.
+- Clear Pipes show up again, in the Course Maker and in play: they're drawn as pale glass with
+  brighter edges (they were invisible).
 - **Wings as in SMM2**: winged power-ups, coins, springs, P Switches and POW Blocks fly slowly
   the way they face with a 16-px bob and pass through walls (they meet walls only in 3D World);
   winged blocks fly the same way, and winged Hard, Ice and Donut Blocks swing 48 px from side to
