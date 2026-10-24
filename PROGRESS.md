@@ -341,7 +341,7 @@ Nextendo; `docs/nextendo-network-play.md`, spec `research/specs/network-play.md`
   (`key_get`, `key_appear`), pink coins (the count's note, the last one's chord) and Burners
   (`fire`) ✅; a container's child key is found by name (the 2D styles' pink coins) [inf]; knock-outs
   by what did it (`r_damage_star` / `_shell` / `_tail` / `_quake`, else `r_damage`; the sim records
-  the cause) ✅
+  the cause), spin-jump stomps (`r_damage_spin`), stomps from Yoshi (`r_damage_ystamp`) ✅
 
 **G9 — Every platform** 🔄
 - 🔄 macOS (Swift app) · 🔄 iOS / iPadOS (built for the Simulator; the owner's iPad) · 🔄 Windows ·

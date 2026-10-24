@@ -1476,7 +1476,13 @@ impl Sounds {
                     let was_shell = matches!(prev.kind, Kind::Shell { .. });
                     let is_shell = matches!(s.kind, Kind::Shell { .. });
                     if prev.mode != Mode::Stomped && s.mode == Mode::Stomped {
-                        todo.push((s.kind, "r_damage_stamp", props("Die", prev), s.x, s.y));
+                        // stomped by a player riding Yoshi: Yoshi's stomp (where the style has it)
+                        let key = if world.player.yoshi.is_some() {
+                            "r_damage_ystamp"
+                        } else {
+                            "r_damage_stamp"
+                        };
+                        todo.push((s.kind, key, props("Die", prev), s.x, s.y));
                         *stomps += 1;
                     } else if !was_shell && is_shell && s.mode == Mode::ShellWait {
                         // a Koopa stomped into its shell
@@ -1512,6 +1518,27 @@ impl Sounds {
                     {
                         todo.push((s.kind, "press", PropList::default(), s.x, s.y));
                     }
+                }
+            }
+        }
+        // a spin jump makes the enemy it lands on vanish at once: its spin defeat sound
+        let spin_stomp = world.player.spinning && world.events.contains(&Event::Stomp);
+        if spin_stomp {
+            let p = &world.player;
+            for (id, prev) in &self.actors {
+                if prev.kind.is_enemy()
+                    && !now.contains_key(id)
+                    && (prev.x - p.x).abs() < 32.0
+                    && (prev.y - p.y).abs() < 40.0
+                {
+                    todo.push((
+                        prev.kind,
+                        "r_damage_spin",
+                        PropList::default(),
+                        prev.x,
+                        prev.y,
+                    ));
+                    *stomps += 1;
                 }
             }
         }
@@ -1563,7 +1590,11 @@ impl Sounds {
             if self.actor_sfx(world, kind, key, &props, x, y) {
                 continue;
             }
-            if key == "r_damage_stamp" {
+            if key == "r_damage_ystamp" {
+                if !self.actor_sfx(world, kind, "r_damage_stamp", &props, x, y) {
+                    self.generic_enemy(world, "r_damage_stamp");
+                }
+            } else if key == "r_damage_stamp" {
                 self.generic_enemy(world, key);
             } else if key.starts_with("r_damage_") {
                 self.actor_sfx(world, kind, "r_damage", &props, x, y);

@@ -81,7 +81,8 @@ fn db() -> serde_json::Value {
                 {"key": "s_big", "parent": 0, "if": ["==", "Big"], "wave": "Split"},
                 {"key": "s_normal", "parent": 0, "if": ["==", "Normal"], "wave": "Stomp"},
                 asset("r_damage", "Down"),
-                asset("r_damage_star", "StarKill")
+                asset("r_damage_star", "StarKill"),
+                asset("r_damage_spin", "SpinKill")
             ]},
             "M1_koura": {"calls": [asset("kick", "Kick")]},
             "M1_EditKuribo": {"calls": [asset("set", "EditSet"), asset("drag", "EditDrag")]}
@@ -266,6 +267,17 @@ fn a_knock_out_sounds_by_what_did_it() {
     w.actors[1].die_by(0.0, DieCause::Fire);
     r.s.after_step(&w);
     assert_eq!(r.played(), ["sfx:Down"]);
+    // a spin jump's stomp makes a Goomba vanish: its spin sound, not the plain stomp
+    let mut g = Actor::new(Kind::Goomba, w.player.x + 4.0, w.player.y);
+    g.id = 9;
+    w.actors.push(g);
+    r.s.after_step(&w);
+    r.played();
+    w.actors.pop();
+    w.player.spinning = true;
+    w.events = vec![Event::Stomp];
+    r.s.after_step(&w);
+    assert_eq!(r.played(), ["sfx:SpinKill"]);
 }
 
 #[test]
