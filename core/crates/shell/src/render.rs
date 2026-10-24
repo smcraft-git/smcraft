@@ -188,7 +188,7 @@ type MeshKey = (u8, u8, bool);
 /// reference frames]. Cards (pre-rendered sprites) and self-lit materials skip the lighting.
 pub const MESH_SHADER: &str = r#"
 struct Light {
-    rows: array<vec4<f32>, 36>,
+    rows: array<vec4<f32>, 39>,
 };
 @group(1) @binding(0) var<uniform> light: Light;
 
@@ -201,12 +201,15 @@ struct VOut {
     @location(4) flags: f32,
     @location(5) aref: f32,
     @location(6) emission: f32,
+    @location(7) form_add: vec4<f32>,
+    @location(8) form_mul: vec3<f32>,
 };
 
 @vertex
 fn vs(@location(0) clip: vec4<f32>, @location(1) world: vec3<f32>, @location(2) flags: f32,
       @location(3) n: vec3<f32>, @location(4) aref: f32, @location(5) uv: vec2<f32>,
-      @location(6) pad: vec2<f32>, @location(7) color: vec4<f32>) -> VOut {
+      @location(6) pad: vec2<f32>, @location(7) color: vec4<f32>,
+      @location(8) form_add: vec4<f32>, @location(9) form_mul: vec4<f32>) -> VOut {
     var o: VOut;
     o.pos = clip;
     o.uv = uv;
@@ -216,6 +219,8 @@ fn vs(@location(0) clip: vec4<f32>, @location(1) world: vec3<f32>, @location(2) 
     o.flags = flags;
     o.aref = aref;
     o.emission = pad.x;
+    o.form_add = form_add;
+    o.form_mul = form_mul.xyz;
     return o;
 }
 
@@ -247,29 +252,52 @@ fn lighting(n: vec3<f32>) -> vec3<f32> {
     return c;
 }
 
+// one fog (rows `r` … r + 2: start, end, density power, height; colour, strength; direction)
+// applied as `calc` (0 blended towards its colour, 1 added, 2 multiplied)
+fn fog_one(c: vec3<f32>, world: vec3<f32>, r: i32, calc: u32) -> vec3<f32> {
+    let p = light.rows[r];
+    let col = light.rows[r + 1];
+    let dir = light.rows[r + 2];
+    if (dir.w < 0.5) {
+        return c;
+    }
+    var d: f32;
+    if (p.w > 0.5) {
+        d = -dot(world, dir.xyz);
+    } else {
+        d = dot(world - light.rows[0].xyz, dir.xyz);
+    }
+    let span = p.y - p.x;
+    var t = 0.0;
+    if (abs(span) > 1e-4) {
+        t = clamp((d - p.x) / span, 0.0, 1.0);
+    }
+    let f = pow(t, p.z) * col.a;
+    if (calc == 1u) {
+        return c + col.rgb * f;
+    }
+    if (calc == 2u) {
+        return c * mix(vec3<f32>(1.0), col.rgb, f);
+    }
+    return mix(c, col.rgb, f);
+}
+
+// the fogs a material switches on, in the uber shader's order: the height fog, the distance
+// fog, the second distance fog, the second height fog
 fn fogged(c: vec3<f32>, world: vec3<f32>, flags: f32) -> vec3<f32> {
+    let calc = u32(flags + 0.5) >> 9u;
     var r = c;
-    let eye = light.rows[0].xyz;
-    let on = array<bool, 3>(has(flags, 2u), has(flags, 16u), has(flags, 32u));
-    for (var i = 0; i < 3; i = i + 1) {
-        let p = light.rows[14 + 3 * i];
-        let col = light.rows[15 + 3 * i];
-        let dir = light.rows[16 + 3 * i];
-        if (dir.w > 0.5 && on[i]) {
-            var d: f32;
-            if (p.w > 0.5) {
-                d = -dot(world, dir.xyz);
-            } else {
-                d = dot(world - eye, dir.xyz);
-            }
-            let span = p.y - p.x;
-            var t = 0.0;
-            if (abs(span) > 1e-4) {
-                t = clamp((d - p.x) / span, 0.0, 1.0);
-            }
-            t = pow(t, max(p.z, 0.01));
-            r = mix(r, col.rgb, t * col.a);
-        }
+    if (has(flags, 32u)) {
+        r = fog_one(r, world, 20, (calc >> 4u) & 3u);
+    }
+    if (has(flags, 2u)) {
+        r = fog_one(r, world, 14, calc & 3u);
+    }
+    if (has(flags, 16u)) {
+        r = fog_one(r, world, 17, (calc >> 2u) & 3u);
+    }
+    if (has(flags, 256u)) {
+        r = fog_one(r, world, 36, (calc >> 6u) & 3u);
     }
     return r;
 }
@@ -289,7 +317,13 @@ fn fs(i: VOut) -> @location(0) vec4<f32> {
     let t = textureSample(tex, samp, select(i.uv, sky_uv(0, i.uv), sky));
     let x = textureSample(extra, samp, select(i.uv, sky_uv(2, i.uv), sky));
     let h = textureSample(extra2, samp, sky_uv(1, i.uv));
-    var c = t * i.color;
+    // the albedo combiner: (albedo + add) · mul, clamped when add.w is set (vertex colour terms
+    // worked out per vertex), then the light's vertex-colour tint
+    var albedo = (t.rgb + i.form_add.rgb) * i.form_mul;
+    if (i.form_add.w > 0.5) {
+        albedo = clamp(albedo, vec3<f32>(0.0), vec3<f32>(1.0));
+    }
+    var c = vec4<f32>(albedo, t.a) * i.color;
     if (mode == 2u) {
         c.a = c.a * x.a;
     }
@@ -327,6 +361,8 @@ fn fs(i: VOut) -> @location(0) vec4<f32> {
     if (mode == 1u) {
         rgb = rgb + x.rgb * i.emission;
     }
+    // the uber shader clamps the lit colour to 0 … 2 before its fogs
+    rgb = clamp(rgb, vec3<f32>(0.0), vec3<f32>(2.0));
     rgb = fogged(rgb, i.world, i.flags);
     return vec4<f32>(rgb, c.a);
 }
@@ -777,7 +813,8 @@ impl Renderer {
                             step_mode: wgpu::VertexStepMode::Vertex,
                             attributes: &wgpu::vertex_attr_array![
                                 0 => Float32x4, 1 => Float32x3, 2 => Float32, 3 => Float32x3,
-                                4 => Float32, 5 => Float32x2, 6 => Float32x2, 7 => Float32x4
+                                4 => Float32, 5 => Float32x2, 6 => Float32x2, 7 => Float32x4,
+                                8 => Float32x4, 9 => Float32x4
                             ],
                         })],
                     },

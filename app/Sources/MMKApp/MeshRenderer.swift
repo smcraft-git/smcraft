@@ -80,7 +80,10 @@ final class MeshRenderer {
         var srt: SIMD4<Float>       // scale u, scale v, rotate, translate u
         var misc: SIMD4<Float>      // translate v, vertex-colour ratio, alpha ref, has colours
         var tint: SIMD4<Float>      // albedo tint rgb, emission strength
-        var flags: UInt32           // MMK_MESH_* bits (bit 0 = card) as in MmkMeshShape.flags
+        var formA: SIMD4<Float> = SIMD4(0, 0, 0, 0)   // combiner add: k rgb, colour.rgb factor
+        var formM: SIMD4<Float> = SIMD4(1, 1, 1, 0)   // combiner mul: k rgb, colour.rgb factor
+        var formX: SIMD4<Float> = .zero  // add / mul colour.a factors, 1 = clamp add / mul
+        var flags: UInt32           // MMK_MESH_* bits (bit 0 = card, bit 30 = clamp the combiner)
         var pad0: UInt32 = 0, pad1: UInt32 = 0, pad2: UInt32 = 0
     }
 
@@ -88,8 +91,9 @@ final class MeshRenderer {
     #include <metal_stdlib>
     using namespace metal;
     struct V { packed_float3 pos; packed_float3 nrm; float2 uv; ushort4 joints; packed_float4 weights; };
-    struct U { float4x4 vp; float4 m0, m1, m2; float4 depth; float4 srt; float4 misc; float4 tint; uint flags; uint p0, p1, p2; };
-    struct O { float4 pos [[position]]; float2 uv; float3 n; float3 world; float4 color; };
+    struct U { float4x4 vp; float4 m0, m1, m2; float4 depth; float4 srt; float4 misc; float4 tint;
+               float4 formA, formM, formX; uint flags; uint p0, p1, p2; };
+    struct O { float4 pos [[position]]; float2 uv; float3 n; float3 world; float4 color; float3 fadd; float3 fmul; };
     vertex O mesh_vertex(const device V* v [[buffer(0)]], const device float4* skin [[buffer(1)]],
                          constant U& u [[buffer(2)]], const device uchar4* colors [[buffer(3)]],
                          uint vid [[vertex_id]]) {
@@ -126,6 +130,11 @@ final class MeshRenderer {
         o.world = wp;
         float4 vc = u.misc.w > 0.5 ? float4(colors[vid]) / 255.0 : float4(1);
         o.color = float4(mix(float3(1), vc.rgb, u.misc.y) * u.tint.rgb, vc.a);
+        // the albedo combiner's terms (MmkMeshShape.form)
+        float3 fa = u.formA.xyz + u.formA.w * vc.rgb + u.formX.x * vc.a;
+        float3 fm = u.formM.xyz + u.formM.w * vc.rgb + u.formX.y * vc.a;
+        o.fadd = u.formX.z > 0.5 ? saturate(fa) : fa;
+        o.fmul = u.formX.w > 0.5 ? saturate(fm) : fm;
         return o;
     }
     float3 lighting(float3 n, constant float4* L) {
@@ -143,21 +152,28 @@ final class MeshRenderer {
         }
         return c;
     }
+    // one fog (rows r .. r + 2: start, end, density power, height; colour, strength; direction)
+    // applied as calc (0 blended towards its colour, 1 added, 2 multiplied) - render.rs MESH_SHADER
+    float3 fog_one(float3 c, float3 world, int r, uint calc, constant float4* L) {
+        float4 p = L[r], col = L[r + 1], dir = L[r + 2];
+        if (dir.w < 0.5) return c;
+        float d = p.w > 0.5 ? -dot(world, dir.xyz) : dot(world - L[0].xyz, dir.xyz);
+        float span = p.y - p.x;
+        float t = abs(span) > 1e-4 ? clamp((d - p.x) / span, 0.0, 1.0) : 0.0;
+        float f = pow(t, p.z) * col.a;
+        if (calc == 1) return c + col.rgb * f;
+        if (calc == 2) return c * mix(float3(1), col.rgb, f);
+        return mix(c, col.rgb, f);
+    }
+    // the fogs a material switches on, in the uber shader's order: the height fog, the distance
+    // fog, the second distance fog, the second height fog
     float3 fogged(float3 c, float3 world, uint flags, constant float4* L) {
+        uint calc = flags >> 18;
         float3 r = c;
-        float3 eye = L[0].xyz;
-        // slots: the distance fog (MMK_MESH_FOG), the second distance fog, the height fog
-        bool on[3] = { (flags & 4) != 0, (flags & (1u << 14)) != 0, (flags & (1u << 15)) != 0 };
-        for (int i = 0; i < 3; i++) {
-            float4 p = L[14 + 3 * i], col = L[15 + 3 * i], dir = L[16 + 3 * i];
-            if (dir.w > 0.5 && on[i]) {
-                float d = p.w > 0.5 ? -dot(world, dir.xyz) : dot(world - eye, dir.xyz);
-                float span = p.y - p.x;
-                float t = abs(span) > 1e-4 ? clamp((d - p.x) / span, 0.0, 1.0) : 0.0;
-                t = pow(t, max(p.z, 0.01));
-                r = mix(r, col.rgb, t * col.a);
-            }
-        }
+        if ((flags & (1u << 15)) != 0) r = fog_one(r, world, 20, (calc >> 4) & 3, L);
+        if ((flags & 4) != 0) r = fog_one(r, world, 14, calc & 3, L);
+        if ((flags & (1u << 14)) != 0) r = fog_one(r, world, 17, (calc >> 2) & 3, L);
+        if ((flags & (1u << 17)) != 0) r = fog_one(r, world, 36, (calc >> 6) & 3, L);
         return r;
     }
     // texture matrix k of the sky (rows 30-35: the cloud layer, the horizon layer, the base)
@@ -174,7 +190,10 @@ final class MeshRenderer {
         bool sky = mode == 3 && L[24].w > 0.5;
         float4 tc = t.sample(s, sky ? sky_uv(0, in.uv, L) : in.uv);
         float4 x = extra.sample(s, sky ? sky_uv(2, in.uv, L) : in.uv);
-        float4 c = tc * in.color;
+        // the albedo combiner: (albedo + add) * mul, clamped with flag bit 30
+        float3 albedo = (tc.rgb + in.fadd) * in.fmul;
+        if ((u.flags & (1u << 30)) != 0) albedo = saturate(albedo);
+        float4 c = float4(albedo, tc.a) * in.color;
         if (mode == 2) c.a *= x.a;
         if (sky) {
             // the uber shader's sky (render.rs MESH_SHADER): the base (_s0) colours constant
@@ -201,6 +220,8 @@ final class MeshRenderer {
         float3 rgb = c.rgb;
         if ((u.flags & 2) == 0) rgb *= lighting(normalize(in.n), L) * L[23].x;
         if (mode == 1) rgb += x.rgb * u.tint.w;
+        // the uber shader clamps the lit colour to 0 .. 2 before its fogs
+        rgb = clamp(rgb, 0.0, 2.0);
         rgb = fogged(rgb, in.world, u.flags, L);
         return float4(rgb, c.a);
     }
@@ -350,7 +371,12 @@ final class MeshRenderer {
                     let extraTex = sh.extra_texture == MMK_TEXTURE_NONE ? nil : texture(sh.extra_texture)
                     let keep = UInt32(MMK_MESH_SELF_LIT | MMK_MESH_FOG | MMK_MESH_ALPHA_TEST) | UInt32(MMK_MESH_FOG1)
                         | UInt32(MMK_MESH_FOG_Y) | UInt32(MMK_MESH_WORLD_UV) | (extraTex != nil ? 3 << 12 : 0)
-                    u.flags = (unlit ? 1 : 0) | (sh.flags & keep)
+                        | UInt32(MMK_MESH_FOG1_Y) | (0xFF << UInt32(MMK_MESH_FOG_CALC_SHIFT))
+                    let f = sh.form
+                    u.formA = SIMD4(f.0, f.1, f.2, f.3)
+                    u.formM = SIMD4(f.6, f.7, f.8, f.9)
+                    u.formX = SIMD4(f.4, f.10, f.5, f.11)
+                    u.flags = (unlit ? 1 : 0) | (sh.flags & keep) | (f.12 > 0.5 ? 1 << 30 : 0)
                     u.tint = SIMD4(sh.tint.0, sh.tint.1, sh.tint.2, sh.emission)
                     enc.setFragmentTexture(extraTex ?? white, index: 1)
                     let extra2Tex = sh.extra2_texture == MMK_TEXTURE_NONE ? nil : texture(sh.extra2_texture)
@@ -389,7 +415,7 @@ final class MeshRenderer {
     }()
 
     /// Rows of a light uniform block (mmk_host::scene3d::LIGHT_ROWS).
-    static let lightRowCount = 36
+    static let lightRowCount = 39
 
     /// The light rows of an `MmkScene3d` uniform block (`lightRowCount` x 4 floats).
     static func lightRows<T>(_ tuple: T) -> [SIMD4<Float>] {

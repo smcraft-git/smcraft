@@ -382,6 +382,15 @@ Nextendo; `docs/nextendo-network-play.md`, spec `research/specs/network-play.md`
   World-projected textures for every `tex_coord0_calc` 5 material (the field's soil bands now
   64 px tall, as the game's), phase ½ → ground 37.6, underground 34.3, castle 75.8, airship
   26.5, water 32.7, ghost 29.1, snow 70.4, desert 48.0, sky 24.6, forest 48.3 (mean 42.7).
+  The albedo combiner (form stages: vertex colours added / multiplied), vertex colours tinting
+  the light only with `enable_vertex_color`, the four fogs by name with their calc types (blend /
+  add / multiply) and squared distance density, the lit colour clamped to 0 … 2 → ground 34.4,
+  underground 19.3, castle 31.8, airship 29.5, water 35.6, ghost 22.2, snow 74.2, desert 24.9,
+  sky 17.0, forest 41.2 (mean 33.0). NSMBU day 38.5 → 39.9 (ground 50.1 → 41.4, sky 60.8 → 68.9,
+  airship 62.6 → 71.2: its TEV colour stages are not drawn yet; a linear fog would give 37.5),
+  night 39.9 → 39.7. Next: the light-map LUT domain (Lambert vs wrapped: wrap ½ measures 30.2),
+  NSMBU's TEV stages, specular + 3W_EnvMap reflections, edge (rim) light, bake AO textures
+  (Bake/*.szs, needs an importer bump), the airship / castle / desert sky variants.
   3D World (references recaptured 2026-10-24, MAE): ground 53.7, underground 34.3, castle 75.9,
   airship 26.9, water 33.3, ghost 31.8, snow 70.6, desert 60.4, sky 24.6, forest 48.4 (were
   31–77 before: the start sign 3× too big — a model without an SMB1 picture is drawn at its own
