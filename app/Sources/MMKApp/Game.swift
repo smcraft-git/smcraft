@@ -287,6 +287,8 @@ final class GameSession: ObservableObject, Identifiable {
             i.buttons = live.buttons & ~UInt32(MMK_BTN_START)
             if live.buttons & UInt32(MMK_BTN_START) != 0 { i.flags |= 1 }
             if input.skipHeld { i.flags |= 2 }
+            // the Course Maker's keys, bits 8–23
+            i.flags |= input.makerKeys << 8
         } else {
             var st = MmkFrontStatus()
             mmk_front_status(front, &st)

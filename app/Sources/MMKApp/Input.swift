@@ -39,6 +39,8 @@ final class InputState {
     private static let confirmKeys: Set<UInt16> = [36, 76]
     /// Menu-only keys (macOS key codes): Q / E are L / R, 1 / 3 are ZL / ZR.
     private static let shoulderKeys: [(UInt16, MenuInput)] = [(12, .l), (14, .r), (18, .zl), (20, .zr)]
+    /// The Course Maker's keys (U, Y, Z, Q, ], [, T, E, G, M, C), swallowed like the game's.
+    private static let makerKeyCodes: Set<UInt16> = [32, 16, 6, 12, 30, 33, 17, 14, 5, 46, 8]
 
     #if os(macOS)
     private var keysDown = Set<UInt16>()
@@ -82,6 +84,7 @@ final class InputState {
             }
             // swallow game keys so the window doesn't beep
             let menuKey = Self.shoulderKeys.contains { $0.0 == event.keyCode }
+                || Self.makerKeyCodes.contains(event.keyCode)
             return self.isGameKey(event.keyCode) || menuKey ? nil : event
         }
         monitor = m
@@ -185,6 +188,27 @@ final class InputState {
             if padHeld(.pause, g) { b |= UInt32(MMK_BTN_START) }
             return b
         }
+    }
+
+    /// The Course Maker's keys held (`mmk_front::maker::keys`, as the portable shell's): U / ⌃Z
+    /// undo, Y / ⌃⇧Z redo, Q the part window, ] / [ the palette slots, T test play from the
+    /// cursor, E the eraser, G the other area, M held multigrab, C copy the selection.
+    var makerKeys: UInt32 {
+        let ctrl = anyDown([59, 62]), shift = anyDown([56, 60])
+        let z = ctrl && anyDown([6])
+        let keys: [(Bool, UInt32)] = [
+            (anyDown([32]) || (z && !shift), 1),
+            (anyDown([16]) || (z && shift), 2),
+            (anyDown([12]), 4),
+            (anyDown([30]), 8),
+            (anyDown([33]), 16),
+            (anyDown([17]), 32),
+            (anyDown([14]), 64),
+            (anyDown([5]), 128),
+            (anyDown([46]), 256),
+            (anyDown([8]) && !ctrl, 512),
+        ]
+        return keys.reduce(0) { $1.0 ? $0 | $1.1 : $0 }
     }
 
     /// The 100 Mario skip key is held (Settings: "Skip course", default − / Tab, controller −).

@@ -245,7 +245,8 @@ sway, importer and pack 12, the dev cache already at v12).
   ⬜ moving slots, the Super World filter, the download flow from Course World, CJK glyphs in
   names
 - 🔄 The Swift app: its host has the maker and Coursebot hooks ✅; a finger / mouse held down
-  reaches the maker (paint, carry, erase) ✅; the maker keys from its keyboard ⬜; 3D styles'
+  reaches the maker (paint, carry, erase) ✅; the maker keys from its keyboard ✅ (the portable
+  shell's: U / ⌃Z, Y / ⌃⇧Z, Q, [ ], T, E, G, M, C; macOS and iOS hardware keyboards); 3D styles'
   still view uses the play camera ⬜
 
 **G5 — Super Worlds** 🔄
