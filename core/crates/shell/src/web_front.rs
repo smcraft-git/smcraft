@@ -975,6 +975,14 @@ impl Host for ShellHost<'_> {
         icon
     }
 
+    fn attachment_icon(&mut self, style: &str, flags: u32) -> Option<mmk_front::Icon> {
+        let icon = self.game.attachment_icon(style, flags);
+        if crate::web::art_loading(&self.game.cache) {
+            return None;
+        }
+        icon
+    }
+
     fn art_loading(&self) -> bool {
         crate::web::art_loading(&self.game.cache)
     }

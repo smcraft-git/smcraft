@@ -184,6 +184,15 @@ impl Game {
         })
     }
 
+    /// The wings / parachute alone (the maker's contents balloon, `mmk_host::icon`).
+    pub fn attachment_icon(&mut self, style: &str, flags: u32) -> Option<mmk_front::Icon> {
+        mmk_host::icon::attachment_icon(&self.cache, style, flags).map(|i| mmk_front::Icon {
+            width: i.width,
+            height: i.height,
+            rgba: i.rgba,
+        })
+    }
+
     /// Mario's Trail: a picture of player 1 as drawn now and the world rectangle it shows.
     pub fn player_snapshot(&mut self) -> Option<(mmk_front::Icon, [f32; 4])> {
         let (i, area) =

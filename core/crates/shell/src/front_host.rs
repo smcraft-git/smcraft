@@ -1018,6 +1018,10 @@ impl Host for ShellHost<'_> {
         self.game.part_icon(style, part, flags)
     }
 
+    fn attachment_icon(&mut self, style: &str, flags: u32) -> Option<mmk_front::Icon> {
+        self.game.attachment_icon(style, flags)
+    }
+
     fn set_engine_option(&mut self, name: &str, value: i32) -> bool {
         let mut o = self.game.session.options;
         if !o.set(name, value) {

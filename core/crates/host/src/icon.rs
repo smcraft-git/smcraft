@@ -21,6 +21,44 @@ pub struct Icon {
 /// course, its sprites copied out of the textures (RGBA, 3 px per world px, trimmed). None for
 /// parts without 2D art or that can't be placed.
 pub fn part_icon(cache: &Cache, style: &str, part: i16, flags: u32) -> Option<Icon> {
+    let (rgba, w, h) = part_pixels(cache, style, part, flags, 4.0)?;
+    trim(&rgba, w, h)
+}
+
+/// The wings (`flags` 0x2) or the parachute (0x8000) alone, as the engine draws them on a part
+/// (a Hard Block's wings, a Goomba's parachute): the pixels the attachment adds, trimmed. The
+/// contents balloon's dummies (`P_DummyWingL/R_00`, `P_DummyParachute_00`) show them
+/// [departure: the game renders its own icons for them at run time].
+pub fn attachment_icon(cache: &Cache, style: &str, flags: u32) -> Option<Icon> {
+    let part = if flags & 0x8000 != 0 { 0 } else { 6 };
+    let (with, w, h) = part_pixels(cache, style, part, mmk_editor::DEFAULT_FLAGS | flags, 20.0)?;
+    let (without, w0, h0) = part_pixels(cache, style, part, mmk_editor::DEFAULT_FLAGS, 20.0)?;
+    if (w, h) != (w0, h0) {
+        return None;
+    }
+    let mut out = with;
+    for (px, base) in out
+        .as_chunks_mut::<4>()
+        .0
+        .iter_mut()
+        .zip(without.as_chunks::<4>().0)
+    {
+        if px == base {
+            px.copy_from_slice(&[0, 0, 0, 0]);
+        }
+    }
+    trim(&out, w, h)
+}
+
+/// Part `part` with `flags` drawn alone, untrimmed: RGBA, its width and height (`margin` world
+/// px round the part's rectangle).
+fn part_pixels(
+    cache: &Cache,
+    style: &str,
+    part: i16,
+    flags: u32,
+    margin: f32,
+) -> Option<(Vec<u8>, u32, u32)> {
     let mut e = mmk_editor::Editor::new(style);
     let (tx, ty) = (20, 6);
     let placed = match part {
@@ -95,7 +133,7 @@ pub fn part_icon(cache: &Cache, style: &str, part: i16, flags: u32) -> Option<Ic
         .collect();
     // the part's rectangle (world px), a little margin for what sticks out (the Koopa's head;
     // wings at its sides and a parachute above take more)
-    let m = if flags & 0x8002 != 0 { 20.0 } else { 4.0 };
+    let m = if flags & 0x8002 != 0 { 20.0 } else { margin };
     let (x0, y0) = (r.x as f32 * 16.0 - m, r.y as f32 * 16.0 - m);
     let (x1, y1) = ((r.x + r.w) as f32 * 16.0 + m, (r.y + r.h) as f32 * 16.0 + m);
     let scale = 3.0;
@@ -114,7 +152,11 @@ pub fn part_icon(cache: &Cache, style: &str, part: i16, flags: u32) -> Option<Ic
     if !any {
         return None;
     }
-    // trimmed to what was drawn
+    Some((rgba, w, h))
+}
+
+/// `rgba` (`w` × `h`) cut to what was drawn (None: nothing).
+fn trim(rgba: &[u8], w: u32, h: u32) -> Option<Icon> {
     let opaque = |x: u32, y: u32| rgba[((y * w + x) * 4 + 3) as usize] > 0;
     let cols: Vec<u32> = (0..w).filter(|&x| (0..h).any(|y| opaque(x, y))).collect();
     let rows: Vec<u32> = (0..h).filter(|&y| (0..w).any(|x| opaque(x, y))).collect();

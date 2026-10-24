@@ -321,12 +321,19 @@ pub fn strip(style: &str, at: Place) -> [Place; 5] {
 
 /// The strip's panes in [`strip`]'s order.
 pub const STRIP: [&str; 5] = [
-    "N_All_00/N_Frame_00/N_Pos_00/N_PartsMenu_00/N_Scissor_00/L_Icon_00",
-    "N_All_00/N_Frame_00/N_Pos_00/N_PartsMenu_00/N_Scissor_00/L_Icon_01",
-    "N_PartsMenu_01/N_Frame_01/N_SizPos_00/N_Pos_01/N_Size_00/L_Icon_04",
-    "N_All_00/N_Frame_00/N_Pos_00/N_PartsMenu_00/N_Scissor_00/L_Icon_02",
-    "N_All_00/N_Frame_00/N_Pos_00/N_PartsMenu_00/N_Scissor_00/L_Icon_03",
+    "L_Icon_00",
+    "L_Icon_01",
+    "L_Icon_04",
+    "L_Icon_02",
+    "L_Icon_03",
 ];
+
+/// The 2P menu's side: it sits at player 2's cursor point (its pad cursor's position, put on
+/// the screen) and turns left of it right of x 180, below it at or above y −140
+/// (`Direction` 0 / 1 / 2 / 3 as the balloons', 0x710191db60: 0x7102319060 = 180,
+/// 0x7102318d64 = −140) [obs v3.0.3].
+pub const MENU_SIDE_X: f32 = 180.0;
+pub const MENU_SIDE_Y: f32 = -140.0;
 
 /// What the part menu wants of the maker after a press.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -460,15 +467,12 @@ impl PartsMenu {
         }
         l.hold("Category", c as f32);
         if let Some(n) = name {
-            l.text(
-                "N_All_00/N_Frame_00/N_Pos_00/N_PartsMenu_00/T_Balloon_00",
-                n,
-            );
+            l.text("T_Balloon_00", n);
         }
     }
 
-    /// The menu by the glove at `at` (layout units), turned by `Direction` to stay on the
-    /// screen (the attribute balloon's rule [inf]).
+    /// The menu at player 2's cursor point `at` (layout units), its `Direction` frame from
+    /// that point ([`MENU_SIDE_X`] / [`MENU_SIDE_Y`]).
     pub fn place(&mut self, at: [f32; 2], direction: u8) {
         let Some(l) = &mut self.layout else { return };
         l.set_translate("N_All_00", [at[0] + 27.0, at[1] - 5.5]);

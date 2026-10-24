@@ -576,6 +576,11 @@ pub trait Host {
     fn part_icon(&mut self, _style: &str, _part: i16, _flags: u32) -> Option<Icon> {
         None
     }
+    /// The wings (`flags` 0x2) or the parachute (0x8000) alone as the engine draws them on a
+    /// part, for the maker's contents balloon. None: no art (the balloon leaves them out).
+    fn attachment_icon(&mut self, _style: &str, _flags: u32) -> Option<Icon> {
+        None
+    }
     /// The host is still reading art a picture needs (a browser reads textures on first use):
     /// a [`Host::part_icon`] that came back None is asked for again later, not kept as missing.
     fn art_loading(&self) -> bool {
