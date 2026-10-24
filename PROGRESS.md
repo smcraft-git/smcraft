@@ -64,8 +64,13 @@ sway, importer and pack 12, the dev cache already at v12).
   16 px × the summed heights up; 0x71003fbef0 / 0x71003fc820 v1.0.0); the drop-out predicate
   from v3.0.3 0x7101285500 (normal mode only: a stomped Koopa's shell is a new object); a rider
   at a wall keeps the pull, not 0, and the carry (0x7101299dd0); riders have no contact reaction
-  (Tower vtable slots 12 / 13 empty) [inf left: a walker meeting a rider]. Next: the other
-  winged enemies, Bowser's chase jumps, the Yoshi's Egg hatch.
+  (Tower vtable slots 12 / 13 empty) [inf left: a walker meeting a rider]. 🔄 winged enemies
+  (actors/wing.rs): ✅ the Bob-omb's own Fly / Turn (v3.0.3 helper 0x71010833a0: 0.5 px/f,
+  ±8 px bob eased by 0.03, floor / ceiling flips); ✅ Dry Bones flies the red Paratroopa's Fly
+  (Karon Wing = NokonokoRed's); ✅ the enemies whose Wing action is their Basic one (Boo,
+  Cheep Cheep, Fish Bone, Wiggler, Magikoopa, Bros, Monty Mole, Blooper, Chain Chomp) act as
+  unwinged; ⬜ their wing-only states (Boo PataCharge, Bros WingWalk), Lava Bubble (Bubble
+  Wing), Buzzy / Spike Top (Met Wing). Next: Bowser's chase jumps, the Yoshi's Egg hatch.
 - **Agent queue** (when a helper slot frees; running 2026-10-25: the maker's Water Level and
   Custom Scroll modes, physics): ✅ a Koopaling in a Clown Car (2026-10-25, branch
   `kclown`, research 120-koopalings.md "In a Koopa Clown Car": KoKoopaDefault's Clown vtable

@@ -31,6 +31,7 @@ pub use powerups::{THROW_MAX as THROW_MAX_USA, THROW_SPEED as THROW_SPEED_USA};
 pub use shot::{COIN_PUSH, spout_limit};
 mod v3;
 mod w3;
+mod wing;
 pub use bosses::{BossAttack, BossHit};
 pub use v3::{LASER_SIGN, MECHA_DOWN, MISSILE_LIFE, Seg, V3State};
 pub use w3::{CREEP_CELL, W3Look, W3State, creeper_corner, push as bully_push};
@@ -2178,6 +2179,29 @@ impl Actor {
                     self.step_winged_plant(level);
                     return None;
                 }
+                // their Wing action is their Basic one (the same action class: Teresa,
+                // Pukupuku, FishBone, Hanachan, Kameck, Bros1st / BrosU / FireBros / MegaBros,
+                // Choropoo, Gesso, Wanwan) [obs v1.0.0 actionmap]: they act as unwinged
+                // [inf: the wing-only states inside it — the Boo's PataCharge, the Bros'
+                // WingWalk — are not ported]
+                Kind::Boo
+                | Kind::CheepCheep { .. }
+                | Kind::FishBone
+                | Kind::Wiggler
+                | Kind::Magikoopa
+                | Kind::HammerBro
+                | Kind::MontyMole
+                | Kind::Blooper
+                | Kind::ChainChomp { .. } => {}
+                // a Dry Bones' Wing is the red Paratroopa's (Karon Wing vtable 0x7102179e68 =
+                // NokonokoRed's; its Fly enter 0x7100697e40 is the same and its exe 0x7100697ec0
+                // runs NokonokoRed's Fly exe 0x710072b370) [obs v1.0.0]: step_wings
+                Kind::DryBones => {}
+                // its own Fly / Turn (actors/wing.rs)
+                Kind::BobOmb if self.phase == 0 => {
+                    self.step_winged_bobomb(level);
+                    return None;
+                }
                 k if k.is_enemy() => {
                     self.step_generic_wings(level);
                     return None;
@@ -2311,7 +2335,7 @@ impl Actor {
                 if self.wings
                     && matches!(
                         self.kind,
-                        Kind::Goomba | Kind::Goombrat | Kind::Koopa { .. }
+                        Kind::Goomba | Kind::Goombrat | Kind::Koopa { .. } | Kind::DryBones
                     )
                 {
                     self.step_wings(level, player_x);
@@ -4460,7 +4484,7 @@ impl Actor {
                     self.turn();
                 }
             }
-            Kind::Koopa { red: true } => {
+            Kind::Koopa { red: true } | Kind::DryBones => {
                 // vertical speed eases toward ±0.5 by 0.01/frame between home−32 and home+48
                 let above = self.y + 8.0 > self.home_y + 48.0;
                 let below = self.y + 8.0 < self.home_y - 32.0;

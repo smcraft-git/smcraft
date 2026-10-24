@@ -30,6 +30,10 @@ SMCraft is back in development (it was archived in October 2026).
 - Stacked parts: a column comes out together when the whole column reaches the screen (as the
   game's tower record does); a stomped Koopa or Buzzy Beetle in a column drops out of it as its
   shell; a rider pushed against a wall is no longer stopped dead but keeps riding along.
+- More winged enemies as in SMM2: a winged Bob-omb flies level, bobbing 8 px up and down and
+  turning at walls; a winged Dry Bones flies like a red Paratroopa; winged Boos, Cheep Cheeps,
+  Fish Bones, Wigglers, Magikoopas, Hammer Bros, Monty Moles, Bloopers and Chain Chomps act as
+  their wingless selves (the game runs the same behaviour for both) instead of drifting.
 
 - **Import once, then no dump or keys.** SMCraft reads your NSPs and `prod.keys` itself (no
   hactool, nothing extracted) and writes its own asset pack; the game runs from the pack alone.
