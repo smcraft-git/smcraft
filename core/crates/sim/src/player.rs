@@ -508,7 +508,7 @@ pub struct Player {
     /// Jump/Fall state's execute sees the ground and only switches to Walk at its end), so the
     /// landing frame keeps the air speed [obs: Ryujinx trace, state +0x3f8 changes with its
     /// counter at 0].
-    landed: bool,
+    pub(crate) landed: bool,
     /// SMW Landing state (mode 3): frames the landing holds the speed with no movement routine
     /// (Landing begin 0x71009f2990 / exec 0x71009f2d00) [obs].
     land_hold: u8,
@@ -542,6 +542,9 @@ pub struct Player {
     slide_stoop: i32,
     /// Walked off a ledge last frame: this frame (Walk handing over to Fall) adds no gravity.
     fell_off: bool,
+    /// A Trampoline launch: 2 on the launch, 1 from the next frame while rising (the held-jump
+    /// gravities don't apply until the fall) [obs: Ryujinx trace M1_spring spring_hold].
+    pub spring_rise: u8,
     /// 3D World long jump (BroadJump, state 14: begin 0x71009d3020, exec 0x71009d3330) and the
     /// frames left of its landing (BroadJumpLand, 0x71009d3470), which stops the player dead.
     broad: bool,
@@ -680,6 +683,7 @@ impl Player {
             slide_hop: false,
             slide_stoop: 0,
             fell_off: false,
+            spring_rise: 0,
             broad: false,
             broad_land: 0,
             pu: PowerUps::default(),
@@ -1679,11 +1683,22 @@ impl Player {
                 0.0
             } else if self.broad {
                 BROAD_GRAVITY
+            } else if self.spring_rise == 1 {
+                // after a Trampoline / Note Block launch the rise takes the released gravities
+                // with Jump held (−0.34, then −0.25 near the top), up to the first frame that
+                // starts falling; the held ones from the next (−0.31) [obs: Ryujinx traces
+                // M1_spring spring_hold, M1_note note_hold]
+                GRAVITY_RELEASED[vy_band(self.vy)]
             } else if jump || spin {
                 GRAVITY_HELD[vy_band(self.vy)]
             } else {
                 GRAVITY_RELEASED[vy_band(self.vy)]
             };
+            if self.on_ground || (self.spring_rise == 1 && self.vy < 0.0) {
+                self.spring_rise = 0;
+            } else if self.spring_rise == 2 {
+                self.spring_rise = 1;
+            }
             if self.low_gravity && !self.on_ground {
                 self.vy = (self.vy + 0.2 * g).max(0.5 * FALL_CAP);
             } else {
@@ -2663,7 +2678,19 @@ impl Player {
         // the game moves both axes before its terrain check, so the wall probes sit at the
         // moved height: rising past a wall's top corner frees the feet a frame earlier
         // [obs: Ryujinx trace, jumping from against a 1-high wall; §1.2 integrate → collide]
-        let wall_base = self.y + self.vy;
+        let mut wall_base = self.y + self.vy;
+        // ... after the head has been stopped by a block: the walls are probed under it [obs:
+        // Ryujinx trace W_3049200: a jump's head into a brick row 0.7 px past the brick's left
+        // edge goes on sideways, the wall probe 2 px into the row at the unstopped height]
+        if self.vy > 0.0 {
+            let hy = wall_base + s.head_y;
+            if [-s.head_x, s.head_x]
+                .iter()
+                .any(|&hx| level.cell_at(self.x + hx, hy).is_solid())
+            {
+                wall_base = wall_base.min((hy / TILE).floor() * TILE - s.head_y);
+            }
+        }
         for dir in [-1.0f32, 1.0] {
             let wx = self.x + dir * s.wall_x;
             let prev_wx = wx - self.vx * cos;

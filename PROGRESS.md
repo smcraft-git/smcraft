@@ -472,8 +472,8 @@ Nextendo; `docs/nextendo-network-play.md`, spec `research/specs/network-play.md`
   out to belong to the parts' 0xC0000 bits, not stacks) · ⬜ the editor's height limit (play
   takes 128 members at most), pulling a member off a column
 - 🔄 Physics: re-recording every trace (2026-10-24; the old 428 / 454 was not a true count — the
-  old items / form traces were all small Mario). Re-recorded, current engine: **503 / 503 exact**
-  over 58 courses (2026-10-24 physics7: the shell courses now compare the shell too, which showed
+  old items / form traces were all small Mario). Re-recorded, current engine: **515 / 516 exact**
+  over 64 courses + 3 whole courses (2026-10-24 physics7: the shell courses now compare the shell too, which showed
   3 carried-shell throws off; and object traces: the player plus every simulated actor matched to
   a recorded game object, found by scans while the game is paused in the trace hook): M1/M3/MW/WU/3W flat 34 each, M1/M3/MW/WU/3W items 34 each, M1/M3/MW/WU/3W
   slope 4 each, M1/M3/MW/WU/3W wall 4 each, M1/M3/MW/WU/3W water 2 each, M3/MW/WU/3W form 16 each
@@ -517,12 +517,28 @@ Nextendo; `docs/nextendo-network-play.md`, spec `research/specs/network-play.md`
   step, no landing) and the player grows a frame after that; hit in all five styles (3D World's Kuribo3W walks
   at 0.3 and a knocked-off one is gone after 24 frames), shellbrk (the shell into a Brick Block)
   M1 / M3 / MW / WU, shellq M1 / M3 / MW / WU, blocks M1 4 + M3 3, bigblk M1 3 (Super Mario
-  breaking the brick). 3D World
+  breaking the brick); objects M1: spring (a Trampoline's top 13.5 up, pressed 1 px a frame to 4
+  from the first ridden frame, held, the launch 4 frames later after the rider's update: vy 6.0
+  held or not, vx half the landing speed, the rider creeping at 0.2 meanwhile; the rise after it
+  takes the released gravities up to the first falling frame), note (landing pushes the block
+  down from the next frame, the rider goes with it and is launched at 5.2 the frame it comes
+  back up, passing through its own cell), donut (per-block 48-frame timers with a 4-frame ridden
+  counter, both feet; the drop carries the rider 0.1875 that frame, a higher support wins, the
+  rider shows the donut's top below a floor for a frame), lift (an off-track lift paces ±48 at
+  min(0.5, d/16 + 0.125), its top 7.95 over its centre; lifts update after the player: feet that
+  come over it inside its box are pushed up and carried that frame, a walk-off gets its last
+  move a frame late plus a carried 0.5 shrinking by max(10 %, 0.01)), pswitch (stood on, 16 px,
+  pressed on the 3rd frame, 4.8 px after), bobomb, note_head; enemies are met where they stood
+  before this frame's move; walls are probed under a head stopped by a block. **Whole courses**
+  (from the course's first frame, the engine running the game's two pre-script updates): two
+  SMB1 courses exact start to goal (W_3064188, W_3046973: player + Goombas; the pole touch is
+  taken in the next update after a normal move, the enemies stop, the pole's x from the frame
+  after, 12 frames of hold, the slide at −1.9, 93 frames in all, then x + 6 facing right);
+  W_3049200 (cloud blocks, Dry Bones, Cheep Cheeps, Koopas) exact to frame 95. 3D World
   slide-end stoop
   3 frames confirmed. 3D World recording works with a local Ryujinx fix (a zero-sized guest
   texture with 2 levels made Metal abort under MoltenVK). ⬜ still to record: the Cat dive's real
-  trigger, shells hitting blocks, more styles of the hit course, blocks hit from below, other
-  objects; whole courses start to goal
+  trigger, the object courses in the other styles, W_3049200 past frame 95, more whole courses
 - 🔄 Pixels against the game (smm2recomp reference frames of `mmk ref-courses`, all 90, update
   900; MAE / % pixels off by > 24; `research/tools/pixel-ref/pixref.py`, 2026-10-24):
 

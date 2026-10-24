@@ -178,7 +178,7 @@ pub(super) struct Ctx {
     yoshi_fire_cd: i32,
     yoshi_prev_run: bool,
     carry: f32,
-    donut_ride: Option<((i32, i32), i32)>,
+    donut_timers: Vec<((i32, i32), i32, i32)>,
     pu: powerups::PuWorld,
     /// Keys held: each player has their own (§7.6); a key door or box needs the entering
     /// player's.
@@ -344,7 +344,7 @@ impl World {
         swap(&mut self.yoshi_fire_cd, &mut c.yoshi_fire_cd);
         swap(&mut self.yoshi_prev_run, &mut c.yoshi_prev_run);
         swap(&mut self.carry, &mut c.carry);
-        swap(&mut self.donut_ride, &mut c.donut_ride);
+        swap(&mut self.donut_timers, &mut c.donut_timers);
         swap(&mut self.pu, &mut c.pu);
         swap(&mut self.keys, &mut c.keys);
         self.clear.swap_action(&mut c.action);
@@ -712,7 +712,11 @@ impl World {
         if self.clear.violated && !was {
             self.events.push(Event::ConditionLost);
         }
-        self.check_goal();
+        // (co-op extra players: touched and grabbed at once)
+        self.check_goal(false);
+        if self.goal_touch {
+            self.check_goal(true);
+        }
         self.autoscroll_push();
     }
 

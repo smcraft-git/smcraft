@@ -309,7 +309,8 @@ pub struct World {
     p_bricks: Vec<(i32, i32)>,
     p_coins: Vec<(i32, i32)>,
     /// Donut under the player and how long it has been ridden.
-    donut_ride: Option<((i32, i32), i32)>,
+    /// Ridden Donut Blocks: (tile, fall timer, ridden counter).
+    donut_timers: Vec<((i32, i32), i32, i32)>,
     /// Fallen donuts waiting to come back: tile, frames left.
     donut_respawn: Vec<((i32, i32), i32)>,
     /// Conveyor carry applied to the player (px/frame).
@@ -351,6 +352,21 @@ pub struct World {
     /// Items taken by their own update, collected (the player's form change) after a frame:
     /// (kind, x, y, SMM1 subtype, frames left).
     pending_collect: Vec<(Kind, f32, f32, u8, u8)>,
+    /// The goal pole was touched at the end of last frame (grabbed in this one), and frames on
+    /// the pole since the grab.
+    pub(crate) goal_touch: bool,
+    goal_pole_t: i32,
+    /// The Trampoline being ridden and the speed the player landed with.
+    spring_ride: Option<(u32, f32)>,
+    /// The Note Block the player landed on (tile), until its launch; then the block launched
+    /// from, until the player is above its cell.
+    note_rider: Option<(i32, i32)>,
+    note_launch: Option<(i32, i32)>,
+    /// Off a moving platform: its last move still to give, the carried speed, and the share of
+    /// it the speed gets on landing (catch_on_platforms).
+    plat_late: f32,
+    plat_inertia: f32,
+    plat_land_bonus: f32,
     /// Key-door pairs unlocked: (area, warp id >> 1).
     unlocked_doors: std::collections::BTreeSet<(usize, u8)>,
     /// Warp-box pairs unlocked with a key, and pairs used up (single player: a box vanishes
@@ -642,7 +658,7 @@ impl World {
             p_timer: 0,
             p_bricks: Vec::new(),
             p_coins: Vec::new(),
-            donut_ride: None,
+            donut_timers: Vec::new(),
             donut_respawn: Vec::new(),
             carry: 0.0,
             autoscroll_pos: 0.0,
@@ -665,6 +681,14 @@ impl World {
             run_held: false,
             throw_wait: None,
             pending_collect: Vec::new(),
+            spring_ride: None,
+            goal_touch: false,
+            goal_pole_t: 0,
+            note_rider: None,
+            note_launch: None,
+            plat_late: 0.0,
+            plat_inertia: 0.0,
+            plat_land_bonus: 0.0,
             unlocked_doors: Default::default(),
             unlocked_boxes: Default::default(),
             gone_boxes: Default::default(),
@@ -726,7 +750,7 @@ impl World {
         self.v3 = v3::V3World::default();
         self.p_bricks.clear();
         self.p_coins.clear();
-        self.donut_ride = None;
+        self.donut_timers.clear();
         self.donut_respawn.clear();
         self.carry = 0.0;
         let (sx, sy) = self.level.start;
@@ -909,7 +933,7 @@ impl World {
         }
         self.mark_taken_big_coins();
         self.apply_on_off();
-        self.donut_ride = None;
+        self.donut_timers.clear();
         self.donut_respawn.clear();
         for s in &mut self.spawns {
             s.alive = false;
@@ -1896,7 +1920,30 @@ impl World {
             self.step_platforms(jump_held, input.dir_x());
         }
         self.conveyor_carry();
+        // a Note Block's rider moves on its (grid) top; the block's drop is put back after the
+        // blocks' update (note_ride)
+        if let Some((_, ty)) = self.note_rider {
+            self.player.y = (ty + 1) as f32 * TILE;
+        }
+        // launched from a Note Block still below its (grid) top: the block is lower than its
+        // cell, so the cell doesn't push the player out sideways
+        let note_hole = self
+            .note_launch
+            .filter(|&(_, ty)| self.player.y < (ty + 1) as f32 * TILE && self.player.vy > 0.0);
+        let note_cell = note_hole.map(|(tx, ty)| self.level.cell(tx, ty));
+        if let Some((tx, ty)) = note_hole {
+            self.level.set(tx, ty, Cell::Empty);
+        } else {
+            self.note_launch = None;
+        }
+        self.player.vx += std::mem::take(&mut self.plat_land_bonus);
         let prev_x = self.player.x;
+        let ride_before = self.player.ride;
+        let donut_ride = self.player.ride.filter(|&id| {
+            self.actors
+                .iter()
+                .any(|a| a.id == id && a.kind == Kind::Donut)
+        });
         if self.player.clown.is_some() {
             self.fly_clown_car(input);
         } else if self.player.car.is_some() {
@@ -1905,7 +1952,35 @@ impl World {
             self.pu_sense();
             self.player.step(input, &self.level);
         }
+        if let (Some((tx, ty)), Some(c)) = (note_hole, note_cell) {
+            self.level.set(tx, ty, c);
+        }
         self.v3_dash(prev_x);
+        // a falling Donut's rider is carried after its own update: its feet show the donut's
+        // top even below a floor (put back on the floor next frame) [obs: Ryujinx trace
+        // M1_donut, y 15.6875 then 16]
+        if let Some(top) = donut_ride.and_then(|id| {
+            self.actors
+                .iter()
+                .find(|a| a.id == id && a.kind == Kind::Donut)
+                .and_then(|a| a.solid_box())
+                .map(|b| b.3)
+        }) && self.player.on_ground
+        {
+            self.player.y = top;
+            self.player.ride = donut_ride;
+        }
+        self.catch_on_platforms(ride_before);
+        if self.goal_touch && self.others.is_empty() {
+            // the pole grab: nothing else moves from this frame (enemies stop where they are)
+            self.check_goal(true);
+            if self.goal_phase != GoalPhase::None {
+                self.update_camera();
+                return;
+            }
+        }
+        self.spring_rider(prev_x);
+        self.note_landing(was_ground);
         let shoe_safe = self.player.shoe.is_some() && self.player.on_ground;
         if self.player.spiked && !shoe_safe && self.player.hurt() {
             self.events.push(if self.player.alive() {
@@ -2089,6 +2164,7 @@ impl World {
         // blocks, actors, effects (a block's item appears after the actors have moved: it
         // doesn't move on its first frame [obs: Ryujinx traces M1_blocks blk_mush, M1_shellq])
         let releases = self.blocks.step();
+        self.note_ride();
         let px = self.player.x;
         let py = self.player.y;
         let mut born = Vec::new();
@@ -2294,7 +2370,11 @@ impl World {
             }
         }
 
-        self.check_goal();
+        self.check_goal(false);
+        if self.goal_touch && !self.others.is_empty() {
+            // (co-op: touched and taken at once)
+            self.check_goal(true);
+        }
         self.update_camera();
         self.autoscroll_push();
     }
@@ -3132,7 +3212,18 @@ impl World {
                 i += 1;
                 continue;
             }
-            let ab = Self::player_contact_box(self.style, a);
+            // enemies are met where they stood before this frame's move (they update after the
+            // player in the game) [obs: Ryujinx trace W_3064188: a jump past a walking Goomba,
+            // 0.46 px into its moved box, no touch; M1_koopa: a stomped enemy doesn't move]
+            let ab = {
+                let b = Self::player_contact_box(self.style, a);
+                let (dx, dy) = if a.kind.is_enemy() && a.mode == Mode::Normal {
+                    (a.pre.0 - a.x, a.pre.1 - a.y)
+                } else {
+                    (0.0, 0.0)
+                };
+                (b.0 + dx, b.1 + dy, b.2 + dx, b.3 + dy)
+            };
             if let Kind::BigCoin { value } = a.kind {
                 if overlap(contact, ab) {
                     let (ax, ay) = (a.x, a.y);
@@ -3216,14 +3307,9 @@ impl World {
                 continue;
             }
             if a.kind == Kind::PSwitch {
-                // pressed by landing on it from above
-                let p = &self.player;
-                if a.phase == 0 && p.vy <= 0.0 && overlap(hurt, ab) && p.y >= a.y + 8.0 {
-                    let id = a.id;
-                    if let Some(sw) = self.actors.iter_mut().find(|x| x.id == id) {
-                        sw.phase = 1;
-                        sw.timer = 34;
-                    }
+                // pressed by standing on it (the actor's step; `chain` on the press frame)
+                if a.chain == 1 {
+                    self.actors[i].chain = 2;
                     self.press_p_switch();
                 }
                 i += 1;
@@ -3919,6 +4005,11 @@ impl World {
             if s.kind == Kind::RockyWrench {
                 a.home_y = s.y - 8.0;
             }
+            if let Kind::Lift { falling: false, .. } = s.kind {
+                // the pacing lift's centre; it starts left unless (flags & 0x18) = 0x10
+                // (11-lift.md) [inf: the flag isn't kept on the spawn; left]
+                a.home_x = s.x;
+            }
             if s.kind == Kind::Magikoopa {
                 a.timer = 30;
             }
@@ -3951,6 +4042,9 @@ impl World {
             } else {
                 1
             };
+            if let Kind::Lift { falling: false, .. } = s.kind {
+                a.dir = -1;
+            }
             // a walker placed on the ground starts in its walk (the Basic enter picks Walk on the
             // ground flag, 0-goomba.md), moving on its first frame [obs: Ryujinx trace M1_hit]
             if a.kind.is_walker() && self.level.cell_at(a.x, a.y - 1.0).is_solid() {
@@ -4941,6 +5035,168 @@ impl World {
         (x0 + inset, y0 + inset, x1 - inset, y1 - inset)
     }
 
+    /// Moving one-way platforms (lifts) update after the player in the game: a player landing
+    /// on one is carried by its move that frame, and feet that came over it inside its box while
+    /// falling are pushed up onto it [obs: Ryujinx trace M1_lift: falling beside a lift, the
+    /// feet 1.2 px under its top when they come over its end: on top, carried −0.5, that frame].
+    fn catch_on_platforms(&mut self, ride_before: Option<u32>) {
+        // walking off a moving platform [obs: Ryujinx trace M1_lift, off a lift going right at
+        // 0.5]: its move of the take-off frame reaches the player a frame late, and a carried
+        // speed (+0x318: 0.5 × (platform speed + last frame's), 0.5 here) is added to x every
+        // frame in the air, shrinking by max(10 %, 0.01); on landing 0.15 of what is left goes
+        // to the speed (the next frame) and it ends
+        if self.plat_late != 0.0 {
+            self.player.x += self.plat_late;
+            self.plat_late = 0.0;
+        }
+        if self.plat_inertia != 0.0 {
+            self.player.x += self.plat_inertia;
+            let i = self.plat_inertia;
+            let d = (i.abs() * 0.1).max(0.01).min(i.abs());
+            self.plat_inertia -= d * i.signum();
+            if self.player.on_ground {
+                self.plat_land_bonus = self.plat_inertia * 0.15;
+                self.plat_inertia = 0.0;
+            }
+        }
+        if let Some(b) = ride_before
+            .filter(|&id| self.player.ride != Some(id) && !self.player.on_ground)
+            .and_then(|id| self.level.solids.iter().find(|s| s.owner == id))
+            && b.top_only
+            && b.dx != 0.0
+            && self.player.vy <= 0.0
+        {
+            let dx = b.dx;
+            self.player.x -= dx;
+            self.plat_late = dx;
+            self.plat_inertia = dx;
+        }
+        let p = &self.player;
+        if !p.alive() || p.vy > 0.0 {
+            return;
+        }
+        if p.on_ground {
+            if let Some(id) = p.ride.filter(|&id| ride_before != Some(id))
+                && let Some(s) = self.level.solids.iter().find(|s| s.owner == id)
+            {
+                self.player.x += s.dx;
+            }
+            return;
+        }
+        let s = self.player.sensors();
+        let (x, y) = (self.player.x, self.player.y);
+        let caught = self.level.solids.iter().find(|b| {
+            b.top_only
+                && b.dx != 0.0
+                && x + s.foot_x > b.x0
+                && x - s.foot_x < b.x1
+                && y >= b.y0
+                && y <= b.top_at(x)
+        });
+        if let Some(b) = caught {
+            let (top, dx, id) = (b.top_at(x), b.dx, b.owner);
+            // (a touch-down: the next frame still runs the air routine)
+            self.player.y = top;
+            self.player.x += dx;
+            self.player.vy = 0.0;
+            self.player.on_ground = true;
+            self.player.landed = true;
+            self.player.ride = Some(id);
+        }
+    }
+
+    /// Landing on a Note Block pushes it down (BoundDown: −4.3, 0.64; 23-note-block.md) from the
+    /// next frame [obs: Ryujinx traces M1_note note_hop / note_hold].
+    fn note_landing(&mut self, was_ground: bool) {
+        if was_ground || !self.player.on_ground || self.player.ride.is_some() {
+            return;
+        }
+        let tx = (self.player.x / TILE).floor() as i32;
+        let ty = ((self.player.y - 1.0) / TILE).floor() as i32;
+        if self
+            .blocks
+            .get(tx, ty)
+            .is_some_and(|b| b.kind == BlockKind::Note)
+            && self.blocks.hit(tx, ty, false, HitPower::Bump) == HitResult::Bumped
+        {
+            self.note_rider = Some((tx, ty));
+        }
+    }
+
+    /// The Note Block's rider goes down with it, and is launched at vy 5.2 on the first frame it
+    /// comes back up (its speed kept; the rise takes the released gravities, as after a
+    /// Trampoline) [obs: Ryujinx traces M1_note: feet at 32 − 3.66, −6.68 … −12.36, then the
+    /// launch at −12.18; Jump held or not].
+    fn note_ride(&mut self) {
+        let Some((tx, ty)) = self.note_rider else {
+            return;
+        };
+        let bump = self.blocks.get(tx, ty).and_then(|b| b.bump);
+        let standing = self.player.on_ground
+            && (self.player.x / TILE).floor() as i32 == tx
+            && self.player.alive();
+        let Some(bump) = bump.filter(|b| b.down && !b.fresh) else {
+            if bump.is_none() || !standing {
+                self.note_rider = None;
+            }
+            return;
+        };
+        if !standing {
+            self.note_rider = None;
+            return;
+        }
+        self.player.y = (ty + 1) as f32 * TILE + bump.d;
+        if bump.v > 0.0 {
+            self.player.vy = 5.2;
+            self.player.spring_rise = 2;
+            self.player.on_ground = false;
+            self.note_rider = None;
+            self.note_launch = Some((tx, ty));
+            self.events.push(Event::Jump);
+        }
+    }
+
+    /// The Trampoline's rider [obs: Ryujinx traces M1_spring spring_hop / spring_hold]: on the
+    /// landing frame its speed is kept and replaced by 0.2 (it creeps on at 0.2 px/frame while the
+    /// spring presses down 4 px and holds); the launch comes after the rider's own update: vy 6.0
+    /// with Jump held or not (the held-jump gravity makes the high bounce), vx half the landing
+    /// speed (10-spring.md: player +0x26F0 × 0.5).
+    fn spring_rider(&mut self, prev_x: f32) {
+        let on = self.player.ride.and_then(|id| {
+            self.actors
+                .iter()
+                .find(|a| a.id == id && a.kind == Kind::Spring)
+                .map(|a| (a.id, a.chain == 1))
+        });
+        let Some((id, launch)) = on else {
+            self.spring_ride = None;
+            return;
+        };
+        let stored = match self.spring_ride {
+            Some((rid, v)) if rid == id => {
+                let creep = 0.2 * v.signum() * (v != 0.0) as i32 as f32;
+                self.player.x = prev_x + creep;
+                self.player.vx = creep;
+                v
+            }
+            _ => {
+                let v = self.player.vx;
+                self.spring_ride = Some((id, v));
+                self.player.vx = 0.2 * v.signum() * (v != 0.0) as i32 as f32;
+                v
+            }
+        };
+        if launch {
+            self.player.vy = 6.0;
+            self.player.spring_rise = 2;
+            self.player.vx = stored * 0.5;
+            self.player.on_ground = false;
+            self.player.ride = None;
+            self.spring_ride = None;
+            self.events.push(Event::Jump);
+        }
+    }
+
     /// Moving solids step before the player; riders are carried by their movement. A spring
     /// launches its rider: 6.0, or 4.43 with the jump button held (the held-jump gravity then
     /// gives the high bounce) (10-spring.md).
@@ -5101,21 +5357,40 @@ impl World {
                 });
             }
         }
+        // a falling Donut's rider still standing on another block's top stays there (the
+        // higher support wins) [obs: Ryujinx trace M1_donut, back on the next donut a frame
+        // after the first dropped]
+        let ride = ride.filter(|&id| {
+            let on_donut = self
+                .actors
+                .iter()
+                .any(|a| a.id == id && a.kind == Kind::Donut);
+            let p = &self.player;
+            let top = ((p.y / TILE).floor() + 1.0) * TILE;
+            let held = [-4.9f32, 4.9].iter().any(|&fx| {
+                let c = self.level.cell_at(p.x + fx, p.y);
+                (c.is_solid() || c == Cell::SemiTop) && top - p.y <= 4.0
+            });
+            if on_donut && held {
+                self.player.y = top;
+            }
+            !(on_donut && held)
+        });
+        if ride.is_none()
+            && self.player.ride.is_some_and(|id| {
+                self.actors
+                    .iter()
+                    .any(|a| a.id == id && a.kind == Kind::Donut)
+            })
+        {
+            self.player.ride = None;
+        }
         if let Some(id) = ride {
             if let Some(s) = self.level.solids.iter().find(|s| s.owner == id) {
                 self.player.x += s.dx;
                 self.player.y = s.top_at(self.player.x);
             }
-            let launch = self
-                .actors
-                .iter()
-                .any(|a| a.id == id && a.kind == Kind::Spring && a.chain == 1);
-            if launch {
-                self.player.vy = if jump_held { 4.43 } else { 6.0 };
-                self.player.on_ground = false;
-                self.player.ride = None;
-                self.events.push(Event::Jump);
-            }
+            // (a spring's launch: spring_rider, after the player's update)
             // Mushroom Trampoline: landing launches at once — 6.0, or 4.43 with jump held; jump
             // pressed within 6 frames of a plain bounce re-launches at 4.43 − 0.1·frames
             let on = self.on_off;
@@ -5376,40 +5651,70 @@ impl World {
     /// Donut blocks drop after 48 frames of being stood on and come back 120 frames after
     /// falling out of the area (21-donut-block.md).
     fn step_donuts(&mut self) {
+        // every Donut Block under a foot is ridden: its counter goes to 4 (it decays a frame at
+        // a time), and while it is above 0 the block's 48-frame timer runs; at 0 the block falls
+        // (21-donut-block.md) [obs: Ryujinx trace M1_donut donut_stand: two donuts under the
+        // feet, each dropping 47 frames after the foot came over it, the rider carried down
+        // 0.1875 on that frame]
         let p = &self.player;
-        let under = if p.on_ground {
-            [-4.9f32, 4.9].iter().find_map(|&fx| {
-                let (tx, ty) = (
+        let mut under: Vec<(i32, i32)> = Vec::new();
+        if p.on_ground {
+            for fx in [-4.9f32, 4.9] {
+                let t = (
                     ((p.x + fx) / TILE).floor() as i32,
                     ((p.y - 1.0) / TILE).floor() as i32,
                 );
-                self.blocks
-                    .get(tx, ty)
-                    .is_some_and(|b| b.kind == BlockKind::Donut)
-                    .then_some((tx, ty))
-            })
-        } else {
-            None
-        };
-        self.donut_ride = match (under, self.donut_ride) {
-            (Some(t), Some((r, n))) if t == r => Some((t, n + 1)),
-            (Some(t), _) => {
-                self.events.push(Event::DonutShake);
-                Some((t, 1))
+                if !under.contains(&t)
+                    && self
+                        .blocks
+                        .get(t.0, t.1)
+                        .is_some_and(|b| b.kind == BlockKind::Donut)
+                {
+                    under.push(t);
+                }
             }
-            _ => None,
-        };
-        if let Some(((x, y), n)) = self.donut_ride
-            && n >= 48
-        {
+        }
+        for t in under {
+            if let Some(e) = self.donut_timers.iter_mut().find(|e| e.0 == t) {
+                e.2 = 4;
+            } else {
+                self.donut_timers.push((t, 48, 4));
+                self.events.push(Event::DonutShake);
+            }
+        }
+        let mut fall = Vec::new();
+        self.donut_timers.retain_mut(|e| {
+            if e.2 <= 0 {
+                return false;
+            }
+            e.1 -= 1;
+            e.2 -= 1;
+            if e.1 <= 0 {
+                fall.push(e.0);
+                return false;
+            }
+            true
+        });
+        for (x, y) in fall {
             self.blocks.map.remove(&(x, y));
             self.level.set(x, y, Cell::Empty);
             let (bx, by) = blocks::origin(x, y);
-            let mut a = Actor::new(Kind::Donut, bx, by);
+            // its first fall step now, carrying a rider standing on it
+            let mut a = Actor::new(Kind::Donut, bx, by - 0.1875);
+            a.vy = -0.1875;
             a.home_x = x as f32;
             a.home_y = y as f32;
+            let p = &self.player;
+            let rides = p.on_ground
+                && (p.y - (by + TILE)).abs() < 0.01
+                && p.x + 4.9 >= bx - 8.0
+                && p.x - 4.9 < bx + 8.0;
+            let id = self.next_id;
             self.add_actor(a);
-            self.donut_ride = None;
+            if rides {
+                self.player.y -= 0.1875;
+                self.player.ride = Some(id);
+            }
             self.events.push(Event::DonutFall);
         }
         if self.coop.extra {
@@ -5559,7 +5864,9 @@ impl World {
 
     // ---------------------------------------------------------------- goal
 
-    fn check_goal(&mut self) {
+    /// `grab` false: the end-of-frame touch test; true: take last frame's touch (after the
+    /// player's move; the world then stops for the goal).
+    fn check_goal(&mut self, grab: bool) {
         let Some((x0, y0)) = self.level.goal else {
             return;
         };
@@ -5570,10 +5877,18 @@ impl World {
         // pole touch box x ∈ [X0−4, X0+5], y ∈ [Y0+14, Y0+166]; its collider (0x710244d810)
         // accepts collider kinds {0, 1, 2, 24}, so both player body boxes (A, kind 0; B, kind 1;
         // 0x71009b3990) touch it and the union is box B [obs]
+        // the touch is taken in the player's next update: it still moves normally that frame,
+        // then holds the pole there (state 122) [obs: Ryujinx traces W_3064188 / W_3046973,
+        // two SMB1 courses run to the goal: box B 1.46 / 0.34 px into the box at frame N, the
+        // pole state from N+1 at that frame's position]
         let hb = p.contact_box();
-        if !overlap(hb, (x0 - 4.0, y0 + 14.0, x0 + 5.0, y0 + 166.0)) {
+        if !grab {
+            if overlap(hb, (x0 - 4.0, y0 + 14.0, x0 + 5.0, y0 + 166.0)) {
+                self.goal_touch = true;
+            }
             return;
         }
+        self.goal_touch = false;
         // a clear condition not met: the goal lets the player pass
         let held_shell = p.held.is_some_and(|id| {
             self.actors
@@ -5613,16 +5928,16 @@ impl World {
         };
         let award = [ONE_UP, 4000, 800, 200, 100][index];
         self.player.control = Control::Demo;
-        self.player.x = x0 - 6.0;
         self.player.y = y;
         self.player.vx = 0.0;
         self.player.vy = 0.0;
-        self.player.facing = 1;
+        self.player.facing = -1;
         self.player.pose = Pose::Pole;
+        self.goal_pole_t = 0;
         self.player.star = 0;
         self.add_score(award, x0 + 16.0, y);
         if self.others.is_empty() {
-            self.goal_phase = GoalPhase::Hold { t: 10 };
+            self.goal_phase = GoalPhase::Hold { t: 12 };
         } else {
             // co-op: on the pole while the goal waits for the others (world/coop.rs)
             self.coop_goal_touch();
@@ -5635,6 +5950,15 @@ impl World {
             return;
         };
         let target_x = x0 + 112.0;
+        // on the pole (state 122): at the pole's x from the frame after the grab, 12 frames of
+        // hold, the slide at −1.9 to the base block, and 93 frames in all; then to its far side
+        // (x + 6, facing right) [obs: Ryujinx traces W_3064188 / W_3046973]
+        if matches!(self.goal_phase, GoalPhase::Hold { .. } | GoalPhase::Slide) {
+            self.goal_pole_t += 1;
+            if self.goal_pole_t == 1 {
+                self.player.x = x0;
+            }
+        }
         match self.goal_phase {
             GoalPhase::None | GoalPhase::Done => {}
             GoalPhase::Hold { t } => {
@@ -5646,19 +5970,27 @@ impl World {
             }
             GoalPhase::Slide => {
                 // player slides at −1.9 to the base block top; the flag drops 1.833 to Y0+16
+                // (vy −1.9 shows while it slides, and on the slide's first frame) [obs]
+                let first = self.goal_pole_t == 13;
+                self.player.vy = if self.player.y > y0 || first {
+                    -1.9
+                } else {
+                    0.0
+                };
                 self.player.y = (self.player.y - 1.9).max(y0);
                 self.goal_flag = (self.goal_flag - 1.833).max(16.0);
-                if self.player.y <= y0 && self.goal_flag <= 16.0 {
+                if self.goal_pole_t >= 92 {
                     self.player.on_ground = true;
-                    self.goal_phase = GoalPhase::Land { t: 10 };
+                    self.goal_phase = GoalPhase::Land { t: 30 };
                     self.goal_frames = 0;
                 }
             }
             GoalPhase::Land { t } => {
-                // M1 GoalLandTurn: flip to the far side of the pole, then walk
-                if t == 10 {
+                // M1 GoalLandTurn: to the far side of the pole, facing on [obs: 25+ frames
+                // there; the length is a guess], then walk
+                if t == 30 {
                     self.player.x = x0 + 6.0;
-                    self.player.facing = -1;
+                    self.player.facing = 1;
                 }
                 self.goal_phase = if t <= 1 {
                     self.player.facing = 1;
@@ -6026,9 +6358,8 @@ impl World {
                 Some(model) => Self::model_sprite(model, "wait.0", px, py, TILE, TILE, false, 12),
                 None => tile(px, py, switch_atlas(b.kind, self.on_off), 12),
             };
-            if let Some(((dx, dy), n)) = self.donut_ride
-                && (dx, dy) == (bx, by)
-            {
+            if let Some(&(_, t, _)) = self.donut_timers.iter().find(|e| e.0 == (bx, by)) {
+                let n = 48 - t;
                 s.x += [1.0, 2.0, 1.0, 0.0, -1.0, -2.0, -1.0, 0.0][(n as usize) % 8];
             }
             out.push(s);
@@ -8648,7 +8979,7 @@ mod tests {
         let y0 = w.actors[0].y;
         run(&mut w, 0, 20);
         assert!(w.actors[0].y < y0);
-        assert_eq!(w.player.y, w.actors[0].y + 16.0);
+        assert_eq!(w.player.y, w.actors[0].y + 15.95);
     }
 
     #[test]

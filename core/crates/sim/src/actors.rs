@@ -555,6 +555,7 @@ impl Kind {
                 | Kind::Pow
                 | Kind::LavaLift { .. }
                 | Kind::MovingBlock { .. }
+                | Kind::PSwitch
         )
     }
     pub fn is_item(self) -> bool {
@@ -847,13 +848,20 @@ impl Actor {
     /// The solid surface this actor offers (for platforms): (x0, y0, x1, y1, top_only).
     pub fn solid_box(&self) -> Option<(f32, f32, f32, f32, bool)> {
         match self.kind {
+            // the P Switch is stood on (16 px; 4.8 once pressed) [obs: Ryujinx trace M1_pswitch]
+            Kind::PSwitch if self.alive() => {
+                let h = if self.phase > 0 { 4.8 } else { 16.0 };
+                Some((self.x - 8.0, self.y, self.x + 8.0, self.y + h, true))
+            }
             Kind::Thwomp { .. } if self.mode == Mode::Normal => {
                 let hw = if self.big { 32.0 } else { 16.0 };
                 Some((self.x - hw, self.y, self.x + hw, self.y + 2.0 * hw, false))
             }
             Kind::Lift { width, .. } => {
+                // the top 7.95 px over its centre (thickness parameter DAT_7101c8ab04, 11-lift.md)
+                // [obs: Ryujinx trace M1_lift, the rider at 79.95 on a lift centred at 72]
                 let hw = width as f32 * 8.0;
-                Some((self.x - hw, self.y + 8.0, self.x + hw, self.y + 16.0, true))
+                Some((self.x - hw, self.y + 8.0, self.x + hw, self.y + 15.95, true))
             }
             Kind::Trampoline { width, .. } => {
                 let hw = width as f32 * 8.0;
@@ -918,7 +926,8 @@ impl Actor {
                 true,
             )),
             Kind::Spring if self.mode == Mode::Normal => {
-                let top = self.y + 12.5 - self.aux_compression();
+                // top 13.5 px up [obs: Ryujinx trace M1_spring, landing at y + 13.5]
+                let top = self.y + 13.5 - self.aux_compression();
                 Some((self.x - 8.0, top - 4.0, self.x + 8.0, top, true))
             }
             k if k.is_v3() => self.v3_solid_box(),
@@ -2420,6 +2429,25 @@ impl Actor {
                     self.phase = 1;
                     self.vy = (self.vy - 0.0625).max(-4.0);
                     self.y += self.vy;
+                } else if !falling && self.rail.is_none() && !self.derailed {
+                    // off a track it paces ±48 px about its spawn (actor 8): speed
+                    // min(0.5, d/16 + 0.125) for d the distance to the nearer end, stopping on
+                    // the end and turning there (11-lift.md, Move 0x7100897c20) [obs: Ryujinx
+                    // trace M1_lift, 232 ↔ 328 about 280]
+                    let (lo, hi) = (self.home_x - 48.0, self.home_x + 48.0);
+                    let d = (self.x - lo).min(hi - self.x);
+                    let sp = (d / 16.0 + 0.125).min(0.5);
+                    if self.dir > 0 {
+                        self.x = (self.x + sp).min(hi);
+                        if self.x >= hi {
+                            self.dir = -1;
+                        }
+                    } else {
+                        self.x = (self.x - sp).max(lo);
+                        if self.x <= lo {
+                            self.dir = 1;
+                        }
+                    }
                 }
             }
             Kind::Spring => {
@@ -2427,16 +2455,20 @@ impl Actor {
                 // (10-spring.md); `chain` = 1 on the launch frame (the world launches the rider)
                 self.chain = 0;
                 match self.phase {
+                    // pressed 1 px on the first ridden frame, to 4, then held until the launch
+                    // 4 frames later [obs: Ryujinx trace M1_spring: the rider at top, −1, −2,
+                    // −3, −4 ×4, launched on the 4th]
                     0 => {
                         if self.ridden {
                             self.phase = 1;
+                            self.pause = 1;
                         }
                     }
                     1 => {
                         self.pause += 1;
                         if self.pause >= 4 {
                             self.phase = 2;
-                            self.timer = 5;
+                            self.timer = 4;
                         }
                     }
                     2 => {
@@ -2686,7 +2718,19 @@ impl Actor {
             }
             Kind::Grinder => {}
             Kind::PSwitch => {
-                if self.phase > 0 {
+                // stood on for 3 frames: pressed (`chain` = 1 on that frame; the world flips
+                // the switch) [obs: Ryujinx trace M1_pswitch, the rider down to 4.8 on the 3rd
+                // frame after landing]
+                self.chain = 0;
+                if self.phase == 0 && self.ridden {
+                    self.pause += 1;
+                    if self.pause >= 3 {
+                        self.phase = 1;
+                        self.timer = 34;
+                        self.chain = 1;
+                    }
+                }
+                if self.phase > 0 && self.chain == 0 {
                     // pressed: squash animation, then removed (PushReserve 2 + DelWait 2 + anim)
                     self.timer -= 1;
                     if self.timer <= 0 {
