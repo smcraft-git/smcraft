@@ -456,6 +456,22 @@ fn fogged(c: vec3<f32>, world: vec3<f32>, flags: f32) -> vec3<f32> {
     return r;
 }
 
+// the game's final pass over the scene (`mmk_host::scene3d::Grade`, row 23 y–w): 3D World's
+// tone map 1 − e^(−k·c), then the colour-correction table's saturation about the brightest
+// channel and its brightness, clamped (w = 0: no final pass)
+fn graded(c: vec3<f32>) -> vec3<f32> {
+    let g = light.rows[23];
+    if (g.w <= 0.0) {
+        return c;
+    }
+    var x = c;
+    if (g.y > 0.0) {
+        x = vec3<f32>(1.0) - exp(-g.y * x);
+    }
+    let v = vec3<f32>(max(x.r, max(x.g, x.b)));
+    return clamp((v + (x - v) * g.z) * g.w, vec3<f32>(0.0), vec3<f32>(1.0));
+}
+
 // texture matrix `k` of the sky (rows 30–35: the cloud layer, the horizon layer, the base)
 fn sky_uv(k: i32, uv: vec2<f32>) -> vec2<f32> {
     let a = light.rows[30 + 2 * k];
@@ -545,7 +561,7 @@ fn fs(i: VOut) -> @location(0) vec4<f32> {
     // the uber shader clamps the lit colour to 0 … 2 before its fogs
     rgb = clamp(rgb, vec3<f32>(0.0), vec3<f32>(2.0));
     rgb = fogged(rgb, i.world, i.flags);
-    return vec4<f32>(rgb, c.a);
+    return vec4<f32>(graded(rgb), c.a);
 }
 "#;
 

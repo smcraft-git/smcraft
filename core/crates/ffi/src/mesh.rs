@@ -170,6 +170,87 @@ pub unsafe extern "C" fn mmk_mesh_shape(
     })
 }
 
+/// Every shape of a model as `mmk_mesh_shape` gives it, with the materials' texture matrices
+/// `time` frames into the model file's own texture-matrix animations (`MeshStore::scroll`: the
+/// background scene's drifting clouds, as the portable shell draws them). Writes at most `cap`
+/// shapes to `out` and returns how many it wrote.
+///
+/// # Safety
+/// `assets` must be a live handle and `out` must have room for `cap` shapes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mmk_mesh_shapes_at(
+    assets: *const MmkAssets,
+    mesh: i32,
+    model: usize,
+    time: f32,
+    out: *mut MmkMeshShape,
+    cap: usize,
+) -> usize {
+    guard(0, || {
+        let (Some(a), Some(mut s)) = (unsafe { assets.as_ref() }, store(assets)) else {
+            return 0;
+        };
+        if out.is_null() {
+            return 0;
+        }
+        s.scroll(mesh, model, time);
+        // (first index, index count, material, bone) and the look of each shape
+        let looks: Vec<([u32; 4], ShapeLook)> = {
+            let Some(m) = s.mesh(mesh).and_then(|m| m.file.models.get(model)) else {
+                return 0;
+            };
+            m.shapes
+                .iter()
+                .take(cap)
+                .map(|sh| {
+                    let ids = [
+                        sh.first_index,
+                        sh.index_count,
+                        sh.material as u32,
+                        sh.bone as u32,
+                    ];
+                    (ids, shape_look(s.material(m, sh.material)))
+                })
+                .collect()
+        };
+        let out = unsafe { std::slice::from_raw_parts_mut(out, looks.len()) };
+        for ((ids, look), o) in looks.iter().zip(out.iter_mut()) {
+            let extra = look.extra.is_some() || look.extra2.is_some() || look.extra3.is_some();
+            *o = MmkMeshShape {
+                first_index: ids[0],
+                index_count: ids[1],
+                material: ids[2],
+                bone: ids[3],
+                flags: look.flags,
+                alpha_ref: look.alpha_ref,
+                srt: look.srt,
+                vertex_color_ratio: look.vertex_color_ratio,
+                extra_texture: if extra {
+                    s.extra_texture(&a.cache, mesh, look)
+                } else {
+                    TEXTURE_NONE
+                },
+                emission: look.emission,
+                tint: look.tint,
+                extra2_texture: if extra {
+                    s.extra2_texture(&a.cache, mesh, look)
+                } else {
+                    TEXTURE_NONE
+                },
+                form: look.form.packed(),
+                extra3_texture: if extra {
+                    s.extra3_texture(&a.cache, mesh, look)
+                } else {
+                    TEXTURE_NONE
+                },
+                tev: look.tev.unwrap_or([0.0; mmk_host::mesh::TEV_ROWS * 4]),
+                extra_wraps: look.extra_wraps,
+            };
+        }
+        looks.len()
+    })
+}
+
 /// The mesh's own animation folder plus shared ones (players), see `anim_folders`.
 fn folders_for(mesh: &str) -> Vec<String> {
     anim_folders(mesh)

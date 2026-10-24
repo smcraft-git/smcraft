@@ -526,6 +526,11 @@ size_t mmk_mesh_model_count(const MmkAssets *assets, int32_t mesh);
 bool mmk_mesh_model(const MmkAssets *assets, int32_t mesh, size_t model, MmkMeshModel *out);
 int32_t mmk_mesh_model_index(const MmkAssets *assets, int32_t mesh, const char *name);
 bool mmk_mesh_shape(const MmkAssets *assets, int32_t mesh, size_t model, size_t shape, MmkMeshShape *out);
+// every shape of the model as mmk_mesh_shape gives it, with the materials' texture matrices `time`
+// frames into the model's texture-matrix animations (the background scene's drifting clouds);
+// writes at most cap shapes, returns how many
+size_t mmk_mesh_shapes_at(const MmkAssets *assets, int32_t mesh, size_t model, float time, MmkMeshShape *out,
+                          size_t cap);
 int32_t mmk_mesh_anim(const MmkAssets *assets, int32_t mesh, const char *name);   // -1 = none
 size_t mmk_mesh_anim_count(const MmkAssets *assets, int32_t mesh);
 size_t mmk_mesh_anim_name(const MmkAssets *assets, int32_t mesh, size_t index, char *buf, size_t cap);
@@ -536,7 +541,8 @@ bool mmk_mesh_pose(const MmkAssets *assets, int32_t mesh, size_t model, int32_t 
 // This frame's mesh draws (3D styles; filled by mmk_engine_snapshot), valid until the next snapshot
 size_t mmk_engine_meshes(const MmkEngine *engine, const MmkMeshDraw **out);
 // The 3D styles' scene this frame: cameras (column-major 4x4, world px -> clip, depth 0..1) and
-// light uniforms (39 x float4: eye; 3 directional lights; hemisphere; ambient; 3 fogs; exposure;
+// light uniforms (39 x float4: eye; 3 directional lights; hemisphere; ambient; 3 fogs; exposure and
+// the final pass (tone map, colour-correction saturation and brightness);
 // the sky's 6 constant colours; the sky's 3 texture matrices, 2 rows each; a 4th fog)
 typedef struct {
     float field_view_proj[16];

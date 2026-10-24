@@ -50,7 +50,9 @@ pub mod sprites;
 ///     the course point kind switch as `@point`.
 /// 15: the meshes' animated texture matrices (`SkelAnim::srt`, from the `_fts` / `_fsp`
 ///     shader-parameter animations: NSMBU's and 3D World's scrolling clouds and skies).
-pub const IMPORTER_VERSION: u32 = 15;
+/// 16: each environment's colour correction (`env/<name>.json` `color_correction`, from its
+///     `.baglccr` or the folder's `ef_normal*`: the saturation of the game's final colour table).
+pub const IMPORTER_VERSION: u32 = 16;
 pub mod smm1;
 pub mod smm1_costumes;
 pub mod smm1_ui_sound;

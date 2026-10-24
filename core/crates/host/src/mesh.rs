@@ -1924,13 +1924,27 @@ impl MeshPlanner {
                 );
                 Some((mesh, model, anim))
             });
+            // one final pass over both cameras' draws: the field environment's colour
+            // correction, and 3D World's tone map
+            let mut field_env = env(row.as_ref().map(|r| r.env_model.as_str()));
+            if l.style == "3W" {
+                field_env.grade.tone = crate::scene3d::TONE_3W;
+                field_env.light = Some(crate::scene3d::LIGHT_3W);
+            }
+            let grade = field_env.grade;
+            let mut background_env = crate::scene3d::Env {
+                sky,
+                grade,
+                light: field_env.light,
+                ..env(row.as_ref().map(|r| r.env_dv.as_str()))
+            };
+            if l.style == "3W" && l.theme == 9 {
+                crate::scene3d::forest_fog(&mut background_env);
+            }
             self.theme = Some(ThemeScene {
                 key,
-                field_env: env(row.as_ref().map(|r| r.env_model.as_str())),
-                background_env: crate::scene3d::Env {
-                    sky,
-                    ..env(row.as_ref().map(|r| r.env_dv.as_str()))
-                },
+                field_env,
+                background_env,
                 row,
                 background,
             });

@@ -48,7 +48,26 @@ sway, importer and pack 12, the dev cache already at v12).
   sit elsewhere than the reference's (sky 27, airship 21: bones / indirect texture?), idle
   Mario faces the camera in the game (ours 70° turned, ~5 px high), the castle's lava is a 3D
   surface in the game (ours the 2D strip), a global tone offset (ground ~14). 3D World: the
-  colours / tone (castle, snow, ground 32–43); captures of the track tiles in play and of NSMBU / 3D World wings (the mesh
+  colours / tone (castle, snow, ground 32–43). ✅ Pass 7 (2026-10-25, branch `pixels7`, k = 900;
+  research/specs/render-3d.md "The final pass" / "Environment palette" / "Diffuse light map"):
+  3D World 29.0 → 21.2 (ground 34.1 → 20.7, underground 18.0 → 16.9, castle 32.1 → 22.1, airship
+  26.3 → 28.5, water 38.2 → 26.2, ghost 22.4 → 17.4, snow 43.2 → 18.9, desert 17.4 → 13.0, sky
+  26.0 → 15.1, forest 32.6 → 33.4); 2D styles and NSMBU unchanged. Read from the recomp's draws:
+  the 3D styles' final pass (3D World tone-maps 1 − e^(−√2·c) from a float target; both look each
+  pixel up in the colour-correction table: saturation about the brightest channel, from each
+  env's `.baglccr`; importer / game pack 16) and 3D World's environment palette
+  (`Palette/Palette3W.benvpal`: the lights and fogs the game actually uses, not the `.baglenv`
+  files'; variant 2 in play, `DV_FogPat` 1 leaves the second fogs out, the forest's code-made
+  downward fog); 3D World's lit colour scaled 0.65 [meas] until the diffuse light map is
+  modelled (a second `LM_ConstructMem` cube the materials sample at the normal; where the game
+  fills it is not found). The Swift app's background materials scroll (`mmk_mesh_shapes_at`).
+  Left: the diffuse light-map cube (NSMBU's grey cloud bands are the cube's light on `kumo_*`,
+  3D World's overall light level), NSMBU sky 27 / airship 21 / water 21 (the sky dome is 20 %
+  white over the bands; light shafts), the 3D liquids (castle lava, forest water: 2D strips in
+  ours), 3D World forest's field (bake AO, pebble overlays), castle bloom (lava above 2 in the
+  float target blooms: threshold 10·luma − 20), NSMBU idle Mario (faces the camera, ours 70°;
+  drawn 5.75 px high in every NSMBU theme, 3D World's on the ground), SMB3 forest water (its
+  `top` texture is greyscale: tinted per theme [?]). Captures of the track tiles in play and of NSMBU / 3D World wings (the mesh
   planner maps `M1_Enemy_wingcommon` to `<style>_Enemy_wingcommon`), a look at Water Level mode
   and custom scroll in the recomp (`research/tools/maker-look`: touch taps / drags by script).
 - ✅ **Inferred-behaviour inventory** (2026-10-25, branch `infres`, research specs/inf-inventory.md):
@@ -757,6 +776,10 @@ Nextendo; `docs/nextendo-network-play.md`, spec `research/specs/network-play.md`
   | SMW night | 2.4 / 2.5% | 2.9 / 5.2% | 5.0 / 6.2% | 5.6 / 5.8% | 1.1 / 1.6% | 0.6 / 0.9% | 2.2 / 2.5% | 2.6 / 2.6% | 2.3 / 2.1% | 4.9 / 6.0% | 3.0 |
   | NSMBU | 16.1 / 45% | 9.1 / 13% | 15.9 / 31% | 33.4 / 63% | 22.7 / 53% | 7.8 / 14% | 6.7 / 9% | 13.6 / 43% | 35.0 / 62% | 17.6 / 38% | 17.8 |
   | NSMBU night | 14.4 / 24% | 14.3 / 22% | 19.7 / 36% | 15.8 / 47% | 2.8 / 7% | 2.4 / 4% | 13.5 / 22% | 20.9 / 42% | 13.3 / 21% | 29.0 / 40% | 14.6 |
+
+  2026-10-25 (pass 7, branch `pixels7`): SMB1 1.6 / night 1.2, SMB3 2.7 / 1.7, SMW 2.2 / 2.0,
+  NSMBU 15.0 / 9.2, 3D World 21.2 (ground 20.7, underground 16.9, castle 22.1, airship 28.5, water
+  26.2, ghost 17.4, snow 18.9, desert 13.0, sky 15.1, forest 33.4).
 
   NSMBU colour combiner (branch tev-wu, 2026-10-24; the uber shader's TEV stages read from the
   game's programs, research/specs/render-3d.md): two registers from `tev_color0` / `tev_color1`,

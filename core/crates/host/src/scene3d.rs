@@ -143,7 +143,46 @@ pub struct Env {
     pub fogs: Vec<Fog>,
     /// The sky material (background scenes with a sky).
     pub sky: Option<Sky>,
+    /// The game's last pass over the whole scene (both cameras' draws).
+    pub grade: Grade,
+    /// Scale of the lit colour (row 23 x; [`EXPOSURE`] unless the style sets one).
+    pub light: Option<f32>,
 }
+
+/// The 3D styles' final pass (research/specs/render-3d.md "The final pass") [obs: the recomp's
+/// draws of it]: 3D World draws its scene into a floating-point target and maps each pixel
+/// through 1 − e^(−k·c) (k = √2), NSMBU into an 8-bit one, unchanged; both then look the colour
+/// up in the colour-correction table (`agl::pfx::ColorCorrection`, 8³): per pixel
+/// V + saturation·(c − V) with V = max(r, g, b), times the brightness, clamped to 0 … 1.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Grade {
+    /// The tone map's exposure k (0: no tone map).
+    pub tone: f32,
+    pub saturation: f32,
+    pub brightness: f32,
+}
+
+impl Default for Grade {
+    fn default() -> Self {
+        Grade {
+            tone: 0.0,
+            saturation: 1.0,
+            brightness: 1.0,
+        }
+    }
+}
+
+/// 3D World's light scale: its lit colours come out about this much darker than the light
+/// sum [`Env::uniform`] models (ambient + hemisphere + wrapped directional lights) [meas: pixel
+/// table at k = 900 with the palette's lights, scales 0.5 … 1.0: 3D World mean 22.0 / 21.2 / 21.5 /
+/// 23.0 at 0.5 / 0.65 / 0.7 / 0.8; the game's diffuse light map — a second `LM_ConstructMem`
+/// cube the uber shader samples at the normal — is not modelled yet]. NSMBU measures flat
+/// around 1 (12.19 / 12.10 / 12.16 at 0.9 / 1 / 1.1).
+pub const LIGHT_3W: f32 = 0.65;
+
+/// 3D World's tone-map exposure [obs: the final pass's vertex constant 1.41421 (times a white
+/// texture's alpha); fitting the scene target against the pass's output gives 1.40 … 1.41].
+pub const TONE_3W: f32 = std::f32::consts::SQRT_2;
 
 /// The background model's sky material (`enable_sky`): its six constant colours and the texture
 /// matrices of its three layers.
@@ -284,13 +323,42 @@ pub fn load_env(cache: &Cache, name: &str) -> Option<Env> {
             }
         })
         .collect();
+    // the colour correction (`color_correction`: its saturation and brightness; hue 0 and
+    // gamma 1 in every SMM2 table)
+    let grade = j
+        .get("color_correction")
+        .filter(|c| c.get("enable").and_then(Value::as_bool).unwrap_or(true))
+        .map_or_else(Grade::default, |c| Grade {
+            saturation: num(c, "saturation", 1.0),
+            brightness: num(c, "brightness", 1.0),
+            ..Grade::default()
+        });
     Some(Env {
         dirs,
         hemi,
         ambient,
         fogs,
         sky: None,
+        grade,
+        light: None,
     })
+}
+
+/// 3D World's forest background: the game replaces its second distance fog with a bluish fog
+/// that thickens downwards — 500 px above the camera to 1000 px below, (0, 0.35, 1) at strength
+/// 0.25 — in place of the palette's [obs: v3.0.3 FUN_7100dc3f70, style 4 theme 9; the forest's
+/// environment block in the recomp; its direction tilts by a small animated amount, left out].
+pub fn forest_fog(env: &mut Env) {
+    env.fogs.retain(|f| f.slot != 1);
+    env.fogs.push(Fog {
+        slot: 1,
+        height: false,
+        start: 500.0,
+        end: -1000.0,
+        damp: 1.0,
+        color: [0.0, 0.35, 1.0, 0.25],
+        dir: [0.0, 1.0, 0.0],
+    });
 }
 
 /// Rows of 4 floats in [`Env::uniform`].
@@ -305,7 +373,8 @@ impl Env {
     /// diffuse rgb, pow; backside rgb, –); 10 hemisphere sky rgb, w = 1 if present; 11 ground, pow;
     /// 12 hemisphere direction; 13 ambient; 14–22 three fogs — `Fog::slot` 0 the distance fog,
     /// 1 the second distance fog, 2 the height fog — (start, end, density power, 1 = height
-    /// fog; colour rgba; direction xyz, w = 1 if enabled); 23 exposure; 24–29 the sky's constant
+    /// fog; colour rgba; direction xyz, w = 1 if enabled); 23 exposure, then the final pass
+    /// ([`Grade`]: tone-map k, saturation, brightness); 24–29 the sky's constant
     /// colours (w = 1 if set); 30–35 the sky's three texture matrices (two rows each: the cloud
     /// layer, the horizon layer, the base); 36–38 fog slot 3, the second height fog.
     pub fn uniform(&self, eye: [f32; 3]) -> [[f32; 4]; LIGHT_ROWS] {
@@ -326,7 +395,12 @@ impl Env {
             // no environment: plain white light
             u[13] = [1.0, 1.0, 1.0, 0.0];
         }
-        u[23] = [EXPOSURE, 0.0, 0.0, 0.0];
+        u[23] = [
+            self.light.unwrap_or(EXPOSURE),
+            self.grade.tone,
+            self.grade.saturation,
+            self.grade.brightness,
+        ];
         if let Some(sky) = &self.sky {
             for (i, c) in sky.colors.iter().enumerate() {
                 u[24 + i] = [c[0], c[1], c[2], 1.0];
@@ -551,6 +625,27 @@ mod tests {
         let near = ndc(&c.view_proj, [384.0, 108.0, 8.0]);
         assert!(near[0] > r[0]);
         assert!((0.0..1.0).contains(&r[2]));
+    }
+
+    #[test]
+    fn the_final_pass_rides_in_row_23() {
+        // no environment: the light scale alone, an identity colour table
+        let u = Env::default().uniform([0.0; 3]);
+        assert_eq!(u[23], [EXPOSURE, 0.0, 1.0, 1.0]);
+        // the forest's background swaps its second distance fog for the game's downward one
+        let mut env = Env {
+            grade: Grade {
+                tone: TONE_3W,
+                saturation: 1.2,
+                brightness: 1.0,
+            },
+            ..Env::default()
+        };
+        forest_fog(&mut env);
+        let u = env.uniform([0.0; 3]);
+        assert_eq!(u[23], [EXPOSURE, TONE_3W, 1.2, 1.0]);
+        assert_eq!(u[17], [500.0, -1000.0, 2.0, 0.0]);
+        assert_eq!(u[19], [0.0, 1.0, 0.0, 1.0]);
     }
 
     #[test]

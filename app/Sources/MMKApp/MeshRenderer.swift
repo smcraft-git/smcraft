@@ -70,6 +70,9 @@ final class MeshRenderer {
         var flipY: Bool
         /// `MeshRenderer.lightRowCount` rows (mmk.h MmkScene3d light uniforms).
         var light: [SIMD4<Float>]
+        /// The materials' texture matrices follow their animations (the background scene:
+        /// `mmk_mesh_shapes_at`, as the portable shell's `Projection::scroll`).
+        var scroll = false
     }
 
     /// Matches `U` in the shader.
@@ -180,6 +183,16 @@ final class MeshRenderer {
         if ((flags & (1u << 17)) != 0) r = fog_one(r, world, 36, (calc >> 6) & 3, L);
         return r;
     }
+    // the game's final pass over the scene (render.rs MESH_SHADER, mmk_host::scene3d::Grade; row
+    // 23 y-w): 3D World's tone map 1 - e^(-k c), then the colour-correction table's saturation
+    // about the brightest channel and its brightness, clamped (w = 0: no final pass)
+    float3 graded(float3 c, constant float4* L) {
+        float4 g = L[23];
+        if (g.w <= 0) return c;
+        float3 x = g.y > 0 ? 1.0 - exp(-g.y * c) : c;
+        float3 v = float3(max(x.r, max(x.g, x.b)));
+        return saturate((v + (x - v) * g.z) * g.w);
+    }
     // texture matrix k of the sky (rows 30-35: the cloud layer, the horizon layer, the base)
     float2 sky_uv(int k, float2 uv, constant float4* L) {
         float4 a = L[30 + 2 * k], b = L[31 + 2 * k];
@@ -287,7 +300,7 @@ final class MeshRenderer {
             rgb += edge_light(normalize(in.n), in.world, L, T);
             rgb = clamp(rgb, 0.0, 2.0);
             rgb = fogged(rgb, in.world, u.flags, L);
-            return float4(rgb, c.a);
+            return float4(graded(rgb, L), c.a);
         }
         float4 tc = t.sample(s, sky ? sky_uv(0, in.uv, L) : in.uv);
         float4 x = extra.sample(s1, sky ? sky_uv(2, in.uv, L) : in.uv);
@@ -325,7 +338,7 @@ final class MeshRenderer {
         // the uber shader clamps the lit colour to 0 .. 2 before its fogs
         rgb = clamp(rgb, 0.0, 2.0);
         rgb = fogged(rgb, in.world, u.flags, L);
-        return float4(rgb, c.a);
+        return float4(graded(rgb, L), c.a);
     }
     """
 
@@ -453,6 +466,14 @@ final class MeshRenderer {
         for blended in [false, true] {
             for p in frame.posed[range] {
                 guard let m = model(p.draw.mesh, p.draw.model) else { continue }
+                // the background's materials with their texture matrices this frame
+                var shapes = m.shapes
+                if camera.scroll {
+                    let n = shapes.withUnsafeMutableBufferPointer {
+                        mmk_mesh_shapes_at(assets, p.draw.mesh, Int(p.draw.model), p.draw.time, $0.baseAddress, $0.count)
+                    }
+                    if n != m.shapes.count { shapes = m.shapes }
+                }
                 let t = p.draw.transform
                 let center = 1 - Float(p.group + 1) * slice
                 // a mirroring transform (or the upside-down course) turns the winding around
@@ -466,7 +487,7 @@ final class MeshRenderer {
                 enc.setVertexBuffer(m.vertices, offset: 0, index: 0)
                 enc.setVertexBuffer(skin, offset: p.skinOffset, index: 1)
                 enc.setVertexBuffer(m.colors ?? noColors, offset: 0, index: 3)
-                for (i, sh) in m.shapes.enumerated() where i < p.visible.count && p.visible[i] != 0 && sh.index_count > 0 {
+                for (i, sh) in shapes.enumerated() where i < p.visible.count && p.visible[i] != 0 && sh.index_count > 0 {
                     let blend = Int((sh.flags >> UInt32(MMK_MESH_BLEND_SHIFT)) & 3)
                     let faces = (sh.flags >> UInt32(MMK_MESH_FACES_SHIFT)) & 3
                     if (blend != 0) != blended || faces == 3 { continue }
