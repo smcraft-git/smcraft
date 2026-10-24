@@ -3271,12 +3271,12 @@ impl World {
                     }
                     // a moving walker (|vx| > 0.001) overlapping another enemy by 0.1 px or
                     // more on its front side raises its touch flag, read by its next update
-                    // (Walk turns, Turn stops), unless the other's feet are within 4 px of its
-                    // head (enemy contact 0x710072bca0, box shapes) [obs: Ryujinx trace
-                    // W_3051605, a packed row of Goombas]; not with one in the air or tilted on
-                    // an incline's diagonal (its box turned with it [inf]) [obs: W_3051605, a
-                    // Goomba walking up a staircase into one falling onto it, then standing on
-                    // it, never turns]
+                    // (Walk turns, Turn stops), when the contact's vertical push (half the
+                    // overlap [inf]) is 4 or more (enemy contact 0x710072bca0) [obs: Ryujinx
+                    // trace W_3051605: a packed row of Goombas; one falling 8.1 px into another's
+                    // height turns it, one 6.75 px in doesn't]; not with one tilted on an
+                    // incline's diagonal (its box turned with it [inf]) [obs: W_3051605, a
+                    // Goomba walking up a staircase into one standing on it never turns]
                     (false, false) if walkers => {
                         let (ab, bb) = (a.bbox(), b.bbox());
                         let ox = ab.2.min(bb.2) - ab.0.max(bb.0);
@@ -3290,7 +3290,7 @@ impl World {
                                 && ox >= 0.1
                                 && d.abs() >= 0.01
                                 && d * w.dir as f32 > 0.0
-                                && (ob.1 - wb.3).abs() >= 4.0
+                                && wb.3.min(ob.3) - wb.1.max(ob.1) >= 8.0
                         };
                         let tilted = |w: &Actor| {
                             w.on_ground
@@ -3298,7 +3298,7 @@ impl World {
                                     sl.on_diagonal(w.x) && (sy - w.y).abs() < 1.0
                                 })
                         };
-                        if !tilted(a) && !tilted(b) && a.on_ground && b.on_ground {
+                        if !tilted(a) && !tilted(b) {
                             if flag(a, ab, bb, dx) {
                                 a.touch_front = true;
                             }
@@ -5206,10 +5206,11 @@ impl World {
             // (the walkers, and Piranha Plants outside 3D World; other enemies keep the
             // next-frame rule)
             let kind_ok = a.kind.is_walker() || (!w3 && matches!(a.kind, Kind::Piranha { .. }));
+            // (a winged one too [obs: Ryujinx trace W_3051605, a big Paragoomba walked into
+            // while falling past its top: dead that frame])
             if !(kind_ok && a.alive() && a.mode == Mode::Normal && !a.held)
                 || !a.solid_contact()
                 || a.stacked
-                || a.wings
             {
                 return false;
             }
@@ -5217,14 +5218,18 @@ impl World {
             if !overlap(hurt, ab) {
                 return false;
             }
-            // not when the feet are in its top (the stomp, at the frame's end)
+            // not when the feet are in its top (the stomp, at the frame's end: the same window
+            // as the stomp's, 12 / 10 for big enemies) [obs: Ryujinx trace W_3051605, falling
+            // 13.2 px into a Big Goomba's top: dead that frame]
             let d = ab.3 - p.y;
-            let w = if p.vy <= 0.0 {
-                7.0 + (-p.vy).max(0.0)
-            } else {
-                3.0
+            let w = match (a.big, p.vy <= 0.0) {
+                (false, true) if self.options.smm1_shell_kicks => 10.0,
+                (false, true) => 7.0 + (-p.vy).max(0.0),
+                (false, false) => 3.0,
+                (true, true) => 12.0,
+                (true, false) => 10.0,
             };
-            !(d > 0.0 && d < w + if a.big { 5.0 } else { 0.0 })
+            !(d > 0.0 && d < w)
         })
     }
 
