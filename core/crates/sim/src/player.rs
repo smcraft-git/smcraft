@@ -1626,6 +1626,16 @@ impl Player {
                     if self.low_gravity {
                         self.vy = (self.vy * 0.7).min(2.7);
                     }
+                    if self.form == Form::Cape
+                        && self.cape_meter == 30
+                        && self.cape == CapeState::None
+                        && !self.in_water
+                    {
+                        // a full cape meter turns the take-off frame itself into MantFlyingUp
+                        // (the Jump exec sees vy > 1 at once): the launch speed, no gravity
+                        // [obs: trace, SMW: vy 3.928 on the take-off frame, counter 1]
+                        self.cape = CapeState::Rise(73);
+                    }
                     self.on_ground = false;
                     self.skid = SkidPhase::None;
                 }
@@ -2321,10 +2331,20 @@ impl Player {
                             lift: 0.0,
                         }
                     } else {
+                        // Fall takes over within this frame and runs its gravity on the new
+                        // speed [obs: trace, 0.208 → −0.092 → −0.342]
+                        let held = jump || inp.held(input::SPIN);
+                        let g = if held {
+                            GRAVITY_HELD[vy_band(self.vy)]
+                        } else {
+                            GRAVITY_RELEASED[vy_band(self.vy)]
+                        };
+                        self.vy = (self.vy + g).max(FALL_CAP);
                         CapeState::None
                     };
                 } else {
-                    self.vy = JUMP_BASE + jump_bonus(self.vx.abs());
+                    // the speed bonus from the speed the frame starts with [obs: trace]
+                    self.vy = JUMP_BASE + jump_bonus(vx0.abs());
                     self.cape = CapeState::Rise(t);
                 }
             }
@@ -2422,12 +2442,15 @@ impl Player {
             self.slide_stoop = 0;
             return;
         }
+        if self.vx == 0.0 {
+            // stopped last frame: MantSlide hands over to Walk, which doesn't move this frame
+            // [obs: trace]
+            self.cape = CapeState::None;
+            return;
+        }
         let decel = if self.on_ice { 0.02 } else { 0.06 };
         self.vx = approach(self.vx.clamp(-3.25, 3.25), 0.0, decel);
         self.pose = Pose::Slide;
-        if self.vx == 0.0 {
-            self.cape = CapeState::None;
-        }
     }
 
     fn vine_at(level: &Level, x: f32, y: f32) -> Option<(f32, f32, f32)> {
@@ -2777,7 +2800,11 @@ impl Player {
             match landed {
                 Some(top) => {
                     self.y = top;
-                    self.vy = 0.0;
+                    // touching down from a cape glide the frame keeps the glide's fall speed
+                    // (MantFlying still runs it) [obs: trace]
+                    if self.on_ground || !matches!(self.cape, CapeState::Fly { .. }) {
+                        self.vy = 0.0;
+                    }
                     self.on_ground = true;
                     self.slope =
                         on_slope.map(|sl| (sl.steepness(), if sl.rising { 1 } else { -1 }));
