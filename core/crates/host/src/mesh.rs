@@ -529,6 +529,59 @@ pub fn edge_rows(m: &mmk_assets::mesh::MeshMaterial) -> Option<[[f32; 4]; 2]> {
     ])
 }
 
+/// The clear pipe's glass (`3W_Object_dokan_tomei`, materials with `enable_clear_pipe`): the
+/// game draws it with a shader of its own (fresnel, the environment map, the refraction of
+/// what is behind); its vertex colours are all 0 (alpha 0 but on the mouths' rims) and its
+/// colour-combiner block works from them, so drawn like other materials it came out fully
+/// transparent. Here it is a pale blue glass: no combiner (`shape_look`), the vertex alpha
+/// raised to `CLEAR_PIPE_ALPHA` facing the view and toward `CLEAR_PIPE_EDGE_ALPHA` where it
+/// turns away (the rims keep their full alpha), and the tint below [inf: a
+/// stand-in for the game's shader, the tint leaning blue as its `const_color0` does].
+pub const CLEAR_PIPE_ALPHA: u8 = 0x50;
+pub const CLEAR_PIPE_EDGE_ALPHA: u8 = 0xe0;
+pub const CLEAR_PIPE_TINT: [f32; 3] = [0.80, 0.90, 1.0];
+/// The option `clear_pipe_glass` marks the part's materials (the backgrounds' clear pipes, also
+/// `enable_clear_pipe`, keep their own look).
+const GLASS: &str = "mmk_clear_pipe_glass";
+
+fn clear_pipe_glass(file: &mut MeshFile) {
+    for m in &mut file.models {
+        for mat in &mut m.materials {
+            if mat.option("enable_clear_pipe") == Some("1") {
+                mat.options.push((GLASS.into(), "1".into()));
+            }
+        }
+        if m.colors.is_empty() {
+            continue;
+        }
+        for sh in &m.shapes {
+            let glass = m
+                .materials
+                .get(sh.material)
+                .is_some_and(|mat| mat.option("enable_clear_pipe") == Some("1"));
+            if !glass {
+                continue;
+            }
+            let range = sh.first_index as usize..(sh.first_index + sh.index_count) as usize;
+            for &i in m.indices.get(range).unwrap_or(&[]) {
+                let i = i as usize;
+                // more opaque where the surface turns away from the view (the pieces only turn
+                // about the view axis, z): a fixed fresnel
+                let nz = m
+                    .vertices
+                    .get(i)
+                    .map_or(1.0, |v| v.normal[2].abs().min(1.0));
+                let edge = (1.0 - nz) * (1.0 - nz);
+                let a = CLEAR_PIPE_ALPHA as f32
+                    + (CLEAR_PIPE_EDGE_ALPHA - CLEAR_PIPE_ALPHA) as f32 * edge;
+                if let Some(c) = m.colors.get_mut(i) {
+                    c[3] = c[3].max(a as u8);
+                }
+            }
+        }
+    }
+}
+
 /// How a shape's material is drawn, worked out once for both renderers.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ShapeLook {
@@ -594,7 +647,10 @@ pub fn shape_look(mat: Option<&mmk_assets::mesh::MeshMaterial>) -> ShapeLook {
     let self_lit = !m.unlit && !m.options.is_empty() && m.option("enable_diffuse") != Some("1");
     let fog = m.option("enable_fog") == Some("1");
     let on = |k: &str| m.option(k) == Some("1");
-    let tev = tev_of(m);
+    // (the clear pipe's colour-combiner block is not what the game draws it with: its own
+    // shader leaves the combiner's result — vertex colours and constants near 0 — out; here the
+    // glass stand-in, `clear_pipe_glass`)
+    let tev = if on(GLASS) { None } else { tev_of(m) };
     // the extra texture: the sky's base (HDRI) under its cloud layer, an emission map, or the
     // alpha mask the uber shader reads through `gsys_user0`
     let (extra_mode, extra_sampler) = if tev.is_some() {
@@ -693,7 +749,7 @@ pub fn shape_look(mat: Option<&mmk_assets::mesh::MeshMaterial>) -> ShapeLook {
         // (the colour combiner's stages only colour a material through `material_diffuse_color`
         // / `material_alpha`, `tev_of`: 3D World's castle walls, whose stage 0 multiplies the
         // albedo by `tev_color0`, are lit with the plain albedo [obs: their program])
-        tint: [1.0; 3],
+        tint: if on(GLASS) { CLEAR_PIPE_TINT } else { [1.0; 3] },
         form: if tev.is_some() {
             Form::default()
         } else {
@@ -967,7 +1023,10 @@ impl MeshStore {
             return -1;
         };
         let id = match bytes.and_then(|d| MeshFile::parse(&d).ok()) {
-            Some(file) if !self.root.as_os_str().is_empty() => {
+            Some(mut file) if !self.root.as_os_str().is_empty() => {
+                if name == mmk_sim::level::CLEAR_PIPE_MESH {
+                    clear_pipe_glass(&mut file);
+                }
                 let names = file
                     .models
                     .iter()
@@ -2191,6 +2250,28 @@ mod tests {
         // the end's mouth faces right: +y turned to +x
         let t = pipe_draws[5].transform;
         assert!((t[4] + 1.0).abs() < 1e-5, "{t:?}");
+        // drawn as glass: no colour combiner (its result is fully transparent), tinted, the
+        // vertex alpha raised (the game's own clear-pipe shader is not modelled)
+        let unit = file
+            .models
+            .iter()
+            .find(|m| m.name == "dokan_tomei_unit_model")
+            .expect("unit");
+        let look = shape_look(unit.materials.get(unit.shapes[0].material));
+        assert!(look.tev.is_none());
+        assert_eq!(look.tint, CLEAR_PIPE_TINT);
+        assert!(unit.colors.iter().all(|c| c[3] >= CLEAR_PIPE_ALPHA));
+        // a background's clear pipes keep their own look
+        let dv = store.find("3W_DV_plain");
+        if let Some(lm) = store.mesh(dv) {
+            assert!(
+                lm.file
+                    .models
+                    .iter()
+                    .flat_map(|m| &m.materials)
+                    .all(|mat| mat.option(GLASS).is_none())
+            );
+        }
     }
 
     #[test]
