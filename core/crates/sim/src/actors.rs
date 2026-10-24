@@ -4188,7 +4188,7 @@ impl Actor {
     /// Chain Chomp (61-chain-chomp.md). Chained: hops around the stake (0.8 px/f, 1.5 hop on each
     /// landing, turns past 40·s px or at walls, pulled back past the 49.6·s chain), and after
     /// 120–179 frames crouches 61 frames, lunges at 8 px/f (+1/frame) to 51.2·s + 4 px from the
-    /// stake, bites 61 frames and curves back. 3 of 7 lunges aim at the player (elevation 73.1°,
+    /// stake, bites 61 frames and curves back onto the stake. 3 of 7 lunges aim at the player (elevation 73.1°,
     /// 45° or 18.3° by height); the rest are random. Free: hops at 1.2 px/f with 3.0 hops.
     /// Phases: 0 walk, 1 crouch, 2 lunge, 3 bite, 4 return. Attack counter in `hops`.
     fn step_chomp(&mut self, level: &Level, chained: bool) {
@@ -4299,23 +4299,48 @@ impl Actor {
             3 => {
                 self.timer -= 1;
                 if self.timer <= 0 {
+                    // AttackEnd: the curve's start, its unit direction to the stake and length
+                    // (centres: the Chomp's and the stake's)
                     self.phase = 4;
                     self.heading = 0.0; // curve parameter
-                    self.trail = vec![(self.x, self.y)];
+                    let c = (self.x, self.y + 8.0 * s);
+                    let (dx, dy) = (stake.0 - c.0, stake.1 - c.1);
+                    let d = dx.dhypot(dy);
+                    let u = if d > 0.0 {
+                        (dx / d, dy / d)
+                    } else {
+                        (0.0, 0.0)
+                    };
+                    self.trail = vec![c, u];
+                    self.speed = d;
                 }
             }
             _ => {
-                // back to the ground beside the stake on a curve [inf: control points not read]
-                let (sx, sy) = self.trail.first().copied().unwrap_or((self.x, self.y));
-                let side = if sx < stake.0 { -1.0 } else { 1.0 };
-                let (ex, ey) = (stake.0 + 32.0 * s * side, self.home_y);
-                self.heading = (self.heading + 0.04).min(1.0);
+                // AttackEnd: back onto the stake along a cubic Bézier, P1 / P2 at 0.2 / 0.8 of the
+                // way plus 16 px across it (the direction turned ±90°, toward the top), the
+                // parameter stepping |1 − t|·0.1 clamped to 0.03…0.05; done within 0.01 of the
+                // end [obs v3.0.3 exec 0x71012b56f0, turn table 0x7102319cc0; the target is the
+                // stake's position, v1.0.0 0x71007b0350]. (v3.0.3's faster return behind a moving
+                // stake in a mode flag's branch, and the halved steps in water, aren't modelled.)
+                let (p0, u) = match self.trail[..] {
+                    [p0, u, ..] => (p0, u),
+                    _ => ((self.x, self.y + 8.0 * s), (0.0, 0.0)),
+                };
+                let d = self.speed;
+                let t0 = self.heading;
+                self.heading = (t0 + ((1.0 - t0).abs() * 0.1).clamp(0.03, 0.05)).min(1.0);
                 let t = self.heading;
-                let (mx, my) = ((sx + ex) / 2.0, sy.max(ey) + 16.0);
-                let u = 1.0 - t;
-                self.x = u * u * sx + 2.0 * u * t * mx + t * t * ex;
-                self.y = u * u * sy + 2.0 * u * t * my + t * t * ey;
-                if t >= 1.0 {
+                let turn = if u.0 >= 0.0 { 0x4000_0000 } else { 0xc000_0000 };
+                let (sn, cs) = crate::fmath::table_sin_cos(turn);
+                let w = ((u.0 * cs - sn * u.1) * 16.0, (u.0 * sn + u.1 * cs) * 16.0);
+                let p1 = (p0.0 + u.0 * d * 0.2 + w.0, p0.1 + u.1 * d * 0.2 + w.1);
+                let p2 = (p0.0 + u.0 * d * 0.8 + w.0, p0.1 + u.1 * d * 0.8 + w.1);
+                let r = 1.0 - t;
+                let (b0, b1, b2, b3) = (r * r * r, 3.0 * t * r * r, 3.0 * r * t * t, t * t * t);
+                self.x = b3 * stake.0 + b0 * p0.0 + b1 * p1.0 + b2 * p2.0;
+                self.y = b3 * stake.1 + b0 * p0.1 + b1 * p1.1 + b2 * p2.1 - 8.0 * s;
+                if r.abs() < 0.01 {
+                    (self.x, self.y) = (stake.0, stake.1 - 8.0 * s);
                     self.phase = 0;
                     self.timer = 120 + self.rand(60) as i32;
                     self.vy = 0.0;
@@ -4738,6 +4763,33 @@ mod tests {
         a.on_ground = true;
         a.dir = 1;
         (level, a)
+    }
+
+    #[test]
+    fn a_chain_chomp_curves_back_onto_its_stake_over_the_top() {
+        let level = Level::flat(40);
+        let mut a = Actor::new(Kind::ChainChomp { chained: true }, 250.0, 70.0);
+        (a.home_x, a.home_y) = (200.0, 32.0);
+        a.phase = 3;
+        a.timer = 1;
+        let mut frames = 0;
+        let mut top: f32 = 0.0;
+        a.step(&level, 0.0);
+        while a.phase == 4 && frames < 100 {
+            a.step(&level, 0.0);
+            top = top.max(a.y);
+            frames += 1;
+        }
+        assert_eq!(a.phase, 0);
+        assert!((20..=30).contains(&frames), "{frames}");
+        assert!(
+            (a.x - 200.0).abs() < 1e-3 && (a.y - 32.0).abs() < 0.5,
+            "{} {}",
+            a.x,
+            a.y
+        );
+        // the control points sit 16 px above the straight path: it rises first
+        assert!(top > 70.0, "{top}");
     }
 
     #[test]
