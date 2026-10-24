@@ -153,14 +153,17 @@ pub unsafe extern "C" fn mmk_mesh_shape(
             tint: look.tint,
             extra2_texture: TEXTURE_NONE,
             form: look.form.packed(),
+            extra3_texture: TEXTURE_NONE,
+            tev: look.tev.unwrap_or([0.0; mmk_host::mesh::TEV_ROWS * 4]),
         };
         // the extra texture is resolved against the cache (named in the model file's folder)
         drop(s);
-        if look.extra.is_some()
+        if (look.extra.is_some() || look.extra2.is_some() || look.extra3.is_some())
             && let (Some(a), Some(mut s)) = (unsafe { assets.as_ref() }, store(assets))
         {
             out.extra_texture = s.extra_texture(&a.cache, mesh, &look);
             out.extra2_texture = s.extra2_texture(&a.cache, mesh, &look);
+            out.extra3_texture = s.extra3_texture(&a.cache, mesh, &look);
         }
         true
     })
@@ -561,7 +564,7 @@ mod tests {
     fn layout_matches_header() {
         assert_eq!(size_of::<MmkMeshVertex>(), 56);
         assert_eq!(size_of::<MmkMeshModel>(), 80);
-        assert_eq!(size_of::<MmkMeshShape>(), 136);
+        assert_eq!(size_of::<MmkMeshShape>(), 524);
         assert_eq!(size_of::<MmkScene3d>(), 1380);
         assert_eq!(size_of::<MmkMeshPose>(), 32);
         assert_eq!(size_of::<MmkMeshDraw>(), 80);

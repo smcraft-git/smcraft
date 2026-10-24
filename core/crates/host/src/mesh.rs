@@ -76,9 +76,12 @@ pub const MMK_MESH_FOG1_Y: u32 = 1 << 17;
 /// `fog_y_calc_type`, `fog1_y_calc_type`): 0 blended towards the fog colour, 1 the colour
 /// added, 2 multiplied by it.
 pub const MMK_MESH_FOG_CALC_SHIFT: u32 = 18;
+/// Shape flag: the alpha leaves the vertex alpha out (the colour combiner's materials without
+/// `enable_vertex_alpha`).
+pub const MMK_MESH_NO_VERTEX_ALPHA: u32 = 1 << 26;
 
 #[repr(C)]
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug)]
 pub struct MmkMeshShape {
     pub first_index: u32,
     pub index_count: u32,
@@ -108,6 +111,34 @@ pub struct MmkMeshShape {
     /// k + rgb · colour.rgb + a · colour.a — [0..3] add k, [3] add rgb, [4] add a, [5] 1 = clamp
     /// add, [6..9] mul k, [9] mul rgb, [10] mul a, [11] 1 = clamp mul, [12] 1 = clamp the result.
     pub form: [f32; 16],
+    /// The third extra texture (the colour combiner's indirect texture): texture index or
+    /// `TEXTURE_NONE`.
+    pub extra3_texture: u32,
+    /// The colour combiner ([`tev_of`]; all zero: none). With it the albedo's coordinates are
+    /// the model's own (`srt` is the identity) and the block holds every texture's matrix.
+    pub tev: [f32; TEV_ROWS * 4],
+}
+
+impl Default for MmkMeshShape {
+    fn default() -> Self {
+        MmkMeshShape {
+            first_index: 0,
+            index_count: 0,
+            material: 0,
+            bone: 0,
+            flags: 0,
+            alpha_ref: 0.0,
+            srt: [0.0; 5],
+            vertex_color_ratio: 0.0,
+            extra_texture: TEXTURE_NONE,
+            emission: 0.0,
+            tint: [0.0; 3],
+            extra2_texture: TEXTURE_NONE,
+            form: [0.0; 16],
+            extra3_texture: TEXTURE_NONE,
+            tev: [0.0; TEV_ROWS * 4],
+        }
+    }
 }
 
 impl Form {
@@ -316,6 +347,135 @@ fn form_of(m: &mmk_assets::mesh::MeshMaterial) -> Option<Form> {
     }
 }
 
+/// Rows (vec4) of a shape's colour-combiner block ([`tev_of`], [`MmkMeshShape::tev`]).
+pub const TEV_ROWS: usize = 24;
+
+/// The uber shader's colour combiner as NSMBU's materials use it (`tev_tev0_color_*`,
+/// `tev_tev1_color_*`, `tev_tev0_alpha_*`, `tev_tev1_alpha_*`, `material_diffuse_color`,
+/// `material_alpha`), read from the game's shader programs (research/specs/render-3d.md) [obs]:
+///
+/// - two registers start as `tev_color0` / `tev_color1`; stage 0 (colour, alpha) writes register
+///   0, stage 1 register 1, each only when enabled; stage 1 reads what stage 0 wrote;
+/// - a stage is `saturate((d + mix(a, b, c)) · scale + offset)` with `tev_color_scale0` …
+///   `tev_alpha_offset1`; its operands: 0 zero, 1 one, 2 ½, 3 / 4 the stage's texture rgb / a
+///   (`*_texture` 0 albedo, 3 the second albedo `_a1`, 7 `gsys_user0`), 5 / 6 the stage's colour
+///   (`*_color` 0 the albedo, 2 the vertex colour, 100–105 `const_color0`–5, 200 / 201 a
+///   register), 7 / 8 register 0, 9 / 10 register 1, 11 / 12 the vertex colour; even codes are
+///   alphas (spread over rgb in colour stages); odd codes in alpha stages are the luminance
+///   (0.299, 0.587, 0.114) of the rgb (seen for 3; the others [inf]);
+/// - the lit colour is `material_diffuse_color` (the same sources: 0 the albedo, 2 the vertex
+///   colour, 100–105 a constant colour, 200 / 201 a register), the alpha `material_alpha`;
+/// - texture coordinates: the albedo uses set 0, `_a1` set `overray_texcoord`, `gsys_user0` set
+///   `user_texcoord`, the indirect texture `_i0` set `ind_texcoord`; set N goes through
+///   `tex_srt[tex_coordN_mtx]` and, with `enable_indirect_N`, is offset by the indirect
+///   texture's blue / alpha times `material_indirect_scale`.
+///
+/// Layout (rows): 0–3 the operands a b c d of colour stage 0, colour 1, alpha 0, alpha 1;
+/// 4 per stage its texture (0 albedo, 1 `_a1`, 2 `gsys_user0`, 3 `_i0`; −1: stage off);
+/// 5 per stage its colour's kind; 6 colour scale 0, offset 0, scale 1, offset 1; 7 the alpha
+/// ones; 8 / 9 the registers' start; 10–13 each stage's constant colour; 14 the lit colour's kind,
+/// the alpha's kind, 1, the alpha factor `gsys_xlu_zprepass_alpha`; 15 their constant (rgb, a);
+/// 16–23 the texture matrices (two rows: u, v) of the albedo, `_a1`, `gsys_user0`, `_i0`, with
+/// w of rows 16 / 18 / 20 = 1 if that texture's coordinates are offset, w of 22 / 23 the indirect
+/// scale. Kinds: 0 the albedo, 1 the constant, 2 the vertex colour, 3 / 4 register 0 / 1.
+/// None for materials that colour themselves with the plain albedo (or the 3D World combiner's
+/// `form` results, codes 300–303).
+pub fn tev_of(m: &mmk_assets::mesh::MeshMaterial) -> Option<[f32; TEV_ROWS * 4]> {
+    if m.options.is_empty() {
+        return None;
+    }
+    let diffuse = m.option("material_diffuse_color").unwrap_or("0");
+    let alpha = m.option("material_alpha").unwrap_or("0");
+    if (diffuse == "0" && alpha == "0") || diffuse.starts_with('3') || alpha.starts_with('3') {
+        return None;
+    }
+    let p1 = |k: &str, d: f32| m.param(k).and_then(|v| v.first().copied()).unwrap_or(d);
+    let p4 = |k: &str| -> [f32; 4] {
+        let v = m.param(k).unwrap_or(&[]);
+        [0, 1, 2, 3].map(|i| v.get(i).copied().unwrap_or(1.0))
+    };
+    // a colour source: (kind, constant)
+    let source = |code: &str| -> (f32, [f32; 4]) {
+        match code {
+            "2" => (2.0, [0.0; 4]),
+            "200" => (3.0, [0.0; 4]),
+            "201" => (4.0, [0.0; 4]),
+            c if c.len() == 3 && c.starts_with("10") => {
+                (1.0, p4(&format!("const_color{}", &c[2..])))
+            }
+            _ => (0.0, [0.0; 4]),
+        }
+    };
+    let mut r = [[0.0f32; 4]; TEV_ROWS];
+    for (s, name) in ["tev0_color", "tev1_color", "tev0_alpha", "tev1_alpha"]
+        .iter()
+        .enumerate()
+    {
+        let o = |k: &str| m.option(&format!("tev_{name}_{k}")).unwrap_or("0");
+        r[s] = ["a", "b", "c", "d"].map(|k| o(k).parse().unwrap_or(0.0));
+        r[4][s] = if m.option(&format!("enable_{name}")) == Some("1") {
+            match o("texture") {
+                "3" => 1.0,
+                "7" => 2.0,
+                "5" => 3.0,
+                _ => 0.0,
+            }
+        } else {
+            -1.0
+        };
+        let (kind, k) = source(o("color"));
+        r[5][s] = kind;
+        r[10 + s] = k;
+    }
+    r[6] = [
+        p1("tev_color_scale0", 1.0),
+        p1("tev_color_offset0", 0.0),
+        p1("tev_color_scale1", 1.0),
+        p1("tev_color_offset1", 0.0),
+    ];
+    r[7] = [
+        p1("tev_alpha_scale0", 1.0),
+        p1("tev_alpha_offset0", 0.0),
+        p1("tev_alpha_scale1", 1.0),
+        p1("tev_alpha_offset1", 0.0),
+    ];
+    r[8] = p4("tev_color0");
+    r[9] = p4("tev_color1");
+    let (dk, dc) = source(diffuse);
+    let (ak, ac) = source(alpha);
+    r[14] = [dk, ak, 1.0, p1("gsys_xlu_zprepass_alpha", 1.0)];
+    r[15] = [dc[0], dc[1], dc[2], ac[3]];
+    let set = |k: &str| {
+        m.option(k)
+            .and_then(|v| v.parse::<usize>().ok())
+            .unwrap_or(0)
+    };
+    let coords = [
+        0,
+        set("overray_texcoord"),
+        set("user_texcoord"),
+        set("ind_texcoord"),
+    ];
+    for (t, &n) in coords.iter().enumerate() {
+        let mtx = set(&format!("tex_coord{n}_mtx"));
+        let k = crate::scene3d::srt_matrix(m.param(&format!("tex_srt{mtx}")).unwrap_or(&[]));
+        let off = (t < 3
+            && m.option("enable_indirect") == Some("1")
+            && m.option(&format!("enable_indirect_{n}")) == Some("1")) as u32
+            as f32;
+        r[16 + 2 * t] = [k[0], k[1], k[2], off];
+        r[17 + 2 * t] = [k[3], k[4], k[5], 0.0];
+    }
+    let ind = m.param("material_indirect_scale").unwrap_or(&[]);
+    r[22][3] = ind.first().copied().unwrap_or(0.0);
+    r[23][3] = ind.get(1).copied().unwrap_or(0.0);
+    let mut out = [0.0; TEV_ROWS * 4];
+    for (i, row) in r.iter().enumerate() {
+        out[4 * i..4 * i + 4].copy_from_slice(row);
+    }
+    Some(out)
+}
+
 /// How a shape's material is drawn, worked out once for both renderers.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ShapeLook {
@@ -333,6 +493,13 @@ pub struct ShapeLook {
     pub tint: [f32; 3],
     /// The albedo combiner (vertex colours added or multiplied in).
     pub form: Form,
+    /// The colour combiner ([`tev_of`]); with it the extra textures are `gsys_user0` (`extra`),
+    /// `_a1` (`extra2`) and the indirect texture (`extra3`), the texture coordinates are the
+    /// model's own (the block holds their matrices), and the vertex alpha applies only with
+    /// `vertex_alpha`.
+    pub tev: Option<[f32; TEV_ROWS * 4]>,
+    /// A third extra texture: the colour combiner's indirect texture (`_i0`).
+    pub extra3: Option<String>,
 }
 
 impl ShapeLook {
@@ -362,14 +529,19 @@ pub fn shape_look(mat: Option<&mmk_assets::mesh::MeshMaterial>) -> ShapeLook {
             emission: 0.0,
             tint: [1.0; 3],
             form: Form::default(),
+            tev: None,
+            extra3: None,
         };
     };
     let self_lit = !m.unlit && !m.options.is_empty() && m.option("enable_diffuse") != Some("1");
     let fog = m.option("enable_fog") == Some("1");
     let on = |k: &str| m.option(k) == Some("1");
+    let tev = tev_of(m);
     // the extra texture: the sky's base (HDRI) under its cloud layer, an emission map, or the
     // alpha mask the uber shader reads through `gsys_user0`
-    let (extra_mode, extra) = if on("enable_sky") && m.texture("_s0").is_some() {
+    let (extra_mode, extra) = if tev.is_some() {
+        (0, m.texture("gsys_user0"))
+    } else if on("enable_sky") && m.texture("_s0").is_some() {
         (3, m.texture("_s0"))
     } else if on("enable_emission") && m.texture("_e0").is_some() {
         (1, m.texture("_e0"))
@@ -396,7 +568,8 @@ pub fn shape_look(mat: Option<&mmk_assets::mesh::MeshMaterial>) -> ShapeLook {
         | (on("enable_fog_y") as u32 * MMK_MESH_FOG_Y)
         | (on("enable_fog1_y") as u32 * MMK_MESH_FOG1_Y)
         | fog_calc(m)
-        | ((m.option("tex_coord0_calc") == Some("5")) as u32 * MMK_MESH_WORLD_UV);
+        | ((m.option("tex_coord0_calc") == Some("5")) as u32 * MMK_MESH_WORLD_UV)
+        | ((tev.is_some() && !on("enable_vertex_alpha")) as u32 * MMK_MESH_NO_VERTEX_ALPHA);
     if m.unlit {
         // cards are seen from both sides (mirrored for the walking direction)
         flags = (flags & !(3 << MMK_MESH_FACES_SHIFT)) | 2 << MMK_MESH_FACES_SHIFT;
@@ -406,7 +579,7 @@ pub fn shape_look(mat: Option<&mmk_assets::mesh::MeshMaterial>) -> ShapeLook {
     // (g3d's "Maya" form, `scene3d::srt_matrix`, in `apply_srt`'s terms: exact without rotation
     // or with equal scales)
     let srt = match m.param("tex_srt0") {
-        Some(p) if p.len() >= 6 && extra_mode != 3 => {
+        Some(p) if p.len() >= 6 && extra_mode != 3 && tev.is_none() => {
             let k = crate::scene3d::srt_matrix(p);
             [p[1], p[2], -p[3], k[2], k[5]]
         }
@@ -417,15 +590,11 @@ pub fn shape_look(mat: Option<&mmk_assets::mesh::MeshMaterial>) -> ShapeLook {
         alpha_ref: m.alpha_ref,
         srt,
         // the uber shader tints the light by the vertex colours only with
-        // `enable_vertex_color` [obs] or a vertex-colour diffuse source (`material_diffuse_color`
-        // 200 / 201, NSMBU's models [inf]); the albedo combiner may use them too. The sky
+        // `enable_vertex_color` [obs]; the albedo and colour combiners may use them too. The sky
         // multiplies by them as they are, without the ratio [obs]
         vertex_color_ratio: if extra_mode == 3 {
             1.0
-        } else if !m.options.is_empty()
-            && !on("enable_vertex_color")
-            && !matches!(m.option("material_diffuse_color"), Some("200" | "201"))
-        {
+        } else if !m.options.is_empty() && !on("enable_vertex_color") {
             0.0
         } else {
             m.param("vertex_color_ratio")
@@ -435,6 +604,8 @@ pub fn shape_look(mat: Option<&mmk_assets::mesh::MeshMaterial>) -> ShapeLook {
         extra: extra.map(String::from),
         extra2: if extra_mode == 3 {
             m.texture("_n0").map(String::from)
+        } else if tev.is_some() {
+            m.texture("_a1").map(String::from)
         } else {
             None
         },
@@ -442,20 +613,17 @@ pub fn shape_look(mat: Option<&mmk_assets::mesh::MeshMaterial>) -> ShapeLook {
             .param("emission_intensity")
             .and_then(|v| v.first().copied())
             .unwrap_or(1.0),
-        // TEV stage 0 with colour source 200 multiplies the albedo by constant colour 0 [inf:
-        // from the options of the materials that use it, e.g. the castle walls' warm tint;
-        // characters enable the stage with source 0 and a black constant]
-        tint: match m.param("const_color0") {
-            Some(c)
-                if on("enable_tev0_color")
-                    && m.option("tev_tev0_color_color") == Some("200")
-                    && c.len() >= 3 =>
-            {
-                [c[0], c[1], c[2]]
-            }
-            _ => [1.0; 3],
+        // (the colour combiner's stages only colour a material through `material_diffuse_color`
+        // / `material_alpha`, `tev_of`: 3D World's castle walls, whose stage 0 multiplies the
+        // albedo by `tev_color0`, are lit with the plain albedo [obs: their program])
+        tint: [1.0; 3],
+        form: if tev.is_some() {
+            Form::default()
+        } else {
+            form_of(m).unwrap_or_default()
         },
-        form: form_of(m).unwrap_or_default(),
+        extra3: tev.and(m.texture("_i0")).map(String::from),
+        tev,
     }
 }
 
@@ -772,6 +940,12 @@ impl MeshStore {
     /// Texture index of a shape look's second extra texture (the sky's horizon layer).
     pub fn extra2_texture(&mut self, cache: &Cache, mesh: i32, look: &ShapeLook) -> u32 {
         self.named_texture(cache, mesh, look.extra2.as_deref())
+    }
+
+    /// Texture index of a shape look's third extra texture (the colour combiner's indirect
+    /// texture).
+    pub fn extra3_texture(&mut self, cache: &Cache, mesh: i32, look: &ShapeLook) -> u32 {
+        self.named_texture(cache, mesh, look.extra3.as_deref())
     }
 
     fn named_texture(&mut self, cache: &Cache, mesh: i32, name: Option<&str>) -> u32 {

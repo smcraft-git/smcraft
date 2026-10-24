@@ -93,7 +93,8 @@ final class MeshRenderer {
     struct V { packed_float3 pos; packed_float3 nrm; float2 uv; ushort4 joints; packed_float4 weights; };
     struct U { float4x4 vp; float4 m0, m1, m2; float4 depth; float4 srt; float4 misc; float4 tint;
                float4 formA, formM, formX; uint flags; uint p0, p1, p2; };
-    struct O { float4 pos [[position]]; float2 uv; float3 n; float3 world; float4 color; float3 fadd; float3 fmul; };
+    struct O { float4 pos [[position]]; float2 uv; float3 n; float3 world; float4 color; float3 fadd; float3 fmul;
+               float4 vc; };
     vertex O mesh_vertex(const device V* v [[buffer(0)]], const device float4* skin [[buffer(1)]],
                          constant U& u [[buffer(2)]], const device uchar4* colors [[buffer(3)]],
                          uint vid [[vertex_id]]) {
@@ -129,7 +130,8 @@ final class MeshRenderer {
         o.n = float3(dot(u.m0.xyz, n), dot(u.m1.xyz, n), dot(u.m2.xyz, n));
         o.world = wp;
         float4 vc = u.misc.w > 0.5 ? float4(colors[vid]) / 255.0 : float4(1);
-        o.color = float4(mix(float3(1), vc.rgb, u.misc.y) * u.tint.rgb, vc.a);
+        o.color = float4(mix(float3(1), vc.rgb, u.misc.y) * u.tint.rgb, (u.flags & (1u << 26)) != 0 ? 1.0 : vc.a);
+        o.vc = vc;
         // the albedo combiner's terms (MmkMeshShape.form)
         float3 fa = u.formA.xyz + u.formA.w * vc.rgb + u.formX.x * vc.a;
         float3 fm = u.formM.xyz + u.formM.w * vc.rgb + u.formX.y * vc.a;
@@ -181,13 +183,96 @@ final class MeshRenderer {
         float4 a = L[30 + 2 * k], b = L[31 + 2 * k];
         return float2(dot(a.xy, uv) + a.z, dot(b.xy, uv) + b.z);
     }
+    // the colour combiner of NSMBU's materials (render.rs MESH_SHADER; layout: mmk_host::mesh::tev_of)
+    float2 tev_uv(int k, float2 uv, constant float4* T) {
+        float4 a = T[16 + 2 * k], b = T[17 + 2 * k];
+        return float2(dot(a.xy, uv) + a.z, dot(b.xy, uv) + b.z);
+    }
+    struct TevIn { float4 t, s, r0, r1, vc; };
+    float3 tev_rgb(float code, TevIn x) {
+        switch (int(code + 0.5)) {
+            case 1: return float3(1); case 2: return float3(0.5);
+            case 3: return x.t.rgb; case 4: return float3(x.t.a);
+            case 5: return x.s.rgb; case 6: return float3(x.s.a);
+            case 7: return x.r0.rgb; case 8: return float3(x.r0.a);
+            case 9: return x.r1.rgb; case 10: return float3(x.r1.a);
+            case 11: return x.vc.rgb; case 12: return float3(x.vc.a);
+            default: return float3(0);
+        }
+    }
+    float luma(float3 c) { return dot(c, float3(0.299, 0.587, 0.114)); }
+    float tev_alpha(float code, TevIn x) {
+        switch (int(code + 0.5)) {
+            case 1: return 1; case 2: return 0.5;
+            case 3: return luma(x.t.rgb); case 4: return x.t.a;
+            case 5: return luma(x.s.rgb); case 6: return x.s.a;
+            case 7: return luma(x.r0.rgb); case 8: return x.r0.a;
+            case 9: return luma(x.r1.rgb); case 10: return x.r1.a;
+            case 11: return luma(x.vc.rgb); case 12: return x.vc.a;
+            default: return 0;
+        }
+    }
+    // a stage's colour by kind: 0 the albedo, 1 the constant, 2 the vertex colour, 3 / 4 a register
+    float4 tev_source(float kind, float4 k, float4 albedo, float4 vc, float4 r0, float4 r1) {
+        switch (int(kind + 0.5)) {
+            case 1: return k; case 2: return vc; case 3: return r0; case 4: return r1;
+            default: return albedo;
+        }
+    }
+    // the combiner's lit colour and alpha; tx: albedo, _a1, gsys_user0, indirect
+    float4 tev_color(thread const float4* tx, float4 vc, constant float4* T) {
+        float4 r0 = T[8], r1 = T[9];
+        float4 on = T[4], kind = T[5], so = T[6], sa = T[7];
+        for (int st = 0; st < 2; st++) {
+            float4 n0 = r0, n1 = r1;
+            int c = st;
+            if (on[c] >= 0) {
+                TevIn x = { tx[clamp(int(on[c] + 0.5), 0, 3)], tev_source(kind[c], T[10 + c], tx[0], vc, r0, r1), r0, r1, vc };
+                float4 q = T[c];
+                float3 v = tev_rgb(q.w, x) + mix(tev_rgb(q.x, x), tev_rgb(q.y, x), tev_rgb(q.z, x));
+                float3 o = saturate(v * so[2 * c] + so[2 * c + 1]);
+                if (st == 0) n0.rgb = o; else n1.rgb = o;
+            }
+            int a = 2 + st;
+            if (on[a] >= 0) {
+                TevIn x = { tx[clamp(int(on[a] + 0.5), 0, 3)], tev_source(kind[a], T[10 + a], tx[0], vc, r0, r1), r0, r1, vc };
+                float4 q = T[a];
+                float v = tev_alpha(q.w, x) + mix(tev_alpha(q.x, x), tev_alpha(q.y, x), tev_alpha(q.z, x));
+                float o = saturate(v * sa[2 * st] + sa[2 * st + 1]);
+                if (st == 0) n0.a = o; else n1.a = o;
+            }
+            r0 = n0;
+            r1 = n1;
+        }
+        float4 f = T[14], k = T[15];
+        float3 rgb = tev_source(f.x, k, tx[0], vc, r0, r1).rgb;
+        float alpha = tev_source(f.y, k, tx[0], vc, r0, r1).a;
+        return float4(rgb, alpha * f.w);
+    }
     fragment float4 mesh_fragment(O in [[stage_in]], texture2d<float> t [[texture(0)]],
                                   texture2d<float> extra [[texture(1)]],
                                   texture2d<float> extra2 [[texture(2)]],
+                                  texture2d<float> extra3 [[texture(3)]],
                                   sampler s [[sampler(0)]], constant U& u [[buffer(0)]],
-                                  constant float4* L [[buffer(1)]]) {
+                                  constant float4* L [[buffer(1)]], constant float4* T [[buffer(2)]]) {
         uint mode = (u.flags >> 12) & 3;
         bool sky = mode == 3 && L[24].w > 0.5;
+        if (T[14].z > 0.5) {
+            // the colour combiner: each texture through its own matrix, offset by the indirect
+            // texture's blue / alpha (scaled) where the material says so
+            float4 ind = extra3.sample(s, tev_uv(3, in.uv, T));
+            float2 off = ind.ba * float2(T[22].w, T[23].w);
+            float4 tx[4] = { t.sample(s, tev_uv(0, in.uv, T) + off * T[16].w),
+                             extra2.sample(s, tev_uv(1, in.uv, T) + off * T[18].w),
+                             extra.sample(s, tev_uv(2, in.uv, T) + off * T[20].w), ind };
+            float4 c = tev_color(tx, in.vc, T) * in.color;
+            if ((u.flags & 8) != 0 && c.a < u.misc.z) discard_fragment();
+            float3 rgb = c.rgb;
+            if ((u.flags & 2) == 0) rgb *= lighting(normalize(in.n), L) * L[23].x;
+            rgb = clamp(rgb, 0.0, 2.0);
+            rgb = fogged(rgb, in.world, u.flags, L);
+            return float4(rgb, c.a);
+        }
         float4 tc = t.sample(s, sky ? sky_uv(0, in.uv, L) : in.uv);
         float4 x = extra.sample(s, sky ? sky_uv(2, in.uv, L) : in.uv);
         // the albedo combiner: (albedo + add) * mul, clamped with flag bit 30
@@ -344,8 +429,9 @@ final class MeshRenderer {
         guard let skin = frame.skin, !range.isEmpty else { return }
         enc.setFrontFacing(.counterClockwise)
         var light = camera.light
-        if light.count < 30 { light += Array(repeating: SIMD4<Float>(0, 0, 0, 0), count: 30 - light.count) }
-        enc.setFragmentBytes(&light, length: 30 * 16, index: 1)
+        let rows = Self.lightRowCount
+        if light.count < rows { light += Array(repeating: SIMD4<Float>(0, 0, 0, 0), count: rows - light.count) }
+        enc.setFragmentBytes(&light, length: rows * 16, index: 1)
         let slice = 1 / Float(frame.groups + 1)
         for blended in [false, true] {
             for p in frame.posed[range] {
@@ -372,6 +458,7 @@ final class MeshRenderer {
                     let keep = UInt32(MMK_MESH_SELF_LIT | MMK_MESH_FOG | MMK_MESH_ALPHA_TEST) | UInt32(MMK_MESH_FOG1)
                         | UInt32(MMK_MESH_FOG_Y) | UInt32(MMK_MESH_WORLD_UV) | (extraTex != nil ? 3 << 12 : 0)
                         | UInt32(MMK_MESH_FOG1_Y) | (0xFF << UInt32(MMK_MESH_FOG_CALC_SHIFT))
+                        | UInt32(MMK_MESH_NO_VERTEX_ALPHA)
                     let f = sh.form
                     u.formA = SIMD4(f.0, f.1, f.2, f.3)
                     u.formM = SIMD4(f.6, f.7, f.8, f.9)
@@ -381,6 +468,9 @@ final class MeshRenderer {
                     enc.setFragmentTexture(extraTex ?? white, index: 1)
                     let extra2Tex = sh.extra2_texture == MMK_TEXTURE_NONE ? nil : texture(sh.extra2_texture)
                     enc.setFragmentTexture(extra2Tex ?? white, index: 2)
+                    let extra3Tex = sh.extra3_texture == MMK_TEXTURE_NONE ? nil : texture(sh.extra3_texture)
+                    enc.setFragmentTexture(extra3Tex ?? white, index: 3)
+                    withUnsafeBytes(of: sh.tev) { enc.setFragmentBytes($0.baseAddress!, length: $0.count, index: 2) }
                     u.srt = SIMD4(sh.srt.0, sh.srt.1, sh.srt.2, sh.srt.3)
                     u.misc = SIMD4(sh.srt.4, sh.vertex_color_ratio, sh.alpha_ref, m.colors == nil ? 0 : 1)
                     enc.setRenderPipelineState(pipelines[blend])
