@@ -457,7 +457,7 @@ enum {
                                 // 2 alpha mask, 3 sky base under the albedo's cloud layer
     MMK_MESH_FOG1 = 1 << 14,    // the second distance fog applies
     MMK_MESH_FOG_Y = 1 << 15,   // the height fog applies
-    MMK_MESH_WORLD_UV = 1 << 16, // uv from the world position: (x, -y) / 64, then srt
+    MMK_MESH_WORLD_UV = 1 << 16, // uv from the world position: (x, -y) / 64 + (0, 1/2), then srt
 };
 typedef struct {
     uint32_t first_index, index_count, material, bone;

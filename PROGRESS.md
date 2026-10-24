@@ -379,6 +379,9 @@ Nextendo; `docs/nextendo-network-play.md`, spec `research/specs/network-play.md`
   research/specs/render-3d.md): the sky material as the game computes it and g3d's "Maya"
   texture SRT → ground 38.6, underground 34.3, castle 75.9, airship 26.5, water 32.8, ghost
   31.8, snow 70.6, desert 48.4, sky 24.6, forest 48.4 (mean 43.2, was 46.0; NSMBU unchanged).
+  World-projected textures for every `tex_coord0_calc` 5 material (the field's soil bands now
+  64 px tall, as the game's), phase ½ → ground 37.6, underground 34.3, castle 75.8, airship
+  26.5, water 32.7, ghost 29.1, snow 70.4, desert 48.0, sky 24.6, forest 48.3 (mean 42.7).
   3D World (references recaptured 2026-10-24, MAE): ground 53.7, underground 34.3, castle 75.9,
   airship 26.9, water 33.3, ghost 31.8, snow 70.6, desert 60.4, sky 24.6, forest 48.4 (were
   31–77 before: the start sign 3× too big — a model without an SMB1 picture is drawn at its own

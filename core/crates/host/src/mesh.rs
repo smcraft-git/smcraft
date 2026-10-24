@@ -60,12 +60,15 @@ pub const MMK_MESH_EXTRA_SHIFT: u32 = 12;
 pub const MMK_MESH_FOG1: u32 = 1 << 14;
 /// Shape flag: the height fog applies (`enable_fog_y`).
 pub const MMK_MESH_FOG_Y: u32 = 1 << 15;
-/// Shape flag: texture coordinates from the world position (u = x / 64, v = −y / 64, then the
-/// SRT) instead of the model's (`tex_coord0_calc` 5 with `enable_tex_coord0_mtx_cancel`).
+/// Shape flag: texture coordinates from the world position (u = x / 64, v = ½ − y / 64, then
+/// the SRT) instead of the model's (`tex_coord0_calc` 5, a projection in the uber shader).
 pub const MMK_MESH_WORLD_UV: u32 = 1 << 16;
 /// World pixels one repeat of a world-mapped texture covers [inf: measured on the castle walls'
 /// bricks in a reference frame, 8 rows of ~8.1 px].
 pub const WORLD_UV_SPAN: f32 = 64.0;
+/// v of world-mapped textures at y = 0 [inf: the 3D World field's soil bands line up with the
+/// reference frames' at ½]. (The game projects through a matrix in its `User0` block.)
+pub const WORLD_UV_V0: f32 = 0.5;
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
@@ -171,8 +174,7 @@ pub fn shape_look(mat: Option<&mmk_assets::mesh::MeshMaterial>) -> ShapeLook {
         | extra_mode << MMK_MESH_EXTRA_SHIFT
         | (on("enable_fog1") as u32 * MMK_MESH_FOG1)
         | (on("enable_fog_y") as u32 * MMK_MESH_FOG_Y)
-        | ((m.option("tex_coord0_calc") == Some("5") && on("enable_tex_coord0_mtx_cancel")) as u32
-            * MMK_MESH_WORLD_UV);
+        | ((m.option("tex_coord0_calc") == Some("5")) as u32 * MMK_MESH_WORLD_UV);
     if m.unlit {
         // cards are seen from both sides (mirrored for the walking direction)
         flags = (flags & !(3 << MMK_MESH_FACES_SHIFT)) | 2 << MMK_MESH_FACES_SHIFT;
@@ -192,10 +194,14 @@ pub fn shape_look(mat: Option<&mmk_assets::mesh::MeshMaterial>) -> ShapeLook {
         flags,
         alpha_ref: m.alpha_ref,
         srt,
-        vertex_color_ratio: m
-            .param("vertex_color_ratio")
-            .and_then(|v| v.first().copied())
-            .unwrap_or(1.0),
+        // (the sky multiplies by the vertex colours as they are, without the ratio [obs])
+        vertex_color_ratio: if extra_mode == 3 {
+            1.0
+        } else {
+            m.param("vertex_color_ratio")
+                .and_then(|v| v.first().copied())
+                .unwrap_or(1.0)
+        },
         extra: extra.map(String::from),
         extra2: if extra_mode == 3 {
             m.texture("_n0").map(String::from)

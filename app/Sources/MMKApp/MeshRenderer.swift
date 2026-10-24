@@ -118,8 +118,8 @@ final class MeshRenderer {
         clip.y *= u.depth.w;
         O o;
         o.pos = clip;
-        // world-mapped textures: (x, -y) / 64 (MMK_MESH_WORLD_UV)
-        float2 uv = ((u.flags & (1u << 16)) != 0 ? float2(wp.x, -wp.y) / 64.0 : x.uv) * u.srt.xy;
+        // world-mapped textures: (x, -y) / 64 + (0, 1/2) (MMK_MESH_WORLD_UV)
+        float2 uv = ((u.flags & (1u << 16)) != 0 ? float2(wp.x, -wp.y) / 64.0 + float2(0, 0.5) : x.uv) * u.srt.xy;
         float s = sin(u.srt.z), c = cos(u.srt.z);
         o.uv = float2(c * uv.x - s * uv.y + u.srt.w, s * uv.x + c * uv.y + u.misc.x);
         o.n = float3(dot(u.m0.xyz, n), dot(u.m1.xyz, n), dot(u.m2.xyz, n));

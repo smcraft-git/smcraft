@@ -252,7 +252,7 @@ pub fn build(
                         uv: apply_srt(
                             if look.flags & mmk_host::mesh::MMK_MESH_WORLD_UV != 0 {
                                 let k = 1.0 / mmk_host::mesh::WORLD_UV_SPAN;
-                                [wp[0] * k, -wp[1] * k]
+                                [wp[0] * k, -wp[1] * k + mmk_host::mesh::WORLD_UV_V0]
                             } else {
                                 v.uv
                             },
