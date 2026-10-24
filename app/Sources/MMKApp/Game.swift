@@ -321,7 +321,8 @@ final class GameSession: ObservableObject, Identifiable {
         var sounds: UnsafePointer<MmkFrontSound>?
         let n = mmk_front_sounds(front, &sounds)
         for s in UnsafeBufferPointer(start: sounds, count: n) {
-            UISound.shared.play(String(cString: s.name), volume: s.volume, delayFrames: Double(s.delay))
+            UISound.shared.play(String(cString: s.name), volume: s.volume, delayFrames: Double(s.delay),
+                                smm1: s.ui == 1)
         }
     }
 

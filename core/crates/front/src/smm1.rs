@@ -3,10 +3,65 @@
 //! over the world map, the walk and the intro card, game over, the ending and credits, and the
 //! in-course overlays. Choreography the data does not pin down is marked [inf] (DECISIONS.md
 //! "100 Mario screens: SMM1 layouts").
+//!
+//! Sounds: the SMM1 import's SLink keys and states ([`crate::smm1_sound`],
+//! research/specs/smm1-sound.md), fired where the screens play the animations they go with.
+//! Which key goes with which of our animations is matched by name where the data names one
+//! (`In`, `Out`, `Decide`, state `1stDemoAnimB` ↔ `AnimB`, `1stDemoTelopIn` ↔ `Telop`,
+//! `cState_Walk` ↔ `Walk`), else [inf].
 
 use crate::layout::{Layout, Ui};
 use crate::menu::{Buttons, UiInput, hit};
+use crate::smm1_sound::Ctx;
+use crate::sound::SoundCue;
 use crate::{DrawItem, push_layout};
+
+/// Sounds due at a later tick (the animation they go with starts then); dropped when the scene
+/// skips ahead of them.
+#[derive(Default)]
+struct Pending(Vec<(i32, &'static str, Vec<SoundCue>)>);
+
+impl Pending {
+    fn at(&mut self, tick: i32, tag: &'static str, cues: Vec<SoundCue>) {
+        if !cues.is_empty() {
+            self.0.push((tick, tag, cues));
+        }
+    }
+
+    fn drop_tag(&mut self, tag: &str) {
+        self.0.retain(|e| e.1 != tag);
+    }
+
+    fn clear(&mut self) {
+        self.0.clear();
+    }
+
+    /// Start the ones due at `tick`.
+    fn fire(&mut self, ui: &Ui, tick: i32) {
+        let (due, rest) = std::mem::take(&mut self.0)
+            .into_iter()
+            .partition::<Vec<_>, _>(|e| e.0 <= tick);
+        self.0 = rest;
+        for (_, _, cues) in due {
+            ui.push_cues(cues);
+        }
+    }
+}
+
+/// Fire SMM1 key `key` on layout `l` (its part `part`) now.
+fn key(l: &Layout, part: Option<&str>, key: &str, ctx: &[Ctx]) {
+    let ui = l.ui();
+    ui.push_cues(ui.smm1_key(&l.name, part, key, ctx));
+}
+
+/// The game style's enum value in the pause menu's switch (`CourseStatus::style` 0–3; the 3D
+/// World style has none).
+fn style_name(style: u32) -> &'static str {
+    ["M1", "M3", "MW", "WU"]
+        .get(style as usize)
+        .copied()
+        .unwrap_or("3W")
+}
 
 /// What the intro card shows.
 #[derive(Clone, Debug)]
@@ -167,17 +222,26 @@ impl WorldMap {
         self.layout.hold(&format!("{MARIO_PART}/Stand"), 0.0);
     }
 
-    /// Walk along MoveMario from frame `from` to `to` starting at `tick`; returns the arrival.
+    /// Walk along MoveMario from frame `from` to `to` starting at `tick` (now); returns the
+    /// arrival. Sounds: the Mario part's `jump` with the Jump [inf], its `cState_Walk` state
+    /// (`Move` 5 frames in) with the Walk.
     pub fn walk(&mut self, from: f32, to: f32, tick: i32) -> i32 {
         self.layout
             .play_ex("MoveMario", tick, from, Some(to), false, 1.0);
         self.layout.stop(&format!("{MARIO_PART}/Stand"));
         if from < 28.0 {
             self.layout.play(&format!("{MARIO_PART}/Jump"), tick);
+            key(&self.layout, Some(MARIO_PART), "jump", &[]);
         }
         let w = if from < 28.0 { 28 } else { 0 };
         self.layout
             .play_loop(&format!("{MARIO_PART}/Walk"), tick + w);
+        let ui = self.layout.ui().clone();
+        let mut walk = ui.smm1_state(&self.layout.name, Some(MARIO_PART), "cState_Walk", &[]);
+        for c in &mut walk {
+            c.delay += w as f32;
+        }
+        ui.push_cues(walk);
         tick + (to - from).ceil() as i32
     }
 }
@@ -229,6 +293,9 @@ pub const TABS: [&str; 4] = [
     "L_Sub_00/L_ListSelectBtnSub_01",
     "L_Sub_00/L_ListSelectBtnSub_08",
 ];
+
+/// The map's start buttons by focus: L_StartBtn_01 = Continue (upper), L_StartBtn_00 = New Game.
+const START_BUTTONS: [&str; 2] = ["L_StartBtn_01", "L_StartBtn_00"];
 
 /// `Nwk_ListTitle_00` (difficulty tabs) over the selected world map in its pre-MapIn state,
 /// with New Game / Continue.
@@ -335,8 +402,7 @@ impl ChallengeMenuScene {
         }
         let (focus, tick) = (self.focus, self.tick);
         let Some(m) = &mut self.maps[d] else { return };
-        // L_StartBtn_01 = Continue (upper), L_StartBtn_00 = New Game
-        for (i, part) in ["L_StartBtn_01", "L_StartBtn_00"].iter().enumerate() {
+        for (i, part) in START_BUTTONS.iter().enumerate() {
             let enabled = open && (i == 1 || cont);
             if !enabled {
                 Self::state(&mut m.layout, tick, part, "Invalid", Some(1.0));
@@ -377,6 +443,7 @@ impl ChallengeMenuScene {
         }
         let d = self.difficulty;
         let can_continue = q.can_continue(d);
+        let was = self.focus;
         if p.has(Buttons::UP) && can_continue {
             self.focus = 0;
             self.update_buttons(q);
@@ -385,7 +452,21 @@ impl ChallengeMenuScene {
             self.focus = 1;
             self.update_buttons(q);
         }
+        if self.focus != was
+            && let Some(m) = &self.maps[d]
+        {
+            // [inf] the cursor moving onto a button plays its touch-select sound
+            key(
+                &m.layout,
+                Some(START_BUTTONS[self.focus]),
+                "TouchSelect",
+                &[],
+            );
+        }
         if p.has(Buttons::BACK) {
+            // [inf] Course World's back button (the select is a Course World page)
+            let ui = &self.ui;
+            ui.push_cues(ui.smm1_key("Nwk_ListFrame_01", Some("L_BackBtn_00"), "Decide", &[]));
             return Some(Smm1Event::Exit);
         }
         if p.has(Buttons::CONFIRM) {
@@ -397,6 +478,7 @@ impl ChallengeMenuScene {
                 for a in ["OutL", "OutR", "InL", "InR"] {
                     m.layout.stop(a);
                 }
+                key(&m.layout, Some(START_BUTTONS[self.focus]), "Decide", &[]);
             }
             return Some(Smm1Event::Start {
                 difficulty: d,
@@ -421,6 +503,8 @@ impl ChallengeMenuScene {
         }
         let right = d > self.difficulty;
         let tick = self.tick;
+        // the tab's Decide: SE_NetworkLeft and the curtain closing and opening
+        key(&self.title, Some(TABS[d]), "Decide", &[]);
         if let Some(mut m) = self.maps[self.difficulty].take() {
             m.layout.play(if right { "OutL" } else { "OutR" }, tick);
             self.leaving = Some((m, tick + 32));
@@ -443,10 +527,7 @@ impl ChallengeMenuScene {
             return Buttons::NONE;
         }
         let d = self.difficulty;
-        let starts = [
-            "L_StartBtn_01/B_Btn_00".to_string(),
-            "L_StartBtn_00/B_Btn_00".to_string(),
-        ];
+        let starts = START_BUTTONS.map(|b| format!("{b}/B_Btn_00"));
         let Some(m) = &mut self.maps[d] else {
             return Buttons::NONE;
         };
@@ -491,9 +572,13 @@ pub enum Entry {
 /// a clear while Mario walks to the next dot), then the intro card `Play_CourseIn100Mario_00`.
 /// Confirm skips ahead (the game skips these with A since 1.20).
 pub struct MapIntroScene {
+    ui: Ui,
     map: Option<WorldMap>,
     title: Option<Layout>,
     card: Layout,
+    /// Lives on the card (its walk sound depends on them).
+    lives: u32,
+    sounds: Pending,
     pub tick: i32,
     card_start: Option<i32>,
     out_at: Option<i32>,
@@ -506,6 +591,11 @@ pub struct MapIntroScene {
 
 /// The card's "Out" animation length: a timer [inf].
 const CARD_HOLD: i32 = 150;
+
+/// MoveKuribo frame at which the Goombas start walking (research/specs/smm1-100mario-screens.md
+/// §1, state 1stDemoMoveKuribo) [obs].
+const KURIBO_WALK: i32 = 60;
+const KURIBO_PART: &str = "L_WorldMapKuribo_00";
 
 impl MapIntroScene {
     /// `cleared`: courses cleared before this one (= index of this course's dot).
@@ -529,9 +619,12 @@ impl MapIntroScene {
             Entry::AfterClear => (WorldMap::new(ui, difficulty), None, None),
         };
         let mut s = Self {
+            ui: ui.clone(),
             map,
             title,
             card,
+            lives: info.lives,
+            sounds: Pending::default(),
             tick: 0,
             card_start,
             out_at: None,
@@ -565,6 +658,18 @@ impl MapIntroScene {
                 l.play("MoveKuribo", 200);
                 let b = 200 + l.length("Telop").max(l.length("MoveKuribo")) as i32;
                 l.play("AnimB", b);
+                // the map's demo states: 1stDemoTelopIn (OpeningWindow), the Goombas'
+                // cState_Walk (their footsteps), 1stDemoAnimB (Peach's "Help!")
+                let name = l.name.clone();
+                let snd = &mut s.sounds;
+                snd.at(
+                    200,
+                    "map",
+                    ui.smm1_state(&name, None, "c1stDemoTelopIn", &[]),
+                );
+                let walk = ui.smm1_state(&name, Some(KURIBO_PART), "cState_Walk", &[]);
+                snd.at(200 + KURIBO_WALK, "map", walk);
+                snd.at(b, "map", ui.smm1_state(&name, None, "c1stDemoAnimB", &[]));
                 s.walk_start = Some(b + 20);
                 s.walk_from = 0.0;
                 s.walk_to = m.stop(0);
@@ -598,11 +703,20 @@ impl MapIntroScene {
         Some(s)
     }
 
+    /// The card's AnimA (the 100 Marios walk in: key `CouseInWalk100`) and AnimB (one steps
+    /// forward: `CouseInJump100`, its walk sound chosen by the lives) [inf: key ↔ animation].
     fn schedule_card(&mut self) {
         let Some(c) = self.card_start else { return };
         self.card.play("AnimA", c);
         let a = self.card.length("AnimA") as i32;
         self.card.play("AnimB", c + a);
+        let (ui, name) = (&self.ui, &self.card.name);
+        let ctx = [Ctx::Int(self.lives as i32)];
+        self.sounds.drop_tag("card");
+        let walk = ui.smm1_key(name, None, "CouseInWalk100", &ctx);
+        self.sounds.at(c, "card", walk);
+        let jump = ui.smm1_key(name, None, "CouseInJump100", &ctx);
+        self.sounds.at(c + a, "card", jump);
     }
 
     fn card_end(&mut self) -> Option<i32> {
@@ -616,6 +730,7 @@ impl MapIntroScene {
             return None;
         }
         let tick = self.tick;
+        self.sounds.fire(&self.ui, tick);
         if let Some(m) = &mut self.map {
             if self.walk_start == Some(tick) {
                 self.walk_end = Some(m.walk(self.walk_from, self.walk_to, tick));
@@ -627,6 +742,9 @@ impl MapIntroScene {
             }
             if self.out_at == Some(tick) && self.card_start.is_none() {
                 m.layout.play("Out", tick);
+                // the closing wipe: the Mario part's cState_Go plays M3_Wipe (80 frames into
+                // his Go, which this map leaves out) [inf]
+                key(&m.layout, Some(MARIO_PART), "Go", &[]);
                 self.card_start = Some(tick + m.layout.ticks("Out", 1));
                 self.schedule_card();
             }
@@ -634,13 +752,21 @@ impl MapIntroScene {
         if input.pressed.has(Buttons::BACK) {
             // leave before the course starts (the run stays saved for Continue)
             self.finished = true;
+            self.sounds.clear();
             return Some(Smm1Event::BackToSelect);
         }
         // a click / tap skips ahead as confirm does [inf]
         if input.pressed.has(Buttons::CONFIRM) || input.click.is_some() {
             if self.card_start.is_some_and(|c| tick >= c) {
                 self.finished = true;
+                self.sounds.clear();
                 return Some(Smm1Event::Play);
+            }
+            // skipping the map's demo: its cDemoCancel state
+            self.sounds.clear();
+            if let Some(m) = &self.map {
+                let ui = &self.ui;
+                ui.push_cues(ui.smm1_state(&m.layout.name, None, "cDemoCancel", &[]));
             }
             self.card_start = Some(tick);
             self.schedule_card();
@@ -648,6 +774,7 @@ impl MapIntroScene {
         }
         if self.card_end().is_some_and(|e| tick >= e) {
             self.finished = true;
+            self.sounds.clear();
             return Some(Smm1Event::Play);
         }
         None
@@ -862,9 +989,15 @@ pub struct RunOverlay {
     closing: Option<(Which, i32)>,
     pub clear_focus: usize,
     clear_last: bool,
+    pause_focus: usize,
+    /// The course's game style (`CourseStatus::style`): the pause menu's In / Out sound.
+    pub style: Option<u32>,
+    sounds: Pending,
 }
 
 pub const PAUSE_PARTS: [&str; 3] = ["L_CloseBtn_00", "L_RetryBtn_00", "L_ExitBtn_00"];
+/// Course clear: Save & Quit, Next.
+const CLEAR_PARTS: [&str; 2] = ["L_ExitBtn_00", "L_NextBtn_00"];
 
 impl RunOverlay {
     pub fn new(ui: &Ui) -> Self {
@@ -880,6 +1013,9 @@ impl RunOverlay {
             closing: None,
             clear_focus: 1,
             clear_last: false,
+            pause_focus: 0,
+            style: None,
+            sounds: Pending::default(),
         }
     }
 
@@ -889,6 +1025,14 @@ impl RunOverlay {
 
     pub fn step(&mut self) {
         self.tick += 1;
+        self.sounds.fire(&self.ui, self.tick);
+    }
+
+    fn style_ctx(&self) -> Vec<Ctx<'static>> {
+        self.style
+            .map(|s| Ctx::Enum(style_name(s)))
+            .into_iter()
+            .collect()
     }
 
     fn set_mode(&mut self, m: RunOverlayMode) {
@@ -942,18 +1086,39 @@ impl RunOverlay {
             self.pause_l = Some(p);
         }
         let t = self.tick;
+        let ctx = self.style_ctx();
         let Some(p) = &mut self.pause_l else { return };
         p.text("T_Mode_00", mode_line);
         p.text("T_CourseName_00", course);
         p.text("T_MiiName_00", maker);
         p.stop("Out");
         p.play("In", t);
+        // In: the style's pause sound (M1_Pose, MW_Pose, WU_SE_SYS_PAUSE_)
+        key(p, None, "In", &ctx);
         self.closing = None;
         self.set_mode(RunOverlayMode::Pause);
-        self.pause_select(selection);
+        self.focus_pause(selection);
     }
 
+    /// The cursor moved to pause button `i` (its touch-select sound [inf]).
     pub fn pause_select(&mut self, i: usize) {
+        if i != self.pause_focus
+            && let (Some(p), Some(part)) = (&self.pause_l, PAUSE_PARTS.get(i))
+        {
+            key(p, Some(part), "TouchSelect", &[]);
+        }
+        self.focus_pause(i);
+    }
+
+    /// Pause button `i` decided (Close: SE_BongoClose; Start Over, Save & Quit: SE_chukettei3).
+    pub fn pause_decide(&mut self, i: usize) {
+        if let (Some(p), Some(part)) = (&self.pause_l, PAUSE_PARTS.get(i)) {
+            key(p, Some(part), "Decide", &[]);
+        }
+    }
+
+    fn focus_pause(&mut self, i: usize) {
+        self.pause_focus = i;
         let t = self.tick;
         let Some(p) = &mut self.pause_l else { return };
         for (k, part) in PAUSE_PARTS.iter().enumerate() {
@@ -971,9 +1136,11 @@ impl RunOverlay {
             return;
         }
         let t = self.tick;
+        let ctx = self.style_ctx();
         let Some(p) = &mut self.pause_l else { return };
         p.stop("In");
         p.play("Out", t);
+        key(p, None, "Out", &ctx);
         self.closing = Some((Which::Pause, t + p.ticks("Out", 1)));
         self.set_mode(RunOverlayMode::None);
     }
@@ -1025,16 +1192,28 @@ impl RunOverlay {
         put(c, "T_Time_00", "T_Time_01", world_record_ms);
         c.play("In", t);
         c.play_loop("Default", t);
+        key(c, None, "In", &[]); // SE_CourseClearFilter
         self.set_mode(RunOverlayMode::Clear);
         self.clear_focus = 1;
-        self.clear_select(1);
+        self.clear_focus_to(1);
     }
 
+    /// The cursor moved to course-clear button `i` (its touch-select sound [inf]).
     pub fn clear_select(&mut self, i: usize) {
+        let was = self.clear_focus;
+        self.clear_focus_to(i);
+        if self.clear_focus != was
+            && let Some(c) = &self.clear_l
+        {
+            key(c, Some(CLEAR_PARTS[self.clear_focus]), "TouchSelect", &[]);
+        }
+    }
+
+    fn clear_focus_to(&mut self, i: usize) {
         self.clear_focus = if self.clear_last { 1 } else { i.min(1) };
         let (f, t) = (self.clear_focus, self.tick);
         let Some(c) = &mut self.clear_l else { return };
-        for (k, part) in ["L_ExitBtn_00", "L_NextBtn_00"].iter().enumerate() {
+        for (k, part) in CLEAR_PARTS.iter().enumerate() {
             let a = format!("{part}/OnOff");
             if k == f {
                 c.play(&a, t);
@@ -1051,14 +1230,11 @@ impl RunOverlay {
     }
 
     pub fn press_clear(&mut self) {
-        let part = if self.clear_focus == 0 {
-            "L_ExitBtn_00"
-        } else {
-            "L_NextBtn_00"
-        };
+        let part = CLEAR_PARTS[self.clear_focus.min(1)];
         let t = self.tick;
         if let Some(c) = &mut self.clear_l {
             c.play(&format!("{part}/Decide"), t);
+            key(c, Some(part), "Decide", &[]); // SE_PlayExit / SE_PlayNext
         }
     }
 
@@ -1083,6 +1259,16 @@ impl RunOverlay {
         s.play("CountDown_00", t);
         s.play("CountDown_01", t + 32);
         s.play("CountDown_02", t + 64);
+        // the countdown's keys, counting down with the three steps [inf]
+        let (ui, name) = (&self.ui, s.name.clone());
+        self.sounds.drop_tag("skip");
+        for (k, step) in ["Countdown3", "Countdown2", "Countdown1"]
+            .iter()
+            .enumerate()
+        {
+            let cues = ui.smm1_key(&name, None, step, &[]);
+            self.sounds.at(t + 32 * k as i32, "skip", cues);
+        }
         self.set_mode(RunOverlayMode::Skip);
     }
 
@@ -1091,6 +1277,7 @@ impl RunOverlay {
             return;
         }
         let t = self.tick;
+        self.sounds.drop_tag("skip");
         let Some(s) = &mut self.skip_l else { return };
         s.play("Out", t);
         self.closing = Some((Which::Skip, t + s.ticks("Out", 1)));
@@ -1100,6 +1287,9 @@ impl RunOverlay {
     /// The hold is complete: play Pass. Returns the tick count it takes.
     pub fn skip_pass(&mut self) -> i32 {
         let t = self.tick;
+        let ui = &self.ui;
+        // the course slides away: Play_SlidePass_00's SlidePass, upwards [inf]
+        ui.push_cues(ui.smm1_key("Play_SlidePass_00", None, "SlidePass", &[Ctx::Enum("cUp")]));
         let Some(s) = &mut self.skip_l else { return 1 };
         s.play("Pass", t);
         s.ticks("Pass", 1)
@@ -1114,6 +1304,7 @@ impl RunOverlay {
         configure_card(c, info);
         c.hold_end("AnimA");
         c.play("AnimB", t);
+        key(c, None, "CouseInJump100", &[Ctx::Int(info.lives as i32)]);
         let b = c.length("AnimB") as i32;
         c.play("OutMiss", t + b);
         self.set_mode(RunOverlayMode::Card);
@@ -1138,6 +1329,7 @@ impl RunOverlay {
 
     pub fn clear_all(&mut self) {
         self.closing = None;
+        self.sounds.clear();
         self.set_mode(RunOverlayMode::None);
     }
 }

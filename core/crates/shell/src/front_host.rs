@@ -29,6 +29,8 @@ pub struct HostData {
     pub library_dirs: Vec<PathBuf>,
     /// The SMM2 UI import (its `courses/` stand in for the title courses).
     pub ui_dir: Option<PathBuf>,
+    /// The SMM1 UI import (its `ui/sound/` plays the SMM1 screens' sounds).
+    pub smm1_dir: Option<PathBuf>,
     /// Course server base URL.
     pub server: Option<String>,
     /// Where Course World's courses come from (`MmkFrontOptions`-like setting, see main).
@@ -118,6 +120,7 @@ impl HostData {
             source,
             library_dirs: Vec::new(),
             ui_dir: None,
+            smm1_dir: None,
             server: None,
             backend: Backend::Library,
             tgr_cache: None,

@@ -22,6 +22,11 @@ SMCraft is back in development (it was archived in October 2026).
   Maker, quick level return after a miss, and SMW's goal wipe in Super Mario World courses.
 - **Network Play groundwork**: signing in to Nextendo Network and matchmaking SMCraft players
   (tested against a local server; live play waits for Nextendo).
+- **SMM1's sounds on the SMM1-look 100 Mario screens**: the difficulty tabs' curtain, the start
+  buttons, the world map's demo (the banner, the Goombas' footsteps, Peach's "Help!", Mario's jump
+  and walk, the wipe), the 100 Marios on the course card, the pause menu's style sound, course
+  clear and the skip countdown, all from your SMM1 dump's own sound data (import SMM1 again:
+  `mmk import-smm1`).
 - Fix: Munchers hurt on a wall sensor's touch, as in SMM2 (a one-tile gap between Munchers is as
   tight as in the game).
 - **The Course Maker**: SMM2's own maker screens (part palette and part window, styles, themes,

@@ -658,3 +658,157 @@ pub fn sample_msbt() -> Vec<u8> {
     msbt_section(&mut w, b"TXT2", &txt.0);
     w.0
 }
+
+/// A tiny SLink2DB v0x15 (big-endian, `crate::xlink_wiiu`): user `UI_L` with an asset `Decide`
+/// (`SE_Ok`), a blend `Walk` over a switch on the local int property `Count` (`>= 50`: `SE_Many`,
+/// `>= 0`: `SE_Few` at volume 0.5), and action `State::cState_Walk` starting `Walk` at frame 5.
+pub fn sample_xlnk_wiiu() -> Vec<u8> {
+    let names: &[&str] = &[
+        "UI_L",               // 0
+        "Decide",             // 1
+        "Walk",               // 2
+        "Walk_00",            // 3
+        "Walk_01",            // 4
+        "SE_Ok",              // 5
+        "SE_Many",            // 6
+        "SE_Few",             // 7
+        "RuntimeAssetName",   // 8
+        "Volume",             // 9
+        "Delay",              // 10
+        "Count",              // 11
+        "cSlot_State",        // 12
+        "State::cState_Walk", // 13
+        "Walk_02",            // 14
+    ];
+    let mut name_tab = Vec::new();
+    let mut off = Vec::new();
+    for n in names {
+        off.push(name_tab.len() as u32);
+        name_tab.extend_from_slice(n.as_bytes());
+        name_tab.push(0);
+    }
+    let mut d = vec![0u8; 0x4C];
+    d[0..4].copy_from_slice(b"XLNK");
+    let push = |d: &mut Vec<u8>, v: u32| d.extend_from_slice(&v.to_be_bytes());
+    // users: one
+    let user_slot = d.len();
+    push(&mut d, 0); // offset, patched
+    push(&mut d, off[0]);
+    // defines: 0 user, 3 asset (RuntimeAssetName str, Volume float, Delay float), 0 trigger
+    push(&mut d, off[8]);
+    push(&mut d, 4);
+    push(&mut d, off[9]);
+    push(&mut d, 1);
+    push(&mut d, off[10]);
+    push(&mut d, 1);
+    // asset params: 3 assets × 3 words
+    let asset_base = d.len();
+    let asset = |d: &mut Vec<u8>, wave: u32, vol: u32, delay: u32| {
+        let at = d.len() - asset_base;
+        push(d, 1 << 24 | wave);
+        push(d, vol);
+        push(d, delay);
+        at as u32
+    };
+    let a_ok = asset(&mut d, off[5], 0, 1);
+    let a_many = asset(&mut d, off[6], 2, 1);
+    let a_few = asset(&mut d, off[7], 2, 1);
+    let asset_words = (d.len() - asset_base) / 4;
+    // value tables: direct [1.0, 0.0, 0.5], no ranges, curves or points
+    push(&mut d, 1.0f32.to_bits());
+    push(&mut d, 0.0f32.to_bits());
+    push(&mut d, 0.5f32.to_bits());
+    let values_end = d.len();
+    // user: header, no user params, 5 calls
+    let user = d.len();
+    let n_call = 5u32;
+    let hdr = [0, n_call, 3, 0, 1, 1, 1, 0, 0, 0, 0];
+    for v in hdr {
+        push(&mut d, v);
+    }
+    for i in 0..n_call as u16 {
+        d.extend_from_slice(&i.to_be_bytes());
+    }
+    while !d.len().is_multiple_of(4) {
+        d.push(0);
+    }
+    let call = |d: &mut Vec<u8>, key: u32, asset: i16, parent: i32, pp: u32, cond: i32| {
+        push(d, key);
+        d.extend_from_slice(&asset.to_be_bytes());
+        d.extend_from_slice(&0u16.to_be_bytes());
+        push(d, 1);
+        push(d, parent as u32);
+        push(d, pp);
+        push(d, cond as u32);
+    };
+    // 0 Decide, 1 Walk (blend of 2), 2 Walk_00 (switch of 3..4), 3 many (>= 50), 4 few
+    call(&mut d, off[1], 0, -1, a_ok, -1);
+    call(&mut d, off[2], -1, -1, 0, -1);
+    call(&mut d, off[3], -1, 1, 12, -1);
+    call(&mut d, off[4], 1, 2, a_many, 0);
+    call(&mut d, off[14], 2, 2, a_few, 16);
+    // container params: blend 2..2, switch 3..4 on "Count" (local)
+    for v in [3, 2, 2, 0, 3, 4, off[11], u32::MAX, 0x0000_0000] {
+        push(&mut d, v);
+    }
+    let triggers = d.len() - user;
+    // trigger table: slot 0..0, action 0..0, trigger → call 1 (Walk) at frame 5
+    push(&mut d, off[12]);
+    push(&mut d, 0);
+    push(&mut d, off[13]);
+    push(&mut d, 0);
+    push(&mut d, 0);
+    for v in [0x1234, 24, 5, i32::MAX as u32, 0, u32::MAX] {
+        push(&mut d, v);
+    }
+    // conditions: int >= 50; int >= 0
+    let cond = d.len();
+    for v in [1, 2, 50, 0xFFFF_0000, 1, 2, 0, 0xFFFF_0000] {
+        push(&mut d, v);
+    }
+    let names_at = d.len();
+    d.extend_from_slice(&name_tab);
+    let put = |d: &mut Vec<u8>, at: usize, v: u32| d[at..at + 4].copy_from_slice(&v.to_be_bytes());
+    put(&mut d, 8, 0x15);
+    put(&mut d, 0x10, 3);
+    put(&mut d, 0x1C, asset_words as u32);
+    put(&mut d, 0x2C, 3);
+    put(&mut d, 0x3C, values_end as u32);
+    put(&mut d, 0x40, 1);
+    put(&mut d, 0x44, cond as u32);
+    put(&mut d, 0x48, names_at as u32);
+    put(&mut d, user_slot, user as u32);
+    put(&mut d, user + 40, triggers as u32);
+    let size = d.len() as u32;
+    put(&mut d, 4, size);
+    d
+}
+
+/// A mono PCM16 BFWAV (version 1.2 layout) holding `samples` at 32 kHz.
+pub fn sample_fwav_pcm(samples: &[i16]) -> Vec<u8> {
+    let mut f = vec![0u8; 0x40];
+    f[..4].copy_from_slice(b"FWAV");
+    f[4..6].copy_from_slice(&[0xFE, 0xFF]);
+    f[6..8].copy_from_slice(&0x40u16.to_be_bytes());
+    f[8..12].copy_from_slice(&0x0001_0200u32.to_be_bytes());
+    f[0x10..0x12].copy_from_slice(&2u16.to_be_bytes());
+    let info = 0x40usize;
+    f[0x14..0x16].copy_from_slice(&0x7000u16.to_be_bytes());
+    f[0x18..0x1C].copy_from_slice(&(info as u32).to_be_bytes());
+    f.resize(info + 0x40, 0);
+    f[info..info + 4].copy_from_slice(b"INFO");
+    f[info + 8] = 1;
+    f[info + 0x0C..info + 0x10].copy_from_slice(&32000u32.to_be_bytes());
+    f[info + 0x14..info + 0x18].copy_from_slice(&(samples.len() as u32).to_be_bytes());
+    let table = info + 0x1C;
+    f[table..table + 4].copy_from_slice(&1u32.to_be_bytes());
+    f[table + 8..table + 12].copy_from_slice(&0xCu32.to_be_bytes());
+    let data = f.len();
+    f[0x20..0x22].copy_from_slice(&0x7001u16.to_be_bytes());
+    f[0x24..0x28].copy_from_slice(&(data as u32).to_be_bytes());
+    f.extend_from_slice(b"DATA\0\0\0\0");
+    for s in samples {
+        f.extend_from_slice(&s.to_be_bytes());
+    }
+    f
+}

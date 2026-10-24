@@ -42,9 +42,10 @@ sway, importer and pack 12, the dev cache already at v12).
   vtable, as the contexts agent did for Block); the Super World map's ledge cliffs (field atlas
   rows 6–7), map ghosts, the goal's AppearGoalPoint / cannon and Passable states, the map music
   (branch `swmap` drew the map with the game's models); ✅ the Cursed Key and Phanto (2026-10-25,
-  research 95-key.md; co-op: Phanto hurts only the player in front [inf]); SMM1 UI sounds for the
-  SMM1-look 100 Mario (agent running: SMM1's `Pack/Sound.pack`, 534 `Sound/Resource/*.bars` of
-  BFWAV, the UI ones per layout and pane).
+  research 95-key.md; co-op: Phanto hurts only the player in front [inf]); ✅ SMM1 UI sounds for
+  the SMM1-look 100 Mario (2026-10-25, branch `smm1snd`, research smm1-sound.md: SMM1's SLink2DB
+  v0x15 decoded; the import's `ui/sound/`, SMM1 importer 4; the screens fire the data's keys and
+  states; left: pitch units, by-ear check against the game).
 - **Waiting on the owner:** the SMCraft app on Nextendo's portal (public client / PKCE, scopes
   `identity game.matchmaking`, redirect `http://127.0.0.1:47614/callback`) and its client ID; the
   game-server access key — (a) read from the player's own dump at import (recommended) or (b) one
@@ -806,7 +807,10 @@ Specs are private (`research/specs/`, gitignored): behaviour in prose/tables, no
   ending text, credits, costume reward); still open: the rescue scene itself (not a layout), the
   run-flow timing between screens
 - 🔄 SMM1 asset import (owner's disc dump): BFLYT/BFLAN layouts ✅, GX2 textures (BFLIM, AddrLib
-  1D/2D untiling) ✅, BFFNT fonts ✅, MSBT text (English) ✅, BFSTM/BARS audio ⬜
+  1D/2D untiling) ✅, BFFNT fonts ✅, MSBT text (English) ✅, UI sounds ✅ (2026-10-25: the banks of
+  `Pack/Sound.pack` — SARCs of AMTA + BFWAV, not BARS — and the UI streams (BFSTM) → `ui/sound/*.wav`,
+  417 sounds; the SLink2DB v0x15 (`mmk_formats::xlink_wiiu`) → `ui/sound/sounds.json`, 968 users;
+  `mmk audio` reads SMM1 waves, banks, `Sound.pack` and streams; importer 4), BGM streams ⬜
 - 🔄 Layout player (panes, text, keyframed animations) — pane tree, parts, pictures, windows,
   text with font fallback, SRT/visibility/alpha/colour/texture-pattern/texture-SRT curves ✅;
   part property overrides: picture material from the enclosing layout (course-dot numbers,
@@ -848,8 +852,14 @@ Specs are private (`research/specs/`, gitignored): behaviour in prose/tables, no
     `Play_SlidePassIconKey_00` (hold − / Tab / controller −, 3 × 32 frames, release cancels)
   - ✅ `Cmn_GameOver_00`; ending: `Play_EndingText_00` over the finished map (Easy: another
     castle; Normal; Expert/Super Expert) then `Nwk_StaffCredit_01/00/03` with the cleared courses
+  - ✅ UI sounds (2026-10-25, `mmk_front::smm1_sound`): the SLink users `UI_<layout>[_<part>]`'s
+    keys and states where the screens play their animations — the tabs' curtain, the start
+    buttons, the map demo (Telop `M3_StarsGather`, the Goombas' footsteps, Peach's "Help!", Mario's
+    jump / walk, the wipe, democancel on a skip), the card's 100 Marios (walk sound by the lives),
+    pause In / Out by the course style, the buttons' cursor and decide sounds, course clear, the
+    skip countdown and SlidePass; key ↔ animation [inf] where the data names only the key
   - 🔄 timings between screens, the rescue scene (not a layout), Mii/flag/Star/comment areas
-    (hidden: no data), per-character GAME OVER letters, UI sounds ⬜
+    (hidden: no data), per-character GAME OVER letters
 - ⬜ SMM1 → SMM2 course import design + documented losses
 - ⬜ App screens drawn with the SMM1 layouts (world map walk, intro card, clear, game over, ending)
 

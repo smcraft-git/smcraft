@@ -1587,3 +1587,21 @@ under `recomp/private|generated|build/`, and text that looks like disassembly or
 - Draw order: backdrop, field, roads, then points / objects higher on the map first, then the
   player; inside a model its own depth. The view frames the whole map's height (192 units on
   720 px) [inf].
+
+## 2026-10-25 — SMM1 screens' sounds: SMM1's own SLink data, matched to our animations
+- SMM1's `.bars` banks are SARCs of AMTA + BFWAV that only name sounds; what plays when is SMM1's
+  SLink2DB (XLNK v0x15, big-endian, read by `mmk_formats::xlink_wiiu`). Its users are the layouts
+  and their parts (`UI_<layout>[_<part>…]`), with keys the code fires (`In`, `Out`, `Decide`,
+  `Countdown1`, `CouseInWalk100`, …) and UI states that start keys at frames
+  (`State::c1stDemoAnimB` → Peach's "Help!", `State::cState_Walk` → footsteps). The import keeps
+  both as `ui/sound/sounds.json` and the waves (and the two UI streams) as WAV.
+- The screens fire a key or a state where they play the animation it goes with: by name where
+  the data names one (states `1stDemoTelopIn` / `1stDemoAnimB` / `cState_Walk` ↔ `Telop` /
+  `AnimB` / `Walk`; keys `In` / `Out` / `Decide`), else [inf]: the card's AnimA / AnimB ↔
+  `CouseInWalk100` / `CouseInJump100`, the castle-exit Jump ↔ one `jump`, the map's Out ↔ `Go`
+  (M3_Wipe), the skip's countdown steps ↔ `Countdown3/2/1`, the cursor moving ↔ `TouchSelect`.
+- Switch conditions are checked against values the screen passes (the course style, the lives),
+  not the property names (Japanese in the data). A missing key falls back to the layout's user,
+  then the scene root's. Sounds due later wait in the scene and are dropped when it skips ahead.
+- `SoundCue::ui` says which import's `ui/sound/` a cue is from (FFI `MmkFrontSound.ui`).
+  Details and the open points: private research/specs/smm1-sound.md.

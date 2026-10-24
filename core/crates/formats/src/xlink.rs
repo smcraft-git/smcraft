@@ -93,7 +93,7 @@ pub enum Compare {
 }
 
 impl Compare {
-    fn from_raw(v: u32) -> Option<Self> {
+    pub(crate) fn from_raw(v: u32) -> Option<Self> {
         Some(match v {
             0 => Self::Eq,
             1 => Self::Gt,

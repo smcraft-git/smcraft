@@ -123,7 +123,8 @@ pub struct MmkFrontItem {
     pub quad_count: usize,
 }
 
-/// A UI sound to start (`MmkFrontSound`, 16 bytes): `<smm2 ui>/ui/sound/<name>.wav`.
+/// A UI sound to start (`MmkFrontSound`, 24 bytes): `<ui import>/ui/sound/<name>.wav` of the
+/// SMM2 import (`ui` 0) or the SMM1 one (`ui` 1).
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
 pub struct MmkFrontSound {
@@ -131,6 +132,8 @@ pub struct MmkFrontSound {
     pub volume: f32,
     /// Frames (60 per second) to wait before it starts.
     pub delay: f32,
+    pub ui: u32,
+    pub _pad: u32,
 }
 
 /// What the app needs to know about the front end now (`MmkFrontStatus`, 16 bytes).
@@ -1479,6 +1482,8 @@ pub unsafe extern "C" fn mmk_front_sounds(
                 name: n.as_ptr(),
                 volume: c.volume,
                 delay: c.delay,
+                ui: (c.ui == UiKind::Smm1) as u32,
+                _pad: 0,
             })
             .collect();
         if let Some(out) = unsafe { out.as_mut() } {
@@ -1792,7 +1797,7 @@ mod tests {
     fn layout_matches_header() {
         assert_eq!(size_of::<MmkFrontInput>(), 24);
         assert_eq!(size_of::<MmkFrontItem>(), 32);
-        assert_eq!(size_of::<MmkFrontSound>(), 16);
+        assert_eq!(size_of::<MmkFrontSound>(), 24);
         assert_eq!(size_of::<MmkFrontStatus>(), 16);
         assert_eq!(size_of::<MmkFrontOptions>(), 72);
         assert_eq!(size_of::<MmkFrontHost>(), 32);

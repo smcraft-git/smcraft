@@ -1,8 +1,11 @@
-//! Switch audio containers: BARS archives of AMTA + BWAV, BWAV waves, DSP-ADPCM.
+//! Switch audio containers: BARS archives of AMTA + BWAV, BWAV waves, DSP-ADPCM; and the Wii U
+//! ones of SMM1: banks (SARCs of AMTA + BFWAV), BFWAV waves, BFSTM streams.
 
 pub mod bars;
+pub mod bars_wiiu;
 pub mod bwav;
 pub mod dsp;
+pub mod fstm;
 pub mod fwav;
 pub mod settings;
 

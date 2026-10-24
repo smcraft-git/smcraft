@@ -306,6 +306,11 @@ impl CoursePlay {
         }
         match self.phase {
             Phase::Playing => {
+                if let Some(o) = &mut self.overlay
+                    && o.style.is_none()
+                {
+                    o.style = Some(cx.host.course_status().style);
+                }
                 if start_pressed {
                     self.pause(run.as_deref());
                     return None;
@@ -343,6 +348,9 @@ impl CoursePlay {
                     self.resume();
                 } else if pressed.has(Buttons::CONFIRM) {
                     let item = items[self.pause_selection.min(n - 1)];
+                    if let Some(o) = &mut self.overlay {
+                        o.pause_decide(self.pause_selection);
+                    }
                     return self.choose(item, cx, run);
                 }
             }

@@ -9,7 +9,7 @@
 //! menu buttons, pause, skip, a click) and a [`Host`] for the course hooks, then draws
 //! [`Front::frame`]: layouts in order (quads + layout size, see [`DrawItem`]), with the course
 //! view where [`DrawItem::Course`] stands, and plays the frame's [`SoundCue`]s (WAVs of the SMM2
-//! UI import's `ui/sound/`).
+//! UI import's `ui/sound/`, or of the SMM1 import's for the SMM1 screens: [`SoundCue::ui`]).
 
 pub mod account;
 pub mod boot;
@@ -35,6 +35,7 @@ pub mod play;
 pub mod screens;
 pub mod search;
 pub mod smm1;
+pub mod smm1_sound;
 pub mod sound;
 pub mod superworld;
 pub mod swmap;
@@ -42,6 +43,8 @@ pub mod swmap;
 pub(crate) mod testing;
 #[cfg(test)]
 mod tests_online;
+#[cfg(test)]
+mod tests_smm1_sound;
 pub mod thumbs;
 pub mod title;
 pub mod world;
@@ -49,6 +52,7 @@ pub mod world;
 pub use host::{CourseEntry, CourseStatus, Host, Icon, Saves, Source, WorldCourse};
 pub use layout::{Layout, Ui, UiKind};
 pub use menu::{Buttons, UiInput};
+pub use smm1_sound::Smm1Sounds;
 pub use sound::{SoundCue, UiSounds};
 
 use challenge::{ChallengeEvent, ChallengeFlow, ChallengeGo, Presentation};
