@@ -54,6 +54,10 @@ const BUBBLE_DRAG: f32 = 0.985;
 const SHELL_HOLD: u16 = 4;
 /// CloudShot: 2.7 (5.94) (0x7101c8c6d8) [obs].
 const CLOUD_SPEED: [f32; 2] = [2.7, 5.94];
+/// A Fish Bone fired in water: 1.5× the Default speed (the fast blaster's 4.5 stays), slowing
+/// by 0.02 a frame (DAT 0x710231909c / 0x7102318e74) [obs v3.0.3 0x71010d8cc0 / 0x71010d8ec0].
+const FISHBONE_WET: f32 = 1.5;
+const FISHBONE_WET_DRAG: f32 = 0.02;
 
 /// Frames until the shrunk-into-the-barrel scale reaches 1: it starts at 16 / height and grows
 /// ×1.05 a frame (vf 0x108 0x71005fd240, Shot exe 0x71005fd9b0) [obs] — 0 for 16 px parts, 15 for
@@ -181,12 +185,35 @@ impl Actor {
                 self.y -= 8.0;
             }
         }
+        // the water variants (the world senses the liquid into `w3` first) [obs v3.0.3]:
+        // FishBone's Shot enter (0x71010d8cc0) when it is in water or the surface is above its
+        // top: 1.5× the speed (not out of the fast blaster), level, no gravity; Hanachan's
+        // (0x7101113640) in its water mode: level, no gravity
+        let wet = !self.chute
+            && match self.kind {
+                Kind::FishBone => {
+                    self.w3.flooded
+                        || self
+                            .w3
+                            .liquid
+                            .is_some_and(|(y, water)| water && self.y + self.height() + 1.0 < y)
+                }
+                Kind::Wiggler => self.wet(),
+                _ => false,
+            };
+        if wet {
+            if self.kind == Kind::FishBone && !fast {
+                self.vx *= FISHBONE_WET;
+            }
+            self.vy = 0.0;
+        }
         self.mode = Mode::Shot {
             x0: self.x,
             y0: self.y,
             t: 0,
             fast,
             landed: false,
+            wet,
         };
     }
 
@@ -219,6 +246,7 @@ impl Actor {
             t: 0,
             fast,
             landed: false,
+            wet: false,
         };
     }
 
@@ -254,6 +282,7 @@ impl Actor {
             t,
             fast,
             landed,
+            wet,
         } = self.mode
         else {
             return;
@@ -265,7 +294,11 @@ impl Actor {
             t,
             fast,
             landed,
+            wet,
         };
+        if wet {
+            return self.shot_wet(level);
+        }
         let grown = !self.big || t >= BIG_GROW;
         let winged = self.wings && !self.chute;
         match preset(self.kind) {
@@ -395,6 +428,25 @@ impl Actor {
         }
     }
 
+    /// The water variants' Shot exes [obs v3.0.3]: a Wiggler in water leaves the Shot at once
+    /// (0x7101113860); a Fish Bone flies level without gravity, slowing by 0.02 a frame to a
+    /// stop, or until a wall stops it while faster than 1 (0x71010d8ec0).
+    fn shot_wet(&mut self, level: &Level) {
+        if self.kind != Kind::FishBone {
+            return self.end_shot();
+        }
+        self.vy = 0.0;
+        self.collide(level);
+        if self.wall && self.vx.abs() > 1.0 {
+            return self.end_shot();
+        }
+        let s = (self.vx.abs() - FISHBONE_WET_DRAG).max(0.0);
+        self.vx = s * self.dir as f32;
+        if s == 0.0 {
+            self.end_shot();
+        }
+    }
+
     /// Winged coins and items: straight, no gravity, until 16 px from the muzzle (Item Shot exe
     /// 0x710082aff0) [obs].
     fn shot_straight(&mut self, level: &Level, x0: f32, until: f32) {
@@ -482,6 +534,34 @@ mod tests {
         for _ in 0..n {
             a.step(lvl, 0.0);
         }
+    }
+
+    #[test]
+    fn in_water_a_fish_bone_glides_level_and_a_wiggler_swims_off() {
+        let lvl = floor();
+        let mut f = Actor::new(Kind::FishBone, 50.0 * TILE, 6.0 * TILE);
+        f.dir = -1;
+        f.w3.flooded = true;
+        f.launch(false);
+        assert_eq!((f.vx, f.vy), (-2.25, 0.0));
+        let y = f.y;
+        let mut n = 0;
+        while matches!(f.mode, Mode::Shot { .. }) && n < 400 {
+            f.step(&lvl, 0.0);
+            n += 1;
+        }
+        assert!((110..=115).contains(&n), "2.25 / 0.02: {n}");
+        assert_eq!(f.y, y);
+        // dry, the Default hop
+        let mut d = Actor::new(Kind::FishBone, 50.0 * TILE, 6.0 * TILE);
+        d.dir = -1;
+        d.launch(true);
+        assert_eq!((d.vx, d.vy), (-4.5, 0.6));
+        let mut w = Actor::new(Kind::Wiggler, 50.0 * TILE, 6.0 * TILE);
+        w.w3.flooded = true;
+        w.launch(false);
+        w.step(&lvl, 0.0);
+        assert_eq!(w.mode, Mode::Normal);
     }
 
     #[test]

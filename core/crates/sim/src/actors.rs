@@ -594,13 +594,15 @@ pub enum Mode {
     },
     /// Coming out of a block (the Block context's Out, actors/block_out.rs): the block centre
     /// `yb`, where the motion started, this frame's gravity, whether it comes out downward
-    /// and a parachute's countdown; terrain collision is off while `timer` runs.
+    /// and a parachute's countdown (a Goomba's hold in water); terrain collision is off while
+    /// `timer` runs. `wet`: it came out in water (the presets' water variants).
     BlockOut {
         yb: f32,
         y0: f32,
         gravity: f32,
         down: bool,
         left: i32,
+        wet: bool,
     },
     /// Coming out of a pipe mouth (the Dokan context, actors/dokan.rs): the slide's target
     /// (tx, ty) and where it is in the context.
@@ -617,6 +619,8 @@ pub enum Mode {
         t: u16,
         fast: bool,
         landed: bool,
+        /// Fired in water (the Fish Bone's and Wiggler's water variants, actors/shot.rs).
+        wet: bool,
     },
     /// Drifting down under a parachute (shared enemy draft §5.2): gravity −0.01875, max fall
     /// −0.4, swinging ±24 px (sin of `phase`, `rate` ±2.5°/frame, doubled while `held` at a

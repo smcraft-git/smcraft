@@ -59,7 +59,11 @@ sway, importer and pack 12, the dev cache already at v12).
   contents rule checked (v3.0.3 0x710138f990, 23-note-block.md: given at bump start on a side hit
   or when the block is in a camera view, else kept for a later bump); ✅ FishBone's Block Out
   (Pukupuku's, 103-fish-bone.md) and the Chain Chomp's pipe exit ending on landing (Wanwan Dokan
-  0x7102915ff0, 61-chain-chomp.md); the Super World map's ledge cliffs (field atlas
+  0x7102915ff0, 61-chain-chomp.md); ✅ water variants (shared enemy draft §5.9): a Goomba out of
+  a block in water holds still, then swims; a Lava Bubble leaps 3.5 (5.0); Fish Bones fired in
+  water glide level and slow to a stop, Wigglers swim off at once; the winged red Koopa's climb
+  eases by 0.06 out of water (the speed bands were its water variant); left: Hanachan's and
+  Togezo's water Block Outs (partial); the Super World map's ledge cliffs (field atlas
   rows 6–7), map ghosts, the goal's AppearGoalPoint / cannon and Passable states, the map music
   (branch `swmap` drew the map with the game's models); ✅ the Cursed Key and Phanto (2026-10-25,
   research 95-key.md; co-op: Phanto hurts only the player in front [inf]); ✅ SMM1 UI sounds for
@@ -112,8 +116,8 @@ sway, importer and pack 12, the dev cache already at v12).
      PataTogezo, DokanOutBig → JamBig → JumpOutBig, Bubble launch, item facing, coin pipes as
      TenCoin bursts; init 0x710105e400), Killer leftovers (Togezo / Met / Karon, empty shells,
      Bubble, MapObj = Item, Hacchin = CloudShot; the red blaster's 320-frame lock-out; Bullet
-     Bill at the muzzle's height), Parachute swing direction and wall hold. Left: liquid
-     variants (Kuribo / Pukupuku / Bubble / FishBone / Hanachan / RedPataPata in water), Block
+     Bill at the muzzle's height), Parachute swing direction and wall hold. Left: ✅ liquid
+     variants (Kuribo / Pukupuku / Bubble / FishBone / Hanachan shots / RedPataPata in water), Block
      sideways (multiplayer) spreads and ✅ note blocks' contents, Gesso3W / Hanachan / FishBone /
      ✅ TeresaSpread / FishBone Block Outs (Hanachan's on land is the Default's; its water mode and
      Gesso3W's not done), KutsuKuribo, ✅ Togezo's ceiling mode, the winged coin's own pipe

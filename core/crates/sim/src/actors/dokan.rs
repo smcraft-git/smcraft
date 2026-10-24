@@ -224,6 +224,7 @@ impl Actor {
             t: 0,
             fast: false,
             landed: false,
+            wet: false,
         };
     }
 

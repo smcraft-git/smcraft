@@ -45,6 +45,10 @@ SMCraft is back in development (it was archived in October 2026).
 - **Boo Buddies in a block** come out as a circle of Boos spreading round the block; a part in a
   block keeps its other form (a lit Bob-omb, a Sledge Bro, a fast Spike Top …).
 - Fix: a note block bounced out of view keeps what it holds for a later bounce, as in SMM2.
+- **Enemies out of blocks and Bill Blasters under water** behave as in SMM2: a Goomba stays put a
+  moment and then swims, a Lava Bubble leaps lower, a Fish Bone glides straight and slows to a
+  stop, a Wiggler swims off at once. A winged red Koopa out of a block now slows its climb as in
+  SMM2 (it used to brake as it does under water).
 - Fix: Munchers hurt on a wall sensor's touch, as in SMM2 (a one-tile gap between Munchers is as
   tight as in the game).
 - **The Course Maker**: SMM2's own maker screens (part palette and part window, styles, themes,

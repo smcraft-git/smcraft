@@ -2944,6 +2944,12 @@ impl World {
                 a.dir = if self.player.x <= bx { -1 } else { 1 };
             }
             a.chute = parachute;
+            // the water variants of the Block Out look at the liquid (actors/block_out.rs)
+            a.w3.flooded = self.liquid.is_some_and(|l| l.spec.full);
+            a.w3.liquid = self
+                .liquid
+                .filter(|l| !l.spec.full)
+                .map(|l| (l.y, l.water()));
             a.block_out(by, r.down, r.note);
             if kind.is_item() {
                 self.events.push(Event::ItemAppear);
@@ -5362,6 +5368,12 @@ impl World {
                     a.chute = f.parachute;
                     a.home_y = my;
                     a.blaster = Some(bi);
+                    // the Shot's water variants look at the liquid (actors/shot.rs)
+                    a.w3.flooded = self.liquid.is_some_and(|l| l.spec.full);
+                    a.w3.liquid = self
+                        .liquid
+                        .filter(|l| !l.spec.full)
+                        .map(|l| (l.y, l.water()));
                     a.launch(b.homing);
                     self.add_actor(a);
                 }

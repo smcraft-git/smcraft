@@ -67,7 +67,7 @@ impl Actor {
         self.w3.flooded || self.w3.liquid.is_some_and(|(y, water)| water && self.y < y)
     }
 
-    fn in_lava(&self) -> bool {
+    pub(super) fn in_lava(&self) -> bool {
         self.w3
             .liquid
             .is_some_and(|(y, water)| !water && self.y < y)
