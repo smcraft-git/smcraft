@@ -1612,7 +1612,8 @@ impl Actor {
                 true
             }
             Kind::BobOmb if self.phase == 3 => {
-                // a walking lit one stops, its fuse still running [inf]
+                // a walking lit one stops, its fuse still running: Down's enter lights the
+                // fuse only when it is unlit [obs v3.0.3 0x7101084420]
                 self.phase = 1;
                 self.vx = 0.0;
                 true
@@ -4115,7 +4116,10 @@ impl Actor {
     /// its top edge, following the camera; waits 120 frames, spins one turn (circling 16 px around
     /// the anchor, 36 frames), then swoops along a half-ellipse 121 px deep to the other corner at
     /// 1.40°/frame. The Moon (alternate) only hangs in its corner. Phases: 0 wait, 1 spin, 2 swoop;
-    /// side in `hops` (0 right, 1 left), angle in `heading`. The first wait is [inf] 120 frames.
+    /// side in `hops` (0 right, 1 left), angle in `heading`. The first wait is 300 frames (init
+    /// writes the Wait timer, +0x600, before Appear; each swoop's end writes 120) [obs v3.0.3
+    /// init 0x71013e4a30, Wait exe 0x71013e6320, Attack exe 0x71013e6840]; the Appear fly-in
+    /// before it is not modelled.
     fn step_sun(&mut self, moon: bool) {
         use crate::world::{VIEW_H, VIEW_W};
         let (cx0, cy0) = self.camera;
@@ -4125,7 +4129,7 @@ impl Actor {
         let top = cy0 + VIEW_H - 64.0;
         let anchor = (centre + side * r, top);
         if self.age <= 1 {
-            self.timer = 120;
+            self.timer = 300;
         }
         if moon {
             self.x = anchor.0;

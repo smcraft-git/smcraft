@@ -4926,13 +4926,14 @@ impl World {
         // animation frames 0-10 of 17 (ClimbAttack exec 0x7100a1c230 → 0x7100a1b290) [obs]; the
         // cape's box is up on every frame of the spin (0x71009f7220 → 0x71009f6710) [obs]; the
         // hammer's on animation frames 11–17 (HammerAttack exec 0x71009c6150) [obs], here the
-        // part of them inside the player's 16-frame swing (`attack` 15 → 0 is frame 0 → 15)
+        // part of them inside the player's 16-frame swing (`attack` 15 → 0 is frame 0 → 15; the
+        // cape's 20-frame spin: 19 → 0)
         let window = match p.form {
             Form::Raccoon => 0..=17,
             Form::Cat => {
                 crate::player::CAT_SCRATCH_FRAMES - 11..=crate::player::CAT_SCRATCH_FRAMES - 1
             }
-            Form::Cape => 1..=15,
+            Form::Cape => 1..=19,
             _ => 1..=4,
         };
         let cat_slide = p.form == Form::Cat && p.cat_slide > 0;
@@ -4948,7 +4949,7 @@ impl World {
         // 15–17 (TailAttack exec 0x7100a034e0) [obs]
         let frame = 17 - p.attack;
         // cape / hammer animation frame (0 on the swing's first frame)
-        let swing = 15 - p.attack;
+        let swing = if p.form == Form::Cape { 19 } else { 15 } - p.attack;
         let side = match p.form {
             Form::Raccoon if !(4..=14).contains(&frame) => -p.facing,
             // the cape box flips sides every 2 animation frames, starting behind
@@ -9873,13 +9874,13 @@ mod tests {
         w.player.form = Form::Cape;
         w.add_actor(Actor::new(Kind::Goomba, 88.0, 32.0));
         w.add_actor(Actor::new(Kind::Goomba, 112.0, 32.0));
-        w.player.attack = 15; // animation frame 0: behind
+        w.player.attack = 19; // animation frame 0 of the 20-frame spin: behind
         w.tail_attack();
         assert_eq!(
             w.actors.iter().map(|a| a.alive()).collect::<Vec<_>>(),
             [false, true]
         );
-        w.player.attack = 13; // frame 2: in front
+        w.player.attack = 17; // frame 2: in front
         w.tail_attack();
         assert!(!w.actors[1].alive());
     }
@@ -10005,7 +10006,10 @@ mod tests {
         run(&mut w, 0, 2);
         let x0 = w.actors[0].x - w.camera_x;
         assert!((x0 - (VIEW_W - 48.0)).abs() < 1.0, "right corner: {x0}");
-        run(&mut w, 0, 120 + 36 + 130);
+        // the first wait is 300 frames: still in its corner just before it ends
+        run(&mut w, 0, 296);
+        assert_eq!(w.actors[0].phase, 0);
+        run(&mut w, 0, 4 + 36 + 130);
         let x1 = w.actors[0].x - w.camera_x;
         assert!((x1 - 48.0).abs() < 2.0, "left corner: {x1}");
     }

@@ -1365,7 +1365,9 @@ impl Player {
             self.throw = true;
         }
         // raccoon tail swing / cape spin / cat scratch on Run (player-physics.md §5.4); the
-        // cape spin and the hammer last 16 frames [inf]
+        // cape spin (MantAttack) runs its 20-frame timer (+0x28c0, the state returns to Walk at
+        // 0) [obs v3.0.3 0x71015d0360]; the hammer swing lasts 16 frames [inf: its swing path
+        // table holds 16 points, v1.0.0 0x71009c5330; the state's own end not read]
         if run
             && !self.prev_run
             && matches!(
@@ -1384,6 +1386,7 @@ impl Player {
             self.attack = match self.form {
                 Form::Raccoon => 18,
                 Form::Cat => CAT_SCRATCH_FRAMES,
+                Form::Cape => 20,
                 _ => 16,
             };
             // (in the air too the scratch is ClimbAttackAir, state 32, with the normal air
