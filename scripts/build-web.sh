@@ -10,6 +10,6 @@ out=${1:-$root/core/target/web}
 cd "$root/core"
 cargo build --release -p mmk-shell --target wasm32-unknown-unknown
 wasm-bindgen --target web --no-typescript --out-dir "$out" \
-  target/wasm32-unknown-unknown/release/mmk-play.wasm
+  "${CARGO_TARGET_DIR:-target}/wasm32-unknown-unknown/release/mmk-play.wasm"
 cp crates/shell/web/*.html crates/shell/web/*.js "$out/"
 echo "web build: $out"

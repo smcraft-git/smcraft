@@ -2,6 +2,32 @@
 
 Newest first. Each entry: what was decided, why, and what would change it.
 
+## 2026-10-25 — The web build: Course World on TGRCode from the page, the maker's host, models and saves
+**Decision:** the browser's front-end host (`web_front`) does what the native one does, through
+the page:
+- **Course World on TGRCode**: TGRCode's API sends `Access-Control-Allow-Origin: *`, so the page
+  fetches it (`mmkNet.get`). The client is `mmk_online::tgrcode` itself, without its HTTP
+  (`mmk-online` feature `http`, on by default; off for wasm32): its `Fetch` answers from what the
+  page fetched, and a call is run again until nothing it asks for is missing (`web_tgr::Tgr::run`).
+  One request at a time, 2 s apart as natively, thumbnails behind everything else; a 429 has no
+  CORS header, so a failed fetch counts as busy and is asked again. `library` stays a setting.
+- **The Course Maker**: the native host's hooks (still view, camera, test play, part icons,
+  maker music and edit sounds, Coursebot, course data). A part icon whose textures are still on
+  their way is asked for again (`Host::art_loading`), not kept as missing.
+- **Data the engine read with `std::fs`** (nothing in a browser): the tables and 3D environments
+  are handed to the cache in memory (`Cache::add_file`, 1.3 MB); effects are parsed once per
+  data; NSMBU / 3D World models through `mmk_host::mesh::HandedFiles` (asked for, read, provided,
+  as the textures; a model not there yet isn't remembered as missing; the planner plans again when
+  files arrive). The page now copies `meshes/` and `anims/` too.
+- **The player's files** (Coursebot slots, Course World downloads) in OPFS `mmk-save/`, apart
+  from the game data (removing the game data keeps them).
+**Why:** the browser check of 2026-10-25 found Course World empty (the library list leaves out
+built-in courses), the maker blank, every course's backdrop black (the SceneDB table was read
+from disk) and 3D World drawn with 2D sprites. Reusing the native client and hooks keeps one
+behaviour; a run-again loop keeps the synchronous client unchanged.
+**Would change:** if TGRCode drops CORS (then the course server, or a relay); if mobile memory
+calls for dropping the models' bytes once parsed.
+
 ## 2026-10-22 — The Mods page: SMM2's settings window, from a menu button on the title
 **Decision:** the mod options are one page of the front end (`mmk_front::mods_page`), so every
 platform has it, including the ones with no settings UI of their own (desktop `mmk-play`, the web,

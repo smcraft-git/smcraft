@@ -17,6 +17,11 @@ SMCraft is back in development (it was archived in October 2026).
 - **Course World over TGRCode**: the course lists, course and maker pages with thumbnails,
   comments, search by course or maker ID, Play and Download. Endless and 100 Mario draw from it
   too. Your own course server stays a choice.
+- **The web version, checked in a real browser**: importing your NSPs and `prod.keys` in the page
+  now keeps every texture (it kept only a few hundred), courses show their backgrounds (they were
+  black), 3D World draws its models, Course World lists TGRCode's courses from the browser, and
+  the Course Maker works (part icons, test play, its music and sounds, the Coursebot, whose
+  courses stay in the browser between visits).
 - **Android**: SMCraft runs as an APK (arm64, Android 9+, Vulkan), with on-screen controls.
 - **Mods from the SMM2 Recomp**: SMM1's Muncher hit box, SMM1's overlapping pipes in the Course
   Maker, quick level return after a miss, and SMW's goal wipe in Super Mario World courses.

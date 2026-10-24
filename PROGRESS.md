@@ -201,7 +201,9 @@ sway, importer and pack 12, the dev cache already at v12).
   with no dump anywhere (an app-level run) ✅ (the second launch above)
 - 🔄 Setup screen on every platform (pick the NSP, the update NSP, `prod.keys`; progress; done):
   macOS app ✅ (NSP files or extracted folders, `mmk_import_nsp`); web (`mmk-play` in a browser: a
-  folder with the NSPs and `prod.keys`) ✅ builds, not yet tried in a browser; iOS / iPadOS 🔄
+  folder with the NSPs and `prod.keys`) ✅ run end to end in headless Edge 2026-10-25 (36 s, the full
+  pack and the menus; it had lost all but the effects' 276 textures: the worker couldn't read back
+  `textures/index.json`); iOS / iPadOS 🔄
   (the NSPs and prod.keys picked in Files or dropped into the app's `import` folder, `mmk_import_nsp`;
   builds for the Simulator, not yet run end to end on a device; a cache made on a Mac still works); native `mmk-play` (Windows / Linux / macOS) and Android
   ✅ through a drop folder: the NSPs and `prod.keys` copied into `<data folder>/import/` are
@@ -1128,13 +1130,25 @@ a portable Rust shell runs the game everywhere, the Swift app stays as the Apple
   - ✅ SMM2 menus (`mmk-front`) when the SMM2 UI import is in storage: copied from an
     `mmk import-smm2-ui` folder, or made by the in-page dump import (identical to the desktop
     import, all 4528 files); the UI cache reads JSON up front (13 MB, ~0.4 s) and textures on
-    request; opening, title over its demo courses, Play menu, Course World (the library: built-in
-    courses + opened files), Story Mode, 100 Mario, course card / HUD / pause / give up; UI sounds,
-    course music, keys, mouse clicks; saves in `localStorage`. No server listing in the browser
-  - checked in headless Edge (CDP: import, courses, keys, a scripted Gamepad API pad, non-silent
-    WebAudio, the menus) and headless Firefox (WebDriver BiDi; before the menus). Open: Safari
-    (OPFS `createWritable`), a real controller in a browser, touch controls, mobile memory
-    limits, the course server from the browser (HTTP), Firefox with the menus
+    request; opening, title over its demo courses, Play menu, Story Mode, 100 Mario, course card /
+    HUD / pause / give up; UI sounds, course music, keys, mouse clicks; saves in `localStorage`
+  - ✅ (2026-10-25) Course World on TGRCode from the page (CORS `*`; the native client, its
+    requests fetched by the page, thumbnails last, 429s waited out): lists, thumbnails, course
+    page, Play, Download (kept in OPFS `mmk-save/`); the library stays a Mods setting
+  - ✅ (2026-10-25) the Course Maker: still view, part icons, test play, maker music and edit
+    sounds, the Coursebot (slots kept in OPFS `mmk-save/`, still there after a reload); the
+    maker screen is pixel-identical to the native shell's capture (WebGPU, linear layout colours)
+  - ✅ (2026-10-25) the engine's data that it read from disk: tables (backdrops were black on every
+    course), 3D environments, particle effects, NSMBU / 3D World models (read as asked for; 3D
+    World was drawn with 2D sprites); the page now copies `meshes/` and `anims/` too
+  - checked 2026-10-25 by `research/tools/web-check/smoke.mjs` in headless Edge 156 (WebGPU on
+    Metal; Playwright's chrome-headless-shell loses its WebGPU device on any canvas): load 1.3 s,
+    title / maker / 3D World course at 60 fps (p95 16.8 ms), keys, clicks, first-key sound,
+    Coursebot persistence, TGRCode; `import-check.mjs`: the NSP import. Earlier: headless Firefox
+    (WebDriver BiDi; before the menus), a scripted Gamepad API pad, non-silent WebAudio. Open:
+    Safari (OPFS `createWritable`), Firefox with the menus, a real controller in a browser, touch
+    controls, mobile memory limits (models' bytes are kept once read), the course server from the
+    browser (HTTP), the Endless / 100 Mario pool of TGRCode courses (library only), local co-op
 - 🔄 iOS/iPadOS: the same Swift package cross-compiled (`swift build --triple`, core linked from
   `core/target/aarch64-apple-ios{,-sim}/release`), bundled by `scripts/make-ios-app.sh`
   (DECISIONS.md "iOS packaging"); `scripts/check.sh --ios` builds it for the Simulator. AppKit
@@ -1162,8 +1176,9 @@ a portable Rust shell runs the game everywhere, the Swift app stays as the Apple
   course-settings 0.11 % of pixels (the selection frame's Loop phase), smm1-walk 0.35 % (the
   random course name on the map's balloon); real-time navigation (hub → list → course page →
   play) and the `MMK_SCREENSHOT` smoke test run; `scripts/check.sh --ios` builds. ✅ the web build runs
-  it too (UI cache over an in-memory file source filled from OPFS, textures on request). Open:
-  Settings screens, ghosts in the Apple app, a server listing in the browser (HTTP fetch)
+  it too (UI cache over an in-memory file source filled from OPFS, textures on request; Course
+  World on TGRCode and the Course Maker since 2026-10-25). Open: Settings screens, ghosts in the
+  Apple app, a course server listing in the browser (HTTP fetch)
 
 ### Phase 9 — SMM2 single-player like-for-like 🔄 (owner request 2026-10-18)
 - 🔄 SMM2 layouts through the same layout player (private map: `research/specs/smm2-layouts.md`):

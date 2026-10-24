@@ -5,12 +5,18 @@
 //! the Course World backend the hosts use (TGRCode, our server or the library); [`nextendo`]:
 //! signing in to Nextendo Network (Network Play). Never talks to Nintendo's network itself.
 
+#[cfg(feature = "http")]
 pub mod nextendo;
 pub mod tgrcode;
+#[cfg(feature = "http")]
 pub mod world;
 
+#[cfg(feature = "http")]
 use mmk_modes::Rng;
-use mmk_modes::endless::{Difficulty, Finished, HistoryEntry, Report, Ruleset, RunStatus};
+use mmk_modes::endless::{Difficulty, RunStatus};
+#[cfg(feature = "http")]
+use mmk_modes::endless::{Finished, HistoryEntry, Report, Ruleset};
+#[cfg(feature = "http")]
 use mmk_modes::pool::{CourseRef, CourseSource};
 use serde_json::Value;
 
@@ -42,6 +48,7 @@ pub struct Listing {
 }
 
 impl Listing {
+    #[cfg(feature = "http")]
     fn from_json(v: &Value) -> Option<Self> {
         let s = |k: &str| v[k].as_str().unwrap_or_default().to_string();
         let n = |k: &str| v[k].as_u64().unwrap_or(0);
@@ -77,6 +84,7 @@ pub struct Account {
 }
 
 impl Account {
+    #[cfg(feature = "http")]
     fn from_json(v: &Value) -> Option<Self> {
         Some(Self {
             id: v["id"].as_u64()? as u32,
@@ -135,6 +143,7 @@ pub struct EndlessAnswer {
     pub best: u64,
 }
 
+#[cfg(feature = "http")]
 #[derive(Clone, Debug)]
 pub struct Client {
     /// e.g. "http://localhost:8640"
@@ -145,6 +154,7 @@ pub struct Client {
 
 pub type Result<T> = std::result::Result<T, String>;
 
+#[cfg(feature = "http")]
 impl Client {
     pub fn new(base: impl Into<String>) -> Self {
         Self {
@@ -526,6 +536,7 @@ pub fn listing_json(l: &Listing) -> Value {
     })
 }
 
+#[cfg(feature = "http")]
 fn account_json(a: &Account) -> Value {
     serde_json::json!({ "id": a.id, "name": a.name, "maker_id": a.maker_id })
 }
@@ -550,6 +561,7 @@ fn account_json(a: &Account) -> Value {
 /// | `delete` | `{code}` | `{}` |
 ///
 /// Replays (bytes) go through [`Client::submit_replay`] / [`Client::record_replay`].
+#[cfg(feature = "http")]
 pub fn call(server: &str, token: Option<&str>, action: &str, args: &Value) -> Result<Value> {
     use serde_json::json;
     let c = Client::new(server).with_token(token.filter(|t| !t.is_empty()).map(str::to_string));
@@ -619,6 +631,7 @@ pub fn call(server: &str, token: Option<&str>, action: &str, args: &Value) -> Re
     })
 }
 
+#[cfg(feature = "http")]
 fn encode(s: &str) -> String {
     s.bytes()
         .map(|b| match b {
@@ -631,12 +644,14 @@ fn encode(s: &str) -> String {
 
 /// 100 Mario courses from a server. `CourseRef::id` is the course code; the app downloads it
 /// before playing. Network errors give an empty search (the run reports "not enough courses").
+#[cfg(feature = "http")]
 pub struct RemoteSource {
     pub client: Client,
     /// Only courses in styles the engine plays.
     pub styles: Vec<String>,
 }
 
+#[cfg(feature = "http")]
 impl CourseSource for RemoteSource {
     fn search(
         &mut self,
@@ -658,6 +673,30 @@ impl CourseSource for RemoteSource {
             })
             .collect()
     }
+}
+
+/// Standard base64 (padding optional); None for anything else.
+pub fn base64(s: &str) -> Option<Vec<u8>> {
+    let mut out = Vec::with_capacity(s.len() * 3 / 4);
+    let (mut acc, mut bits) = (0u32, 0u32);
+    for c in s.bytes().filter(|c| !c.is_ascii_whitespace()) {
+        let v = match c {
+            b'A'..=b'Z' => c - b'A',
+            b'a'..=b'z' => c - b'a' + 26,
+            b'0'..=b'9' => c - b'0' + 52,
+            b'+' => 62,
+            b'/' => 63,
+            b'=' => break,
+            _ => return None,
+        };
+        acc = (acc << 6) | v as u32;
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            out.push((acc >> bits) as u8);
+        }
+    }
+    Some(out)
 }
 
 #[cfg(test)]

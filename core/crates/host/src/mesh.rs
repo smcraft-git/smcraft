@@ -8,13 +8,14 @@
 //! stem picks an animation (`walk` → `walk` / `Walk`, synonyms in `ANIM_SYNONYMS`), and the
 //! animation time is the world tick [inf: the sim keeps no per-actor animation clock].
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::ffi::{CString, c_char};
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 
 use mmk_assets::Cache;
 use mmk_assets::mesh::{
-    AnimInfo, Binding, MeshFile, Pose, SkelAnim, anim_file_name, find_ci, read_anim_index,
+    AnimInfo, Binding, MeshFile, Pose, SkelAnim, anim_file_name, anim_index_from_json, find_ci,
 };
 use mmk_formats::bfres::{Affine, IDENTITY, mul};
 use mmk_sim::Sprite;
@@ -766,10 +767,55 @@ pub struct LoadedMesh {
     pub default_visible: Vec<Vec<bool>>,
 }
 
+/// Mesh and animation files handed over by a host that reads them asynchronously (a browser
+/// reads its storage so): a store made with [`MeshStore::handed`] asks for its files here and
+/// finds them once the host provided them. Share one between the stores of one cache.
+#[derive(Default)]
+pub struct HandedFiles {
+    /// Provided files by path relative to the cache root (None: not in the cache).
+    got: Mutex<HashMap<String, Option<Arc<Vec<u8>>>>>,
+    /// Asked for since the last [`HandedFiles::take_requests`], and ever asked for.
+    wanted: Mutex<Vec<String>>,
+    asked: Mutex<HashSet<String>>,
+}
+
+impl HandedFiles {
+    /// File `rel`: Ok(its bytes, or None when the cache has none); Err while the host hasn't
+    /// provided it (it is asked for).
+    fn get(&self, rel: &str) -> Result<Option<Arc<Vec<u8>>>, ()> {
+        if let Some(b) = self.got.lock().map_err(|_| ())?.get(rel) {
+            return Ok(b.clone());
+        }
+        if self.asked.lock().map_err(|_| ())?.insert(rel.to_string())
+            && let Ok(mut w) = self.wanted.lock()
+        {
+            w.push(rel.to_string());
+        }
+        Err(())
+    }
+
+    /// The files asked for since the last call (paths relative to the cache root).
+    pub fn take_requests(&self) -> Vec<String> {
+        self.wanted
+            .lock()
+            .map(|mut w| std::mem::take(&mut *w))
+            .unwrap_or_default()
+    }
+
+    /// Hand over file `rel` (None: the cache has no such file).
+    pub fn provide(&self, rel: &str, bytes: Option<Vec<u8>>) {
+        if let Ok(mut g) = self.got.lock() {
+            g.insert(rel.to_string(), bytes.map(Arc::new));
+        }
+    }
+}
+
 /// Lazily loaded meshes and animations of one asset cache.
 #[derive(Default)]
 pub struct MeshStore {
     pub root: PathBuf,
+    /// Files handed over by the host instead of read from `root` ([`MeshStore::handed`]).
+    handed: Option<Arc<HandedFiles>>,
     /// Never removed: the vertex / index / name buffers handed to C stay where they are.
     pub meshes: Vec<LoadedMesh>,
     pub by_name: HashMap<String, i32>,
@@ -816,9 +862,28 @@ impl MeshStore {
         }
     }
 
+    /// A store whose files the host hands over as they are asked for ([`HandedFiles`]); a
+    /// model or animation not provided yet is missing until it is (not remembered as missing).
+    pub fn handed(root: PathBuf, files: Arc<HandedFiles>) -> Self {
+        Self {
+            root,
+            handed: Some(files),
+            ..Default::default()
+        }
+    }
+
     /// Whether the cache has a mesh stage at all.
     pub fn available(&self) -> bool {
-        !self.root.as_os_str().is_empty() && self.root.join("meshes").is_dir()
+        self.handed.is_some()
+            || (!self.root.as_os_str().is_empty() && self.root.join("meshes").is_dir())
+    }
+
+    /// File `rel` of the cache (None: there is none); Err while a host still reads it.
+    fn file(&self, rel: &str) -> Result<Option<Vec<u8>>, ()> {
+        match &self.handed {
+            Some(h) => h.get(rel).map(|b| b.map(|b| b.as_ref().clone())),
+            None => Ok(std::fs::read(self.root.join(rel)).ok()),
+        }
     }
 
     /// Mesh id of a model file, loading it on first use; −1 if the cache has none.
@@ -826,11 +891,10 @@ impl MeshStore {
         if let Some(&id) = self.by_name.get(name) {
             return id;
         }
-        let path = self.root.join(format!("meshes/{name}.mmesh"));
-        let id = match std::fs::read(&path)
-            .ok()
-            .and_then(|d| MeshFile::parse(&d).ok())
-        {
+        let Ok(bytes) = self.file(&format!("meshes/{name}.mmesh")) else {
+            return -1;
+        };
+        let id = match bytes.and_then(|d| MeshFile::parse(&d).ok()) {
             Some(file) if !self.root.as_os_str().is_empty() => {
                 let names = file
                     .models
@@ -859,8 +923,13 @@ impl MeshStore {
     /// Animations listed for an animation folder (`anims/<folder>/index.json`).
     pub fn index(&mut self, folder: &str) -> &[AnimInfo] {
         if !self.anim_index.contains_key(folder) {
-            let path = self.root.join(format!("anims/{folder}/index.json"));
-            let list = read_anim_index(&path);
+            let list = match self.file(&format!("anims/{folder}/index.json")) {
+                Ok(Some(b)) => serde_json::from_slice(&b)
+                    .map(|v| anim_index_from_json(&v))
+                    .unwrap_or_default(),
+                Ok(None) => Vec::new(),
+                Err(()) => return &[],
+            };
             self.anim_index.insert(folder.to_string(), list);
         }
         &self.anim_index[folder]
@@ -872,13 +941,10 @@ impl MeshStore {
         if let Some(&id) = self.anim_ids.get(&key) {
             return id;
         }
-        let path = self
-            .root
-            .join(format!("anims/{folder}/{}.mskel", anim_file_name(name)));
-        let id = match std::fs::read(&path)
-            .ok()
-            .and_then(|d| SkelAnim::parse(&d).ok())
-        {
+        let Ok(bytes) = self.file(&format!("anims/{folder}/{}.mskel", anim_file_name(name))) else {
+            return -1;
+        };
+        let id = match bytes.and_then(|d| SkelAnim::parse(&d).ok()) {
             Some(a) => {
                 self.anims.push(a);
                 self.anim_folder.push(folder.to_string());
@@ -1641,7 +1707,7 @@ impl MeshPlanner {
                 .filter(|r| store.find(&r.dv_model) >= 0)
                 .or_else(|| crate::scene3d::scene_row(cache, &l.style, l.theme, l.night, false));
             let env = |name: Option<&str>| {
-                name.and_then(|n| crate::scene3d::load_env(&cache.root, n))
+                name.and_then(|n| crate::scene3d::load_env(cache, n))
                     .unwrap_or_default()
             };
             // the background model's sky material: its constant colours colour the sky
@@ -1795,6 +1861,28 @@ impl MeshPlanner {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A handed-over store asks for a file once, isn't missing while it is on its way, and
+    /// remembers a file the host says isn't there.
+    #[test]
+    fn handed_files_are_asked_for_then_found() {
+        let files = Arc::new(HandedFiles::default());
+        let mut store = MeshStore::handed(PathBuf::from("browser"), files.clone());
+        assert!(store.available());
+        assert_eq!(store.find("M3_Kuribo"), -1);
+        assert_eq!(store.find("M3_Kuribo"), -1);
+        assert_eq!(files.take_requests(), ["meshes/M3_Kuribo.mmesh"]);
+        assert!(files.take_requests().is_empty());
+        assert!(!store.by_name.contains_key("M3_Kuribo"));
+        assert!(store.index("M3_Kuribo").is_empty());
+        assert_eq!(files.take_requests(), ["anims/M3_Kuribo/index.json"]);
+        files.provide("meshes/M3_Kuribo.mmesh", None);
+        assert_eq!(store.find("M3_Kuribo"), -1);
+        assert_eq!(store.by_name.get("M3_Kuribo"), Some(&-1));
+        files.provide("anims/M3_Kuribo/index.json", Some(b"[]".to_vec()));
+        assert!(store.index("M3_Kuribo").is_empty());
+        assert!(store.anim_index.contains_key("M3_Kuribo"));
+    }
 
     #[test]
     fn mini_mario_retargets_marios_animations_but_not_its_own() {

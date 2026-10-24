@@ -6,12 +6,20 @@ version.workspace = true
 license.workspace = true
 publish.workspace = true
 
+[features]
+default = ["http"]
+# the HTTP clients (the course server's, TGRCode's) and Nextendo; without it (the web build,
+# which fetches through the page) TGRCode's client takes its answers from a `tgrcode::Fetch`
+http = ["dep:mmk-nex", "dep:ureq"]
+
 [dependencies]
 mmk-formats = { path = "../formats" }
 mmk-modes = { path = "../modes" }
-mmk-nex = { path = "../nex" }
+mmk-nex = { path = "../nex", optional = true }
 serde_json.workspace = true
-ureq = "3.4.2"
+ureq = { version = "3.4.2", optional = true }
+# std's clocks panic in a browser (wasm32); the same types there
+web-time = "1.1.0"
 
 [dev-dependencies]
 mmk-server = { path = "../server" }

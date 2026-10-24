@@ -17,8 +17,11 @@ import init, * as mmk from "./mmk-play.js";
 
 const ROOT = "mmk-data";
 const UI_ROOT = "mmk-ui";
-// written by `mmk import` but not used by the portable shell yet (3D models): not copied
-const SKIP = ["meshes/", "anims/"];
+// the player's own files (the Coursebot's courses, Course World downloads): never served, and
+// kept when the game data is removed
+const SAVE_ROOT = "mmk-save";
+// written by `mmk import` but never read by the game: not copied
+const SKIP = [];
 const WRITERS = 16;
 
 const $ = (id) => document.getElementById(id);
@@ -111,6 +114,23 @@ async function writeFile(path, data, root = ROOT) {
   }
 }
 
+async function removeFile(path, root) {
+  const [dir, name] = split(path);
+  try {
+    await (await dirAt(dir, false, root)).removeEntry(name);
+  } catch (e) {
+    if (e.name !== "NotFoundError") throw e;
+  }
+}
+
+// The player's files are written one at a time (two writers on one file fail).
+let saving = Promise.resolve();
+function save(job) {
+  const run = saving.then(job);
+  saving = run.catch(() => {});
+  return run;
+}
+
 async function removeData(root = ROOT) {
   dirs = new Map();
   try {
@@ -187,6 +207,18 @@ globalThis.mmkStorage = {
   readUi: (p) => readFile(p, UI_ROOT),
   readAllUi: (paths) => readAll(paths, UI_ROOT),
   walkUi: uiFiles,
+  readSave: (p) => readFile(p, SAVE_ROOT),
+  listSave: (p) => listDir(p, SAVE_ROOT),
+  writeSave: (p, bytes) => save(() => writeFile(p, bytes, SAVE_ROOT)),
+  removeSave: (p) => save(() => removeFile(p, SAVE_ROOT)),
+};
+
+// Course World on TGRCode: its API answers any page (CORS), so the game fetches it from here.
+globalThis.mmkNet = {
+  get: async (url) => {
+    const r = await fetch(url);
+    return { status: r.status, bytes: new Uint8Array(await r.arrayBuffer()) };
+  },
 };
 
 // ---- import ----------------------------------------------------------------------------------
@@ -395,7 +427,7 @@ async function runImport(message) {
     await writeFile(UI_INDEX, new TextEncoder().encode(list.join("\n")), UI_ROOT);
     await writeFile("manifest.json", uiManifest, UI_ROOT);
   }
-  console.log("imported in the browser:", summary);
+  console.log("imported in the browser:", JSON.stringify(summary));
 }
 
 async function importFolder(fileList) {

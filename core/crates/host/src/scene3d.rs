@@ -17,8 +17,6 @@
 //!   view bottom / 1080. The offset is in units of the frustum size (sead perspective matrix,
 //!   FUN_71014e1560).
 
-use std::path::Path;
-
 use mmk_assets::Cache;
 use serde_json::Value;
 
@@ -195,8 +193,8 @@ fn normalised(v: [f32; 3]) -> [f32; 3] {
 }
 
 /// `env/<name>.json` of the cache.
-pub fn load_env(root: &Path, name: &str) -> Option<Env> {
-    let text = std::fs::read(root.join(format!("env/{name}.json"))).ok()?;
+pub fn load_env(cache: &Cache, name: &str) -> Option<Env> {
+    let text = cache.read_file(&format!("env/{name}.json"))?;
     let j: Value = serde_json::from_slice(&text).ok()?;
     let list = |k: &str| {
         j.get(k)

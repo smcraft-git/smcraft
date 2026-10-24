@@ -24,7 +24,7 @@ use mmk_sim::world::{Event, GoalPhase};
 use crate::costume_sound::CostumeSounds;
 pub use crate::costume_sound::{COSTUME_EVENTS, CostumeReader};
 use crate::sound::Sounds;
-pub use crate::sound::{FileReader, Library, course_files, style_files};
+pub use crate::sound::{FileReader, Library, course_files, edit_files, style_files};
 
 /// Hurry-up threshold (course timer frames), as in the sim.
 const HURRY_FRAMES: i32 = 100 * 60;

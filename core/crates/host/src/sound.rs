@@ -2316,6 +2316,32 @@ pub fn style_files(db: &SoundDb, style: &str, theme: u8) -> Vec<String> {
     files_for(db, style, theme, &[false, true], &[])
 }
 
+/// The Course Maker's files in `style`: the edit music of `theme` and every part's edit sounds
+/// (SLink users `<style>_Edit<Part>`).
+pub fn edit_files(db: &SoundDb, style: &str, theme: u8) -> Vec<String> {
+    let mut waves = Vec::new();
+    db.waves_of(
+        &format!("CourseSceneBGM_{style}"),
+        &edit_bgm_key(theme),
+        &mut waves,
+    );
+    let prefix = format!("{style}_Edit");
+    for (name, u) in &db.users {
+        if name.starts_with(&prefix) {
+            for key in u.keys() {
+                db.waves_of(name, key, &mut waves);
+            }
+        }
+    }
+    let mut files: Vec<String> = waves
+        .iter()
+        .filter_map(|w| db.waves.get(w).cloned())
+        .collect();
+    files.sort();
+    files.dedup();
+    files
+}
+
 fn files_for(db: &SoundDb, style: &str, theme: u8, nights: &[bool], kinds: &[Kind]) -> Vec<String> {
     let mut waves = Vec::new();
     let music = format!("CourseSceneBGM_{style}");

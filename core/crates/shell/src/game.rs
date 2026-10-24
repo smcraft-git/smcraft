@@ -198,6 +198,32 @@ impl Game {
         ))
     }
 
+    /// The same game with its 3D models' files handed over by the host as they are asked for
+    /// (the web build: [`mmk_host::mesh::HandedFiles`]).
+    pub fn with_mesh_files(mut self, files: Arc<mmk_host::mesh::HandedFiles>) -> Self {
+        if !self.placeholder {
+            self.meshes = Some(mmk_host::mesh::MeshStore::handed(
+                self.cache.root.clone(),
+                files,
+            ));
+        }
+        self
+    }
+
+    /// Model files arrived: plan the sprites' models again (a model that wasn't there yet was
+    /// planned as a 2D sprite).
+    pub fn mesh_files_arrived(&mut self) {
+        self.planner.reset();
+    }
+
+    /// The same game with the particle effects of `fx` (the web build parses the library once,
+    /// not for every course).
+    pub fn with_effects(mut self, fx: Arc<mmk_host::effects::EffectLibrary>) -> Self {
+        self.session.effects = Some(mmk_host::effects::EffectDirector::new(fx.clone()));
+        self.fx_lib = fx;
+        self
+    }
+
     /// Test-play the maker's course (Enter in the editor).
     pub fn play_maker_course(&mut self) {
         let Some(bytes) = self.maker.as_ref().and_then(|m| m.course_bytes()) else {

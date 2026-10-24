@@ -66,6 +66,9 @@ pub struct Cache {
     sprites: Sprites,
     /// Manifests of the caches added with [`Cache::merge`], in order.
     pub merged: Vec<Value>,
+    /// Data files handed over in memory ([`Cache::add_file`]: a browser reads its storage
+    /// asynchronously, so the tables and environments are read up front), by relative path.
+    files: HashMap<String, Vec<u8>>,
 }
 
 /// Reads one file of a cache, by its full path (`root.join(relative path)`).
@@ -187,6 +190,7 @@ impl Cache {
             by_name,
             sprites,
             merged: Vec::new(),
+            files: HashMap::new(),
         })
     }
 
@@ -255,6 +259,11 @@ impl Cache {
                 (i, format!("textures/{}/{}.mtex", e.model, e.name))
             })
             .collect()
+    }
+
+    /// Deferred caches: textures were asked for since the last [`Cache::take_requests`].
+    pub fn has_requests(&self) -> bool {
+        self.wanted.lock().is_ok_and(|w| !w.is_empty())
     }
 
     /// Deferred caches: hand over the file of texture `i` (None: it couldn't be read, so the
@@ -339,7 +348,25 @@ impl Cache {
     }
 
     pub fn table(&self, name: &str) -> Result<Value, CacheError> {
-        read_json(&self.root.join(format!("tables/{name}.json")))
+        let rel = format!("tables/{name}.json");
+        match self.files.get(&rel) {
+            Some(b) => parse_json(&self.root.join(&rel), b),
+            None => read_json(&self.root.join(rel)),
+        }
+    }
+
+    /// Hand over data file `rel` (relative to the root, e.g. `tables/M1_SceneDB.json`): read
+    /// from memory from now on.
+    pub fn add_file(&mut self, rel: impl Into<String>, bytes: Vec<u8>) {
+        self.files.insert(rel.into(), bytes);
+    }
+
+    /// Data file `rel`: one handed over, else the file under the root.
+    pub fn read_file(&self, rel: &str) -> Option<Vec<u8>> {
+        match self.files.get(rel) {
+            Some(b) => Some(b.clone()),
+            None => std::fs::read(self.root.join(rel)).ok(),
+        }
     }
 }
 
@@ -368,6 +395,24 @@ mod tests {
         assert_eq!(c.anim("M", "walk").unwrap().texture_at(10), Some("walk.1"));
         assert!(c.anim("M", "walk_ftp").is_some());
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// Data files handed over in memory are read before the disk (a browser has no disk).
+    #[test]
+    fn handed_files_read_from_memory() {
+        let mut c = Cache {
+            root: PathBuf::from("/nonexistent-cache"),
+            ..Default::default()
+        };
+        assert!(c.table("M1_SceneDB").is_err());
+        assert_eq!(c.read_file("env/a.json"), None);
+        c.add_file(
+            "tables/M1_SceneDB.json",
+            br#"[{"DVModel": "M1_DV_plain"}]"#.to_vec(),
+        );
+        c.add_file("env/a.json", b"{}".to_vec());
+        assert_eq!(c.table("M1_SceneDB").unwrap()[0]["DVModel"], "M1_DV_plain");
+        assert_eq!(c.read_file("env/a.json").unwrap(), b"{}");
     }
 
     /// Merging appends the other cache's textures and quads after this cache's own.

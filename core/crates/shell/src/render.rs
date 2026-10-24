@@ -69,6 +69,9 @@ impl Gpu {
             })
             .await
             .map_err(|e| format!("graphics device: {e}"))?;
+        device.set_device_lost_callback(|reason, msg| {
+            crate::app::log(&format!("graphics device lost ({reason:?}): {msg}"));
+        });
         Ok(Self {
             device,
             queue,
@@ -619,6 +622,9 @@ pub struct Renderer {
     mesh_samplers: std::collections::HashMap<u32, wgpu::Sampler>,
     /// (texture or u32::MAX for plain grey, extra texture or u32::MAX, wrap) → bind group.
     mesh_binds: std::collections::HashMap<(u32, u32, u32, u32, u32), wgpu::BindGroup>,
+    /// Mesh bind groups made while a texture's pixels were on their way (made again once
+    /// they are there).
+    mesh_binds_waiting: std::collections::HashSet<(u32, u32, u32, u32, u32)>,
     /// Colour-combiner blocks of the play field's and the background's pieces (a dynamic
     /// uniform buffer, `TEV_STRIDE` bytes per block) with their bind groups.
     tev: [(wgpu::Buffer, wgpu::BindGroup); 2],
@@ -922,6 +928,7 @@ impl Renderer {
             bg_ibuf,
             mesh_samplers: Default::default(),
             mesh_binds: Default::default(),
+            mesh_binds_waiting: Default::default(),
             grey,
             mesh_vbuf,
             mesh_ibuf,
@@ -1106,11 +1113,19 @@ impl Renderer {
             extra3.unwrap_or(u32::MAX),
             wrap,
         );
-        if self.mesh_binds.contains_key(&key) {
+        if self.mesh_binds.contains_key(&key) && !self.mesh_binds_waiting.contains(&key) {
             return Some(());
         }
         for t in [texture, extra, extra2, extra3].into_iter().flatten() {
             self.ensure(gpu, t as usize);
+        }
+        // a browser cache: a texture's pixels still on their way are grey until they come
+        let waiting = [texture, extra, extra2, extra3]
+            .into_iter()
+            .flatten()
+            .any(|t| matches!(self.textures.get(t as usize), Some(TexState::Pending)));
+        if waiting && self.mesh_binds.contains_key(&key) {
+            return Some(());
         }
         let view_of = |t: Option<u32>| match t.map(|t| self.textures.get(t as usize)) {
             Some(Some(TexState::Ready(_, v))) => v,
@@ -1182,6 +1197,11 @@ impl Renderer {
             ],
         });
         self.mesh_binds.insert(key, group);
+        if waiting {
+            self.mesh_binds_waiting.insert(key);
+        } else {
+            self.mesh_binds_waiting.remove(&key);
+        }
         Some(())
     }
 
@@ -1281,6 +1301,7 @@ impl Renderer {
             .collect();
         self.skipped_textures = 0;
         self.mesh_binds.clear();
+        self.mesh_binds_waiting.clear();
         self.effects.reset();
     }
 

@@ -229,9 +229,10 @@ starts on the demo strip with placeholder art. **Import game data…** takes a f
 
 Either way the result goes into the browser's own storage for this site (the origin private
 file system, about 1.5 GB) and stays there for the next visit; nothing is uploaded anywhere.
-**Remove game data** deletes it. With the SMM2 UI import stored the page starts on the SMM2
-menus (opening, title, Course World, Story Mode, 100 Mario; arrows / Enter / Esc or clicks;
-`?opening=0` skips the opening), and courses picked from the list or opened with **Open course
+**Remove game data** deletes it (your Coursebot courses and Course World downloads are kept
+apart and stay). With the SMM2 UI import stored the page starts on the SMM2 menus (opening,
+title, the Course Maker, Course World on TGRCode, Story Mode, 100 Mario; arrows / Enter / Esc
+or clicks; `?opening=0` skips the opening), and courses picked from the list or opened with **Open course
 file…** (`.bcd`, `.course.zlib` or raw course data) play with the course card, HUD and pause
 menu; without it the page plays them directly. Sound starts on the first click or key press
 (browsers block it before that).

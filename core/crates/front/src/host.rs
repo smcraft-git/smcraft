@@ -568,6 +568,11 @@ pub trait Host {
     fn part_icon(&mut self, _style: &str, _part: i16, _flags: u32) -> Option<Icon> {
         None
     }
+    /// The host is still reading art a picture needs (a browser reads textures on first use):
+    /// a [`Host::part_icon`] that came back None is asked for again later, not kept as missing.
+    fn art_loading(&self) -> bool {
+        false
+    }
     /// Set an engine play option by name (`mmk_sim::Options::set`: the SMM1 extras of the Mods
     /// page) for the courses played from now on. False: no such option, or no engine options.
     fn set_engine_option(&mut self, _name: &str, _value: i32) -> bool {

@@ -363,10 +363,11 @@ impl App {
             .collect();
         let input = combine(&self.keys, pads);
         let actions = self.keys.take_actions();
-        // the browser reads texture files asynchronously: start the reads the last frame asked
-        // for, and hold the game (briefly) while they are on their way
+        // the browser reads texture and model files asynchronously: start the reads the last
+        // frame asked for, and hold the game (briefly) while they are on their way
         #[cfg(target_arch = "wasm32")]
         let loading = crate::web::pump_textures(&self.game.cache)
+            | crate::web::pump_meshes(&mut self.game)
             | crate::web::pump_ui(self.front.as_deref_mut());
         #[cfg(not(target_arch = "wasm32"))]
         let loading = false;

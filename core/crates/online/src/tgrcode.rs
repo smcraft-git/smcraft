@@ -37,7 +37,9 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Mutex;
-use std::time::{Duration, Instant, SystemTime};
+use std::time::Duration;
+
+use web_time::{Instant, SystemTime};
 
 use mmk_formats::smm2::crypto::{self, BCD_SIZE};
 use mmk_formats::smm2::{COURSE_SIZE, KeyTable};
@@ -84,11 +86,13 @@ pub trait Fetch: Send + Sync {
 }
 
 /// The real service over HTTPS.
+#[cfg(feature = "http")]
 pub struct Http {
     base: String,
     agent: ureq::Agent,
 }
 
+#[cfg(feature = "http")]
 impl Http {
     pub fn new(base: &str) -> Self {
         let agent = ureq::Agent::config_builder()
@@ -104,6 +108,7 @@ impl Http {
     }
 }
 
+#[cfg(feature = "http")]
 impl Fetch for Http {
     fn get(&self, path: &str) -> TgrResult<Vec<u8>> {
         let url = format!("{}{path}", self.base);
@@ -171,6 +176,7 @@ pub struct TgrCode {
 
 impl TgrCode {
     /// The real service, caching in `cache` (created when needed).
+    #[cfg(feature = "http")]
     pub fn new(cache: Option<PathBuf>) -> Self {
         Self::with_fetch(Box::new(Http::new(BASE)), cache, MIN_INTERVAL)
     }
@@ -204,7 +210,9 @@ impl TgrCode {
             return Some(e.clone());
         }
         let f = self.cache_file(path)?;
-        let when = std::fs::metadata(&f).and_then(|m| m.modified()).ok()?;
+        let modified = std::fs::metadata(&f).and_then(|m| m.modified()).ok()?;
+        // (std's time as web-time's, which is std's itself outside a browser)
+        let when = SystemTime::UNIX_EPOCH + modified.duration_since(std::time::UNIX_EPOCH).ok()?;
         let bytes = std::fs::read(&f).ok()?;
         Some((when, bytes))
     }

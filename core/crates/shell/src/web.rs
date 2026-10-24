@@ -7,10 +7,11 @@
 //!   page from an asset cache folder the owner picked, or imported from their dump's RomFS and
 //!   ExeFS in a worker ([`crate::web_import`]); nothing is uploaded anywhere. Rust reads it through
 //!   the page's `mmkStorage.read(path)` (a promise of the file's bytes, or null). The texture
-//!   index, sprites, sounds and key table are read when the data is opened ([`open_assets`]);
-//!   texture pixels are read when a sprite first needs them ([`pump_textures`]), and a course's
-//!   music when the course starts ([`play_course`]), so memory holds what is being played, not
-//!   the 1.4 GB cache.
+//!   index, sprites, sounds, key tables, data tables, 3D environments and particle effects are
+//!   read when the data is opened ([`open_assets`]); texture pixels are read when a sprite first
+//!   needs them ([`pump_textures`]), NSMBU / 3D World models when a game first asks for them
+//!   ([`pump_meshes`]), and a course's music when the course starts ([`play_course`]), so memory
+//!   holds what is being played, not the 1.9 GB cache.
 //! - **The SMM2 menus** (`mmk-front`, as `mmk-play` runs them natively) start when the page has
 //!   an SMM2 UI import (`mmk import-smm2-ui`) in its storage ([`open_front`]). The UI cache reads
 //!   through an in-memory file source: the import's layouts, fonts' metrics and message tables
@@ -18,7 +19,9 @@
 //!   first shows them ([`pump_ui`]: the cache records what it was asked for, the page reads it,
 //!   the cache gets the pixels; the front end waits a few frames for them, as the game does for
 //!   its own); its sounds are read in the background. Courses the page plays then play through
-//!   the front end's screens.
+//!   the front end's screens. The player's own files (the Coursebot's courses, Course World
+//!   downloads) are kept apart (`mmkStorage.readSave` …, OPFS `mmk-save/`), and Course World is
+//!   TGRCode's, fetched by the page ([`crate::web_tgr`]).
 //! - **Sound** goes out through cpal's WebAudio backend, which browsers only let start after a
 //!   user gesture: the page calls [`unlock_audio`] from its first pointer or key event.
 //! - **Gamepads** come from the Gamepad API through gilrs (`input`), keys and clicks from the
@@ -33,6 +36,7 @@ use mmk_assets::Cache;
 use mmk_audio::Bank;
 use mmk_front::{Front, Host, Options, Source, Ui, UiKind, UiSounds};
 use mmk_host::audio::AudioOut;
+use mmk_host::mesh::HandedFiles;
 use mmk_ui::{MemFiles, UiCache};
 use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
@@ -47,7 +51,7 @@ use crate::front_course::natural;
 use crate::game::Game;
 use crate::source::{self, AssetSource, MemorySource};
 use crate::ui_sound::UiMixer;
-use crate::web_front::{HostData, LibCourse, Library, ShellHost};
+use crate::web_front::{DOWNLOADS, HostData, LibCourse, Library, ShellHost};
 
 #[wasm_bindgen]
 extern "C" {
@@ -70,6 +74,12 @@ extern "C" {
     /// there is no import).
     #[wasm_bindgen(catch, js_namespace = mmkStorage, js_name = walkUi)]
     fn storage_walk_ui() -> Result<js_sys::Promise, JsValue>;
+    /// `mmkStorage.readSave(path)` / `listSave(dir)`: the player's own files (the Coursebot's
+    /// courses, Course World downloads: `mmk-save/`), as `read` / `list`.
+    #[wasm_bindgen(catch, js_namespace = mmkStorage, js_name = readSave)]
+    fn storage_read_save(path: &str) -> Result<js_sys::Promise, JsValue>;
+    #[wasm_bindgen(catch, js_namespace = mmkStorage, js_name = listSave)]
+    fn storage_list_save(dir: &str) -> Result<js_sys::Promise, JsValue>;
 }
 
 fn bytes_of(v: JsValue) -> Option<Vec<u8>> {
@@ -95,6 +105,19 @@ async fn read_ui(path: &str) -> Option<Vec<u8>> {
     bytes_of(JsFuture::from(storage_read_ui(path).ok()?).await.ok()?)
 }
 
+/// The bytes of `path` in the player's own files.
+async fn read_save(path: &str) -> Option<Vec<u8>> {
+    bytes_of(JsFuture::from(storage_read_save(path).ok()?).await.ok()?)
+}
+
+/// The files directly in `dir` of the player's own files.
+async fn list_save(dir: &str) -> Vec<String> {
+    match storage_list_save(dir) {
+        Ok(p) => JsFuture::from(p).await.map(strings_of).unwrap_or_default(),
+        Err(_) => Vec::new(),
+    }
+}
+
 /// The files directly in `dir` of the game data.
 async fn list(dir: &str) -> Vec<String> {
     match storage_list(dir) {
@@ -110,6 +133,13 @@ struct Assets {
     /// The gameplay sound database, to know which files a course reads.
     sounds: Option<Arc<mmk_audio::links::SoundDb>>,
     keys: Option<Vec<u8>>,
+    /// The world-map key table (TGRCode's Super Worlds).
+    world_keys: Option<Vec<u8>>,
+    /// Particle effects (`effects/effects.json`, parsed once).
+    fx: Arc<mmk_host::effects::EffectLibrary>,
+    /// The NSMBU / 3D World models' files (`meshes/`, `anims/`), read as the games ask for
+    /// them ([`pump_meshes`]); None when the stored data has none.
+    mesh_files: Option<Arc<HandedFiles>>,
 }
 
 /// Page-side state; the game itself lives in the event loop's `App`, reached through `proxy`.
@@ -141,6 +171,10 @@ thread_local! {
     /// The same for the UI import's textures and the front end.
     static UI_IN_FLIGHT: Cell<usize> = const { Cell::new(0) };
     static UI_HELD: Cell<u32> = const { Cell::new(0) };
+    /// The same for model files, and whether some arrived since the last frame.
+    static MESH_IN_FLIGHT: Cell<usize> = const { Cell::new(0) };
+    static MESH_HELD: Cell<u32> = const { Cell::new(0) };
+    static MESH_ARRIVED: Cell<bool> = const { Cell::new(false) };
 }
 
 /// Frames the game waits at most for texture reads (then it plays on; the art pops in).
@@ -230,6 +264,38 @@ pub fn pump_textures(cache: &Arc<Cache>) -> bool {
     hold
 }
 
+/// Start the reads of the model files the games asked for; `game` plans its models again when
+/// some arrived. True while the game should wait for them (reads on their way, for at most
+/// [`MAX_HOLD`] frames in a row).
+pub fn pump_meshes(game: &mut Game) -> bool {
+    if MESH_ARRIVED.replace(false) {
+        game.mesh_files_arrived();
+    }
+    let files = with_web(|w| w.assets.as_ref().and_then(|a| a.mesh_files.clone()))
+        .ok()
+        .flatten();
+    if let Some(files) = files {
+        for rel in files.take_requests() {
+            MESH_IN_FLIGHT.set(MESH_IN_FLIGHT.get() + 1);
+            let files = files.clone();
+            wasm_bindgen_futures::spawn_local(async move {
+                // (a missing file is common: the planner tries a frame's own model first)
+                files.provide(&rel, read(&rel).await);
+                MESH_IN_FLIGHT.set(MESH_IN_FLIGHT.get().saturating_sub(1));
+                MESH_ARRIVED.set(true);
+            });
+        }
+    }
+    let hold = MESH_IN_FLIGHT.get() > 0 && MESH_HELD.get() < MAX_HOLD;
+    MESH_HELD.set(if hold { MESH_HELD.get() + 1 } else { 0 });
+    hold
+}
+
+/// Art is still being read: textures asked for and not read yet (deferred caches).
+pub fn art_loading(cache: &Cache) -> bool {
+    IN_FLIGHT.get() > 0 || cache.has_requests()
+}
+
 /// Start the reads of the UI import's textures the front end's cache was asked for, and of the
 /// music of a course the front end just loaded. True while the front end should wait for the
 /// textures (reads on their way, for at most [`MAX_HOLD`] frames in a row).
@@ -239,6 +305,9 @@ pub fn pump_ui(front: Option<&mut FrontApp>) -> bool {
     };
     if let Some((style, theme)) = f.data.music_wanted.take() {
         fetch_music(style, theme);
+    }
+    if let Some((style, theme)) = f.data.edit_wanted.take() {
+        fetch_edit(style, theme);
     }
     let ui = &f.front.smm2;
     let wanted = ui.cache_mut().take_requests();
@@ -310,6 +379,39 @@ fn fetch_music(style: String, theme: u8) {
             let level = &app.game.session.world.level;
             if level.style == style && level.theme == theme && app.game.session.audio.is_some() {
                 app.game.session.set_audio(f.data.audio.clone());
+            }
+        });
+    });
+}
+
+/// The Course Maker opened (or changed style or theme): read its music and edit sounds next to
+/// what is read already, then start its music again with them.
+fn fetch_edit(style: String, theme: u8) {
+    let Ok((music, db)) = with_web(|w| {
+        (
+            w.music.clone(),
+            w.assets.as_ref().and_then(|a| a.sounds.clone()),
+        )
+    }) else {
+        return;
+    };
+    let Some(db) = db else { return };
+    wasm_bindgen_futures::spawn_local(async move {
+        let mut wanted = mmk_host::audio::edit_files(&db, &style, theme);
+        if let Ok(m) = music.lock() {
+            wanted.extend(m.keys().cloned());
+        }
+        let files = read_sounds(wanted).await;
+        log(&format!(
+            "maker sounds: {style} theme {theme}: {} files",
+            files.len()
+        ));
+        if let Ok(mut m) = music.lock() {
+            *m = files;
+        }
+        let _ = send(|app| {
+            if let Some(f) = app.front.as_mut() {
+                f.data.edit_files_read();
             }
         });
     });
@@ -407,6 +509,7 @@ const INDEX_FILES: &[&str] = &[
     "sprites.json",
     "audio/index.json",
     mmk_host::course::KEY_TABLE,
+    mmk_host::course::WORLD_TABLE,
 ];
 
 /// Open the game data in the page's storage and play the demo strip with it. Resolves to a
@@ -446,7 +549,23 @@ pub async fn open_assets() -> Result<JsValue, JsValue> {
             }
         })?;
     }
-    let cache = source::open_cache_deferred(&files).map_err(|e| JsValue::from_str(&e))?;
+    let mut cache = source::open_cache_deferred(&files).map_err(|e| JsValue::from_str(&e))?;
+    // the data tables (scenes and backdrops, darkness) and the 3D styles' environments, which
+    // the engine reads as it goes (1.3 MB)
+    for dir in ["tables", "env"] {
+        for n in list(dir).await {
+            let rel = format!("{dir}/{n}");
+            if let Some(bytes) = read(&rel).await {
+                cache.add_file(rel, bytes);
+            }
+        }
+    }
+    // models: only when the stored data has them (copies made before they were kept have not)
+    let mesh_files = (!list("meshes").await.is_empty()).then(|| Arc::new(HandedFiles::default()));
+    let fx = read("effects/effects.json")
+        .await
+        .map(|b| mmk_host::effects::EffectLibrary::from_bytes(&b))
+        .unwrap_or_default();
     let bank = match source::open_bank(&files) {
         Ok(b) => Some(b),
         Err(e) => {
@@ -464,15 +583,27 @@ pub async fn open_assets() -> Result<JsValue, JsValue> {
         bank,
         sounds,
         keys: files.read(mmk_host::course::KEY_TABLE).ok(),
+        world_keys: files.read(mmk_host::course::WORLD_TABLE).ok(),
+        fx: Arc::new(fx),
+        mesh_files,
     });
     log(&format!("assets: browser storage, {summary}"));
     with_web(|web| {
         web.assets = Some(assets.clone());
         connect_sound(web);
-        let game = Game::with_cache(assets.cache.clone(), false, None);
+        let game = game_with(&assets, None);
         let _ = web.proxy.send_event(UserEvent::Game(Box::new(game)));
     })?;
     Ok(JsValue::from_str(&summary.to_string()))
+}
+
+/// A game on the opened game data, with its effects and models.
+fn game_with(a: &Assets, course: Option<mmk_formats::smm2::Course>) -> Game {
+    let g = Game::with_cache(a.cache.clone(), false, course).with_effects(a.fx.clone());
+    match &a.mesh_files {
+        Some(f) => g.with_mesh_files(f.clone()),
+        None => g,
+    }
 }
 
 /// Forget the opened game data (the page removed it): back to placeholder art.
@@ -528,7 +659,7 @@ pub async fn play_course(bytes: Vec<u8>, name: Option<String>) -> Result<JsValue
         .as_ref()
         .map_or_else(|| "Demo".to_string(), |c| c.header.name.to_string_lossy());
     let game = match &assets {
-        Some(a) => Game::with_cache(a.cache.clone(), false, course),
+        Some(a) => game_with(a, course),
         None => Game::with_cache(Arc::new(Cache::default()), true, course),
     };
     let level = &game.session.world.level;
@@ -726,7 +857,7 @@ pub async fn open_front(opening: bool) -> Result<JsValue, JsValue> {
     }
 
     let mut game = match &assets {
-        Some(a) => Game::with_cache(a.cache.clone(), false, None),
+        Some(a) => game_with(a, None),
         None => Game::with_cache(Arc::new(Cache::default()), true, None),
     };
     game.no_hud = true;
@@ -741,8 +872,28 @@ pub async fn open_front(opening: bool) -> Result<JsValue, JsValue> {
             }
         }
     }
-    let mut data = HostData::new(title, library);
+    let mut data = HostData::new(title, library.clone());
     data.audio = with_web(|w| w.speaker.lock().ok().and_then(|s| s.clone()))?;
+    data.keys = keys;
+    data.world_keys = assets.as_ref().and_then(|a| a.world_keys.clone());
+    // the player's own courses: the Coursebot's slots and Course World downloads
+    for n in list_save("coursebot").await {
+        let slot = n
+            .strip_prefix("course_")
+            .and_then(|r| r.strip_suffix(".bin"))
+            .and_then(|r| r.parse::<usize>().ok());
+        if let (Some(slot), Some(b)) = (slot, read_save(&format!("coursebot/{n}")).await) {
+            data.restore_slot(slot.wrapping_sub(1), &b);
+        }
+    }
+    for n in list_save(DOWNLOADS).await {
+        if let Some(b) = read_save(&format!("{DOWNLOADS}/{n}")).await
+            && let Ok(c) =
+                LibCourse::new(format!("download:{}", stem(&n)), stem(&n), false, &b, None)
+        {
+            library.borrow_mut().push(c);
+        }
+    }
     let opts = Options {
         boot: opening,
         ..Default::default()

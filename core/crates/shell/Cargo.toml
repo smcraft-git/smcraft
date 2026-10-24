@@ -45,6 +45,8 @@ libc = "0.2.191"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 mmk-import = { path = "../import" }
+# TGRCode's client without its HTTP (the page fetches; `web_tgr`)
+mmk-online = { path = "../online", default-features = false }
 flate2.workspace = true
 console_error_panic_hook = "0.1.7"
 js-sys = "0.3.106"

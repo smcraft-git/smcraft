@@ -12,6 +12,7 @@
 //! `mmkImport` object provides the calls below.
 
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -71,6 +72,10 @@ impl Storage for PickedNsp {
 thread_local! {
     /// The dump [`open_nsps`] opened, read by the imports instead of picked RomFS / ExeFS files.
     static DUMP: RefCell<Option<Rc<dyn Vfs>>> = const { RefCell::new(None) };
+    /// The JSON files written so far (~30 MB), by full path: a stage may read back what an
+    /// earlier one wrote (the effects add theirs to `textures/index.json`), and the outputs
+    /// themselves went to the page.
+    static WRITTEN: RefCell<HashMap<String, Vec<u8>>> = RefCell::new(HashMap::new());
 }
 
 /// The imports' file access: the opened dump (outputs to the page), else the picked folders.
@@ -122,6 +127,9 @@ fn path_str(p: &Path) -> String {
 
 impl Vfs for WorkerFs {
     fn read(&self, path: &Path) -> io::Result<Vec<u8>> {
+        if let Some(b) = WRITTEN.with(|w| w.borrow().get(&path_str(path)).cloned()) {
+            return Ok(b);
+        }
         let v = js_read(&path_str(path));
         if v.is_null() || v.is_undefined() {
             return Err(io::ErrorKind::NotFound.into());
@@ -129,6 +137,9 @@ impl Vfs for WorkerFs {
         Ok(js_sys::Uint8Array::new(&v).to_vec())
     }
     fn write(&self, path: &Path, data: &[u8]) -> io::Result<()> {
+        if path.extension().is_some_and(|e| e == "json") {
+            WRITTEN.with(|w| w.borrow_mut().insert(path_str(path), data.to_vec()));
+        }
         // the SMM2 UI import: /ui-out/<rel> → @ui/<rel> (the page keeps it apart)
         if let Ok(rel) = path.strip_prefix(UI_OUT) {
             js_write(
@@ -160,7 +171,7 @@ impl Vfs for WorkerFs {
             .collect())
     }
     fn is_file(&self, path: &Path) -> bool {
-        js_is_file(&path_str(path))
+        WRITTEN.with(|w| w.borrow().contains_key(&path_str(path))) || js_is_file(&path_str(path))
     }
     fn remove_dir_all(&self, _dir: &Path) -> io::Result<()> {
         // the page imports into empty storage

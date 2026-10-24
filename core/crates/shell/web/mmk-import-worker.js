@@ -11,8 +11,6 @@
 
 import init, { import_dump, import_ui, open_nsps } from "./mmk-play.js";
 
-// written by the importer but not used by the portable shell yet (3D models): not stored
-const SKIP = ["meshes/", "anims/"];
 
 self.onmessage = async ({ data: { romfs = [], main, nsps, keys } }) => {
   try {
@@ -38,9 +36,7 @@ self.onmessage = async ({ data: { romfs = [], main, nsps, keys } }) => {
       },
       list: (dir) => [...(dirs.get(dir) ?? [])],
       isFile: (path) => files.has(path),
-      write: (path, bytes) => {
-        if (!SKIP.some((s) => path.startsWith(s))) postMessage({ write: path, bytes }, [bytes.buffer]);
-      },
+      write: (path, bytes) => postMessage({ write: path, bytes }, [bytes.buffer]),
       nspSize: (i) => nsps[i].size,
       nspRead: (i, offset, len) => new Uint8Array(reader.readAsArrayBuffer(nsps[i].slice(offset, offset + len))),
       progress: (stage, done, total) => {

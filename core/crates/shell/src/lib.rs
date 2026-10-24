@@ -46,3 +46,5 @@ pub mod web_front;
 pub mod web_import;
 #[cfg(target_arch = "wasm32")]
 pub mod web_net;
+#[cfg(target_arch = "wasm32")]
+pub mod web_tgr;

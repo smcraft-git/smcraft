@@ -3524,7 +3524,11 @@ impl MakerFlow {
             if self.icons.contains_key(&k) {
                 continue;
             }
-            let name = host.part_icon(&style, part, flags).map(|icon| {
+            let icon = host.part_icon(&style, part, flags);
+            if icon.is_none() && host.art_loading() {
+                continue; // (asked for again once the art is read)
+            }
+            let name = icon.map(|icon| {
                 let name = if flags == DEFAULT_FLAGS {
                     format!("{style}_{part}")
                 } else {
