@@ -1306,6 +1306,14 @@ impl Actor {
         px >= x0 && px <= x1 && py < cy + hh && py + 16.0 > cy - hh
     }
 
+    /// A Side Thwomp's charge starts: it faces its side and returns here afterwards.
+    fn charge_from(&mut self, side: bool, right: bool) {
+        if side {
+            self.dir = if right { 1 } else { -1 };
+            self.home_x = self.x;
+        }
+    }
+
     fn step_thwomp(&mut self, level: &Level, side: bool, right: bool) {
         let (px, py) = self.target;
         let w = if self.big { 32.0 } else { 16.0 };
@@ -1333,6 +1341,7 @@ impl Actor {
                     self.phase = 1;
                     self.vx = 0.0;
                     self.vy = 0.0;
+                    self.charge_from(side, right);
                 }
             }
             0 => {
@@ -1340,20 +1349,18 @@ impl Actor {
                 self.vy = 0.0;
                 if triggered(self) {
                     self.phase = 1;
+                    self.charge_from(side, right);
                 }
             }
             1 => {
                 if side {
-                    if self.vx == 0.0 {
-                        // the charge starts: it returns to here afterwards
-                        self.dir = if right { 1 } else { -1 };
-                        self.home_x = self.x;
-                    }
-                    let t = 3.0 * self.dir as f32;
+                    // a parachute it carries opens in the charge (actors/chute.rs)
+                    let (acc, top) = self.side_thwomp_chute();
+                    let t = top * self.dir as f32;
                     self.vx = if self.vx < t {
-                        (self.vx + 0.075).min(t)
+                        (self.vx + acc).min(t)
                     } else {
-                        (self.vx - 0.075).max(t)
+                        (self.vx - acc).max(t)
                     };
                     self.vy = 0.0;
                 } else {
