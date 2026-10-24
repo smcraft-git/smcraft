@@ -705,6 +705,7 @@ mod tests {
                     track: PatternTrack::Steps(vec![(0.0, 0), (5.0, 1)]),
                 }],
                 param_tracks: 0,
+                params: Vec::new(),
             }],
         };
         Bfres {

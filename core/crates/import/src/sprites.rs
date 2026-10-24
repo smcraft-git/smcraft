@@ -383,6 +383,7 @@ mod tests {
                     track: PatternTrack::Steps(keys.to_vec()),
                 }],
                 param_tracks: 0,
+                params: Vec::new(),
             }],
         }
     }

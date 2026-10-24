@@ -189,8 +189,9 @@ impl SpriteResolver {
             let set = field_anime_set(cache, style, key.1, key.2);
             self.anime_set = Some((key, set));
         }
-        // the field animations run on the course's frame clock [inf]
-        self.anime_clock = world.tick as u32;
+        // the field animations run on the course scene's clock (`World::scene_frame`) [meas:
+        // the coins' spin in the game's frames]
+        self.anime_clock = world.scene_frame();
     }
 
     /// A field animation part (`mmk_sim::world::FIELD_ANIME_PREFIX`) in this style's model of

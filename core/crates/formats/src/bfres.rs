@@ -408,8 +408,31 @@ pub struct MaterialAnim {
 pub struct MaterialAnimTarget {
     pub material: String,
     pub patterns: Vec<TexturePattern>,
-    /// Number of shader-parameter tracks (colour, texture SRT, ...); not decoded.
+    /// Number of shader-parameter tracks (colour, texture SRT, ...).
     pub param_tracks: usize,
+    /// The shader-parameter tracks (`_fts` texture SRT, `_fcl` colours …).
+    pub params: Vec<ParamAnim>,
+}
+
+/// One animated shader parameter of a material: its float curves and constants, each aimed at
+/// a byte offset into the parameter's value (a texture SRT `tex_mtx0`: 0x00 mode, 0x04 / 0x08
+/// scale, 0x0C rotate, 0x10 / 0x14 translate).
+#[derive(Clone, Debug, PartialEq)]
+pub struct ParamAnim {
+    pub name: String,
+    pub curves: Vec<Curve>,
+    /// (byte offset, value): parts that keep one value for the whole animation.
+    pub constants: Vec<(u32, f32)>,
+}
+
+impl ParamAnim {
+    /// The parameter's part at byte offset `target` at `frame` (None: not animated).
+    pub fn value_at(&self, target: u32, frame: f32) -> Option<f32> {
+        if let Some(c) = self.curves.iter().find(|c| c.target == target) {
+            return Some(c.eval(frame));
+        }
+        self.constants.iter().find(|c| c.0 == target).map(|c| c.1)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -749,6 +772,7 @@ const ATTRIBUTE_SIZE: usize = 0x10;
 const MATERIAL_ANIM_SIZE: usize = 0x70;
 const MATERIAL_ANIM_DATA_SIZE: usize = 0x40;
 const PATTERN_INFO_SIZE: usize = 0x10;
+const PARAM_INFO_SIZE: usize = 0x18;
 const CURVE_SIZE: usize = 0x30;
 const MESH_SIZE: usize = 0x38;
 const SKELETAL_ANIM_SIZE: usize = 0x50;
@@ -1223,6 +1247,7 @@ fn parse_material_anim(r: &R, a: usize) -> Result<MaterialAnim> {
 
 fn parse_anim_target(r: &R, d: usize) -> Result<MaterialAnimTarget> {
     let material = r.name(d)?;
+    let params_at = r.off(d + 0x08)?;
     let patterns_at = r.off(d + 0x10)?;
     let curves_at = r.off(d + 0x18)?;
     let constants_at = r.off(d + 0x20)?;
@@ -1251,10 +1276,36 @@ fn parse_anim_target(r: &R, d: usize) -> Result<MaterialAnimTarget> {
         };
         patterns.push(TexturePattern { sampler, track });
     }
+    let mut params = Vec::with_capacity(param_count);
+    for i in 0..param_count {
+        let p = params_at + i * PARAM_INFO_SIZE;
+        let name = r.name(p)?;
+        let (begin, floats, ints) = (
+            r.u16(p + 0x08)? as usize,
+            r.u16(p + 0x0A)? as usize,
+            r.u16(p + 0x0C)? as usize,
+        );
+        let (first_constant, constants) = (r.u16(p + 0x0E)? as usize, r.u16(p + 0x10)? as usize);
+        let curves = (begin..(begin + floats + ints).min(curve_count))
+            .map(|c| parse_curve(r, curves_at + c * CURVE_SIZE))
+            .collect::<Result<Vec<_>>>()?;
+        let constants = (first_constant..(first_constant + constants).min(constant_count))
+            .map(|c| {
+                let at = constants_at + 8 * c;
+                Ok((r.u32(at)?, r.f32(at + 4)?))
+            })
+            .collect::<Result<Vec<_>>>()?;
+        params.push(ParamAnim {
+            name,
+            curves,
+            constants,
+        });
+    }
     Ok(MaterialAnimTarget {
         material,
         patterns,
         param_tracks: param_count,
+        params,
     })
 }
 
