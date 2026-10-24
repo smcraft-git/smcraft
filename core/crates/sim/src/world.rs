@@ -2815,6 +2815,15 @@ impl World {
         if !self.player.alive() {
             return;
         }
+        // last frame's enemy touch (Player::enemy_hit)
+        if std::mem::take(&mut self.player.enemy_hit) && self.player.hurt() {
+            self.events.push(if self.player.alive() {
+                Event::PowerDown
+            } else {
+                Event::Death
+            });
+            return;
+        }
         let hurt = self.player.hurt_box();
         let contact = self.player.contact_box();
         let star = self.player.star > 0;
@@ -3407,13 +3416,9 @@ impl World {
                 }
             } else if self.actors[i].mode == Mode::ShellSlide && self.actors[i].kick_lock > 0 {
                 // the kicker's no-hit window
-            } else if self.player.hurt() {
-                if self.player.alive() {
-                    self.events.push(Event::PowerDown);
-                } else {
-                    self.events.push(Event::Death);
-                }
-                return;
+            } else {
+                // hurts on the next frame (Player::enemy_hit)
+                self.player.enemy_hit = true;
             }
             i += 1;
         }
