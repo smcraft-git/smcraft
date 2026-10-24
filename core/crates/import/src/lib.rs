@@ -40,7 +40,8 @@ pub mod sprites;
 /// 9: gameplay sound database (`audio/sound.json`, `audio/se/`, music by the game's names).
 /// 10: the field animation models (`Pack/<style>_FieldAnime_<set>.pack`: ? blocks, bricks, coins,
 ///     note blocks, conveyors… with their frames, one set per theme's SceneDB `FieldAnime`).
-pub const IMPORTER_VERSION: u32 = 10;
+/// 11: the Course Maker's sound: the edit music (`BGM_<Theme>_Edit`) and the `<S>_Edit*` users.
+pub const IMPORTER_VERSION: u32 = 11;
 pub mod smm1;
 pub mod smm1_costumes;
 pub use smm1::{Smm1Config, Smm1Report, run_smm1};

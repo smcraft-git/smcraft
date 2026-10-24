@@ -81,7 +81,7 @@ pub fn find_import(prefix: &str, exclude: Option<&str>, legacy: &str) -> Option<
 /// this version of the game reads, so it counts as missing and the player imports again. Raised
 /// with the importer's own versions (`mmk_import::IMPORTER_VERSION`,
 /// `SMM2_UI_IMPORTER_VERSION`; the importer's tests check the two agree).
-pub const GAME_PACK_VERSION: u32 = 10;
+pub const GAME_PACK_VERSION: u32 = 11;
 pub const UI_PACK_VERSION: u32 = 5;
 
 /// An import's `importer_version` from its manifest (0 when unreadable).
