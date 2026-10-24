@@ -121,6 +121,8 @@ pub const ENTRIES: &[Entry] = &[
     e(P(63), "IceBlock", Terrain),
     e(P(64), "TsutaBlock", Terrain),
     e(P(110), "TogeBlock", Terrain),
+    e(P(79), "PBlock", Terrain),
+    e(P(80), "DashBlock", Terrain),
     // Items
     e(P(8), "Coin", Items),
     e(P(70), "10Coin", Items),
@@ -128,6 +130,7 @@ pub const ENTRIES: &[Entry] = &[
     e(P(20), "SuperKinoko", Items),
     e(P(34), "FireFlower", Items),
     e(P(44), "SpecialItem", Items),
+    e(P(81), "M1_SpecialItemExtra", Items),
     e(P(35), "SuperStar", Items),
     e(P(33), "1upKinoko", Items),
     e(P(116), "SuperHammer", Items),
@@ -136,6 +139,11 @@ pub const ENTRIES: &[Entry] = &[
     e(P(18), "PSwitch", Items),
     e(P(95), "Key", Items),
     e(P(10), "JumpStep", Items),
+    e(P(127), "BoxKiller", Items),
+    e(P(128), "BoxPropeller", Items),
+    e(P(131), "BoxPow", Items),
+    e(P(129), "BoxKuribo", Items),
+    e(P(130), "BoxKillerPlayer", Items),
     // Enemies
     e(P(0), "Kuribo", Enemies),
     e(P(1), "Nokonoko", Enemies),
@@ -160,6 +168,10 @@ pub const ENTRIES: &[Entry] = &[
     e(P(39), "Kameck", Enemies),
     e(P(102), "ChoroPoo", Enemies),
     e(P(52), "Hanachan_00", Enemies),
+    e(P(74), "Gabon", Enemies),
+    e(P(78), "Sambo", Enemies),
+    e(P(107), "PackunPipe", Enemies),
+    e(P(111), "KoopaMecha", Enemies),
     e(P(30), "Jugem", Enemies),
     e(P(42), "KoopaClown_00", Enemies),
     e(P(96), "Arihei_00", Enemies),
@@ -171,6 +183,13 @@ pub const ENTRIES: &[Entry] = &[
     e(P(77), "Bunbun", Enemies),
     e(P(98), "KoopaJr", Enemies),
     e(P(62), "Koopa", Enemies),
+    e(P(120), "Lemmy", Enemies),
+    e(P(121), "Morton", Enemies),
+    e(P(122), "Larry", Enemies),
+    e(P(123), "Wendy", Enemies),
+    e(P(124), "Iggy", Enemies),
+    e(P(125), "Roy", Enemies),
+    e(P(126), "Ludwig", Enemies),
     // Gizmos
     e(P(11), "Lift_00", Gizmos),
     e(P(36), "YouganLift_00", Gizmos),
@@ -192,6 +211,7 @@ pub const ENTRIES: &[Entry] = &[
     e(P(100), "OnOffBlock", Gizmos),
     e(P(108), "Chikachika", Gizmos),
     e(P(113), "Trampoline", Gizmos),
+    e(P(132), "OnOffTrampoline", Gizmos),
     e(P(112), "WoodBox", Gizmos),
     e(P(106), "BellTree", Gizmos),
     e(Doors, "Door_00", Gizmos),
@@ -215,6 +235,10 @@ pub fn of(category: Category, style: &str) -> Vec<Entry> {
 /// The style has the part (and, for the two semisolid entries, it is that style's one).
 pub fn available(x: &Entry, style: &str) -> bool {
     let p = x.tool.part();
+    // the SMB2 Mushroom is SMB1's alone (the update's extra item)
+    if p == 81 {
+        return style == "M1";
+    }
     p == 7 || rules::style_allows(style, p)
 }
 

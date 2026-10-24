@@ -227,6 +227,10 @@ sway, importer and pack 12, the dev cache already at v12).
   - ⬜ custom autoscroll and its nodes, water level, the sub-area set-up window, the vertical
     scroll bar, the part variants balloon (Fast Conveyor …), tracks / doors' partners placed
     by hand, the trash can, Mario's Trail, co-op making
+  - ✅ more parts in the part window (2026-10-24): Spike, Pokey, Piranha Creeper, Mechakoopa, the
+    seven Koopalings, P Block, Dash Block, the SMB2 Mushroom (SMB1), the wearables and the
+    ON/OFF Trampoline (3D World); each checked placeable in every style that offers it (a test)
+    and playable · ⬜ the Clear Pipe (its own placement), Lakitu's Cloud (no label found)
   - ✅ tracks (2026-10-24): the Track part in Gizmos; a press lays a horizontal piece, dragging
     draws on from its end, 2 tiles a piece, 8 ways [inf: the gesture]; a part that rides tracks
     put down on one is attached (flag 0x400); a press on an end opens / closes it; erasing,

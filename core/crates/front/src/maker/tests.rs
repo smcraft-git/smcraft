@@ -1106,3 +1106,20 @@ fn a_track_is_drawn_by_dragging_and_a_lift_put_on_it_rides_it() {
         .expect("a lift");
     assert_ne!(lift.flags & 0x400, 0, "on the track");
 }
+
+#[test]
+fn every_catalog_part_can_be_put_down_in_the_styles_that_offer_it() {
+    for style in ["M1", "M3", "MW", "WU", "3W"] {
+        for c in catalog::CATEGORIES {
+            for x in catalog::of(c, style) {
+                let Tool::Part(p) = x.tool else { continue };
+                let mut e = mmk_editor::Editor::new(style);
+                assert!(
+                    e.place(p, 30, 6).is_ok(),
+                    "{style}: part {p} ({}) can't be put down",
+                    x.label
+                );
+            }
+        }
+    }
+}
