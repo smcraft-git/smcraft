@@ -2324,6 +2324,7 @@ impl World {
                 (px, py)
             };
             a.target_facing = self.player.facing;
+            a.target_h = self.player.query_height();
             powerups::mask_target(a, masked);
             a.camera = (self.camera_x, self.camera_y);
             a.floor_ref = self.liquid.map(|l| l.y).unwrap_or(self.level.bottom - 12.0);
@@ -4254,8 +4255,7 @@ impl World {
                 a.home_y = s.y - 8.0;
             }
             if let Kind::Lift { falling: false, .. } = s.kind {
-                // the pacing lift's centre; it starts left unless (flags & 0x18) = 0x10
-                // (11-lift.md) [inf: the flag isn't kept on the spawn; left]
+                // the pacing lift's centre
                 a.home_x = s.x;
             }
             if s.kind == Kind::Magikoopa {
@@ -4290,8 +4290,15 @@ impl World {
             } else {
                 1
             };
-            if let Kind::Lift { falling: false, .. } = s.kind {
-                a.dir = -1;
+            if let Kind::Lift {
+                falling: false,
+                right,
+                ..
+            } = s.kind
+            {
+                // it starts left unless (flags & 0x18) = 0x10 (11-lift.md) [obs v3.0.3 init
+                // 0x71013c2790]
+                a.dir = if right { 1 } else { -1 };
             }
             // a walker placed on the ground starts in its walk (the Basic enter picks Walk on the
             // ground flag, 0-goomba.md), moving on its first frame [obs: Ryujinx trace M1_hit]
@@ -4920,13 +4927,14 @@ impl World {
         // animation frames 0-10 of 17 (ClimbAttack exec 0x7100a1c230 → 0x7100a1b290) [obs]; the
         // cape's box is up on every frame of the spin (0x71009f7220 → 0x71009f6710) [obs]; the
         // hammer's on animation frames 11–17 (HammerAttack exec 0x71009c6150) [obs], here the
-        // part of them inside the player's 16-frame swing (`attack` 15 → 0 is frame 0 → 15)
+        // part of them inside the player's 16-frame swing (`attack` 15 → 0 is frame 0 → 15; the
+        // cape's 20-frame spin: 19 → 0)
         let window = match p.form {
             Form::Raccoon => 0..=17,
             Form::Cat => {
                 crate::player::CAT_SCRATCH_FRAMES - 11..=crate::player::CAT_SCRATCH_FRAMES - 1
             }
-            Form::Cape => 1..=15,
+            Form::Cape => 1..=19,
             _ => 1..=4,
         };
         let cat_slide = p.form == Form::Cat && p.cat_slide > 0;
@@ -4942,7 +4950,7 @@ impl World {
         // 15–17 (TailAttack exec 0x7100a034e0) [obs]
         let frame = 17 - p.attack;
         // cape / hammer animation frame (0 on the swing's first frame)
-        let swing = 15 - p.attack;
+        let swing = if p.form == Form::Cape { 19 } else { 15 } - p.attack;
         let side = match p.form {
             Form::Raccoon if !(4..=14).contains(&frame) => -p.facing,
             // the cape box flips sides every 2 animation frames, starting behind
@@ -6573,9 +6581,12 @@ impl World {
 
     /// Custom autoscroll (89-autoscroll-camera.md, themes.md §4.3): the view centre starts at
     /// the nearest node not behind it and travels node to node at the speed of each segment's
-    /// start node (setting 0–2 → 0.5 / 1.0 / 2.0 px/f [inf: field + 1 = slow/normal/fast; the
-    /// loader that fills the camera's node table (+0xb8 + area·0x90) wasn't found]),
-    /// easing by max(0.03·|Δ|, 0.01) per frame; it pauses during warps, deaths and the goal.
+    /// start node, easing by max(0.03·|Δ|, 0.01) per frame; it pauses during warps, deaths and
+    /// the goal. The loader stores speed type {3, −1, 1, 2}[setting ^ 2] [obs v3.0.3 0x710179c8f0,
+    /// table 0x7102320600], and the camera's speed for type t is the slow / normal / fast entry
+    /// t − 1 — 0.5 / 1.0 / 2.0 px/f, 0.28 / 0.53 / 1.12 in a vertical area [obs v3.0.3
+    /// 0x71023d74c0; v1.0.0 exec 0x7100b60880] — so settings 0–2 are slow / normal / fast and 3
+    /// (type −1) is speed 0: the camera stops on that segment.
     fn custom_autoscroll(&mut self) {
         let mut nodes = self.level.scroll_nodes.clone();
         nodes.sort_by_key(|n| n.0);
@@ -6599,7 +6610,12 @@ impl World {
         let mut next = next;
         if !paused && next < nodes.len() {
             let from = next.saturating_sub(1);
-            let target = [0.5, 1.0, 2.0][nodes[from].3.min(2) as usize];
+            let speeds = if vertical {
+                [0.28, 0.53, 1.12]
+            } else {
+                [0.5, 1.0, 2.0]
+            };
+            let target = speeds.get(nodes[from].3 as usize).copied().unwrap_or(0.0);
             let dv = target - v;
             v += dv.signum() * (dv.abs() * 0.03).max(0.01).min(dv.abs());
             let (tx, ty) = (nodes[next].1, nodes[next].2);
@@ -7364,7 +7380,7 @@ impl World {
                 }
                 continue;
             }
-            if let Kind::Lift { width, falling } = a.kind {
+            if let Kind::Lift { width, falling, .. } = a.kind {
                 let x0 = a.x - width as f32 * 8.0;
                 for i in 0..width {
                     let tex = if i == 0 {
@@ -8932,7 +8948,7 @@ mod tests {
     }
 
     #[test]
-    fn lakitu_throws_coins_as_a_burst_that_stops_after_its_arc() {
+    fn lakitu_throws_coins_as_a_burst_that_flies_on_after_its_arc() {
         let mut lvl = Level::flat(100);
         lvl.spawns.push(spawn(Kind::Lakitu, 200.0, 160.0));
         lvl.held.push((0, 8, 0));
@@ -8960,10 +8976,11 @@ mod tests {
             .iter()
             .filter(|a| a.kind == Kind::FloatCoin)
             .collect();
+        // past the arc each flies 0.625 px/f its way (the shared flight)
         assert!(
             coins
                 .iter()
-                .all(|c| !c.thrown && c.vx == 0.0 && c.vy == 0.0)
+                .all(|c| !c.thrown && c.fly.on && (c.vx.abs() - 0.625).abs() < 1e-4)
         );
         assert!(!coins.is_empty());
     }
@@ -9602,6 +9619,7 @@ mod tests {
             Kind::Lift {
                 width: 4,
                 falling: true,
+                right: false,
             },
             200.0,
             96.0,
@@ -9615,6 +9633,40 @@ mod tests {
         run(&mut w, 0, 20);
         assert!(w.actors[0].y < y0);
         assert_eq!(w.player.y, w.actors[0].y + 15.95);
+    }
+
+    #[test]
+    fn a_pacing_lift_starts_by_its_flag_and_a_winged_one_bobs_8_px() {
+        let lift = |right: bool, falling: bool, wings: bool| {
+            let mut lvl = Level::flat(60);
+            let mut s = spawn(
+                Kind::Lift {
+                    width: 3,
+                    falling,
+                    right,
+                },
+                400.0,
+                160.0,
+            );
+            s.wings = wings;
+            lvl.spawns.push(s);
+            let mut w = World::with_level(lvl);
+            w.player.x = 100.0;
+            run(&mut w, 0, 32);
+            (w.actors[0].x, w.actors[0].y)
+        };
+        let (x, y) = lift(true, false, false);
+        assert!(
+            x > 400.0 && y == 160.0,
+            "(flags & 0x18) = 0x10 starts right: {x}"
+        );
+        assert!(lift(false, false, false).0 < 400.0);
+        // flag 0x2: 8·sin φ, φ at 2.8125°/frame: a quarter of the bob in 32 frames
+        let (_, y) = lift(false, false, true);
+        assert!((y - 168.0).abs() < 1e-3, "{y}");
+        // a resting winged falling lift: half that rate
+        let (x, y) = lift(false, true, true);
+        assert!(x == 400.0 && (y - (160.0 + 8.0 * std::f32::consts::FRAC_1_SQRT_2)).abs() < 1e-3);
     }
 
     #[test]
@@ -9832,13 +9884,13 @@ mod tests {
         w.player.form = Form::Cape;
         w.add_actor(Actor::new(Kind::Goomba, 88.0, 32.0));
         w.add_actor(Actor::new(Kind::Goomba, 112.0, 32.0));
-        w.player.attack = 15; // animation frame 0: behind
+        w.player.attack = 19; // animation frame 0 of the 20-frame spin: behind
         w.tail_attack();
         assert_eq!(
             w.actors.iter().map(|a| a.alive()).collect::<Vec<_>>(),
             [false, true]
         );
-        w.player.attack = 13; // frame 2: in front
+        w.player.attack = 17; // frame 2: in front
         w.tail_attack();
         assert!(!w.actors[1].alive());
     }
@@ -9964,7 +10016,10 @@ mod tests {
         run(&mut w, 0, 2);
         let x0 = w.actors[0].x - w.camera_x;
         assert!((x0 - (VIEW_W - 48.0)).abs() < 1.0, "right corner: {x0}");
-        run(&mut w, 0, 120 + 36 + 130);
+        // the first wait is 300 frames: still in its corner just before it ends
+        run(&mut w, 0, 296);
+        assert_eq!(w.actors[0].phase, 0);
+        run(&mut w, 0, 4 + 36 + 130);
         let x1 = w.actors[0].x - w.camera_x;
         assert!((x1 - 48.0).abs() < 2.0, "left corner: {x1}");
     }
@@ -10213,7 +10268,7 @@ mod tests {
     }
 
     #[test]
-    fn winged_blocks_bob_and_release_their_contents() {
+    fn winged_blocks_fly_and_release_their_contents() {
         let mut lvl = Level::flat(40);
         let mut b = spawn(
             Kind::MovingBlock {
@@ -10229,6 +10284,7 @@ mod tests {
             Kind::Lift {
                 width: 3,
                 falling: false,
+                right: false,
             },
             300.0,
             80.0,
@@ -10238,19 +10294,21 @@ mod tests {
         let mut w = World::with_level(lvl);
         w.player.x = 40.0;
         run(&mut w, 0, 33);
-        // a quarter period (90° / 2.8125° = 32 frames): 16 px up
+        // a quarter period (90° / 2.8125° = 32 frames): the block 16 px up, drifting right
+        // 0.625 a frame; the winged lift paces left with an 8 px bob
         let blk = w
             .actors
             .iter()
             .find(|a| matches!(a.kind, Kind::MovingBlock { .. }))
             .unwrap();
         assert!((blk.y - 96.0).abs() < 0.5, "{}", blk.y);
+        assert!((blk.x - (200.0 + 0.625 * 32.0)).abs() < 0.7, "{}", blk.x);
         let l = w
             .actors
             .iter()
             .find(|a| matches!(a.kind, Kind::Lift { .. }))
             .unwrap();
-        assert!((l.y - 96.0).abs() < 0.5, "{}", l.y);
+        assert!((l.y - 88.0).abs() < 0.5 && l.x < 300.0, "{} {}", l.x, l.y);
         // bump from below: one coin, then used
         let i = w
             .actors
@@ -10330,6 +10388,20 @@ mod tests {
             (w.camera_x + VIEW_W / 2.0 - 1000.0).abs() < 1.0,
             "stops at the last node"
         );
+    }
+
+    #[test]
+    fn a_custom_autoscroll_node_set_to_3_stops_the_camera() {
+        let mut lvl = Level::flat(200);
+        lvl.autoscroll = 4;
+        lvl.scroll_nodes.push((1, 200.0, 120.0, 3));
+        lvl.scroll_nodes.push((2, 1000.0, 120.0, 0));
+        let mut w = World::with_level(lvl);
+        w.reset_camera();
+        run(&mut w, 0, 200);
+        let x0 = w.camera_x;
+        run(&mut w, 0, 200);
+        assert!((w.camera_x - x0).abs() < 1e-3, "speed 0 past the stop node");
     }
 
     #[test]

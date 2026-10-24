@@ -16,6 +16,8 @@ mod clown;
 pub use clown::ClownFire;
 mod dokan;
 pub use dokan::Dokan;
+mod fly;
+pub use fly::Fly;
 mod koopalings;
 mod powerups;
 mod shot;
@@ -118,10 +120,12 @@ pub enum Kind {
         side: bool,
         right: bool,
     },
-    /// One-way lift, `width` tiles; falling = drops once stood on.
+    /// One-way lift, `width` tiles; falling = drops once stood on; `right`: a pacing lift that
+    /// starts to the right ((flags & 0x18) = 0x10).
     Lift {
         width: u8,
         falling: bool,
+        right: bool,
     },
     /// Trampoline.
     Spring,
@@ -298,7 +302,8 @@ pub enum Kind {
     Superball,
     /// A coin that moves (wings or a track): collected on touch.
     FloatCoin,
-    /// Yoshi's Egg (45 in SMW / NSMBU): hatches into Yoshi; `red` = Red Yoshi [inf: alt flag].
+    /// Yoshi's Egg (45 in SMW / NSMBU): hatches into Yoshi; `red` = Red Yoshi (the egg's big
+    /// bits, level.rs).
     YoshiEgg {
         red: bool,
     },
@@ -770,6 +775,9 @@ pub struct Actor {
     pub heading: f32,
     /// The player's facing (+1 right), set by the world.
     pub target_facing: i32,
+    /// The player's height as the shared player-in-box query sees it (`Player::query_height`),
+    /// set by the world.
+    pub target_h: f32,
     /// Riding a track, and the offset from the track point to (x, y).
     pub rail: Option<crate::track::Rail>,
     pub rail_off: (f32, f32),
@@ -822,6 +830,8 @@ pub struct Actor {
     /// A shell that is a Spiny dropped off the ceiling (spiky; wakes as a Spiny). Not `alt`,
     /// which is the placement's 0x4 flag (a red Koopa's shell has it).
     pub spiny_shell: bool,
+    /// The shared winged flight (items, coins, map objects and blocks with wings; actors/fly.rs).
+    pub fly: Fly,
 }
 
 impl Actor {
@@ -875,6 +885,7 @@ impl Actor {
             speed: 0.0,
             heading: 0.0,
             target_facing: 1,
+            target_h: 16.0,
             rail: None,
             rail_off: (0.0, 0.0),
             derailed: false,
@@ -899,6 +910,7 @@ impl Actor {
             clown_fire: matches!(kind, Kind::ClownCar { fire: true }).then(ClownFire::default),
             ceiling: false,
             spiny_shell: false,
+            fly: Fly::default(),
         }
     }
 
@@ -1306,24 +1318,9 @@ impl Actor {
         }
     }
 
-    /// Thwomp (12-thwomp.md): Wait (notices a player below within |dx| < W + 32) → Fall
-    /// (g −0.25, cap −5) → FallWait 64 → Return (≤ 0.875, +0.2/frame) to the home height.
-    /// Side Thwomp (SideDossun): looks one way only; a player in the attack box on that side —
-    /// 136 px long from 6·S px behind its centre (8·S in 3D World), centred 16·S above its feet
-    /// with half-height 16·S + 16 (S = 1, big 2) — sets it charging that way (0.075/frame² to
-    /// 3.0, no gravity) until it hits a wall; FallWait 64, then back to its start at up to
-    /// 0.875 px/f (±0.2/frame) [obs Wait 0x7100768800, box 0x710076ab10, Fall 0x7100769210,
-    /// Return 0x710076a140].
-    /// Winged blocks and lifts (4-brick.md B12 "Wing"): a vertical sine bob around home at
-    /// 2.8125°/frame [inf: amplitude 16 px, 48 for the helper's special mode (hard, ice, donut,
-    /// cloud)]. Angle in `heading`.
-    fn wing_bob(&mut self, amp: f32) {
-        self.heading = (self.heading + 2.8125) % 360.0;
-        self.y = self.home_y + amp * self.heading.to_radians().dsin();
-    }
-
-    /// A player in the Side Thwomp's attack box (see `step_thwomp`); the player's box is taken
-    /// as 16 px tall from its feet [inf].
+    /// A player in the Side Thwomp's attack box (see `step_thwomp`): the shared player-in-box
+    /// query in its feet-span mode, the player's x inside the box and its feet-to-height span
+    /// (`target_h`) overlapping it [obs v3.0.3 0x7100d7fed0].
     fn side_thwomp_sees(&self, level: &Level, right: bool) -> bool {
         let (px, py) = self.target;
         let s = if self.big { 2.0 } else { 1.0 };
@@ -1334,7 +1331,7 @@ impl Actor {
             (self.x - 136.0, self.x + back)
         };
         let (cy, hh) = (self.y + 16.0 * s, 16.0 * s + 16.0);
-        px >= x0 && px <= x1 && py < cy + hh && py + 16.0 > cy - hh
+        px >= x0 && px <= x1 && py < cy + hh && py + self.target_h > cy - hh
     }
 
     /// A Side Thwomp's charge starts: it faces its side and returns here afterwards.
@@ -1345,6 +1342,14 @@ impl Actor {
         }
     }
 
+    /// Thwomp (12-thwomp.md): Wait (notices a player below within |dx| < W + 32) → Fall
+    /// (g −0.25, cap −5) → FallWait 64 → Return (≤ 0.875, +0.2/frame) to the home height.
+    /// Side Thwomp (SideDossun): looks one way only; a player in the attack box on that side —
+    /// 136 px long from 6·S px behind its centre (8·S in 3D World), centred 16·S above its feet
+    /// with half-height 16·S + 16 (S = 1, big 2) — sets it charging that way (0.075/frame² to
+    /// 3.0, no gravity) until it hits a wall; FallWait 64, then back to its start at up to
+    /// 0.875 px/f (±0.2/frame) [obs Wait 0x7100768800, box 0x710076ab10, Fall 0x7100769210,
+    /// Return 0x710076a140].
     fn step_thwomp(&mut self, level: &Level, side: bool, right: bool) {
         let (px, py) = self.target;
         let w = if self.big { 32.0 } else { 16.0 };
@@ -1613,7 +1618,8 @@ impl Actor {
                 true
             }
             Kind::BobOmb if self.phase == 3 => {
-                // a walking lit one stops, its fuse still running [inf]
+                // a walking lit one stops, its fuse still running: Down's enter lights the
+                // fuse only when it is unlit [obs v3.0.3 0x7101084420]
                 self.phase = 1;
                 self.vx = 0.0;
                 true
@@ -2146,11 +2152,21 @@ impl Actor {
                 Kind::Bowser { .. } | Kind::BoomBoom { .. } | Kind::BowserJr { .. } => {}
                 k if k.is_w3() => {} // their own wing behaviour (actors/w3.rs)
                 k if k.is_v3() => {} // their own wing behaviour (actors/v3.rs)
+                Kind::Spiny => {
+                    self.step_pata_togezo(level);
+                    return None;
+                }
+                // the shared fly helper (actors/fly.rs); a track carries a winged part itself
+                k if k.flies_winged() && !self.thrown && self.rail.is_none() => {
+                    let slow = self.wet();
+                    self.step_fly(level, slow);
+                    return None;
+                }
                 Kind::Piranha { .. } | Kind::Muncher if self.pipe.is_none() => {
                     self.step_winged_plant(level);
                     return None;
                 }
-                k if k.is_enemy() || k.is_item() || matches!(k, Kind::BigCoin { .. }) => {
+                k if k.is_enemy() => {
                     self.step_generic_wings(level);
                     return None;
                 }
@@ -2235,17 +2251,20 @@ impl Actor {
             Kind::FloatCoin => {
                 if self.thrown {
                     // a Lakitu's coin: its arc (gravity −0.14, falling at most 1.5) for 50
-                    // frames (cState_Thrown exe 0x7100847f90), then the Wing context with speed,
-                    // vy and gravity 0: it stays where it is [inf: the helper's exe unread]
+                    // frames (cState_Thrown exe 0x7100847f90), then the Wing context with the
+                    // bob's angle at 180° (+0xdb4 = 0x80000000): the shared flight, 0.625 px/f
+                    // its way, the bob starting down (actors/fly.rs) [obs v1.0.0]
                     self.vy = (self.vy - 0.14).max(shot::THROWN_FALL);
                     self.x += self.vx;
                     self.y += self.vy;
                     self.timer -= 1;
                     if self.timer <= 0 {
                         (self.thrown, self.vx, self.vy) = (false, 0.0, 0.0);
+                        self.fly_from_top();
                     }
-                } else if self.wings {
-                    self.wing_bob(16.0);
+                } else if self.fly.on {
+                    let slow = self.wet();
+                    self.step_fly(level, slow);
                 }
             }
             Kind::ClownCar { .. } => return self.step_clown_car(level),
@@ -2468,17 +2487,7 @@ impl Actor {
                 }
             }
             Kind::Thwomp { side, right } => self.step_thwomp(level, side, right),
-            Kind::MovingBlock { block, .. } => {
-                if self.wings {
-                    use crate::blocks::BlockKind as B;
-                    let amp = if matches!(block, B::Hard | B::Ice | B::Donut | B::Cloud) {
-                        48.0
-                    } else {
-                        16.0
-                    };
-                    self.wing_bob(amp);
-                }
-            }
+            Kind::MovingBlock { .. } => {} // wings: the fly helper (above); a track: its rail
             Kind::TrackMount { .. } => {}  // moved by its rail only
             Kind::BabyBlooper { .. } => {} // placed by the world
             Kind::SideSpring => {
@@ -2574,12 +2583,24 @@ impl Actor {
                     }
                 }
             }
-            Kind::Lift { .. } if self.wings => self.wing_bob(16.0),
             Kind::Lift { falling, .. } => {
                 if falling && (self.ridden || self.phase == 1) {
+                    // flag 0x2: gravity −0.01875, falling at most 1.2 (11-lift.md) [obs v1.0.0
+                    // FallLift Move enter 0x7100899500, table 0x7101c8c658]
                     self.phase = 1;
-                    self.vy = (self.vy - 0.0625).max(-4.0);
+                    let (g, cap) = if self.wings {
+                        (-0.01875, -1.2)
+                    } else {
+                        (-0.0625, -4.0)
+                    };
+                    self.vy = (self.vy + g).max(cap);
                     self.y += self.vy;
+                } else if falling && self.wings && self.rail.is_none() {
+                    // a resting winged falling lift bobs 8·sin φ about its height, φ stepping
+                    // 0x1000000 (1.40625°) a frame [obs v3.0.3 Stop exe 0x71013c2430, rate
+                    // _INIT 0x7100aff810]
+                    self.fly.angle.1 = self.fly.angle.1.wrapping_add(0x100_0000);
+                    self.y = self.home_y + 8.0 * crate::fmath::table_sin_cos(self.fly.angle.1).0;
                 } else if !falling && self.rail.is_none() && !self.derailed {
                     // off a track it paces ±48 px about its spawn (actor 8): speed
                     // min(0.5, d/16 + 0.125) for d the distance to the nearer end, stopping on
@@ -2598,6 +2619,14 @@ impl Actor {
                         if self.x <= lo {
                             self.dir = 1;
                         }
+                    }
+                    if self.wings {
+                        // flag 0x2 adds 8·sin φ across the motion, φ stepping 0x2000000
+                        // (2.8125°) a frame [obs v3.0.3 Move 0x71013c06d0, rate _INIT
+                        // 0x7100aff510]
+                        self.fly.angle.1 = self.fly.angle.1.wrapping_add(0x200_0000);
+                        self.y =
+                            self.home_y + 8.0 * crate::fmath::table_sin_cos(self.fly.angle.1).0;
                     }
                 }
             }
@@ -4102,7 +4131,10 @@ impl Actor {
     /// its top edge, following the camera; waits 120 frames, spins one turn (circling 16 px around
     /// the anchor, 36 frames), then swoops along a half-ellipse 121 px deep to the other corner at
     /// 1.40°/frame. The Moon (alternate) only hangs in its corner. Phases: 0 wait, 1 spin, 2 swoop;
-    /// side in `hops` (0 right, 1 left), angle in `heading`. The first wait is [inf] 120 frames.
+    /// side in `hops` (0 right, 1 left), angle in `heading`. The first wait is 300 frames (init
+    /// writes the Wait timer, +0x600, before Appear; each swoop's end writes 120) [obs v3.0.3
+    /// init 0x71013e4a30, Wait exe 0x71013e6320, Attack exe 0x71013e6840]; the Appear fly-in
+    /// before it is not modelled.
     fn step_sun(&mut self, moon: bool) {
         use crate::world::{VIEW_H, VIEW_W};
         let (cx0, cy0) = self.camera;
@@ -4112,7 +4144,7 @@ impl Actor {
         let top = cy0 + VIEW_H - 64.0;
         let anchor = (centre + side * r, top);
         if self.age <= 1 {
-            self.timer = 120;
+            self.timer = 300;
         }
         if moon {
             self.x = anchor.0;
@@ -4157,7 +4189,7 @@ impl Actor {
     /// Chain Chomp (61-chain-chomp.md). Chained: hops around the stake (0.8 px/f, 1.5 hop on each
     /// landing, turns past 40·s px or at walls, pulled back past the 49.6·s chain), and after
     /// 120–179 frames crouches 61 frames, lunges at 8 px/f (+1/frame) to 51.2·s + 4 px from the
-    /// stake, bites 61 frames and curves back. 3 of 7 lunges aim at the player (elevation 73.1°,
+    /// stake, bites 61 frames and curves back onto the stake. 3 of 7 lunges aim at the player (elevation 73.1°,
     /// 45° or 18.3° by height); the rest are random. Free: hops at 1.2 px/f with 3.0 hops.
     /// Phases: 0 walk, 1 crouch, 2 lunge, 3 bite, 4 return. Attack counter in `hops`.
     fn step_chomp(&mut self, level: &Level, chained: bool) {
@@ -4268,23 +4300,48 @@ impl Actor {
             3 => {
                 self.timer -= 1;
                 if self.timer <= 0 {
+                    // AttackEnd: the curve's start, its unit direction to the stake and length
+                    // (centres: the Chomp's and the stake's)
                     self.phase = 4;
                     self.heading = 0.0; // curve parameter
-                    self.trail = vec![(self.x, self.y)];
+                    let c = (self.x, self.y + 8.0 * s);
+                    let (dx, dy) = (stake.0 - c.0, stake.1 - c.1);
+                    let d = dx.dhypot(dy);
+                    let u = if d > 0.0 {
+                        (dx / d, dy / d)
+                    } else {
+                        (0.0, 0.0)
+                    };
+                    self.trail = vec![c, u];
+                    self.speed = d;
                 }
             }
             _ => {
-                // back to the ground beside the stake on a curve [inf: control points not read]
-                let (sx, sy) = self.trail.first().copied().unwrap_or((self.x, self.y));
-                let side = if sx < stake.0 { -1.0 } else { 1.0 };
-                let (ex, ey) = (stake.0 + 32.0 * s * side, self.home_y);
-                self.heading = (self.heading + 0.04).min(1.0);
+                // AttackEnd: back onto the stake along a cubic Bézier, P1 / P2 at 0.2 / 0.8 of the
+                // way plus 16 px across it (the direction turned ±90°, toward the top), the
+                // parameter stepping |1 − t|·0.1 clamped to 0.03…0.05; done within 0.01 of the
+                // end [obs v3.0.3 exec 0x71012b56f0, turn table 0x7102319cc0; the target is the
+                // stake's position, v1.0.0 0x71007b0350]. (v3.0.3's faster return behind a moving
+                // stake in a mode flag's branch, and the halved steps in water, aren't modelled.)
+                let (p0, u) = match self.trail[..] {
+                    [p0, u, ..] => (p0, u),
+                    _ => ((self.x, self.y + 8.0 * s), (0.0, 0.0)),
+                };
+                let d = self.speed;
+                let t0 = self.heading;
+                self.heading = (t0 + ((1.0 - t0).abs() * 0.1).clamp(0.03, 0.05)).min(1.0);
                 let t = self.heading;
-                let (mx, my) = ((sx + ex) / 2.0, sy.max(ey) + 16.0);
-                let u = 1.0 - t;
-                self.x = u * u * sx + 2.0 * u * t * mx + t * t * ex;
-                self.y = u * u * sy + 2.0 * u * t * my + t * t * ey;
-                if t >= 1.0 {
+                let turn = if u.0 >= 0.0 { 0x4000_0000 } else { 0xc000_0000 };
+                let (sn, cs) = crate::fmath::table_sin_cos(turn);
+                let w = ((u.0 * cs - sn * u.1) * 16.0, (u.0 * sn + u.1 * cs) * 16.0);
+                let p1 = (p0.0 + u.0 * d * 0.2 + w.0, p0.1 + u.1 * d * 0.2 + w.1);
+                let p2 = (p0.0 + u.0 * d * 0.8 + w.0, p0.1 + u.1 * d * 0.8 + w.1);
+                let r = 1.0 - t;
+                let (b0, b1, b2, b3) = (r * r * r, 3.0 * t * r * r, 3.0 * r * t * t, t * t * t);
+                self.x = b3 * stake.0 + b0 * p0.0 + b1 * p1.0 + b2 * p2.0;
+                self.y = b3 * stake.1 + b0 * p0.1 + b1 * p1.1 + b2 * p2.1 - 8.0 * s;
+                if r.abs() < 0.01 {
+                    (self.x, self.y) = (stake.0, stake.1 - 8.0 * s);
                     self.phase = 0;
                     self.timer = 120 + self.rand(60) as i32;
                     self.vy = 0.0;
@@ -4333,8 +4390,10 @@ impl Actor {
         }
     }
 
-    /// Generic winged flight [inf, from the winged Thwomp]: drift ±0.3 px/frame (turning at
-    /// walls), bob vy = 0.15·sin(2°·t).
+    /// Generic winged flight for the enemies without a wing behaviour of their own here (each
+    /// has its own EnemyDB Wing action: Teresa, Bubble, Pukupuku, …) [inf, from the winged
+    /// Thwomp]: drift ±0.3 px/frame (turning at walls), bob vy = 0.15·sin(2°·t). The items,
+    /// coins, map objects and blocks fly with the shared fly helper (actors/fly.rs).
     fn step_generic_wings(&mut self, level: &Level) {
         let t = 0.3 * self.dir as f32;
         self.vx += (t - self.vx).clamp(-0.003, 0.003);
@@ -4705,6 +4764,53 @@ mod tests {
         a.on_ground = true;
         a.dir = 1;
         (level, a)
+    }
+
+    #[test]
+    fn a_chain_chomp_curves_back_onto_its_stake_over_the_top() {
+        let level = Level::flat(40);
+        let mut a = Actor::new(Kind::ChainChomp { chained: true }, 250.0, 70.0);
+        (a.home_x, a.home_y) = (200.0, 32.0);
+        a.phase = 3;
+        a.timer = 1;
+        let mut frames = 0;
+        let mut top: f32 = 0.0;
+        a.step(&level, 0.0);
+        while a.phase == 4 && frames < 100 {
+            a.step(&level, 0.0);
+            top = top.max(a.y);
+            frames += 1;
+        }
+        assert_eq!(a.phase, 0);
+        assert!((20..=30).contains(&frames), "{frames}");
+        assert!(
+            (a.x - 200.0).abs() < 1e-3 && (a.y - 32.0).abs() < 0.5,
+            "{} {}",
+            a.x,
+            a.y
+        );
+        // the control points sit 16 px above the straight path: it rises first
+        assert!(top > 70.0, "{top}");
+    }
+
+    #[test]
+    fn a_side_thwomp_sees_a_big_players_head_in_its_box() {
+        let level = Level::flat(40);
+        let mut a = Actor::new(
+            Kind::Thwomp {
+                side: true,
+                right: true,
+            },
+            100.0,
+            100.0,
+        );
+        // the box spans y 84…148; feet at 60: a small player (16 tall) is under it, a big one's
+        // 32 px reach into it
+        a.target = (150.0, 60.0);
+        a.target_h = 16.0;
+        assert!(!a.side_thwomp_sees(&level, true));
+        a.target_h = 32.0;
+        assert!(a.side_thwomp_sees(&level, true));
     }
 
     #[test]

@@ -541,7 +541,8 @@ impl Level {
             (c.id, c.flags, c.child_id, c.width, c.height) = (id, flags, -1, 1, 1);
             part_kind(&c, self)?
         };
-        Some((kind, wings, flags & 0x8000 != 0, flags & 0x6000 == 0x4000))
+        let big = flags & 0x6000 == 0x4000 && !matches!(kind, Kind::YoshiEgg { .. });
+        Some((kind, wings, flags & 0x8000 != 0, big))
     }
 }
 
@@ -605,8 +606,10 @@ fn part_kind(o: &CourseObject, lvl: &Level) -> Option<Kind> {
         }),
         60 => Some(Kind::LavaBubble),
         103 => Some(Kind::FishBone),
+        // the red egg is the "big" one (flags & 0x6000 = 0x4000, YoshiEggBig: the
+        // `p_EggBreak_Red` effect and the red Yoshi) [obs v3.0.3 0x71013f88f0, 0x71013f7b70]
         45 if matches!(lvl.style.as_str(), "MW" | "WU") => Some(Kind::YoshiEgg {
-            red: o.flags & 0x4 != 0,
+            red: o.flags & 0x6000 == 0x4000,
         }),
         45 => Some(Kind::ShoeGoomba {
             heels: o.flags & 0x4 != 0,
@@ -680,6 +683,7 @@ fn part_kind(o: &CourseObject, lvl: &Level) -> Option<Kind> {
         11 => Some(Kind::Lift {
             width: o.width.max(1),
             falling: o.flags & 0x4 != 0,
+            right: o.flags & 0x18 == 0x10,
         }),
         // 3D World enemies (actors/w3.rs); the alternate (0x4) is the horned / spiny /
         // sleeping form; a creeper's path is extended data − 1
@@ -1082,9 +1086,10 @@ impl Level {
             // Stiletto hopping up through a row of parachute coins while a P Switch runs]
             let actorish =
                 o.flags & 0x2 != 0 || o.flags & 0x400 != 0 || (o.id == 8 && o.flags & 0x8000 != 0);
-            let big = o.flags & 0x6000 == 0x4000;
-            let wings = o.flags & 0x2 != 0;
             let actor = part_kind(o, &lvl);
+            // (the red Yoshi's Egg carries the big bits but is no bigger)
+            let big = o.flags & 0x6000 == 0x4000 && !matches!(actor, Some(Kind::YoshiEgg { .. }));
+            let wings = o.flags & 0x2 != 0;
             if o.id == 61 && o.flags & 0x4 == 0 && o.flags & 0x400 == 0 {
                 // the Chain Chomp's stake is solid (WanwanPile has a collision body)
                 lvl.set(tx, ty, Cell::Solid);
@@ -1241,10 +1246,12 @@ impl Level {
                 continue;
             }
             if o.id == 89 {
-                // custom autoscroll node (89-autoscroll-camera.md): number (flags >> 20) & 0xF,
-                // speed (flags >> 18) & 3; the camera centre follows the nodes in order
+                // custom autoscroll node (89-autoscroll-camera.md): number (flags >> 20) & 0x1F,
+                // speed (flags >> 18) & 3; a number past the 12 slots lands in slot 0, the start
+                // [obs v3.0.3 loader 0x710179c8f0]; the camera centre follows the nodes in order
+                let n = ((o.flags >> 20) & 0x1F) as u8;
                 lvl.scroll_nodes.push((
-                    ((o.flags >> 20) & 0xF) as u8,
+                    if n > 11 { 0 } else { n },
                     o.x as f32 / 10.0,
                     o.y as f32 / 10.0,
                     ((o.flags >> 18) & 3) as u8,
@@ -2088,6 +2095,17 @@ mod tests {
             (Kind::OneUp, true, false, false)
         );
         assert_eq!(lvl.part_actor(7, 0), None, "ground has no actor");
+        // SMW / NSMBU: Yoshi's Egg with the big bits is the red egg, no bigger
+        let mut lvl = level(vec![], 0);
+        lvl.style = "MW".to_string();
+        assert_eq!(
+            lvl.part_actor(45, 0x4000).unwrap(),
+            (Kind::YoshiEgg { red: true }, false, false, false)
+        );
+        assert_eq!(
+            lvl.part_actor(45, 0x4).unwrap().0,
+            Kind::YoshiEgg { red: false }
+        );
     }
 
     #[test]

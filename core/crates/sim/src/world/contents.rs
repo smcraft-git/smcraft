@@ -111,7 +111,10 @@ impl World {
     }
 
     /// An enemy holding a Key lets it go when it is defeated, where it was (95-key.md: the
-    /// generic child spawn) [inf: the key's own start motion from the child spawn].
+    /// generic child spawn, spawn-info type 9). The Key has no start motion of its own: its only
+    /// states are Wait (a drawn 1-px bob, cos of a phase stepping 4°, eased 0.2 a frame) and
+    /// Eaten [obs v3.0.3 init 0x71013be7a0, Wait 0x71013bf250 / 0x71013bf2d0]; the spot it is
+    /// put at is the child spawn's [inf: the enemy's centre].
     pub(super) fn drop_keys(&mut self) {
         let mut keys = Vec::new();
         for a in &mut self.actors {

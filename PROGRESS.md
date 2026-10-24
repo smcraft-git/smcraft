@@ -37,6 +37,16 @@ sway, importer and pack 12, the dev cache already at v12).
   offset to ours (the same courses whose backdrops are off) [inf]; captures of the track tiles in play and of NSMBU / 3D World wings (the mesh
   planner maps `M1_Enemy_wingcommon` to `<style>_Enemy_wingcommon`), a look at Water Level mode
   and custom scroll in the recomp (`research/tools/maker-look`: touch taps / drags by script).
+- ✅ **Inferred-behaviour inventory** (2026-10-25, branch `infres`, research specs/inf-inventory.md):
+  every [inf] / [?] / [meas] in sim/src ranked by course share (823 courses: the sample + tgr2) and
+  visibility; 14 resolved from v3.0.3 — the shared fly helper for winged items / coins / map objects /
+  blocks (0x71013d0e50), lift start direction and flag-0x2 bob, the winged Spiny's PataTogezo flight,
+  the Lakitu coin's flight, the Sun's 300-frame first wait, the cape's 20-frame spin, the Side
+  Thwomp's player box (0x7100d7fed0), the Chomp's Bézier return (0x71012b56f0), custom autoscroll
+  speeds (0x710179c8f0), the red Yoshi's Egg, the Bob-omb fuse and Key start motion (no change).
+  578 / 580 traces exact. Next by rank: the Swinging Claw's rope (the W_3010660 record shows a
+  slowly building ±2 px sway), the Twister's player handling (v1 0x71009bc2c0), the stack [inf]s,
+  Bowser's chase jumps, the other winged enemies.
 - **Agent queue** (when a helper slot frees; running 2026-10-25: the maker's Water Level and
   Custom Scroll modes, physics): ✅ a Koopaling in a Clown Car (2026-10-25, branch
   `kclown`, research 120-koopalings.md "In a Koopa Clown Car": KoKoopaDefault's Clown vtable
