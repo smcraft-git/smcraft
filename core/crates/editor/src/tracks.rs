@@ -6,10 +6,12 @@
 //! Each piece has its own link id (stored + 1, shared with objects' link ids); a part on a track
 //! has flag 0x400 and the link id of the piece it sits on, and the piece's flag byte is 1 while a
 //! part sits on it [corp: 657 of 657 riders]. The two end words are the tile codes the game
-//! writes at the piece's ends: a cap (closed end 0x70–0x77, open end 0x80–0x87) at a free end, a
-//! joint code at a shared end written by one of the two pieces (the other writes 0x104,
-//! "nothing"). The codes below are the most common ones per end pairing in the sample courses
-//! (research/specs/maker.md); the engine draws tracks from the geometry alone.
+//! writes at the piece's ends, as it does (v3.0.3, research/specs/maker.md C16): a free end
+//! keeps its 3 × 3 template's cap (closed 0x70–0x77, open 0x10 higher; template 0x71023c7068,
+//! end points 0x71023ca6a8), and where two ends meet the code `join` makes from the two caps
+//! (table 0x71023c74f0, 0x7100da2060) goes to the piece further left — at the same x, the lower
+//! one — while the other writes 0x104, "nothing" (0x7101016610) [obs; corp: all 3823 joints
+//! of the 550 sample courses].
 
 use mmk_formats::record::Record;
 use mmk_formats::smm2::course::Track;
@@ -21,49 +23,80 @@ pub const TRACK_MAX: usize = 1500;
 /// End word meaning "nothing written here".
 pub const NO_CODE: u16 = 0x104;
 
-/// End points of a piece type, relative to its centre tile; end 0 is stored in k0.
+/// End points of a piece type, relative to its centre tile; end 0 is stored in k0. The game's
+/// end points per type (0x71023ca6a8) are listed k1 first: horizontal left / right, vertical
+/// bottom / top, type 2 upper-left / lower-right, type 3 lower-left / upper-right [obs].
 fn ends(kind: u8) -> Option<[(i32, i32); 2]> {
     Some(match kind {
         0 => [(1, 0), (-1, 0)],
         1 => [(0, 1), (0, -1)],
-        2 => [(-1, 1), (1, -1)],
+        2 => [(1, -1), (-1, 1)],
         3 => [(1, 1), (-1, -1)],
         _ => return None,
     })
 }
 
-/// Closed-end cap per (type, end); open ends are 0x10 higher.
-const CAPS: [[u16; 2]; 4] = [[0x71, 0x70], [0x72, 0x73], [0x75, 0x74], [0x77, 0x76]];
-
-/// Joint codes for two piece ends meeting, keyed by (type, end) pairs in sorted order: the codes
-/// the first and the second end write [corp: majority per pairing].
-/// A piece end: (type, end number).
-type End = (u8, u8);
-
-const JOINTS: &[(End, End, u16, u16)] = &[
-    ((0, 0), (0, 1), 0x90, NO_CODE),
-    ((0, 0), (1, 0), 0x96, NO_CODE),
-    ((0, 0), (1, 1), 0x97, NO_CODE),
-    ((0, 0), (2, 0), 0xa6, 0x9e),
-    ((0, 0), (2, 1), 0xa4, 0x9c),
-    ((0, 0), (3, 0), NO_CODE, 0xa7),
-    ((0, 0), (3, 1), 0xa5, NO_CODE),
-    ((0, 1), (1, 0), NO_CODE, 0x95),
-    ((0, 1), (1, 1), NO_CODE, 0x94),
-    ((0, 1), (3, 0), NO_CODE, 0x9d),
-    ((0, 1), (3, 1), 0x9f, NO_CODE),
-    ((1, 0), (1, 1), 0x91, NO_CODE),
-    ((1, 0), (2, 0), 0xa3, 0xa1),
-    ((1, 0), (3, 0), NO_CODE, 0xa0),
-    ((1, 0), (3, 1), 0xa2, NO_CODE),
-    ((1, 1), (2, 0), 0x99, 0x9e),
-    ((1, 1), (3, 0), NO_CODE, 0x9a),
-    ((1, 1), (3, 1), 0x98, NO_CODE),
-    ((2, 0), (2, 1), 0x92, NO_CODE),
-    ((2, 0), (3, 0), 0x9e, 0x55),
-    ((2, 1), (3, 0), 0x65, 0x64),
-    ((3, 0), (3, 1), 0x93, NO_CODE),
+/// The 3 × 3 template's code at each end (k0, k1) of types 0–7: a closed cap, the open one
+/// 0x10 higher (0x71023c7068 at the end points) [obs]. The bends' ends point along the
+/// straights they meet.
+const CAPS: [[u16; 2]; 8] = [
+    [0x71, 0x70],
+    [0x72, 0x73],
+    [0x75, 0x74],
+    [0x77, 0x76],
+    [0x71, 0x72],
+    [0x73, 0x70],
+    [0x71, 0x73],
+    [0x72, 0x70],
 ];
+
+/// Two caps meeting and the joint code they make (0x71023c74f0, entries 0–27; either cap may
+/// be its open form) [obs].
+const JOIN: [(u16, u16, u16); 28] = [
+    (0x70, 0x71, 0x90),
+    (0x70, 0x72, 0x95),
+    (0x70, 0x73, 0x94),
+    (0x70, 0x74, 0x9c),
+    (0x70, 0x75, 0x9e),
+    (0x70, 0x76, 0x9f),
+    (0x70, 0x77, 0x9d),
+    (0x71, 0x72, 0x96),
+    (0x71, 0x73, 0x97),
+    (0x71, 0x74, 0xa6),
+    (0x71, 0x75, 0xa4),
+    (0x71, 0x76, 0xa5),
+    (0x71, 0x77, 0xa7),
+    (0x72, 0x73, 0x91),
+    (0x72, 0x74, 0xa3),
+    (0x72, 0x75, 0xa1),
+    (0x72, 0x76, 0xa2),
+    (0x72, 0x77, 0xa0),
+    (0x73, 0x74, 0x99),
+    (0x73, 0x75, 0x9b),
+    (0x73, 0x76, 0x98),
+    (0x73, 0x77, 0x9a),
+    (0x74, 0x75, 0x92),
+    (0x74, 0x76, 0x65),
+    (0x74, 0x77, 0x55),
+    (0x75, 0x76, 0x54),
+    (0x75, 0x77, 0x64),
+    (0x76, 0x77, 0x93),
+];
+
+/// The joint code of two caps (0 when they make none) [obs 0x7100da2060].
+pub fn join(a: u16, b: u16) -> u16 {
+    let closed = |c: u16| {
+        if (0x80..0x88).contains(&c) {
+            c - 0x10
+        } else {
+            c
+        }
+    };
+    let (a, b) = (closed(a), closed(b));
+    JOIN.iter()
+        .find(|&&(x, y, _)| (x, y) == (a, b) || (x, y) == (b, a))
+        .map_or(0, |j| j.2)
+}
 
 fn coord(v: u8) -> i32 {
     if v == 255 { -1 } else { v as i32 }
@@ -183,12 +216,13 @@ impl Editor {
         Ok(out)
     }
 
-    /// Rewrite the end codes at a point from the pieces meeting there.
+    /// Rewrite the end codes at a point from the pieces meeting there: a free end its cap
+    /// (kept open or closed), a meeting of two the joint on the left / lower piece (0x7101016610).
     fn recode(&mut self, p: (i32, i32)) {
         let at = self.pieces_at(p);
         let tracks = &self.area().tracks.items;
-        // bends and junctions keep their codes, and so do their neighbours
-        if at.iter().any(|&(i, _)| tracks[i].r#type > 3) {
+        // junctions keep their codes, and so do their neighbours
+        if at.iter().any(|&(i, _)| tracks[i].r#type > 7) {
             return;
         }
         let code_of = |t: &Track, k: usize| if k == 0 { t.k0 } else { t.k1 };
@@ -201,19 +235,19 @@ impl Editor {
                 writes.push((*i, *k, if open { cap + 0x10 } else { cap }));
             }
             [(i, ki), (j, kj)] => {
-                let a = (tracks[*i].r#type, *ki as u8);
-                let b = (tracks[*j].r#type, *kj as u8);
-                let ((first, fa), (second, sb)) = if a <= b {
-                    ((*i, a), (*j, b))
+                let (a, b) = (&tracks[*i], &tracks[*j]);
+                let code = join(CAPS[a.r#type as usize][*ki], CAPS[b.r#type as usize][*kj]);
+                let code = if code == 0 { NO_CODE } else { code };
+                // the joint goes to the piece further left, at the same x the lower one
+                let (ca, cb) = (centre(a), centre(b));
+                let b_holds = cb.0 < ca.0 || (cb.0 == ca.0 && cb.1 < ca.1);
+                let (wa, wb) = if b_holds {
+                    (NO_CODE, code)
                 } else {
-                    ((*j, b), (*i, a))
+                    (code, NO_CODE)
                 };
-                let (ca, cb) = JOINTS
-                    .iter()
-                    .find(|j| j.0 == fa && j.1 == sb)
-                    .map_or((NO_CODE, NO_CODE), |j| (j.2, j.3));
-                writes.push((first, fa.1 as usize, ca));
-                writes.push((second, sb.1 as usize, cb));
+                writes.push((*i, *ki, wa));
+                writes.push((*j, *kj, wb));
             }
             _ => {}
         }
@@ -461,5 +495,57 @@ mod tests {
         assert_eq!((t[d[0]].k0, t[d[0]].k1), (0x93, 0x76));
         assert_eq!((t[d[1]].k0, t[d[1]].k1), (0x77, NO_CODE));
         round_trip(&e);
+    }
+
+    #[test]
+    fn down_right_diagonals_keep_k0_at_the_lower_right_end() {
+        // the game's end points (0x71023ca6a8): type 2's k0 is its lower-right end
+        let mut e = flat("M1");
+        let d = e.draw_track((10, 8), (14, 4)).unwrap();
+        let t = &e.area().tracks.items;
+        assert!(t.iter().all(|p| p.r#type == 2));
+        assert_eq!(
+            (t[d[0]].k0, t[d[0]].k1),
+            (0x92, 0x74),
+            "joint on the left piece"
+        );
+        assert_eq!((t[d[1]].k0, t[d[1]].k1), (0x75, NO_CODE));
+        e.set_track_end((10, 8), true).unwrap();
+        assert_eq!(
+            e.area().tracks.items[d[0]].k1,
+            0x84,
+            "the upper-left end opens"
+        );
+        assert_eq!(e.track_end_open((14, 4)), Some(false));
+        // a horizontal piece into its upper-left end: the horizontal (further left) holds it
+        let h = e.draw_track((8, 8), (10, 8)).unwrap();
+        let t = &e.area().tracks.items;
+        assert_eq!((t[h[0]].k0, t[h[0]].k1), (0xa6, 0x70));
+        assert_eq!(t[d[0]].k1, NO_CODE);
+        round_trip(&e);
+    }
+
+    #[test]
+    fn joints_go_to_the_left_or_lower_piece() {
+        assert_eq!(join(0x71, 0x70), 0x90);
+        assert_eq!(
+            join(0x81, 0x70),
+            0x90,
+            "an open cap joins as its closed form"
+        );
+        assert_eq!(join(0x75, 0x77), 0x64);
+        assert_eq!(join(0x70, 0x70), 0, "two left ends make none");
+        // vertical pieces: the lower one holds the joint
+        let mut e = flat("M1");
+        let v = e.draw_track((20, 4), (20, 8)).unwrap();
+        let t = &e.area().tracks.items;
+        assert_eq!((t[v[0]].k0, t[v[0]].k1), (0x91, 0x73));
+        assert_eq!((t[v[1]].k0, t[v[1]].k1), (0x72, NO_CODE));
+        // a horizontal piece ending on a vertical one's bottom end from the right: the vertical
+        // (further left) holds the joint
+        let h = e.draw_track((22, 4), (20, 4)).unwrap();
+        let t = &e.area().tracks.items;
+        assert_eq!(t[v[0]].k1, join(0x73, 0x70));
+        assert_eq!(t[h[0]].k1, NO_CODE);
     }
 }
