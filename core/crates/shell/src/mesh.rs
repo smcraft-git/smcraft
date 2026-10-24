@@ -268,7 +268,8 @@ pub fn build(
                     let vc = c.map(|x| x as f32 / 255.0);
                     let fa = look.form.add.eval(vc);
                     // (the colour combiner takes the vertex colour as it is)
-                    let fm = if tev != 0 {
+                    let combiner = look.tev.is_some_and(|b| b[14 * 4 + 2] > 0.5);
+                    let fm = if combiner {
                         vc
                     } else {
                         let m = look.form.mul.eval(vc);

@@ -349,7 +349,7 @@ fn form_of(m: &mmk_assets::mesh::MeshMaterial) -> Option<Form> {
 }
 
 /// Rows (vec4) of a shape's colour-combiner block ([`tev_of`], [`MmkMeshShape::tev`]).
-pub const TEV_ROWS: usize = 26;
+pub const TEV_ROWS: usize = 28;
 
 /// The uber shader's colour combiner as NSMBU's materials use it (`tev_tev0_color_*`,
 /// `tev_tev1_color_*`, `tev_tev0_alpha_*`, `tev_tev1_alpha_*`, `material_diffuse_color`,
@@ -381,7 +381,8 @@ pub const TEV_ROWS: usize = 26;
 /// scale; 24 the emission (kind of `emission_mul_color`, `emission_intensity`, 1 if on, –) and
 /// 25 its constant: the emission texture `_e0` (in `gsys_user0`'s place, with the albedo's
 /// coordinates [inf]) times that colour is added to the lit colour (3D World's airship blocks).
-/// Kinds: 0 the albedo, 1 the constant, 2 the vertex colour, 3 / 4 register 0 / 1.
+/// Kinds: 0 the albedo, 1 the constant, 2 the vertex colour, 3 / 4 register 0 / 1. Rows 26–27
+/// are the edge light ([`edge_rows`]), also in blocks without a combiner (row 14's z is 0).
 /// None for materials that colour themselves with the plain albedo (or the 3D World combiner's
 /// `form` results, codes 300–303).
 pub fn tev_of(m: &mmk_assets::mesh::MeshMaterial) -> Option<[f32; TEV_ROWS * 4]> {
@@ -492,6 +493,35 @@ pub fn tev_of(m: &mmk_assets::mesh::MeshMaterial) -> Option<[f32; TEV_ROWS * 4]>
     Some(out)
 }
 
+/// The uber shader's edge (rim) light (`enable_edge_light`) as rows 26–27 of a shape's block:
+/// (`edge_light_intensity`, `edge_light_sharpness` · 10, `edge_light_rim_i`, 1) and the colour
+/// `block_edge_light_color` names (100–105 `const_color0`–5). The program adds
+/// (1 − saturate(n·v))^(sharpness · 10) · intensity · colour · mix(1, L(−v), rim_i) to the lit
+/// colour, L the light map at the direction away from the eye [obs: 3W castle field program].
+pub fn edge_rows(m: &mmk_assets::mesh::MeshMaterial) -> Option<[[f32; 4]; 2]> {
+    if m.option("enable_edge_light") != Some("1") {
+        return None;
+    }
+    let p1 = |k: &str, d: f32| m.param(k).and_then(|v| v.first().copied()).unwrap_or(d);
+    let code = m.option("block_edge_light_color").unwrap_or("100");
+    let color = match code.strip_prefix("10") {
+        Some(n) if code.len() == 3 => {
+            let v = m.param(&format!("const_color{n}")).unwrap_or(&[]);
+            [0, 1, 2, 3].map(|i| v.get(i).copied().unwrap_or(1.0))
+        }
+        _ => [1.0; 4],
+    };
+    Some([
+        [
+            p1("edge_light_intensity", 0.0),
+            p1("edge_light_sharpness", 1.0) * 10.0,
+            p1("edge_light_rim_i", 0.0),
+            1.0,
+        ],
+        color,
+    ])
+}
+
 /// How a shape's material is drawn, worked out once for both renderers.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ShapeLook {
@@ -509,7 +539,8 @@ pub struct ShapeLook {
     pub tint: [f32; 3],
     /// The albedo combiner (vertex colours added or multiplied in).
     pub form: Form,
-    /// The colour combiner ([`tev_of`]); with it the extra textures are `gsys_user0` (`extra`),
+    /// The shape's block: the colour combiner ([`tev_of`]; row 14's z = 1) and / or the edge
+    /// light ([`edge_rows`]). With the combiner the extra textures are `gsys_user0` (`extra`),
     /// `_a1` (`extra2`) and the indirect texture (`extra3`), the texture coordinates are the
     /// model's own (the block holds their matrices), and the vertex alpha applies only with
     /// `vertex_alpha`.
@@ -643,7 +674,15 @@ pub fn shape_look(mat: Option<&mmk_assets::mesh::MeshMaterial>) -> ShapeLook {
             form_of(m).unwrap_or_default()
         },
         extra3: tev.and(m.texture("_i0")).map(String::from),
-        tev,
+        tev: match (tev, edge_rows(m)) {
+            (b, None) => b,
+            (b, Some(e)) => {
+                let mut b = b.unwrap_or([0.0; TEV_ROWS * 4]);
+                b[26 * 4..27 * 4].copy_from_slice(&e[0]);
+                b[27 * 4..28 * 4].copy_from_slice(&e[1]);
+                Some(b)
+            }
+        },
     }
 }
 

@@ -232,7 +232,7 @@ fn vs(@location(0) clip: vec4<f32>, @location(1) world: vec3<f32>, @location(2) 
 
 // the colour combiner of NSMBU's materials (mmk_host::mesh::tev_of has the layout)
 struct Tev {
-    rows: array<vec4<f32>, 26>,
+    rows: array<vec4<f32>, 28>,
 };
 @group(2) @binding(0) var<uniform> tev: Tev;
 
@@ -497,6 +497,15 @@ fn fs(i: VOut) -> @location(0) vec4<f32> {
     }
     if (mode == 1u) {
         rgb = rgb + x.rgb * i.emission;
+    }
+    if (tev.rows[26].w > 0.5) {
+        // the edge (rim) light: (1 − n·v)^sharpness · intensity · colour, scaled towards the light
+        // map behind the surface
+        let v = normalize(light.rows[0].xyz - i.world);
+        let e = tev.rows[26];
+        let rim = mix(vec3<f32>(1.0), lighting(-v), e.z);
+        rgb = rgb + pow(1.0 - clamp(dot(normalize(i.n), v), 0.0, 1.0), e.y) * e.x
+            * tev.rows[27].rgb * rim;
     }
     if (combiner && tev.rows[24].z > 0.5) {
         // the combiner's emission: _e0 times `emission_mul_color`'s colour

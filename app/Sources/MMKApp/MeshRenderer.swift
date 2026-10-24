@@ -249,6 +249,14 @@ final class MeshRenderer {
         R0 = r0;
         R1 = r1;
     }
+    // the edge (rim) light (render.rs MESH_SHADER): (1 - n.v)^sharpness * intensity * colour,
+    // scaled towards the light map behind the surface
+    float3 edge_light(float3 n, float3 world, constant float4* L, constant float4* T) {
+        if (T[26].w < 0.5) return float3(0);
+        float3 v = normalize(L[0].xyz - world);
+        float3 rim = mix(float3(1), lighting(-v, L), T[26].z);
+        return pow(1.0 - saturate(dot(n, v)), T[26].y) * T[26].x * T[27].rgb * rim;
+    }
     fragment float4 mesh_fragment(O in [[stage_in]], texture2d<float> t [[texture(0)]],
                                   texture2d<float> extra [[texture(1)]],
                                   texture2d<float> extra2 [[texture(2)]],
@@ -275,6 +283,7 @@ final class MeshRenderer {
             if ((u.flags & 2) == 0) rgb *= lighting(normalize(in.n), L) * L[23].x;
             // the combiner's emission: _e0 (in gsys_user0's place) times emission_mul_color's colour
             if (T[24].z > 0.5) rgb += tx[2].rgb * tev_source(T[24].x, T[25], tx[0], in.vc, R0, R1).rgb * T[24].y;
+            rgb += edge_light(normalize(in.n), in.world, L, T);
             rgb = clamp(rgb, 0.0, 2.0);
             rgb = fogged(rgb, in.world, u.flags, L);
             return float4(rgb, c.a);
@@ -311,6 +320,7 @@ final class MeshRenderer {
         float3 rgb = c.rgb;
         if ((u.flags & 2) == 0) rgb *= lighting(normalize(in.n), L) * L[23].x;
         if (mode == 1) rgb += x.rgb * u.tint.w;
+        rgb += edge_light(normalize(in.n), in.world, L, T);
         // the uber shader clamps the lit colour to 0 .. 2 before its fogs
         rgb = clamp(rgb, 0.0, 2.0);
         rgb = fogged(rgb, in.world, u.flags, L);

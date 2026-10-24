@@ -464,7 +464,7 @@ enum {
                                 // 2 multiplied
     MMK_MESH_NO_VERTEX_ALPHA = 1 << 26, // the alpha leaves the vertex alpha out (colour combiner)
 };
-enum { MMK_MESH_TEV_ROWS = 26 };
+enum { MMK_MESH_TEV_ROWS = 28 };
 typedef struct {
     uint32_t first_index, index_count, material, bone;
     uint32_t flags;             // MMK_MESH_* bits 0-7; bits 8-9 wrap u, 10-11 wrap v
@@ -481,11 +481,11 @@ typedef struct {
                                 // [4] add a, [5] 1 = clamp add, [6-8] mul k, [9] mul rgb,
                                 // [10] mul a, [11] 1 = clamp mul, [12] 1 = clamp the result
     uint32_t extra3_texture;    // the colour combiner's indirect texture, or MMK_TEXTURE_NONE
-    float tev[104];              // the colour combiner (MMK_MESH_TEV_ROWS x float4, all zero:
-                                // none; layout: mmk_host::mesh::tev_of). With it the textures are
+    float tev[112];             // the colour combiner and edge light (MMK_MESH_TEV_ROWS x float4,
+                                // all zero: none; layout: mmk_host::mesh::tev_of, edge_rows). With it the textures are
                                 // albedo, extra2 (_a1), extra (gsys_user0, or the emission
                                 // _e0), extra3 (indirect)
-} MmkMeshShape;                                                        // 556 bytes
+} MmkMeshShape;                                                        // 588 bytes
 
 typedef struct {
     const float *skin;          // bone_count x 12 floats (row-major 3x4)
