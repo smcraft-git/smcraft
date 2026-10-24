@@ -469,7 +469,8 @@ typedef struct {
     uint32_t extra_texture;     // MMK_MESH_EXTRA_SHIFT texture, or MMK_TEXTURE_NONE
     float emission;             // emission strength (extra mode 1)
     float tint[3];              // albedo multiplied by this colour
-} MmkMeshShape;                                                        // 68 bytes
+    uint32_t extra2_texture;    // the sky's horizon layer (extra mode 3), or MMK_TEXTURE_NONE
+} MmkMeshShape;                                                        // 72 bytes
 
 typedef struct {
     const float *skin;          // bone_count x 12 floats (row-major 3x4)
@@ -506,15 +507,15 @@ bool mmk_mesh_pose(const MmkAssets *assets, int32_t mesh, size_t model, int32_t 
 // This frame's mesh draws (3D styles; filled by mmk_engine_snapshot), valid until the next snapshot
 size_t mmk_engine_meshes(const MmkEngine *engine, const MmkMeshDraw **out);
 // The 3D styles' scene this frame: cameras (column-major 4x4, world px -> clip, depth 0..1) and
-// light uniforms (30 x float4: eye; 3 directional lights; hemisphere; ambient; 3 fogs; exposure;
-// the sky's 6 constant colours)
+// light uniforms (36 x float4: eye; 3 directional lights; hemisphere; ambient; 3 fogs; exposure;
+// the sky's 6 constant colours; the sky's 3 texture matrices, 2 rows each)
 typedef struct {
     float field_view_proj[16];
     float background_view_proj[16];
-    float field_light[120];
-    float background_light[120];
+    float field_light[144];
+    float background_light[144];
     bool has_background;
-} MmkScene3d;                                                          // 1092 bytes
+} MmkScene3d;                                                          // 1284 bytes
 bool mmk_engine_scene3d(const MmkEngine *engine, MmkScene3d *out);    // false: 2D style
 // The background scene's draws (drawn first, with background_view_proj and its own depth)
 size_t mmk_engine_background(const MmkEngine *engine, const MmkMeshDraw **out);

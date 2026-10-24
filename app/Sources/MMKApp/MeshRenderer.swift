@@ -68,7 +68,7 @@ final class MeshRenderer {
         var layered: Bool
         /// Underground night: drawn upside down.
         var flipY: Bool
-        /// 30 rows (mmk.h MmkScene3d light uniforms).
+        /// `MeshRenderer.lightRowCount` rows (mmk.h MmkScene3d light uniforms).
         var light: [SIMD4<Float>]
     }
 
@@ -160,23 +160,37 @@ final class MeshRenderer {
         }
         return r;
     }
+    // texture matrix k of the sky (rows 30-35: the cloud layer, the horizon layer, the base)
+    float2 sky_uv(int k, float2 uv, constant float4* L) {
+        float4 a = L[30 + 2 * k], b = L[31 + 2 * k];
+        return float2(dot(a.xy, uv) + a.z, dot(b.xy, uv) + b.z);
+    }
     fragment float4 mesh_fragment(O in [[stage_in]], texture2d<float> t [[texture(0)]],
                                   texture2d<float> extra [[texture(1)]],
+                                  texture2d<float> extra2 [[texture(2)]],
                                   sampler s [[sampler(0)]], constant U& u [[buffer(0)]],
                                   constant float4* L [[buffer(1)]]) {
-        float4 c = t.sample(s, in.uv) * in.color;
-        float4 x = extra.sample(s, in.uv);
         uint mode = (u.flags >> 12) & 3;
+        bool sky = mode == 3 && L[24].w > 0.5;
+        float4 tc = t.sample(s, sky ? sky_uv(0, in.uv, L) : in.uv);
+        float4 x = extra.sample(s, sky ? sky_uv(2, in.uv, L) : in.uv);
+        float4 c = tc * in.color;
         if (mode == 2) c.a *= x.a;
-        // sky: the base gradient under the albedo's cloud layer
-        if (mode == 3) {
-            if (L[24].w > 0.5) {
-                float3 sky = mix(L[29].rgb, L[28].rgb, x.r);
-                float3 cloud = mix(L[25].rgb, L[24].rgb, c.r);
-                c = float4(mix(sky, cloud, c.a) * in.color.rgb, 1);
-            } else {
-                c = float4(mix(x.rgb, c.rgb, c.a) * in.color.rgb, 1);
-            }
+        if (sky) {
+            // the uber shader's sky (render.rs MESH_SHADER): the base (_s0) colours constant
+            // colour 5 -> 4 with an HDR boost in its alpha; the horizon layer (_n0) colours 3 -> 2
+            // and covers by alpha^5; the clouds (_a0) colour 1 -> 0 and cover by
+            // alpha^2 sin(pi (alpha - 1/2))
+            float4 h = extra2.sample(s, sky_uv(1, in.uv, L));
+            float3 base = mix(L[29].rgb, L[28].rgb, x.rgb) * (1.0 + 1024.0 * pow(x.a * 0.99975, 4.0));
+            float3 horizon = mix(L[27].rgb, L[26].rgb, h.rgb);
+            float ha = pow(h.a, 5.0);
+            float w = (1.0 - ha) * (1.0 - pow(tc.a, 5.0));
+            float3 under = mix(base * w, horizon, ha) * in.color.rgb;
+            float3 cloud = mix(L[25].rgb, L[24].rgb, tc.rgb);
+            c = float4(mix(under, cloud, tc.a * tc.a * sin(M_PI_F * (tc.a - 0.5))), 1);
+        } else if (mode == 3) {
+            c = float4(mix(x.rgb, c.rgb, c.a) * in.color.rgb, 1);
         }
         // cards (pre-rendered sprites) are cut out by alpha
         if ((u.flags & 1) != 0) {
@@ -339,6 +353,8 @@ final class MeshRenderer {
                     u.flags = (unlit ? 1 : 0) | (sh.flags & keep)
                     u.tint = SIMD4(sh.tint.0, sh.tint.1, sh.tint.2, sh.emission)
                     enc.setFragmentTexture(extraTex ?? white, index: 1)
+                    let extra2Tex = sh.extra2_texture == MMK_TEXTURE_NONE ? nil : texture(sh.extra2_texture)
+                    enc.setFragmentTexture(extra2Tex ?? white, index: 2)
                     u.srt = SIMD4(sh.srt.0, sh.srt.1, sh.srt.2, sh.srt.3)
                     u.misc = SIMD4(sh.srt.4, sh.vertex_color_ratio, sh.alpha_ref, m.colors == nil ? 0 : 1)
                     enc.setRenderPipelineState(pipelines[blend])
@@ -363,7 +379,7 @@ final class MeshRenderer {
 
     /// A plain key light plus ambient (model viewer; scenes without an environment).
     static let neutralLight: [SIMD4<Float>] = {
-        var l = Array(repeating: SIMD4<Float>(0, 0, 0, 0), count: 30)
+        var l = Array(repeating: SIMD4<Float>(0, 0, 0, 0), count: lightRowCount)
         l[0] = SIMD4(0, 0, 500, 1)
         l[1] = SIMD4(simd_normalize(SIMD3<Float>(0.35, -0.6, -0.75)), 1)
         l[2] = SIMD4(0.6, 0.6, 0.6, 0)
@@ -372,11 +388,14 @@ final class MeshRenderer {
         return l
     }()
 
-    /// The light rows of an `MmkScene3d` uniform block (96 floats).
+    /// Rows of a light uniform block (mmk_host::scene3d::LIGHT_ROWS).
+    static let lightRowCount = 36
+
+    /// The light rows of an `MmkScene3d` uniform block (`lightRowCount` x 4 floats).
     static func lightRows<T>(_ tuple: T) -> [SIMD4<Float>] {
         withUnsafeBytes(of: tuple) { raw in
             let f = raw.bindMemory(to: Float.self)
-            return (0..<30).map { SIMD4(f[$0 * 4], f[$0 * 4 + 1], f[$0 * 4 + 2], f[$0 * 4 + 3]) }
+            return (0..<lightRowCount).map { SIMD4(f[$0 * 4], f[$0 * 4 + 1], f[$0 * 4 + 2], f[$0 * 4 + 3]) }
         }
     }
 

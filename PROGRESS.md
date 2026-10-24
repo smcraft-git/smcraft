@@ -375,6 +375,10 @@ Nextendo; `docs/nextendo-network-play.md`, spec `research/specs/network-play.md`
   | NSMBU | 50.1 / 71% | 15.9 / 46% | 26.5 / 49% | 62.6 / 77% | 47.9 / 73% | 24.8 / 60% | 38.0 / 66% | 22.2 / 51% | 60.8 / 73% | 36.2 / 63% | 38.5 |
   | NSMBU night | 41.7 / 78% | 41.6 / 76% | 46.4 / 88% | 79.9 / 87% | 5.8 / 12% | 4.5 / 11% | 40.8 / 76% | 41.6 / 74% | 40.7 / 75% | 56.0 / 91% | 39.9 |
 
+  3D World light pass (branch light3w, the uber shader read from its own programs,
+  research/specs/render-3d.md): the sky material as the game computes it and g3d's "Maya"
+  texture SRT → ground 38.6, underground 34.3, castle 75.9, airship 26.5, water 32.8, ghost
+  31.8, snow 70.6, desert 48.4, sky 24.6, forest 48.4 (mean 43.2, was 46.0; NSMBU unchanged).
   3D World (references recaptured 2026-10-24, MAE): ground 53.7, underground 34.3, castle 75.9,
   airship 26.9, water 33.3, ghost 31.8, snow 70.6, desert 60.4, sky 24.6, forest 48.4 (were
   31–77 before: the start sign 3× too big — a model without an SMB1 picture is drawn at its own

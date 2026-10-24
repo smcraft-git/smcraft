@@ -57,6 +57,8 @@ pub struct Piece {
     pub texture: Option<u32>,
     /// The extra texture (emission, mask or sky base; see `FLAG_EXTRA_SHIFT`).
     pub extra: Option<u32>,
+    /// The second extra texture (the sky's horizon layer).
+    pub extra2: Option<u32>,
     pub wrap: u32,
     pub blend: u8,
     pub cull: u8,
@@ -144,7 +146,13 @@ pub fn build(
                 .filter(|(_, l)| l.extra.is_some())
                 .collect();
             for (i, l) in looks {
-                extras.insert(i, store.extra_texture(cache, d.mesh, &l));
+                extras.insert(
+                    i,
+                    (
+                        store.extra_texture(cache, d.mesh, &l),
+                        store.extra2_texture(cache, d.mesh, &l),
+                    ),
+                );
             }
         }
         let Some(m) = store
@@ -168,9 +176,12 @@ pub fn build(
                 continue;
             }
             let look = shape_look(m.materials.get(sh.material));
-            let extra = match look.extra {
-                Some(_) => extras.get(&sh.material).copied().unwrap_or(TEXTURE_NONE),
-                None => TEXTURE_NONE,
+            let (extra, extra2) = match look.extra {
+                Some(_) => extras
+                    .get(&sh.material)
+                    .copied()
+                    .unwrap_or((TEXTURE_NONE, TEXTURE_NONE)),
+                None => (TEXTURE_NONE, TEXTURE_NONE),
             };
             if look.faces() == 3 {
                 continue; // drawn with no faces (helper geometry)
@@ -270,6 +281,7 @@ pub fn build(
                 count: out.indices.len() as u32 - first,
                 texture: (tex != TEXTURE_NONE).then_some(tex),
                 extra: (extra != TEXTURE_NONE).then_some(extra),
+                extra2: (extra2 != TEXTURE_NONE).then_some(extra2),
                 wrap: (look.flags >> 8) & 0xF,
                 blend: match look.blend() {
                     1 => 2,

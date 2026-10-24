@@ -128,8 +128,37 @@ pub struct Env {
     pub hemi: Option<Hemi>,
     pub ambient: [f32; 3],
     pub fogs: Vec<Fog>,
-    /// The sky material's six constant colours (background scenes with a sky).
-    pub sky: Option<[[f32; 4]; 6]>,
+    /// The sky material (background scenes with a sky).
+    pub sky: Option<Sky>,
+}
+
+/// The background model's sky material (`enable_sky`): its six constant colours and the texture
+/// matrices of its three layers.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Sky {
+    pub colors: [[f32; 4]; 6],
+    /// 2×3 texture matrices (row-major) of the cloud layer (`_a0`, `tex_srt0`), the horizon
+    /// layer (`_n0`, `tex_srt1`) and the sky's base (`_s0`, `tex_srt2`).
+    pub srt: [[f32; 6]; 3],
+}
+
+/// A material's texture SRT (`tex_srt*`: mode, scale u, scale v, rotate, translate u, translate
+/// v) as a 2×3 matrix (row-major) over the model's texture coordinates: the "Maya" form of
+/// `nn::g3d`'s texture SRT (mode 0, every 3D material's), rotating about the texture's centre
+/// and scaling about its top edge (v up) [inf: the g3d convention; it puts the 3D World sky's
+/// clouds where the reference frames have them, the plain scale-rotate-translate form does not].
+pub fn srt_matrix(p: &[f32]) -> [f32; 6] {
+    let g = |i: usize, d: f32| p.get(i).copied().unwrap_or(d);
+    let (sx, sy, r, tx, ty) = (g(1, 1.0), g(2, 1.0), g(3, 0.0), g(4, 0.0), g(5, 0.0));
+    let (s, c) = r.sin_cos();
+    [
+        sx * c,
+        sx * s,
+        sx * ((-0.5 * c - 0.5 * s + 0.5) - tx),
+        -sy * s,
+        sy * c,
+        sy * ((0.5 * s - 0.5 * c + 0.5) + ty) + 1.0 - sy,
+    ]
 }
 
 fn v3(v: &Value) -> [f32; 3] {
@@ -218,7 +247,7 @@ pub fn load_env(root: &Path, name: &str) -> Option<Env> {
 }
 
 /// Rows of 4 floats in [`Env::uniform`].
-pub const LIGHT_ROWS: usize = 30;
+pub const LIGHT_ROWS: usize = 36;
 
 /// Scale of the lit colour (row 23) [inf: calibrated against reference frames].
 pub const EXPOSURE: f32 = 1.0;
@@ -229,7 +258,9 @@ impl Env {
     /// diffuse rgb, –; backside rgb, –); 10 hemisphere sky rgb, w = 1 if present; 11 ground;
     /// 12 hemisphere direction; 13 ambient; 14–22 three fogs — the distance fog, the second
     /// distance fog, the height fog — (start, end, damp, 1 = height fog; colour rgba; direction
-    /// xyz, w = 1 if enabled); 23 exposure; 24–29 the sky's constant colours (w = 1 if set).
+    /// xyz, w = 1 if enabled); 23 exposure; 24–29 the sky's constant colours (w = 1 if set);
+    /// 30–35 the sky's three texture matrices (two rows each: the cloud layer, the horizon
+    /// layer, the base).
     pub fn uniform(&self, eye: [f32; 3]) -> [[f32; 4]; LIGHT_ROWS] {
         let mut u = [[0.0f32; 4]; LIGHT_ROWS];
         u[0] = [eye[0], eye[1], eye[2], 1.0];
@@ -250,8 +281,12 @@ impl Env {
         }
         u[23] = [EXPOSURE, 0.0, 0.0, 0.0];
         if let Some(sky) = &self.sky {
-            for (i, c) in sky.iter().enumerate() {
+            for (i, c) in sky.colors.iter().enumerate() {
                 u[24 + i] = [c[0], c[1], c[2], 1.0];
+            }
+            for (i, m) in sky.srt.iter().enumerate() {
+                u[30 + 2 * i] = [m[0], m[1], m[2], 0.0];
+                u[31 + 2 * i] = [m[3], m[4], m[5], 0.0];
             }
         }
         // fog slots as the materials switch them: 0 the distance fog (`enable_fog`), 1 the second

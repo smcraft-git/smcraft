@@ -91,6 +91,9 @@ pub struct MmkMeshShape {
     pub emission: f32,
     /// Colour the albedo is multiplied by (TEV stage 0's constant colour).
     pub tint: [f32; 3],
+    /// The second extra texture (the sky's horizon layer, extra mode 3): texture index or
+    /// `TEXTURE_NONE`.
+    pub extra2_texture: u32,
 }
 
 /// How a shape's material is drawn, worked out once for both renderers.
@@ -103,6 +106,8 @@ pub struct ShapeLook {
     pub vertex_color_ratio: f32,
     /// Name of the extra texture (in the model file's texture folder), if any.
     pub extra: Option<String>,
+    /// A second extra texture: the sky's horizon layer (`_n0`).
+    pub extra2: Option<String>,
     pub emission: f32,
     /// Colour the albedo is multiplied by.
     pub tint: [f32; 3],
@@ -131,6 +136,7 @@ pub fn shape_look(mat: Option<&mmk_assets::mesh::MeshMaterial>) -> ShapeLook {
             srt: [1.0, 1.0, 0.0, 0.0, 0.0],
             vertex_color_ratio: 1.0,
             extra: None,
+            extra2: None,
             emission: 0.0,
             tint: [1.0; 3],
         };
@@ -171,9 +177,15 @@ pub fn shape_look(mat: Option<&mmk_assets::mesh::MeshMaterial>) -> ShapeLook {
         // cards are seen from both sides (mirrored for the walking direction)
         flags = (flags & !(3 << MMK_MESH_FACES_SHIFT)) | 2 << MMK_MESH_FACES_SHIFT;
     }
-    // tex_srt0: [mode, scale u, scale v, rotate, translate u, translate v]
+    // tex_srt0: [mode, scale u, scale v, rotate, translate u, translate v]; the sky's three
+    // layers each have their own (`Sky::srt`), applied in the shader to the model's coordinates
+    // (g3d's "Maya" form, `scene3d::srt_matrix`, in `apply_srt`'s terms: exact without rotation
+    // or with equal scales)
     let srt = match m.param("tex_srt0") {
-        Some(p) if p.len() >= 6 => [p[1], p[2], p[3], p[4], p[5]],
+        Some(p) if p.len() >= 6 && extra_mode != 3 => {
+            let k = crate::scene3d::srt_matrix(p);
+            [p[1], p[2], -p[3], k[2], k[5]]
+        }
         _ => [1.0, 1.0, 0.0, 0.0, 0.0],
     };
     ShapeLook {
@@ -185,6 +197,11 @@ pub fn shape_look(mat: Option<&mmk_assets::mesh::MeshMaterial>) -> ShapeLook {
             .and_then(|v| v.first().copied())
             .unwrap_or(1.0),
         extra: extra.map(String::from),
+        extra2: if extra_mode == 3 {
+            m.texture("_n0").map(String::from)
+        } else {
+            None
+        },
         emission: m
             .param("emission_intensity")
             .and_then(|v| v.first().copied())
@@ -512,7 +529,16 @@ impl MeshStore {
     /// Texture index of a shape look's extra texture in mesh file `mesh` (`TEXTURE_NONE` if
     /// none).
     pub fn extra_texture(&mut self, cache: &Cache, mesh: i32, look: &ShapeLook) -> u32 {
-        let (Some(name), Some(lm)) = (look.extra.as_deref(), self.mesh(mesh)) else {
+        self.named_texture(cache, mesh, look.extra.as_deref())
+    }
+
+    /// Texture index of a shape look's second extra texture (the sky's horizon layer).
+    pub fn extra2_texture(&mut self, cache: &Cache, mesh: i32, look: &ShapeLook) -> u32 {
+        self.named_texture(cache, mesh, look.extra2.as_deref())
+    }
+
+    fn named_texture(&mut self, cache: &Cache, mesh: i32, name: Option<&str>) -> u32 {
+        let (Some(name), Some(lm)) = (name, self.mesh(mesh)) else {
             return TEXTURE_NONE;
         };
         let file = lm.name.clone();
@@ -1135,12 +1161,18 @@ impl MeshPlanner {
                     .iter()
                     .flat_map(|m| &m.materials)
                     .find(|m| m.option("enable_sky") == Some("1"))?;
-                let mut c = [[1.0f32; 4]; 6];
-                for (i, slot) in c.iter_mut().enumerate() {
+                let mut sky = crate::scene3d::Sky::default();
+                for (i, slot) in sky.colors.iter_mut().enumerate() {
                     let v = mat.param(&format!("const_color{i}"))?;
+                    *slot = [1.0; 4];
                     slot[..v.len().min(4)].copy_from_slice(&v[..v.len().min(4)]);
                 }
-                Some(c)
+                for (i, m) in sky.srt.iter_mut().enumerate() {
+                    *m = crate::scene3d::srt_matrix(
+                        mat.param(&format!("tex_srt{i}")).unwrap_or(&[]),
+                    );
+                }
+                Some(sky)
             });
             let background = row.as_ref().and_then(|r| {
                 let mesh = store.find(&r.dv_model);

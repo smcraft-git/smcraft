@@ -188,7 +188,7 @@ type MeshKey = (u8, u8, bool);
 /// reference frames]. Cards (pre-rendered sprites) and self-lit materials skip the lighting.
 pub const MESH_SHADER: &str = r#"
 struct Light {
-    rows: array<vec4<f32>, 30>,
+    rows: array<vec4<f32>, 36>,
 };
 @group(1) @binding(0) var<uniform> light: Light;
 
@@ -222,6 +222,7 @@ fn vs(@location(0) clip: vec4<f32>, @location(1) world: vec3<f32>, @location(2) 
 @group(0) @binding(0) var tex: texture_2d<f32>;
 @group(0) @binding(1) var samp: sampler;
 @group(0) @binding(2) var extra: texture_2d<f32>;
+@group(0) @binding(3) var extra2: texture_2d<f32>;
 
 fn has(flags: f32, bit: u32) -> bool {
     return (u32(flags + 0.5) & bit) != 0u;
@@ -273,25 +274,40 @@ fn fogged(c: vec3<f32>, world: vec3<f32>, flags: f32) -> vec3<f32> {
     return r;
 }
 
+// texture matrix `k` of the sky (rows 30–35: the cloud layer, the horizon layer, the base)
+fn sky_uv(k: i32, uv: vec2<f32>) -> vec2<f32> {
+    let a = light.rows[30 + 2 * k];
+    let b = light.rows[31 + 2 * k];
+    return vec2<f32>(dot(a.xy, uv) + a.z, dot(b.xy, uv) + b.z);
+}
+
 @fragment
 fn fs(i: VOut) -> @location(0) vec4<f32> {
-    var c = textureSample(tex, samp, i.uv) * i.color;
-    let x = textureSample(extra, samp, i.uv);
     let mode = (u32(i.flags + 0.5) >> 6u) & 3u;
+    let sky = mode == 3u && light.rows[24].w > 0.5;
+    // (every texture is sampled up front: the mode varies per piece, so not uniformly)
+    let t = textureSample(tex, samp, select(i.uv, sky_uv(0, i.uv), sky));
+    let x = textureSample(extra, samp, select(i.uv, sky_uv(2, i.uv), sky));
+    let h = textureSample(extra2, samp, sky_uv(1, i.uv));
+    var c = t * i.color;
     if (mode == 2u) {
         c.a = c.a * x.a;
     }
-    if (mode == 3u) {
-        // sky [inf: our model of the sky material]: a gradient from constant colour 5 (horizon)
-        // to 4 (zenith) by the base mask, under clouds shaded from colour 1 to 0 by their red
-        // channel and blended by their alpha
-        if (light.rows[24].w > 0.5) {
-            let sky = mix(light.rows[29].rgb, light.rows[28].rgb, x.r);
-            let cloud = mix(light.rows[25].rgb, light.rows[24].rgb, c.r);
-            c = vec4<f32>(mix(sky, cloud, c.a) * i.color.rgb, 1.0);
-        } else {
-            c = vec4<f32>(mix(x.rgb, c.rgb, c.a) * i.color.rgb, 1.0);
-        }
+    if (sky) {
+        // the uber shader's sky (`enable_sky`, research/specs/render-3d.md): the base (_s0)
+        // colours constant colour 5 → 4 per channel with an HDR boost in its alpha; the horizon
+        // layer (_n0) colours 3 → 2 and covers by alpha^5; the clouds (_a0) colour 1 → 0 and
+        // cover by alpha^2 · sin(π(alpha − ½))
+        let base = mix(light.rows[29].rgb, light.rows[28].rgb, x.rgb)
+            * (1.0 + 1024.0 * pow(x.a * 0.99975, 4.0));
+        let horizon = mix(light.rows[27].rgb, light.rows[26].rgb, h.rgb);
+        let ha = pow(h.a, 5.0);
+        let w = (1.0 - ha) * (1.0 - pow(t.a, 5.0));
+        let under = mix(base * w, horizon, ha) * i.color.rgb;
+        let cloud = mix(light.rows[25].rgb, light.rows[24].rgb, t.rgb);
+        c = vec4<f32>(mix(under, cloud, t.a * t.a * sin(3.14159265 * (t.a - 0.5))), 1.0);
+    } else if (mode == 3u) {
+        c = vec4<f32>(mix(x.rgb, c.rgb, c.a) * i.color.rgb, 1.0);
     }
     if (has(i.flags, 4u)) {
         // cards (pre-rendered sprites) are cut out by alpha
@@ -405,7 +421,7 @@ pub struct Renderer {
     /// Linear samplers by wrap mode (bits 0–1 u, 2–3 v).
     mesh_samplers: std::collections::HashMap<u32, wgpu::Sampler>,
     /// (texture or u32::MAX for plain grey, extra texture or u32::MAX, wrap) → bind group.
-    mesh_binds: std::collections::HashMap<(u32, u32, u32), wgpu::BindGroup>,
+    mesh_binds: std::collections::HashMap<(u32, u32, u32, u32), wgpu::BindGroup>,
     grey: wgpu::TextureView,
     mesh_vbuf: wgpu::Buffer,
     mesh_ibuf: wgpu::Buffer,
@@ -548,6 +564,7 @@ impl Renderer {
                     count: None,
                 },
                 tex_entry(2),
+                tex_entry(3),
             ],
         });
         let light_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -798,20 +815,26 @@ impl Renderer {
         gpu: &Gpu,
         texture: Option<u32>,
         extra: Option<u32>,
+        extra2: Option<u32>,
         wrap: u32,
     ) -> Option<()> {
-        let key = (texture.unwrap_or(u32::MAX), extra.unwrap_or(u32::MAX), wrap);
+        let key = (
+            texture.unwrap_or(u32::MAX),
+            extra.unwrap_or(u32::MAX),
+            extra2.unwrap_or(u32::MAX),
+            wrap,
+        );
         if self.mesh_binds.contains_key(&key) {
             return Some(());
         }
-        for t in [texture, extra].into_iter().flatten() {
+        for t in [texture, extra, extra2].into_iter().flatten() {
             self.ensure(gpu, t as usize);
         }
         let view_of = |t: Option<u32>| match t.map(|t| self.textures.get(t as usize)) {
             Some(Some(TexState::Ready(_, v))) => v,
             _ => &self.grey,
         };
-        let (view, extra_view) = (view_of(texture), view_of(extra));
+        let (view, extra_view, extra2_view) = (view_of(texture), view_of(extra), view_of(extra2));
         let mode = |w: u32| match w {
             1 => wgpu::AddressMode::MirrorRepeat,
             2 => wgpu::AddressMode::ClampToEdge,
@@ -842,6 +865,10 @@ impl Renderer {
                 wgpu::BindGroupEntry {
                     binding: 2,
                     resource: wgpu::BindingResource::TextureView(extra_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: wgpu::BindingResource::TextureView(extra2_view),
                 },
             ],
         });
@@ -1051,6 +1078,7 @@ impl Renderer {
                 let key = (
                     p.texture.unwrap_or(u32::MAX),
                     p.extra.unwrap_or(u32::MAX),
+                    p.extra2.unwrap_or(u32::MAX),
                     p.wrap,
                 );
                 let Some(b) = self.mesh_binds.get(&key).cloned() else {
@@ -1114,7 +1142,7 @@ impl Renderer {
         }
         let meshes = scene.meshes;
         for p in meshes.pieces.iter().chain(&scene.background.pieces) {
-            self.mesh_bind(gpu, p.texture, p.extra, p.wrap);
+            self.mesh_bind(gpu, p.texture, p.extra, p.extra2, p.wrap);
         }
         // the 2D drop shadow: every sprite but the backdrop (layer 0) and the start sign (far
         // behind the field, it casts none but takes the field's), moved right and down on the
