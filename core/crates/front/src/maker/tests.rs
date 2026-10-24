@@ -2313,3 +2313,45 @@ fn the_palette_table_names_the_editor_s_parts() {
         }
     }
 }
+
+#[test]
+fn player_twos_edits_leave_player_one_s_palette_bar_alone() {
+    use crate::host::buttons as pad;
+    let (mut host, mut saves) = (MockHost::default(), Saves::default());
+    let mut m = coop_maker(&mut host, &mut saves);
+    let palette = m.palette.clone();
+    set_p2_cur(&mut m, (15, 4));
+    p2_press(&mut m, &mut host, &mut saves, pad::JUMP);
+    assert!(m.editor.object_at(15, 4).is_some());
+    // the page was laid out again with player 1's palette, not player 2's one part
+    assert!(!m.page_stale);
+    assert_eq!(m.palette, palette);
+}
+
+#[test]
+fn the_2p_menu_and_the_dummies_follow_the_game_s_sides_and_pictures() {
+    // 0x710191db60: left of the cursor right of x 180, below it at or above y −140
+    let side = |x, y| attr::direction([x, y], coop::MENU_SIDE_X, coop::MENU_SIDE_Y);
+    assert_eq!(
+        [
+            side(0.0, -200.0),
+            side(200.0, -200.0),
+            side(200.0, 0.0),
+            side(0.0, 0.0)
+        ],
+        [0, 1, 2, 3]
+    );
+    // the wings' pair cut in two, a picture squared for a dummy
+    let icon = crate::host::Icon {
+        width: 4,
+        height: 2,
+        rgba: (0..32).collect(),
+    };
+    let (l, r) = inparts::halves(&icon);
+    assert_eq!((l.width, r.width, l.height), (2, 2, 2));
+    assert_eq!(&l.rgba[..8], &icon.rgba[..8]);
+    assert_eq!(&r.rgba[..8], &icon.rgba[8..16]);
+    let sq = inparts::square(&icon);
+    assert_eq!((sq.width, sq.height), (4, 4));
+    assert_eq!(&sq.rgba[16..32], &icon.rgba[..16], "centred: one row down");
+}

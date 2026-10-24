@@ -303,6 +303,8 @@ struct Coop {
     hand: Hand,
     pad: coop::Pad2,
     menu: coop::PartsMenu,
+    /// Captures: player 2's buttons held down throughout (a carry that lasts).
+    held_pad: u32,
 }
 
 pub struct MakerFlow {
@@ -397,6 +399,8 @@ pub struct MakerFlow {
     coop_window: Option<coop::CoopWindow>,
     /// Player 2's tick (or drawing) is running: its cursor is the live one.
     p2_turn: bool,
+    /// The page wanted laying out during player 2's tick ([`MakerFlow::update_page`]).
+    page_stale: bool,
     /// Player 2's glove (`Edit_mainCursor2P`'s textures), if the import has them.
     textures_2p: std::collections::HashMap<&'static str, u32>,
 }
@@ -496,6 +500,7 @@ impl MakerFlow {
             coop: None,
             coop_window: None,
             p2_turn: false,
+            page_stale: false,
             textures_2p: view::TEXTURES
                 .iter()
                 .filter_map(|&n| {
@@ -2250,6 +2255,13 @@ impl MakerFlow {
 
     /// Palette slots, Undodog, the area theme text … after a change.
     fn update_page(&mut self) {
+        // (player 2's tick: its own one-part palette isn't the bar's; the page is laid out once
+        // player 1's state is back)
+        if self.p2_turn {
+            self.page_stale = true;
+            return;
+        }
+        self.page_stale = false;
         let style = self.style();
         let palette = self.palette.clone();
         let mut pictures: Vec<Option<String>> = Vec::new();
@@ -3630,6 +3642,7 @@ impl MakerFlow {
             hand,
             pad: Default::default(),
             menu,
+            held_pad: 0,
         });
         self.editor.clear_history();
         self.editor.set_history(false);
@@ -3736,7 +3749,7 @@ impl MakerFlow {
         let tick = self.tick;
         let ui = self.ui.clone();
         let Some(c) = &mut self.coop else { return };
-        let (held, pressed, menu_key) = c.pad.step(input.pad2);
+        let (held, pressed, menu_key) = c.pad.step(input.pad2 | c.held_pad);
         if c.menu.open {
             let e = c.menu.step(&ui, &style, pressed, menu_key, tick);
             if e == Some(coop::MenuEvent::Decide)
@@ -3774,7 +3787,7 @@ impl MakerFlow {
         if self.cam != cam {
             self.keep_in_view();
         }
-        if pressed != Buttons::NONE || held != Buttons::NONE {
+        if self.page_stale {
             self.update_page();
         }
         self.place_coop_menu();
@@ -3835,7 +3848,7 @@ impl MakerFlow {
     fn place_coop_menu(&mut self) {
         let Some(c) = &mut self.coop else { return };
         let at = c.hand.glove;
-        let d = attr::direction(at, 20.0, 40.0);
+        let d = attr::direction(at, coop::MENU_SIDE_X, coop::MENU_SIDE_Y);
         c.menu.place(at, d);
     }
 
@@ -3849,20 +3862,21 @@ impl MakerFlow {
         self.swap_hand();
     }
 
-    /// Player 2's green glove and part menu, over everything.
+    /// Player 2's part menu, then its green glove over it (the menu at the glove's point,
+    /// 0x710191db60) [inf: the order; the game draws its gloves as models].
     fn draw_coop(&mut self, out: &mut Vec<DrawItem>) {
         if self.coop.is_none() || !self.glove_shown() {
             return;
+        }
+        let tick = self.tick;
+        if let Some(l) = self.coop.as_mut().and_then(|c| c.menu.layout.as_mut()) {
+            push_layout(out, l, tick);
         }
         self.swap_hand();
         if let Some(g) = view::glove(self) {
             out.push(g);
         }
         self.swap_hand();
-        let tick = self.tick;
-        if let Some(l) = self.coop.as_mut().and_then(|c| c.menu.layout.as_mut()) {
-            push_layout(out, l, tick);
-        }
     }
 
     /// After a style change: parts the style lacks leave the palette.
@@ -4191,6 +4205,8 @@ impl MakerFlow {
                             from: (x, y),
                             held: -1,
                         });
+                        // (A kept down: the carry lasts through the capture's ticks)
+                        c.held_pad = crate::host::buttons::JUMP;
                     }
                     self.dirty = true;
                 }
@@ -4304,9 +4320,15 @@ impl MakerFlow {
                 wanted.extend(pg.iter().map(|e| (e.tool.part(), DEFAULT_FLAGS)));
             }
         }
-        // the contents balloon's picture
+        // the contents balloon's picture, and its dummy wings / parachute (part −1: the
+        // attachment alone)
         if let Some(c) = &self.contents {
             wanted.push((c.child, c.picture_flags()));
+            for a in [mmk_editor::attr::WINGS, mmk_editor::attr::PARACHUTE] {
+                if c.child_flags & a != 0 {
+                    wanted.push((inparts::ATTACHMENT, a));
+                }
+            }
         }
         // player 2's part and the 2P menu's strip
         if let Some(c) = &self.coop {
@@ -4329,26 +4351,45 @@ impl MakerFlow {
             if self.icons.contains_key(&k) {
                 continue;
             }
-            let icon = host.part_icon(&style, part, flags);
+            let icon = if part == inparts::ATTACHMENT {
+                host.attachment_icon(&style, flags)
+            } else {
+                host.part_icon(&style, part, flags)
+            };
             if icon.is_none() && host.art_loading() {
                 continue; // (asked for again once the art is read)
             }
             let name = icon.map(|icon| {
-                let name = if flags == DEFAULT_FLAGS {
+                let name = if part == inparts::ATTACHMENT {
+                    format!("{style}_attach_{flags:x}")
+                } else if flags == DEFAULT_FLAGS {
                     format!("{style}_{part}")
                 } else {
                     format!("{style}_{part}_{flags:x}")
                 };
-                let icon = fit_icon(&icon);
-                let tex = mmk_assets::Mtex {
-                    format: mmk_assets::MtexFormat::Rgba8,
-                    variant: mmk_assets::MtexVariant::Srgb,
-                    width: icon.width,
-                    height: icon.height,
-                    channel_select: [2, 3, 4, 5],
-                    data: icon.rgba,
+                // the wings come as a pair: each dummy takes its own (`_l`, `_r`)
+                let pictures = if part == inparts::ATTACHMENT && flags == mmk_editor::attr::WINGS {
+                    let (l, r) = inparts::halves(&icon);
+                    vec![(format!("{name}_l"), l), (format!("{name}_r"), r)]
+                } else {
+                    vec![(name.clone(), icon)]
                 };
-                self.ui.cache_mut().add_texture_file("PartIcon", &name, tex);
+                for (n, icon) in pictures {
+                    let icon = if part == inparts::ATTACHMENT {
+                        inparts::square(&icon)
+                    } else {
+                        fit_icon(&icon)
+                    };
+                    let tex = mmk_assets::Mtex {
+                        format: mmk_assets::MtexFormat::Rgba8,
+                        variant: mmk_assets::MtexVariant::Srgb,
+                        width: icon.width,
+                        height: icon.height,
+                        channel_select: [2, 3, 4, 5],
+                        data: icon.rgba,
+                    };
+                    self.ui.cache_mut().add_texture_file("PartIcon", &n, tex);
+                }
                 name
             });
             self.icons.insert(k, name);
