@@ -112,6 +112,9 @@ pub struct Hemi {
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Fog {
+    /// The material switch it answers to: 0 `enable_fog` ("FogZ"), 1 `enable_fog1` ("FogZ1"),
+    /// 2 `enable_fog_y` ("FogY"), 3 `enable_fog1_y` ("FogY1").
+    pub slot: usize,
     /// Height fog (along world y) rather than distance fog (along the view).
     pub height: bool,
     pub start: f32,
@@ -128,8 +131,37 @@ pub struct Env {
     pub hemi: Option<Hemi>,
     pub ambient: [f32; 3],
     pub fogs: Vec<Fog>,
-    /// The sky material's six constant colours (background scenes with a sky).
-    pub sky: Option<[[f32; 4]; 6]>,
+    /// The sky material (background scenes with a sky).
+    pub sky: Option<Sky>,
+}
+
+/// The background model's sky material (`enable_sky`): its six constant colours and the texture
+/// matrices of its three layers.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Sky {
+    pub colors: [[f32; 4]; 6],
+    /// 2×3 texture matrices (row-major) of the cloud layer (`_a0`, `tex_srt0`), the horizon
+    /// layer (`_n0`, `tex_srt1`) and the sky's base (`_s0`, `tex_srt2`).
+    pub srt: [[f32; 6]; 3],
+}
+
+/// A material's texture SRT (`tex_srt*`: mode, scale u, scale v, rotate, translate u, translate
+/// v) as a 2×3 matrix (row-major) over the model's texture coordinates: the "Maya" form of
+/// `nn::g3d`'s texture SRT (mode 0, every 3D material's), rotating about the texture's centre
+/// and scaling about its top edge (v up) [inf: the g3d convention; it puts the 3D World sky's
+/// clouds where the reference frames have them, the plain scale-rotate-translate form does not].
+pub fn srt_matrix(p: &[f32]) -> [f32; 6] {
+    let g = |i: usize, d: f32| p.get(i).copied().unwrap_or(d);
+    let (sx, sy, r, tx, ty) = (g(1, 1.0), g(2, 1.0), g(3, 0.0), g(4, 0.0), g(5, 0.0));
+    let (s, c) = r.sin_cos();
+    [
+        sx * c,
+        sx * s,
+        sx * ((-0.5 * c - 0.5 * s + 0.5) - tx),
+        -sy * s,
+        sy * c,
+        sy * ((0.5 * s - 0.5 * c + 0.5) + ty) + 1.0 - sy,
+    ]
 }
 
 fn v3(v: &Value) -> [f32; 3] {
@@ -193,8 +225,19 @@ pub fn load_env(root: &Path, name: &str) -> Option<Env> {
         .map(|o| {
             let dir = normalised(v3(&o["direction"]));
             let c = &o["color"];
+            // the uber shader's fog slots go by the fog objects' names: the environment uniform
+            // block has one place per name (the env set's FogZ, FogY, FogZ1, FogY1)
+            let slot = match o.get("name").and_then(Value::as_str) {
+                Some("FogZ") => 0,
+                Some("FogZ1") => 1,
+                Some("FogY") => 2,
+                Some("FogY1") => 3,
+                _ if dir[1].abs() > 0.5 => 2,
+                _ => 0,
+            };
             Fog {
-                height: dir[1].abs() > 0.5,
+                slot,
+                height: slot >= 2,
                 start: num(o, "start", 0.0),
                 end: num(o, "end", 1.0),
                 damp: num(o, "damp", 1.0),
@@ -218,7 +261,7 @@ pub fn load_env(root: &Path, name: &str) -> Option<Env> {
 }
 
 /// Rows of 4 floats in [`Env::uniform`].
-pub const LIGHT_ROWS: usize = 30;
+pub const LIGHT_ROWS: usize = 39;
 
 /// Scale of the lit colour (row 23) [inf: calibrated against reference frames].
 pub const EXPOSURE: f32 = 1.0;
@@ -227,9 +270,11 @@ impl Env {
     /// The environment as the shaders' uniform block (`LIGHT_ROWS` × vec4):
     /// 0 eye xyz, w = 1 if lit at all; 1–9 three directional lights (direction xyz, –;
     /// diffuse rgb, –; backside rgb, –); 10 hemisphere sky rgb, w = 1 if present; 11 ground;
-    /// 12 hemisphere direction; 13 ambient; 14–22 three fogs — the distance fog, the second
-    /// distance fog, the height fog — (start, end, damp, 1 = height fog; colour rgba; direction
-    /// xyz, w = 1 if enabled); 23 exposure; 24–29 the sky's constant colours (w = 1 if set).
+    /// 12 hemisphere direction; 13 ambient; 14–22 three fogs — `Fog::slot` 0 the distance fog,
+    /// 1 the second distance fog, 2 the height fog — (start, end, density power, 1 = height
+    /// fog; colour rgba; direction xyz, w = 1 if enabled); 23 exposure; 24–29 the sky's constant
+    /// colours (w = 1 if set); 30–35 the sky's three texture matrices (two rows each: the cloud
+    /// layer, the horizon layer, the base); 36–38 fog slot 3, the second height fog.
     pub fn uniform(&self, eye: [f32; 3]) -> [[f32; 4]; LIGHT_ROWS] {
         let mut u = [[0.0f32; 4]; LIGHT_ROWS];
         u[0] = [eye[0], eye[1], eye[2], 1.0];
@@ -250,30 +295,25 @@ impl Env {
         }
         u[23] = [EXPOSURE, 0.0, 0.0, 0.0];
         if let Some(sky) = &self.sky {
-            for (i, c) in sky.iter().enumerate() {
+            for (i, c) in sky.colors.iter().enumerate() {
                 u[24 + i] = [c[0], c[1], c[2], 1.0];
             }
-        }
-        // fog slots as the materials switch them: 0 the distance fog (`enable_fog`), 1 the second
-        // distance fog (`enable_fog1`), 2 the height fog (`enable_fog_y`)
-        let mut slots: [Option<&Fog>; 3] = [None; 3];
-        for f in &self.fogs {
-            let slot = if f.height {
-                2
-            } else if slots[0].is_none() {
-                0
-            } else {
-                1
-            };
-            if slots[slot].is_none() {
-                slots[slot] = Some(f);
+            for (i, m) in sky.srt.iter().enumerate() {
+                u[30 + 2 * i] = [m[0], m[1], m[2], 0.0];
+                u[31 + 2 * i] = [m[3], m[4], m[5], 0.0];
             }
         }
-        for (i, f) in slots.iter().enumerate() {
-            let Some(f) = f else { continue };
-            u[14 + 3 * i] = [f.start, f.end, f.damp, f.height as u32 as f32];
-            u[15 + 3 * i] = f.color;
-            u[16 + 3 * i] = [f.dir[0], f.dir[1], f.dir[2], 1.0];
+        for f in &self.fogs {
+            let row = if f.slot < 3 { 14 + 3 * f.slot } else { 36 };
+            if u[row + 2][3] > 0.5 {
+                continue; // (the first of a name wins)
+            }
+            // the density curve: the uber shader squares the distance fogs' (t²), not the
+            // height fogs'; it has no damp term
+            let power = if f.height { 1.0 } else { 2.0 };
+            u[row] = [f.start, f.end, power, f.height as u32 as f32];
+            u[row + 1] = f.color;
+            u[row + 2] = [f.dir[0], f.dir[1], f.dir[2], 1.0];
         }
         u
     }

@@ -60,12 +60,22 @@ pub const MMK_MESH_EXTRA_SHIFT: u32 = 12;
 pub const MMK_MESH_FOG1: u32 = 1 << 14;
 /// Shape flag: the height fog applies (`enable_fog_y`).
 pub const MMK_MESH_FOG_Y: u32 = 1 << 15;
-/// Shape flag: texture coordinates from the world position (u = x / 64, v = −y / 64, then the
-/// SRT) instead of the model's (`tex_coord0_calc` 5 with `enable_tex_coord0_mtx_cancel`).
+/// Shape flag: texture coordinates from the world position (u = x / 64, v = ½ − y / 64, then
+/// the SRT) instead of the model's (`tex_coord0_calc` 5, a projection in the uber shader).
 pub const MMK_MESH_WORLD_UV: u32 = 1 << 16;
 /// World pixels one repeat of a world-mapped texture covers [inf: measured on the castle walls'
 /// bricks in a reference frame, 8 rows of ~8.1 px].
 pub const WORLD_UV_SPAN: f32 = 64.0;
+/// v of world-mapped textures at y = 0 [inf: the 3D World field's soil bands line up with the
+/// reference frames' at ½]. (The game projects through a matrix in its `User0` block.)
+pub const WORLD_UV_V0: f32 = 0.5;
+/// Shape flag: the second height fog applies (`enable_fog1_y`).
+pub const MMK_MESH_FOG1_Y: u32 = 1 << 17;
+/// Shape flags bits 18–25: how each fog applies, 2 bits per fog in the order distance fog,
+/// second distance fog, height fog, second height fog (`fog_calc_type`, `fog1_calc_type`,
+/// `fog_y_calc_type`, `fog1_y_calc_type`): 0 blended towards the fog colour, 1 the colour
+/// added, 2 multiplied by it.
+pub const MMK_MESH_FOG_CALC_SHIFT: u32 = 18;
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
@@ -91,6 +101,219 @@ pub struct MmkMeshShape {
     pub emission: f32,
     /// Colour the albedo is multiplied by (TEV stage 0's constant colour).
     pub tint: [f32; 3],
+    /// The second extra texture (the sky's horizon layer, extra mode 3): texture index or
+    /// `TEXTURE_NONE`.
+    pub extra2_texture: u32,
+    /// The albedo combiner ([`Form`]): albedo' = (albedo + add) · mul with add / mul =
+    /// k + rgb · colour.rgb + a · colour.a — [0..3] add k, [3] add rgb, [4] add a, [5] 1 = clamp
+    /// add, [6..9] mul k, [9] mul rgb, [10] mul a, [11] 1 = clamp mul, [12] 1 = clamp the result.
+    pub form: [f32; 16],
+}
+
+impl Form {
+    /// As [`MmkMeshShape::form`].
+    pub fn packed(&self) -> [f32; 16] {
+        let mut f = [0.0; 16];
+        for (o, t) in [(0, &self.add), (6, &self.mul)] {
+            f[o..o + 3].copy_from_slice(&t.k);
+            f[o + 3] = t.rgb;
+            f[o + 4] = t.a;
+            f[o + 5] = t.sat as u32 as f32;
+        }
+        f[12] = self.sat as u32 as f32;
+        f
+    }
+}
+
+/// The four fogs' `*_calc_type` options as `MMK_MESH_FOG_CALC_SHIFT`'s fields.
+fn fog_calc(m: &mmk_assets::mesh::MeshMaterial) -> u32 {
+    [
+        "fog_calc_type",
+        "fog1_calc_type",
+        "fog_y_calc_type",
+        "fog1_y_calc_type",
+    ]
+    .iter()
+    .enumerate()
+    .map(|(i, k)| {
+        let t = m.option(k).and_then(|v| v.parse::<u32>().ok()).unwrap_or(0);
+        t.min(2) << (MMK_MESH_FOG_CALC_SHIFT + 2 * i as u32)
+    })
+    .fold(0, |a, b| a | b)
+}
+
+/// A term of the albedo combiner that depends on the vertex colour only:
+/// `k + rgb · colour.rgb + a · colour.a`, clamped to 0 … 1 when `sat`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FormTerm {
+    pub k: [f32; 3],
+    pub rgb: f32,
+    pub a: f32,
+    pub sat: bool,
+}
+
+impl FormTerm {
+    pub const ZERO: FormTerm = FormTerm {
+        k: [0.0; 3],
+        rgb: 0.0,
+        a: 0.0,
+        sat: false,
+    };
+    pub const ONE: FormTerm = FormTerm {
+        k: [1.0; 3],
+        ..FormTerm::ZERO
+    };
+    /// The term for a vertex colour (RGBA 0 … 1).
+    pub fn eval(&self, c: [f32; 4]) -> [f32; 3] {
+        let v = [0, 1, 2].map(|i| self.k[i] + self.rgb * c[i] + self.a * c[3]);
+        if self.sat {
+            v.map(|x| x.clamp(0.0, 1.0))
+        } else {
+            v
+        }
+    }
+    fn is_const(&self) -> bool {
+        self.rgb == 0.0 && self.a == 0.0
+    }
+}
+
+/// The uber shader's albedo combiner (the `form0`–`form3` options) as SMCraft draws it:
+/// albedo' = (albedo + `add`) · `mul`, clamped to 0 … 1 when `sat`. Each stage computes a
+/// function of its operands a, b, c, d (`formN_color_*`: 301 the albedo so far, 304 the vertex
+/// colour — channel 2 its rgb, 6 its alpha —, 400–403 `const_float0`–3, 500 / 501 the stage
+/// before / the one before that, 0 none) [obs: Block_UBER programs, research/specs/render-3d.md]:
+/// `calc_func` 2 a + b, 7 a · b, 8 a · b + d, 4 (a + b) · (c + d); `post_process` 1 clamps.
+/// Other functions and sources are not read yet: such a material keeps its albedo.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Form {
+    pub add: FormTerm,
+    pub mul: FormTerm,
+    pub sat: bool,
+}
+
+impl Default for Form {
+    fn default() -> Self {
+        Form {
+            add: FormTerm::ZERO,
+            mul: FormTerm::ONE,
+            sat: false,
+        }
+    }
+}
+
+/// A combiner value: one depending on the vertex colour only, or (albedo + add) · mul.
+#[derive(Clone, Copy, Debug)]
+enum FormVal {
+    Term(FormTerm),
+    Albedo(Form),
+}
+
+fn form_of(m: &mmk_assets::mesh::MeshMaterial) -> Option<Form> {
+    let cf = |i: usize| {
+        m.param(&format!("const_float{i}"))
+            .and_then(|v| v.first().copied())
+    };
+    let mut results: Vec<FormVal> = Vec::new();
+    let mut last: Option<(FormVal, bool)> = None;
+    for i in 0..4 {
+        if m.option(&format!("form{i}_enable")) != Some("1") {
+            continue;
+        }
+        let opt = |k: &str| m.option(&format!("form{i}_{k}")).unwrap_or("0");
+        let src = |op: &str| -> Option<FormVal> {
+            let ch = opt(&format!("channel_{op}"));
+            Some(match opt(&format!("color_{op}")) {
+                "0" => FormVal::Term(FormTerm::ZERO),
+                "301" => FormVal::Albedo(Form::default()),
+                "304" => FormVal::Term(match ch {
+                    "0" | "2" => FormTerm {
+                        rgb: 1.0,
+                        ..FormTerm::ZERO
+                    },
+                    "6" => FormTerm {
+                        a: 1.0,
+                        ..FormTerm::ZERO
+                    },
+                    _ => return None,
+                }),
+                c @ ("400" | "401" | "402" | "403") => {
+                    let k = cf(c.as_bytes()[2] as usize - b'0' as usize)?;
+                    FormVal::Term(FormTerm {
+                        k: [k; 3],
+                        ..FormTerm::ZERO
+                    })
+                }
+                "500" => *results.last()?,
+                "501" => *results.get(results.len().checked_sub(2)?)?,
+                _ => return None,
+            })
+        };
+        let add = |x: FormVal, y: FormVal| -> Option<FormVal> {
+            match (x, y) {
+                (FormVal::Term(p), FormVal::Term(q)) if !p.sat && !q.sat => {
+                    Some(FormVal::Term(FormTerm {
+                        k: [0, 1, 2].map(|j| p.k[j] + q.k[j]),
+                        rgb: p.rgb + q.rgb,
+                        a: p.a + q.a,
+                        sat: false,
+                    }))
+                }
+                (FormVal::Albedo(f), FormVal::Term(t)) | (FormVal::Term(t), FormVal::Albedo(f))
+                    if f == Form::default() =>
+                {
+                    Some(FormVal::Albedo(Form { add: t, ..f }))
+                }
+                (x, FormVal::Term(t)) | (FormVal::Term(t), x) if t == FormTerm::ZERO => Some(x),
+                _ => None,
+            }
+        };
+        let mul = |x: FormVal, y: FormVal| -> Option<FormVal> {
+            match (x, y) {
+                (FormVal::Term(p), FormVal::Term(q)) if q.is_const() && !p.sat => {
+                    Some(FormVal::Term(FormTerm {
+                        k: [0, 1, 2].map(|j| p.k[j] * q.k[j]),
+                        rgb: p.rgb * q.k[0],
+                        a: p.a * q.k[0],
+                        sat: false,
+                    }))
+                }
+                (FormVal::Term(q), FormVal::Term(p)) if q.is_const() && !p.sat => {
+                    Some(FormVal::Term(FormTerm {
+                        k: [0, 1, 2].map(|j| p.k[j] * q.k[j]),
+                        rgb: p.rgb * q.k[0],
+                        a: p.a * q.k[0],
+                        sat: false,
+                    }))
+                }
+                (FormVal::Albedo(f), FormVal::Term(t)) | (FormVal::Term(t), FormVal::Albedo(f))
+                    if f.mul == FormTerm::ONE && !f.sat =>
+                {
+                    Some(FormVal::Albedo(Form { mul: t, ..f }))
+                }
+                _ => None,
+            }
+        };
+        let v = match opt("calc_func") {
+            "2" => add(src("a")?, src("b")?)?,
+            "7" => mul(src("a")?, src("b")?)?,
+            "8" => add(mul(src("a")?, src("b")?)?, src("d")?)?,
+            "4" => mul(add(src("a")?, src("b")?)?, add(src("c")?, src("d")?)?)?,
+            _ => return None,
+        };
+        let sat = opt("post_process") == "1";
+        let v = match v {
+            FormVal::Term(t) if sat => FormVal::Term(FormTerm { sat: true, ..t }),
+            FormVal::Albedo(f) if sat => FormVal::Albedo(Form { sat: true, ..f }),
+            v => v,
+        };
+        results.push(v);
+        last = Some((v, sat));
+    }
+    match last {
+        Some((FormVal::Albedo(f), _)) => Some(f),
+        // (no stage, or the last one leaves the albedo out)
+        _ => None,
+    }
 }
 
 /// How a shape's material is drawn, worked out once for both renderers.
@@ -103,9 +326,13 @@ pub struct ShapeLook {
     pub vertex_color_ratio: f32,
     /// Name of the extra texture (in the model file's texture folder), if any.
     pub extra: Option<String>,
+    /// A second extra texture: the sky's horizon layer (`_n0`).
+    pub extra2: Option<String>,
     pub emission: f32,
     /// Colour the albedo is multiplied by.
     pub tint: [f32; 3],
+    /// The albedo combiner (vertex colours added or multiplied in).
+    pub form: Form,
 }
 
 impl ShapeLook {
@@ -131,8 +358,10 @@ pub fn shape_look(mat: Option<&mmk_assets::mesh::MeshMaterial>) -> ShapeLook {
             srt: [1.0, 1.0, 0.0, 0.0, 0.0],
             vertex_color_ratio: 1.0,
             extra: None,
+            extra2: None,
             emission: 0.0,
             tint: [1.0; 3],
+            form: Form::default(),
         };
     };
     let self_lit = !m.unlit && !m.options.is_empty() && m.option("enable_diffuse") != Some("1");
@@ -165,26 +394,50 @@ pub fn shape_look(mat: Option<&mmk_assets::mesh::MeshMaterial>) -> ShapeLook {
         | extra_mode << MMK_MESH_EXTRA_SHIFT
         | (on("enable_fog1") as u32 * MMK_MESH_FOG1)
         | (on("enable_fog_y") as u32 * MMK_MESH_FOG_Y)
-        | ((m.option("tex_coord0_calc") == Some("5") && on("enable_tex_coord0_mtx_cancel")) as u32
-            * MMK_MESH_WORLD_UV);
+        | (on("enable_fog1_y") as u32 * MMK_MESH_FOG1_Y)
+        | fog_calc(m)
+        | ((m.option("tex_coord0_calc") == Some("5")) as u32 * MMK_MESH_WORLD_UV);
     if m.unlit {
         // cards are seen from both sides (mirrored for the walking direction)
         flags = (flags & !(3 << MMK_MESH_FACES_SHIFT)) | 2 << MMK_MESH_FACES_SHIFT;
     }
-    // tex_srt0: [mode, scale u, scale v, rotate, translate u, translate v]
+    // tex_srt0: [mode, scale u, scale v, rotate, translate u, translate v]; the sky's three
+    // layers each have their own (`Sky::srt`), applied in the shader to the model's coordinates
+    // (g3d's "Maya" form, `scene3d::srt_matrix`, in `apply_srt`'s terms: exact without rotation
+    // or with equal scales)
     let srt = match m.param("tex_srt0") {
-        Some(p) if p.len() >= 6 => [p[1], p[2], p[3], p[4], p[5]],
+        Some(p) if p.len() >= 6 && extra_mode != 3 => {
+            let k = crate::scene3d::srt_matrix(p);
+            [p[1], p[2], -p[3], k[2], k[5]]
+        }
         _ => [1.0, 1.0, 0.0, 0.0, 0.0],
     };
     ShapeLook {
         flags,
         alpha_ref: m.alpha_ref,
         srt,
-        vertex_color_ratio: m
-            .param("vertex_color_ratio")
-            .and_then(|v| v.first().copied())
-            .unwrap_or(1.0),
+        // the uber shader tints the light by the vertex colours only with
+        // `enable_vertex_color` [obs] or a vertex-colour diffuse source (`material_diffuse_color`
+        // 200 / 201, NSMBU's models [inf]); the albedo combiner may use them too. The sky
+        // multiplies by them as they are, without the ratio [obs]
+        vertex_color_ratio: if extra_mode == 3 {
+            1.0
+        } else if !m.options.is_empty()
+            && !on("enable_vertex_color")
+            && !matches!(m.option("material_diffuse_color"), Some("200" | "201"))
+        {
+            0.0
+        } else {
+            m.param("vertex_color_ratio")
+                .and_then(|v| v.first().copied())
+                .unwrap_or(1.0)
+        },
         extra: extra.map(String::from),
+        extra2: if extra_mode == 3 {
+            m.texture("_n0").map(String::from)
+        } else {
+            None
+        },
         emission: m
             .param("emission_intensity")
             .and_then(|v| v.first().copied())
@@ -202,6 +455,7 @@ pub fn shape_look(mat: Option<&mmk_assets::mesh::MeshMaterial>) -> ShapeLook {
             }
             _ => [1.0; 3],
         },
+        form: form_of(m).unwrap_or_default(),
     }
 }
 
@@ -512,7 +766,16 @@ impl MeshStore {
     /// Texture index of a shape look's extra texture in mesh file `mesh` (`TEXTURE_NONE` if
     /// none).
     pub fn extra_texture(&mut self, cache: &Cache, mesh: i32, look: &ShapeLook) -> u32 {
-        let (Some(name), Some(lm)) = (look.extra.as_deref(), self.mesh(mesh)) else {
+        self.named_texture(cache, mesh, look.extra.as_deref())
+    }
+
+    /// Texture index of a shape look's second extra texture (the sky's horizon layer).
+    pub fn extra2_texture(&mut self, cache: &Cache, mesh: i32, look: &ShapeLook) -> u32 {
+        self.named_texture(cache, mesh, look.extra2.as_deref())
+    }
+
+    fn named_texture(&mut self, cache: &Cache, mesh: i32, name: Option<&str>) -> u32 {
+        let (Some(name), Some(lm)) = (name, self.mesh(mesh)) else {
             return TEXTURE_NONE;
         };
         let file = lm.name.clone();
@@ -1135,12 +1398,18 @@ impl MeshPlanner {
                     .iter()
                     .flat_map(|m| &m.materials)
                     .find(|m| m.option("enable_sky") == Some("1"))?;
-                let mut c = [[1.0f32; 4]; 6];
-                for (i, slot) in c.iter_mut().enumerate() {
+                let mut sky = crate::scene3d::Sky::default();
+                for (i, slot) in sky.colors.iter_mut().enumerate() {
                     let v = mat.param(&format!("const_color{i}"))?;
+                    *slot = [1.0; 4];
                     slot[..v.len().min(4)].copy_from_slice(&v[..v.len().min(4)]);
                 }
-                Some(c)
+                for (i, m) in sky.srt.iter_mut().enumerate() {
+                    *m = crate::scene3d::srt_matrix(
+                        mat.param(&format!("tex_srt{i}")).unwrap_or(&[]),
+                    );
+                }
+                Some(sky)
             });
             let background = row.as_ref().and_then(|r| {
                 let mesh = store.find(&r.dv_model);

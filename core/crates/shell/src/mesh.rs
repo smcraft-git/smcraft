@@ -28,6 +28,10 @@ pub const FLAG_CARD: u32 = 4;
 pub const FLAG_ALPHA_TEST: u32 = 8;
 pub const FLAG_FOG1: u32 = 16;
 pub const FLAG_FOG_Y: u32 = 32;
+/// The second height fog applies.
+pub const FLAG_FOG1_Y: u32 = 256;
+/// Bits 9–16: how the four fogs apply (`MMK_MESH_FOG_CALC_SHIFT`'s 2-bit fields).
+pub const FLAG_FOG_CALC_SHIFT: u32 = 9;
 /// Bits 6–7: the piece's extra texture (1 emission, 2 alpha mask, 3 sky base).
 pub const FLAG_EXTRA_SHIFT: u32 = 6;
 
@@ -45,6 +49,10 @@ pub struct MeshVertex {
     pub uv: [f32; 2],
     pub pad: [f32; 2],
     pub color: [f32; 4],
+    /// The albedo combiner's added term (rgb; w = 1: clamp the result to 0 … 1).
+    pub form_add: [f32; 4],
+    /// The albedo combiner's factor (rgb).
+    pub form_mul: [f32; 4],
 }
 
 /// Indices `first..first + count` drawn with one texture (None: plain grey), wrap mode (bits
@@ -57,6 +65,8 @@ pub struct Piece {
     pub texture: Option<u32>,
     /// The extra texture (emission, mask or sky base; see `FLAG_EXTRA_SHIFT`).
     pub extra: Option<u32>,
+    /// The second extra texture (the sky's horizon layer).
+    pub extra2: Option<u32>,
     pub wrap: u32,
     pub blend: u8,
     pub cull: u8,
@@ -144,7 +154,13 @@ pub fn build(
                 .filter(|(_, l)| l.extra.is_some())
                 .collect();
             for (i, l) in looks {
-                extras.insert(i, store.extra_texture(cache, d.mesh, &l));
+                extras.insert(
+                    i,
+                    (
+                        store.extra_texture(cache, d.mesh, &l),
+                        store.extra2_texture(cache, d.mesh, &l),
+                    ),
+                );
             }
         }
         let Some(m) = store
@@ -168,9 +184,12 @@ pub fn build(
                 continue;
             }
             let look = shape_look(m.materials.get(sh.material));
-            let extra = match look.extra {
-                Some(_) => extras.get(&sh.material).copied().unwrap_or(TEXTURE_NONE),
-                None => TEXTURE_NONE,
+            let (extra, extra2) = match look.extra {
+                Some(_) => extras
+                    .get(&sh.material)
+                    .copied()
+                    .unwrap_or((TEXTURE_NONE, TEXTURE_NONE)),
+                None => (TEXTURE_NONE, TEXTURE_NONE),
             };
             if look.faces() == 3 {
                 continue; // drawn with no faces (helper geometry)
@@ -184,6 +203,9 @@ pub fn build(
                 | ((look.flags & MMK_MESH_ALPHA_TEST != 0) as u32 * FLAG_ALPHA_TEST)
                 | ((look.flags & MMK_MESH_FOG1 != 0) as u32 * FLAG_FOG1)
                 | ((look.flags & MMK_MESH_FOG_Y != 0) as u32 * FLAG_FOG_Y)
+                | ((look.flags & mmk_host::mesh::MMK_MESH_FOG1_Y != 0) as u32 * FLAG_FOG1_Y)
+                | ((look.flags >> mmk_host::mesh::MMK_MESH_FOG_CALC_SHIFT) & 0xFF)
+                    << FLAG_FOG_CALC_SHIFT
                 | if extra != TEXTURE_NONE {
                     look.extra_mode() << FLAG_EXTRA_SHIFT
                 } else {
@@ -231,6 +253,9 @@ pub fn build(
                     clip[1] *= flip;
                     let c = m.colors.get(i).copied().unwrap_or([255; 4]);
                     let lerp = |x: u8| 1.0 + (x as f32 / 255.0 - 1.0) * vc_ratio;
+                    let vc = c.map(|x| x as f32 / 255.0);
+                    let fa = look.form.add.eval(vc);
+                    let fm = look.form.mul.eval(vc);
                     remap[i] = out.vertices.len() as u32;
                     out.vertices.push(MeshVertex {
                         clip,
@@ -241,7 +266,7 @@ pub fn build(
                         uv: apply_srt(
                             if look.flags & mmk_host::mesh::MMK_MESH_WORLD_UV != 0 {
                                 let k = 1.0 / mmk_host::mesh::WORLD_UV_SPAN;
-                                [wp[0] * k, -wp[1] * k]
+                                [wp[0] * k, -wp[1] * k + mmk_host::mesh::WORLD_UV_V0]
                             } else {
                                 v.uv
                             },
@@ -254,6 +279,8 @@ pub fn build(
                             lerp(c[2]) * look.tint[2],
                             c[3] as f32 / 255.0,
                         ],
+                        form_add: [fa[0], fa[1], fa[2], look.form.sat as u32 as f32],
+                        form_mul: [fm[0], fm[1], fm[2], 0.0],
                     });
                 }
                 out.indices.push(remap[i]);
@@ -270,6 +297,7 @@ pub fn build(
                 count: out.indices.len() as u32 - first,
                 texture: (tex != TEXTURE_NONE).then_some(tex),
                 extra: (extra != TEXTURE_NONE).then_some(extra),
+                extra2: (extra2 != TEXTURE_NONE).then_some(extra2),
                 wrap: (look.flags >> 8) & 0xF,
                 blend: match look.blend() {
                     1 => 2,
