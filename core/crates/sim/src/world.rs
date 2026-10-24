@@ -5706,8 +5706,16 @@ impl World {
             layer,
         };
         self.background_sprites(&mut out);
-        // tracks: drawn from the white line texels of the field atlas (tile 0x80) [placeholder
-        // for the game's per-cell track tiles], with a dot at every free end
+        // tracks: each rail cell's template code is its field-atlas tile (59-track.md); a
+        // junction's own cells have no tile of theirs here and keep a line from the white
+        // texels of the atlas [placeholder]
+        let tracks = &self.level.tracks;
+        for ((cx, cy), code) in tracks.art() {
+            let (px, py) = (cx as f32 * TILE, cy as f32 * TILE);
+            if visible(px, py) {
+                out.push(tile(px, py, code as u32, 9));
+            }
+        }
         let line = |px: f32, py: f32, size: f32| Sprite {
             image: SpriteImage {
                 model: field,
@@ -5722,22 +5730,20 @@ impl World {
             flip_y: false,
             layer: 9,
         };
-        for poly in self.level.tracks.polylines() {
+        let bare = |px: f32, py: f32| {
+            !tracks.has_art((px / TILE).floor() as i32, (py / TILE).floor() as i32)
+        };
+        for poly in tracks.polylines() {
             for w in poly.windows(2) {
                 let (a, b) = (w[0], w[1]);
                 let n = ((b.0 - a.0).abs().max((b.1 - a.1).abs())).ceil().max(1.0) as usize;
                 for k in 0..n {
                     let t = k as f32 / n as f32;
                     let (px, py) = (a.0 + (b.0 - a.0) * t, a.1 + (b.1 - a.1) * t);
-                    if visible(px, py) {
+                    if visible(px, py) && bare(px, py) {
                         out.push(line(px, py, 1.5));
                     }
                 }
-            }
-        }
-        for (px, py) in self.level.tracks.ends() {
-            if visible(px, py) {
-                out.push(line(px, py, 5.0));
             }
         }
         for t in &self.level.tiles {

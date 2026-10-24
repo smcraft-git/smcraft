@@ -357,6 +357,10 @@ fn bend_of((e0, e1): (u16, u16)) -> Option<u16> {
 pub struct Tracks {
     /// Rail cell words by cell (x, y), y up.
     cells: BTreeMap<(i32, i32), u32>,
+    /// The cells' template codes, which are also their field-atlas tiles (rows 5–11 of
+    /// `*_Field_*`: straights 0x60–0x63, closed caps 0x70–, open caps 0x80–, joints and bends
+    /// 0x90–0xb7); a junction's own cells (0x2xx) have none.
+    art: BTreeMap<(i32, i32), u16>,
     /// The course-wide ON/OFF bit as the game holds it: set = ON (red), the course-start state
     /// [obs 0x7100ae4270: the switch-state reset writes 0x10000 to +0x28, i.e. +0x2a = 1].
     pub on: bool,
@@ -366,6 +370,7 @@ impl Default for Tracks {
     fn default() -> Self {
         Tracks {
             cells: BTreeMap::new(),
+            art: BTreeMap::new(),
             on: true,
         }
     }
@@ -423,6 +428,11 @@ impl Tracks {
                     if w != 0 && (class == 3 || (class == 2 && kind != 0x40)) && cx >= 0 && cy >= 0
                     {
                         t.cells.insert((cx, cy), w);
+                        if code < 0x100 {
+                            t.art.insert((cx, cy), code);
+                        } else {
+                            t.art.remove(&(cx, cy));
+                        }
                     }
                 }
             }
@@ -432,6 +442,16 @@ impl Tracks {
 
     pub fn is_empty(&self) -> bool {
         self.cells.is_empty()
+    }
+
+    /// The track's tiles: cell (x, y) and its field-atlas tile.
+    pub fn art(&self) -> impl Iterator<Item = ((i32, i32), u16)> + '_ {
+        self.art.iter().map(|(&k, &v)| (k, v))
+    }
+
+    /// Has the cell at (x, y) a tile of its own (else it is a junction cell, drawn as a line)?
+    pub fn has_art(&self, x: i32, y: i32) -> bool {
+        self.art.contains_key(&(x, y))
     }
 
     /// The raw cell word under a point.
@@ -920,6 +940,20 @@ mod tests {
             "lower arm, junction diagonal"
         );
         assert_eq!(j.cells.len(), 7);
+    }
+
+    #[test]
+    fn cells_keep_their_tiles_and_junction_cells_have_none() {
+        // a horizontal piece: closed cap (k1, end A), the straight, an open cap (k0, end B)
+        let t = Tracks::with_ends([(10, 10, 0, 0x81, 0x70)]);
+        let art: Vec<_> = t.art().collect();
+        assert_eq!(
+            art,
+            vec![((10, 11), 0x70), ((11, 11), 0x60), ((12, 11), 0x81)]
+        );
+        let j = Tracks::with_ends([(20, 20, 8, 0, 0)]);
+        assert!(!j.has_art(22, 22), "the junction's centre");
+        assert!(j.has_art(21, 22));
     }
 
     #[test]
