@@ -162,6 +162,69 @@ impl Editor {
         Ok(true)
     }
 
+    /// The balloon over a multigrab selection, the held part first: its forms and size, then
+    /// wings and parachute on / off wherever any of the parts takes that change (the game ORs
+    /// the offers over the selection, maker spec C10).
+    pub fn attr_options_many(&self, parts: &[usize]) -> Vec<AttrOption> {
+        let Some((&held, rest)) = parts.split_first() else {
+            return Vec::new();
+        };
+        let mut out: Vec<AttrOption> = self
+            .attr_options(held)
+            .into_iter()
+            .filter(|o| matches!(o.attr, Attr::Form(_) | Attr::Big(_)))
+            .collect();
+        for attr in [
+            Attr::Wings(true),
+            Attr::Wings(false),
+            Attr::Parachute(true),
+            Attr::Parachute(false),
+        ] {
+            let offered: Vec<usize> = std::iter::once(held)
+                .chain(rest.iter().copied())
+                .filter(|&i| self.attr_options(i).iter().any(|o| o.attr == attr))
+                .collect();
+            if !offered.is_empty() {
+                out.push(AttrOption {
+                    attr,
+                    checked: false,
+                    enabled: offered.iter().any(|&i| self.attr_allowed(i, attr).is_ok()),
+                });
+            }
+        }
+        out
+    }
+
+    /// Apply a balloon choice to a multigrab selection (the held part first): wings and
+    /// parachute go to every part that can take them, the others are left as they are; forms
+    /// and size to the held part alone [inf]. Ok(parts changed); the first refusal when no part
+    /// could take it.
+    pub fn apply_attr_many(&mut self, parts: &[usize], attr: Attr) -> Result<usize, EditError> {
+        let Some(&held) = parts.first() else {
+            return Err(EditError::Missing);
+        };
+        if matches!(attr, Attr::Form(_) | Attr::Big(_)) {
+            return self.apply_attr(held, attr).map(usize::from);
+        }
+        let mut changed = 0;
+        let mut first_err = None;
+        for &i in parts {
+            if !self.attr_options(i).iter().any(|o| o.attr == attr) {
+                continue;
+            }
+            match self.apply_attr(i, attr) {
+                Ok(c) => changed += usize::from(c),
+                Err(e) => {
+                    first_err.get_or_insert(e);
+                }
+            }
+        }
+        match (changed, first_err) {
+            (0, Some(e)) => Err(e),
+            _ => Ok(changed),
+        }
+    }
+
     /// Put wings on part `index` or take them off.
     pub fn set_wings(&mut self, index: usize, on: bool) -> Result<bool, EditError> {
         self.apply_attr(index, Attr::Wings(on))
@@ -192,6 +255,25 @@ mod tests {
         assert_eq!(e.set_wings(g, false), Ok(true));
         assert_eq!(e.set_parachute(g, false), Ok(true));
         assert_eq!(e.object(g).unwrap().flags, crate::DEFAULT_FLAGS);
+    }
+
+    #[test]
+    fn a_selection_gets_wings_where_each_part_can_take_them() {
+        let mut e = flat("M1");
+        let goomba = e.place(0, 10, 2).unwrap();
+        let block = e.place(6, 12, 2).unwrap();
+        let winged = e.place(0, 14, 2).unwrap();
+        e.set_wings(winged, true).unwrap();
+        let sel = [goomba, block, winged];
+        let offered: Vec<Attr> = e.attr_options_many(&sel).iter().map(|o| o.attr).collect();
+        // wings on (two parts have none) and off (one has them); a parachute for the Goombas
+        assert!(offered.contains(&Attr::Wings(true)) && offered.contains(&Attr::Wings(false)));
+        assert!(offered.contains(&Attr::Parachute(true)));
+        assert_eq!(e.apply_attr_many(&sel, Attr::Wings(true)), Ok(2));
+        assert!(sel.iter().all(|&i| e.object(i).unwrap().flags & WINGS != 0));
+        // the Hard Block takes no parachute: the Goombas do, it is skipped
+        assert_eq!(e.apply_attr_many(&sel, Attr::Parachute(true)), Ok(2));
+        assert_eq!(e.object(block).unwrap().flags & PARACHUTE, 0);
     }
 
     #[test]

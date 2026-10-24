@@ -35,8 +35,10 @@ sway, importer and pack 12, the dev cache already at v12).
      Mushroom flies off), the 3D World courses (MoltenVK rejects a texture on first blit).
      Pixels: the 3D World sky material, light-map lighting and fogs (measured in G8), the colour
      table (ramps ready), NSMBU's background lighting.
-  2. Maker: ✅ wings / parachutes (the attribute balloon, merged 2026-10-24); left: multigrab
-     choices, NSMBU / 3D World wing art, the contents balloon's dummies; tracks and links.
+  2. Maker: ✅ wings / parachutes (the attribute balloon, merged 2026-10-24), ✅ over a multigrab
+     selection (hold a selected part: wings / parachute go to every part that takes them, one
+     undo step); left: NSMBU / 3D World wing art, the contents balloon's dummies; tracks and
+     links.
   3. Co-op: a players screen in SMM2's layouts; the P-door hold for followers.
   4. Super Worlds' 3D map and Toad Houses; airship sway; the colour table; NSMBU / 3D World pixels.
   5. iPad / Android device runs; the macOS package; live Network Play once the ID and key arrive.

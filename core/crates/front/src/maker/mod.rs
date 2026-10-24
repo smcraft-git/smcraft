@@ -180,9 +180,11 @@ enum Drag {
     Select {
         from: (i32, i32),
     },
-    /// Carrying the multigrab selection, grabbed at `grab`.
+    /// Carrying the multigrab selection, grabbed at `grab`; `held` as for `Carry` (on a part:
+    /// the balloon for the whole selection).
     MoveSelection {
         grab: (i32, i32),
+        held: i32,
     },
     /// Stretching a part by its edge: its width (right column) and / or height (top row).
     Resize {
@@ -832,7 +834,15 @@ impl MakerFlow {
                     }
                     self.selection = None;
                 } else {
-                    self.drag = Some(Drag::MoveSelection { grab: self.cur });
+                    let held = if self.editor.object_at(self.cur.0, self.cur.1).is_some() {
+                        0
+                    } else {
+                        -1
+                    };
+                    self.drag = Some(Drag::MoveSelection {
+                        grab: self.cur,
+                        held,
+                    });
                     self.sound(7, "drag");
                 }
             }
@@ -911,8 +921,32 @@ impl MakerFlow {
                             .then_some(r);
                 }
             }
-            Some(Drag::MoveSelection { grab }) => {
-                if !place_held {
+            Some(Drag::MoveSelection { grab, held }) => {
+                if place_held && held >= 0 {
+                    // held still on a part of the selection: the balloon for all of it
+                    let still = self.cur == grab;
+                    let held = if still { held + 1 } else { -1 };
+                    self.drag = Some(Drag::MoveSelection { grab, held });
+                    if held >= attr::HOLD {
+                        // the balloon's undo step (a selection's press made none)
+                        self.editor.checkpoint();
+                        let opened = self
+                            .editor
+                            .object_at(grab.0, grab.1)
+                            .zip(self.selection)
+                            .is_some_and(|(i, r)| {
+                                let mut parts = vec![i];
+                                parts.extend(
+                                    self.editor.objects_in(r).into_iter().filter(|&j| j != i),
+                                );
+                                self.open_attr_parts(parts)
+                            });
+                        if !opened {
+                            self.editor.discard_checkpoint();
+                            self.drag = Some(Drag::MoveSelection { grab, held: -1 });
+                        }
+                    }
+                } else if !place_held {
                     self.drag = None;
                     let (dx, dy) = (self.cur.0 - grab.0, self.cur.1 - grab.1);
                     if let Some(r) = self.selection
@@ -1327,7 +1361,7 @@ impl MakerFlow {
     pub fn selection_shown(&self) -> Option<Rect> {
         match self.drag {
             Some(Drag::Select { from }) => Some(Rect::spanning(from, self.cur)),
-            Some(Drag::MoveSelection { grab }) => self.selection.map(|r| {
+            Some(Drag::MoveSelection { grab, .. }) => self.selection.map(|r| {
                 Rect::new(
                     r.x + self.cur.0 - grab.0,
                     r.y + self.cur.1 - grab.1,

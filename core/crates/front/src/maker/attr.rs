@@ -31,6 +31,8 @@ pub struct Balloon {
     pub index: usize,
     pub part: i16,
     pub options: Vec<AttrOption>,
+    /// The rest of a multigrab selection the choice also goes to.
+    pub others: Vec<usize>,
     pub sel: usize,
     pub layout: Option<Layout>,
     /// The press that opened the balloon is still down (its release chooses nothing).
@@ -57,7 +59,20 @@ impl MakerFlow {
     /// Open the balloon of part `index` (the hold on it ended the carry). False when the part
     /// has nothing to choose.
     pub(super) fn open_attr(&mut self, index: usize) -> bool {
-        let options = self.editor.attr_options(index);
+        self.open_attr_parts(vec![index])
+    }
+
+    /// Open the balloon over `parts`: the held one first, then the rest of its multigrab
+    /// selection, which wings and parachute choices also go to (maker spec C10).
+    pub(super) fn open_attr_parts(&mut self, parts: Vec<usize>) -> bool {
+        let Some((&index, others)) = parts.split_first() else {
+            return false;
+        };
+        let options = if others.is_empty() {
+            self.editor.attr_options(index)
+        } else {
+            self.editor.attr_options_many(&parts)
+        };
         let Some(part) = self.editor.object(index).map(|o| o.id) else {
             return false;
         };
@@ -75,6 +90,7 @@ impl MakerFlow {
             index,
             part,
             options: options.into_iter().take(BUTTONS).collect(),
+            others: others.to_vec(),
             sel,
             layout: self.ui.layout(LAYOUT),
             press_held: true,
@@ -269,7 +285,15 @@ impl MakerFlow {
             self.close_attr();
             return;
         }
-        match self.editor.apply_attr(index, opt.attr) {
+        let others = b.others.clone();
+        let result = if others.is_empty() {
+            self.editor.apply_attr(index, opt.attr)
+        } else {
+            let mut parts = vec![index];
+            parts.extend(others);
+            self.editor.apply_attr_many(&parts, opt.attr).map(|n| n > 0)
+        };
+        match result {
             Ok(changed) => {
                 self.ui.sound_button(LAYOUT, &pane, Event::Decide);
                 if let Some(l) = self.attr.as_mut().and_then(|b| b.layout.as_mut()) {

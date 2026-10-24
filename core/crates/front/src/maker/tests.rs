@@ -935,3 +935,42 @@ fn the_balloon_offers_only_what_the_part_can_carry() {
     }
     assert!(m.attr_options_shown().is_none() && m.carrying());
 }
+
+#[test]
+fn holding_a_part_of_a_selection_gives_the_whole_selection_wings() {
+    use mmk_editor::attr::Attr;
+    let (mut host, mut saves) = (MockHost::default(), Saves::default());
+    let mut m = maker(&mut host, &mut saves, MakerStart::New("M1".into()));
+    let a = m.editor.place(0, 12, 3).unwrap();
+    let b = m.editor.place(0, 14, 3).unwrap();
+    let block = m.editor.place(6, 16, 3).unwrap();
+    m.selection = Some(Rect::new(12, 3, 5, 1));
+    m.cur = (14, 3);
+    hold_on_part(&mut m, &mut host, &mut saves, attr::HOLD);
+    let shown = m.attr_options_shown().expect("the selection's balloon");
+    assert!(shown.contains(&Attr::Wings(true)));
+    run(&mut m, &mut host, &mut saves, idle());
+    let k = shown.iter().position(|a| *a == Attr::Wings(true)).unwrap();
+    let first = shown
+        .iter()
+        .position(|a| !matches!(a, Attr::Form(false)))
+        .unwrap();
+    for _ in first..k {
+        run(&mut m, &mut host, &mut saves, press(Buttons::RIGHT));
+    }
+    run(&mut m, &mut host, &mut saves, press(Buttons::CONFIRM));
+    run(&mut m, &mut host, &mut saves, idle());
+    for i in [a, b, block] {
+        assert_eq!(
+            m.editor.object(i).unwrap().flags & 0x2,
+            0x2,
+            "part {i} winged"
+        );
+    }
+    assert_eq!(m.selection, Some(Rect::new(12, 3, 5, 1)), "nothing moved");
+    // one undo step takes the wings off them all
+    m.editor.undo();
+    for i in [a, b, block] {
+        assert_eq!(m.editor.object(i).unwrap().flags & 0x2, 0);
+    }
+}
