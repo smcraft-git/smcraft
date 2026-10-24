@@ -226,9 +226,11 @@ sway, importer and pack 12, the dev cache already at v12).
     `Killer_in`, `Jugem_in`, `Clown_in`, `Cloud_in`, `Key_In`), made big (`scaleChange`), form
     change (`p_AttributeChange`), multigrab frame / grab / drop / erase. Host hooks
     `edit_music` / `edit_sound`, routed in the shell and the FFI (so the Swift app has them) to a
-    maker `Director` of their own. ⬜ the selection frame's `cursor` ticks, `move`, the voices'
-    `MusicalScale` pitch by height, wings / parachutes (`p_EquipPara` …), the start / goal and
-    stretch drags' sounds, a listen on hardware against SMM2
+    maker `Director` of their own. ✅ `move` per tile while carrying [inf: when], the start /
+    goal drags (`<S>_EditGroundStart` / `GroundGoal`: drag, move, set), wings / parachutes
+    (`voice_getWing`, `lose_wing`, `p_EquipPara`, `p_RemovePara`) · ⬜ the selection frame's
+    `cursor` ticks, the stretch drags' sounds, `Tower_stack` (stacking, research C11), a listen
+    on hardware against SMM2
 - 🔄 Edit any course: the open row of the Course World / Coursebot lists has "Make" (the co-op
   button's slot, the Coursebot's word, the glove icon) → the maker; someone else's course (a
   code whose maker isn't the signed-in player) saves as a new Coursebot course with "based on

@@ -538,6 +538,13 @@ fn the_start_and_goal_drag_their_heights_and_the_course_length() {
     run(&mut m, &mut host, &mut saves, held(Buttons::CONFIRM));
     run(&mut m, &mut host, &mut saves, idle());
     assert_eq!(m.editor.course.header.start_y, 5);
+    let start: Vec<&str> = host
+        .edit_sounds
+        .iter()
+        .filter(|(u, _)| u == "M1_EditGroundStart")
+        .map(|(_, k)| k.as_str())
+        .collect();
+    assert_eq!(start, ["drag", "move", "set"], "picked up, moved, put down");
     // the goal ground starts 10 tiles from the right edge of a 240-tile course
     m.cur = (233, 1);
     run(&mut m, &mut host, &mut saves, press(Buttons::CONFIRM));
@@ -760,7 +767,8 @@ fn the_maker_plays_its_music_and_the_parts_sounds() {
     assert_eq!(sounds(&mut host), ["M1_EditKuribo:drag"]);
     m.cur = (14, 3);
     run(&mut m, &mut host, &mut saves, idle());
-    assert_eq!(sounds(&mut host), ["M1_EditKuribo:set"]);
+    // carried to a new tile (`move`), then put down
+    assert_eq!(sounds(&mut host), ["M1_EditKuribo:move", "M1_EditKuribo:set"]);
     // a Super Mushroom on it makes it big
     m.slot = m.palette.iter().position(|&t| t == Tool::Part(20)).unwrap();
     run(&mut m, &mut host, &mut saves, press(Buttons::CONFIRM));

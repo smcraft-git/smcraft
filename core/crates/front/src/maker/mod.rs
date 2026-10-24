@@ -67,6 +67,9 @@ pub mod keys {
     pub const COPY: u16 = 512;
 }
 
+/// The start and goal grounds' edit sound users (`<style>_EditGroundStart` / `…GroundGoal`).
+const START_GROUND: i16 = 37;
+const GOAL_GROUND: i16 = 26;
 /// What a part keeps when it is put into another: wings, alternate form, size, parachute.
 const CHILD_KEEPS: u32 = 0x2 | 0x4 | 0x6000 | 0x8000;
 const PAGE: &str = "Edit_MainPage_00";
@@ -269,6 +272,8 @@ pub struct MakerFlow {
     test: Option<Test>,
     /// Edit sounds to play this tick: (course object id, key) (research/specs/maker.md C9).
     pub sounds: Vec<(i16, &'static str)>,
+    /// The tile the cursor was on when a carry last sounded `move`.
+    move_cur: (i32, i32),
     /// The music last asked of the host (None: nothing asked yet, so ask).
     music_sent: Option<Option<(String, u8)>>,
     /// The maker's Mario: where test play starts (None: the course start); area.
@@ -353,6 +358,7 @@ impl MakerFlow {
             shown: false,
             test: None,
             sounds: Vec::new(),
+            move_cur: (0, 0),
             music_sent: None,
             mario: None,
             icons: Default::default(),
@@ -806,6 +812,21 @@ impl MakerFlow {
                 self.glove = self.tile_center(self.cur);
             }
         }
+        // carrying something: each tile the cursor moves to sounds `move` in the carried thing's
+        // edit user [inf: the key every part's user has; when the game plays it not read]
+        if self.cur != self.move_cur {
+            let part = match self.drag {
+                Some(Drag::Carry { index, .. }) => self.editor.object(index).map(|o| o.id),
+                Some(Drag::MoveSelection { .. }) => Some(7),
+                Some(Drag::Start { .. }) => Some(START_GROUND),
+                Some(Drag::Goal { .. }) => Some(GOAL_GROUND),
+                _ => None,
+            };
+            if let Some(p) = part {
+                self.sound(p, "move");
+            }
+            self.move_cur = self.cur;
+        }
         // course edits: confirm / primary press puts down (or picks up), back / secondary
         // erases
         let erase_held = (input.ui.held.has(Buttons::BACK) && !input.start) || input.alt;
@@ -1164,6 +1185,7 @@ impl MakerFlow {
             if start.contains(tx, ty) && ty <= h.start_y as i32 + 2 {
                 self.editor.checkpoint();
                 self.drag = Some(Drag::Start { changed: false });
+                self.sound(START_GROUND, "drag");
                 return;
             }
             if goal.contains(tx, ty) && ty <= h.goal_y as i32 + 10 {
@@ -1172,6 +1194,7 @@ impl MakerFlow {
                     grab: tx,
                     changed: false,
                 });
+                self.sound(GOAL_GROUND, "drag");
                 return;
             }
         }
@@ -1272,6 +1295,12 @@ impl MakerFlow {
 
     /// The press ended: keep its checkpoint only when something changed.
     fn end_drag(&mut self) {
+        // the start / goal put down where they were dragged
+        match self.drag {
+            Some(Drag::Start { changed: true }) => self.sound(START_GROUND, "set"),
+            Some(Drag::Goal { changed: true, .. }) => self.sound(GOAL_GROUND, "set"),
+            _ => {}
+        }
         let changed = match self.drag.take() {
             Some(Drag::Place { changed, .. })
             | Some(Drag::Erase { changed })
