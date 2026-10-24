@@ -4,7 +4,8 @@
 //! fetched: a call runs, the paths it lacked are fetched (one request at a time,
 //! [`tgrcode::MIN_INTERVAL`] apart, busy answers waited out, as natively; thumbnails last), and
 //! it runs again until it has everything. The client keeps the answers in memory as natively (lists for
-//! minutes, course files and thumbnails for good); nothing is stored between visits.
+//! minutes, course files and thumbnails for good); nothing is stored between visits. The runs'
+//! pool ([`crate::web_pool`]) asks in the background, behind everything a player waits for.
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -79,6 +80,16 @@ impl Tgr {
 
     /// Run `f` on the client, fetching what it asks for, until it has it all.
     pub async fn run<R>(&self, f: impl Fn(&TgrCode) -> R) -> R {
+        self.run_at(false, f).await
+    }
+
+    /// [`Tgr::run`] whose requests wait behind every other (the runs' pool, fetched while the
+    /// player looks at other things).
+    pub async fn run_background<R>(&self, f: impl Fn(&TgrCode) -> R) -> R {
+        self.run_at(true, f).await
+    }
+
+    async fn run_at<R>(&self, background: bool, f: impl Fn(&TgrCode) -> R) -> R {
         let mut fetched: Vec<String> = Vec::new();
         let r = loop {
             let r = f(&self.client);
@@ -105,7 +116,7 @@ impl Tgr {
                     continue;
                 }
                 FETCHING.with(|f| f.borrow_mut().push(path.clone()));
-                let answer = fetch(&path).await;
+                let answer = fetch(&path, background).await;
                 FETCHING.with(|f| f.borrow_mut().retain(|p| p != &path));
                 if let Ok(mut p) = self.pending.lock() {
                     p.got.insert(path.clone(), answer);
@@ -126,18 +137,18 @@ impl Tgr {
 thread_local! {
     /// When the next request may go (ms since 1970): one at a time, MIN_INTERVAL apart.
     static NEXT: Cell<f64> = const { Cell::new(0.0) };
-    /// Requests waiting for their turn: (a thumbnail, ticket).
-    static WAITING: RefCell<Vec<(bool, u64)>> = const { RefCell::new(Vec::new()) };
+    /// Requests waiting for their turn: (rank, ticket); see [`turn`].
+    static WAITING: RefCell<Vec<(u8, u64)>> = const { RefCell::new(Vec::new()) };
     static TICKETS: Cell<u64> = const { Cell::new(0) };
     /// Paths being fetched (a second call asking for one waits for the first).
     static FETCHING: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
 }
 
 /// Wait for a request's turn: [`tgrcode::MIN_INTERVAL`] after the last one, and no request
-/// waiting before it. Thumbnails (a list asks for one per row) wait behind everything else, so
-/// the course a player opened arrives first.
-async fn turn(thumbnail: bool) {
-    let me = (thumbnail, TICKETS.get());
+/// waiting before it. Thumbnails (a list asks for one per row) wait behind the rest (rank 1), so
+/// the course a player opened arrives first; the runs' pool behind those (rank 2).
+async fn turn(rank: u8) {
+    let me = (rank, TICKETS.get());
     TICKETS.set(me.1 + 1);
     WAITING.with(|w| w.borrow_mut().push(me));
     loop {
@@ -164,13 +175,19 @@ async fn sleep(ms: f64) {
     let _ = JsFuture::from(p).await;
 }
 
-/// GET `path` of the service: in its turn, a busy answer asked again ([`tgrcode::RETRIES`] times,
-/// waiting 5 s, doubling: browsers don't show the service's Retry-After).
-async fn fetch(path: &str) -> TgrResult<Vec<u8>> {
+/// GET `path` of the service: in its turn (`background`: behind every other), a busy answer
+/// asked again ([`tgrcode::RETRIES`] times, waiting 5 s, doubling: browsers don't show the
+/// service's Retry-After).
+async fn fetch(path: &str, background: bool) -> TgrResult<Vec<u8>> {
+    let rank = if background {
+        2
+    } else {
+        path.contains("thumbnail/") as u8
+    };
     let mut wait = 5000.0;
     let mut r = Err(TgrError::Busy(None));
     for attempt in 0..=tgrcode::RETRIES {
-        turn(path.contains("thumbnail/")).await;
+        turn(rank).await;
         r = get(path).await;
         match r {
             Err(TgrError::Busy(_)) if attempt < tgrcode::RETRIES => {

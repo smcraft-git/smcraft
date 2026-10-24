@@ -1141,14 +1141,32 @@ a portable Rust shell runs the game everywhere, the Swift app stays as the Apple
   - ✅ (2026-10-25) the engine's data that it read from disk: tables (backdrops were black on every
     course), 3D environments, particle effects, NSMBU / 3D World models (read as asked for; 3D
     World was drawn with 2D sprites); the page now copies `meshes/` and `anims/` too
+  - 🔄 (2026-10-25, branch `webparity`; built and unit-tested, browser check pending) the own
+    course server from the page (`web_server`: `mmk_online::Client` over a `Transport` the page
+    fetches for; server CORS for Private Network Access): Course World's list, thumbnails, Play,
+    Download, account register / token sign-in (token in `localStorage`, paste into the field),
+    likes / comments / leaderboards, replays and ghosts, the Coursebot's upload (any maker name:
+    `?maker=`); page "Course server…" / `?server=`
+  - 🔄 (2026-10-25, `webparity`) 100 Mario / Endless from Course World's pool (`web_pool`):
+    TGRCode's Endless draws in the background (behind the player's own requests), kept in OPFS
+    `mmk-save/pool/` (100 at most), or the own server's `/api/pool`
+  - 🔄 (2026-10-25, `webparity`) local co-op: one player per Gamepad API pad as natively
+    (`Host::controllers` / `set_players`), or the keyboard split in two (page "Keyboard: 2
+    players" / `?split=1`; natively `MMK_KEYBOARD_SPLIT=1`)
+  - 🔄 (2026-10-25, `webparity`) a lost graphics device: made again on the same canvas up to 3
+    times (UI layers and renderer rebuilt from the caches), else a message in the status line;
+    WebGPU errors are logged instead of panicking
+  - 🔄 (2026-10-25, `webparity`) memory: the models' file bytes are dropped once parsed past
+    64 MB (`HandedFiles::with_cap`, least recently taken first); parsed meshes and texture
+    pixels still stay for the visit
   - checked 2026-10-25 by `research/tools/web-check/smoke.mjs` in headless Edge 156 (WebGPU on
     Metal; Playwright's chrome-headless-shell loses its WebGPU device on any canvas): load 1.3 s,
     title / maker / 3D World course at 60 fps (p95 16.8 ms), keys, clicks, first-key sound,
     Coursebot persistence, TGRCode; `import-check.mjs`: the NSP import. Earlier: headless Firefox
     (WebDriver BiDi; before the menus), a scripted Gamepad API pad, non-silent WebAudio. Open:
     Safari (OPFS `createWritable`), Firefox with the menus, a real controller in a browser, touch
-    controls, mobile memory limits (models' bytes are kept once read), the course server from the
-    browser (HTTP), the Endless / 100 Mario pool of TGRCode courses (library only), local co-op
+    controls, mobile memory limits (parsed models and texture pixels are kept for the visit), a
+    browser check of the `webparity` items above
 - 🔄 iOS/iPadOS: the same Swift package cross-compiled (`swift build --triple`, core linked from
   `core/target/aarch64-apple-ios{,-sim}/release`), bundled by `scripts/make-ios-app.sh`
   (DECISIONS.md "iOS packaging"); `scripts/check.sh --ios` builds it for the Simulator. AppKit
@@ -1177,8 +1195,8 @@ a portable Rust shell runs the game everywhere, the Swift app stays as the Apple
   random course name on the map's balloon); real-time navigation (hub → list → course page →
   play) and the `MMK_SCREENSHOT` smoke test run; `scripts/check.sh --ios` builds. ✅ the web build runs
   it too (UI cache over an in-memory file source filled from OPFS, textures on request; Course
-  World on TGRCode and the Course Maker since 2026-10-25). Open: Settings screens, ghosts in the
-  Apple app, a course server listing in the browser (HTTP fetch)
+  World on TGRCode and the Course Maker since 2026-10-25; the course server's HTTP API from the
+  page on branch `webparity`). Open: Settings screens, ghosts in the Apple app
 
 ### Phase 9 — SMM2 single-player like-for-like 🔄 (owner request 2026-10-18)
 - 🔄 SMM2 layouts through the same layout player (private map: `research/specs/smm2-layouts.md`):

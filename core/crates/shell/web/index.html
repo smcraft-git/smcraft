@@ -30,13 +30,15 @@
     <button id="open" title="SMM2 course data: .bcd, zlib (.course.zlib) or raw">Open course file…</button>
     <input id="file" type="file" hidden>
     <button id="online" title="Play this course online with up to 3 others, through a course server's relay">Play online…</button>
+    <button id="server" title="Your own course server (mmk server): Course World from it, and the Coursebot's uploads">Course server…</button>
+    <button id="split" aria-pressed="false" title="Local co-op on one keyboard: WASD + Z/Space + X/left Shift is player 1, the arrows + / + . or right Shift player 2">Keyboard: 1 player</button>
     <button id="forget" disabled title="Delete the game data stored in this browser">Remove game data</button>
   </header>
   <span id="status">Starting…</span>
   <progress id="progress" hidden></progress>
   <!-- the shell draws into this canvas (WebGPU, or WebGL2 where WebGPU is missing) -->
   <canvas id="mmk" tabindex="0"></canvas>
-  <p>Arrows/WASD move, Z/Space jump, X/Shift run, Esc/P/Enter pause, R restart. Gamepads: d-pad/stick, A/B jump, X/Y run, Start pause. Menus: arrows, Enter/Z/Space or a click choose, Esc/Backspace go back.</p>
+  <p>Arrows/WASD move, Z/Space jump, X/Shift run, Esc/P/Enter pause, R restart. Gamepads: d-pad/stick, A/B jump, X/Y run, Start pause; one player each in Play Together. Menus: arrows, Enter/Z/Space or a click choose, Esc/Backspace go back; paste into text fields.</p>
   <script type="module" src="./mmk-web.js"></script>
 </body>
 </html>

@@ -29,6 +29,27 @@ pub fn key_button(k: KeyCode) -> Option<u32> {
     })
 }
 
+/// The keyboard split in two for local co-op: the engine button of a key of its left half
+/// (player 1: WASD, Z / Space jump, X / left Shift run) or its right half (player 2: arrows,
+/// / or Numpad 0 jump, . or right Shift or Numpad . run), and which half (false: left).
+pub fn half_button(k: KeyCode) -> Option<(bool, u32)> {
+    Some(match k {
+        KeyCode::KeyA => (false, input::LEFT),
+        KeyCode::KeyD => (false, input::RIGHT),
+        KeyCode::KeyW => (false, input::UP),
+        KeyCode::KeyS => (false, input::DOWN),
+        KeyCode::KeyZ | KeyCode::Space => (false, input::JUMP),
+        KeyCode::KeyX | KeyCode::ShiftLeft => (false, input::RUN),
+        KeyCode::ArrowLeft => (true, input::LEFT),
+        KeyCode::ArrowRight => (true, input::RIGHT),
+        KeyCode::ArrowUp => (true, input::UP),
+        KeyCode::ArrowDown => (true, input::DOWN),
+        KeyCode::Slash | KeyCode::Numpad0 => (true, input::JUMP),
+        KeyCode::Period | KeyCode::ShiftRight | KeyCode::NumpadDecimal => (true, input::RUN),
+        _ => return None,
+    })
+}
+
 /// A Bluetooth controller's button on Android (winit hands its key code over unnamed; the D-pad
 /// already comes as the arrows) as the keyboard key that does the same: A / B jump, X / Y run,
 /// L1 / R1 / L2 / R2 the menus' shoulders (Q / E / 1 / 3), Start pause, Select the skip key.
@@ -76,6 +97,19 @@ impl Keyboard {
             .iter()
             .filter_map(|&k| key_button(k))
             .fold(0, |b, k| b | k)
+    }
+
+    /// The buttons held on each half of the keyboard ([`half_button`]): (left, right).
+    pub fn halves(&self) -> (u32, u32) {
+        let (mut left, mut right) = (0, 0);
+        for (r, b) in self.down.iter().filter_map(|&k| half_button(k)) {
+            if r {
+                right |= b;
+            } else {
+                left |= b;
+            }
+        }
+        (left, right)
     }
 
     /// Actions pressed since the last call.
@@ -176,6 +210,17 @@ impl Default for Pads {
 
 pub use mmk_front::coop::assign_pads;
 
+/// Local co-op with the keyboard split ([`Keyboard::halves`]): the right half is player 2, pad
+/// k player k + 3 (the left half is player 1 on its own). Players 2…'s buttons.
+pub fn assign_split(right: u32, pads: &[u32], players: usize) -> Vec<u32> {
+    let mut v: Vec<u32> = std::iter::once(right)
+        .chain(pads.iter().copied())
+        .take(players.saturating_sub(1))
+        .collect();
+    v.resize(players.saturating_sub(1), 0);
+    v
+}
+
 /// Keyboard and pads together.
 pub fn combine(keys: &Keyboard, pads: u32) -> Input {
     Input {
@@ -202,5 +247,32 @@ mod tests {
         assert!(!k.take_actions().restart);
         k.clear();
         assert_eq!(k.buttons(), 0);
+    }
+
+    #[test]
+    fn the_split_keyboard_is_two_players() {
+        let mut k = Keyboard::default();
+        for c in [
+            KeyCode::KeyD,
+            KeyCode::Space,
+            KeyCode::ArrowLeft,
+            KeyCode::ShiftRight,
+        ] {
+            k.key(c, true);
+        }
+        assert_eq!(
+            k.halves(),
+            (input::RIGHT | input::JUMP, input::LEFT | input::RUN)
+        );
+        // every key still plays player 1 when there is no split
+        assert_eq!(
+            k.buttons(),
+            input::RIGHT | input::JUMP | input::LEFT | input::RUN
+        );
+        // the right half is player 2, the pads after it; missing players get nothing
+        assert_eq!(assign_split(4, &[8, 16], 4), [4, 8, 16]);
+        assert_eq!(assign_split(4, &[8, 16], 2), [4]);
+        assert_eq!(assign_split(4, &[], 3), [4, 0]);
+        assert!(assign_split(4, &[8], 1).is_empty());
     }
 }

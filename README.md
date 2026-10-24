@@ -207,7 +207,9 @@ cargo run --release -p mmk-shell -- --check-textures        # GPU vs CPU BCn dec
 ```
 
 Keys: arrows/WASD move, Z/Space jump, X/Shift run, Esc/P/Enter pause, R restart. Gamepads:
-d-pad/left stick, south/east jump, west/north run, Start pause.
+d-pad/left stick, south/east jump, west/north run, Start pause. Play Together (local co-op)
+takes one player per pad; `MMK_KEYBOARD_SPLIT=1` makes the keyboard two players (WASD + Z/Space
++ X/left Shift, and the arrows + / or Numpad 0 + . or right Shift).
 
 ### In a browser
 
@@ -236,6 +238,19 @@ or clicks; `?opening=0` skips the opening), and courses picked from the list or 
 file…** (`.bcd`, `.course.zlib` or raw course data) play with the course card, HUD and pause
 menu; without it the page plays them directly. Sound starts on the first click or key press
 (browsers block it before that).
+
+**Course server…** (or `?server=http://127.0.0.1:8640`) names your own course server
+(`mmk server`, below): Course World then lists, searches and plays its courses when the Mods
+page's Course World is "Course server" (or unset), the account on the hub's player card
+registers or signs in there (the token stays in this browser; paste it into the token field),
+and the Coursebot uploads to it whichever Course World is shown. The page fetches the server
+directly (it answers any site); a page served over `https://` reaches only `https://` servers
+and `http://localhost` / `127.0.0.1`. 100 Mario and Endless draw from Course World too: TGRCode's
+Endless pool, fetched in the background and kept in the browser, or the server's pool. Local
+co-op (Play Together) takes one player per gamepad; **Keyboard: 2 players** (or `?split=1`)
+makes the keyboard two (WASD + Z/Space + X/left Shift, and the arrows + / + . or right Shift).
+If the graphics device is lost (a driver reset, the browser's GPU process gone) the page makes
+its graphics again and plays on; if that fails, the status line says so.
 
 ### Course Maker (SMM2's maker screens)
 

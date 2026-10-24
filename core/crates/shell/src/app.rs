@@ -3,7 +3,9 @@
 //! `session`) and draws the latest state.
 //!
 //! Graphics start asynchronously (the browser can't block): native builds wait for the device
-//! inside `resumed`; the web build spawns the setup and receives it as a user event.
+//! inside `resumed`; the web build spawns the setup and receives it as a user event. A lost
+//! device (a driver reset, the browser's GPU process gone) is made again on the same window, up
+//! to [`GRAPHICS_RESTARTS`] times; past that the loss is shown (the web page's status line).
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -18,7 +20,7 @@ use winit::window::{Window, WindowId};
 use mmk_host::audio::AudioOut;
 
 use crate::game::Game;
-use crate::input::{Keyboard, Pads, combine};
+use crate::input::{Keyboard, Pads};
 use crate::render::{Gpu, Renderer, VIEW};
 
 /// Everything that needs the window: surface, device, renderer.
@@ -87,6 +89,11 @@ impl Gfx {
             renderer,
             warned: false,
         })
+    }
+
+    /// The device was lost (see [`Gpu::lost`]).
+    fn lost(&self) -> bool {
+        self.gpu.lost.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     /// Draw another game's assets from now on.
@@ -172,6 +179,18 @@ pub struct GameInfo {
     pub draw_missing: bool,
 }
 
+/// A lost graphics device is made again this many times in a run at most.
+pub const GRAPHICS_RESTARTS: u32 = 3;
+
+/// Tell the player something the canvas can't show (the web page's status line; natively the
+/// log).
+fn say(msg: &str) {
+    #[cfg(target_arch = "wasm32")]
+    crate::web::notice(msg);
+    #[cfg(not(target_arch = "wasm32"))]
+    log(msg);
+}
+
 /// Events sent to the loop from async setup and (web) from the page.
 pub enum UserEvent {
     Gfx(Result<Box<Gfx>, String>),
@@ -219,6 +238,11 @@ pub struct App {
     /// course, and the front end starts when it is done.
     #[cfg(not(target_arch = "wasm32"))]
     pub setup: Option<crate::setup::Import>,
+    /// Local co-op on one keyboard: its two halves are players 1 and 2 (`Keyboard::halves`;
+    /// the web page's setting, natively `MMK_KEYBOARD_SPLIT=1`).
+    pub keyboard_split: bool,
+    /// Lost graphics devices made again so far.
+    graphics_restarts: u32,
 }
 
 pub fn log(msg: &str) {
@@ -254,6 +278,8 @@ impl App {
             touch: crate::touch::TouchPad::default(),
             #[cfg(not(target_arch = "wasm32"))]
             setup: None,
+            keyboard_split: std::env::var("MMK_KEYBOARD_SPLIT").is_ok_and(|v| v == "1"),
+            graphics_restarts: 0,
         }
     }
 
@@ -317,6 +343,10 @@ impl App {
     fn frame(&mut self, event_loop: &ActiveEventLoop) {
         #[cfg(not(target_arch = "wasm32"))]
         self.poll_setup();
+        if self.gfx.as_ref().is_some_and(|g| g.lost()) {
+            self.graphics_lost(event_loop);
+            return;
+        }
         let now = crate::clock::now();
         if let Some(limit) = self.quit_after {
             let first = *self.first_frame.get_or_insert(now);
@@ -341,7 +371,14 @@ impl App {
             .session
             .players()
             .max(self.game.session.world.players());
-        let (p1, extra) = crate::input::assign_pads(&each, players);
+        // the keyboard split in two (co-op on one keyboard): its right half is player 2
+        let split = self.keyboard_split && in_play && players >= 2;
+        let (left, right) = self.keys.halves();
+        let (p1, extra) = if split {
+            (0, crate::input::assign_split(right, &each, players))
+        } else {
+            crate::input::assign_pads(&each, players)
+        };
         let pads = if in_play {
             p1
         } else {
@@ -350,10 +387,20 @@ impl App {
         if each.iter().any(|&b| b != 0) {
             self.touch.hide();
         }
-        // (the web page's host has one player)
-        #[cfg(not(target_arch = "wasm32"))]
         if let Some(f) = self.front.as_mut() {
-            f.data.controllers = 1 + each.len() as u32;
+            let n = 1 + self.keyboard_split as u32 + each.len() as u32;
+            if f.data.controllers != n {
+                log(&format!(
+                    "controllers: {n} (keyboard{}, {} pads)",
+                    if self.keyboard_split {
+                        " split in two"
+                    } else {
+                        ""
+                    },
+                    each.len()
+                ));
+                f.data.controllers = n;
+            }
         }
         // the on-screen controls only count in play (in menus a touch is a tap)
         let pads = pads | if in_play { self.touch.buttons() } else { 0 };
@@ -361,7 +408,10 @@ impl App {
             .into_iter()
             .map(|b| mmk_sim::Input { buttons: b })
             .collect();
-        let input = combine(&self.keys, pads);
+        let play_keys = if split { left } else { self.keys.buttons() };
+        let input = mmk_sim::Input {
+            buttons: play_keys | pads,
+        };
         let actions = self.keys.take_actions();
         // the browser reads texture and model files asynchronously: start the reads the last
         // frame asked for, and hold the game (briefly) while they are on their way
@@ -371,7 +421,7 @@ impl App {
             | crate::web::pump_ui(self.front.as_deref_mut());
         #[cfg(not(target_arch = "wasm32"))]
         let loading = false;
-        if self.front_advance(if loading { 0.0 } else { dt }, pads) {
+        if self.front_advance(if loading { 0.0 } else { dt }, play_keys, pads) {
             // the front end ran its ticks (and the course's)
         } else if self.game.editing {
             // arrows / WASD scroll the maker view
@@ -425,10 +475,11 @@ impl App {
     }
 
     /// Advance the front end when it runs (true: it did).
-    fn front_advance(&mut self, dt: f64, pads: u32) -> bool {
+    fn front_advance(&mut self, dt: f64, play_keys: u32, pads: u32) -> bool {
         match &mut self.front {
             Some(f) => {
-                f.advance(dt, &self.keys, pads, self.pads.shoulders, &mut self.game);
+                let shoulders = self.pads.shoulders;
+                f.advance(dt, &self.keys, play_keys, pads, shoulders, &mut self.game);
                 true
             }
             None => false,
@@ -550,13 +601,82 @@ impl App {
     fn installed(&mut self, gfx: Result<Box<Gfx>, String>, event_loop: &ActiveEventLoop) {
         match gfx {
             Ok(g) => {
+                if self.graphics_restarts > 0 {
+                    say("Graphics restarted after the graphics device was lost.");
+                }
+                // (no catching up on the time the graphics were away)
+                self.last = None;
                 g.window.request_redraw();
                 self.gfx = Some(g);
+            }
+            Err(e) if self.graphics_restarts > 0 => {
+                // the page stays (its status line says why there is no picture)
+                say(&format!(
+                    "The graphics device was lost and couldn't be made again ({e}). Reload the page \
+                     (or restart the game) to play on."
+                ));
+                #[cfg(not(target_arch = "wasm32"))]
+                event_loop.exit();
             }
             Err(e) => {
                 log(&format!("graphics unavailable: {e}"));
                 event_loop.exit();
             }
+        }
+    }
+
+    /// Act as if the graphics device was lost (scripted checks of the recovery).
+    pub fn lose_graphics(&mut self) {
+        if let Some(g) = &self.gfx {
+            g.gpu.lost.store(true, std::sync::atomic::Ordering::Relaxed);
+            g.window.request_redraw();
+        }
+    }
+
+    /// The graphics device was lost: drop everything made with it and make the graphics again
+    /// on the same window (the game and the front end keep their state), at most
+    /// [`GRAPHICS_RESTARTS`] times.
+    fn graphics_lost(&mut self, event_loop: &ActiveEventLoop) {
+        let Some(g) = self.gfx.take() else { return };
+        let window = g.window.clone();
+        drop(g);
+        if let Some(f) = &mut self.front {
+            f.graphics_lost();
+        }
+        self.graphics_restarts += 1;
+        if self.graphics_restarts > GRAPHICS_RESTARTS {
+            say(
+                "The graphics device was lost again (more than a few times). Reload the page (or \
+                 restart the game) to play on.",
+            );
+            return;
+        }
+        say("The graphics device was lost: making the graphics again…");
+        self.start_graphics(window, event_loop);
+    }
+
+    /// Make the graphics for `window` (natively now; in a browser in the background, arriving
+    /// as [`UserEvent::Gfx`]).
+    fn start_graphics(&mut self, window: Arc<Window>, event_loop: &ActiveEventLoop) {
+        let info = self.info();
+        let display = event_loop.owned_display_handle();
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_with_display_handle(
+                Box::new(display),
+            ));
+            let gfx = pollster::block_on(Gfx::new(instance, window, &info)).map(Box::new);
+            self.installed(gfx, event_loop);
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            let proxy = self.proxy.clone().expect("web build sets the proxy");
+            wasm_bindgen_futures::spawn_local(async move {
+                let desc = wgpu::InstanceDescriptor::new_with_display_handle(Box::new(display));
+                let instance = wgpu::util::new_instance_with_webgpu_detection(desc).await;
+                let gfx = Gfx::new(instance, window, &info).await.map(Box::new);
+                let _ = proxy.send_event(UserEvent::Gfx(gfx));
+            });
         }
     }
 }
@@ -594,26 +714,7 @@ impl ApplicationHandler<UserEvent> for App {
                 return;
             }
         };
-        let info = self.info();
-        let display = event_loop.owned_display_handle();
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_with_display_handle(
-                Box::new(display),
-            ));
-            let gfx = pollster::block_on(Gfx::new(instance, window, &info)).map(Box::new);
-            self.installed(gfx, event_loop);
-        }
-        #[cfg(target_arch = "wasm32")]
-        {
-            let proxy = self.proxy.clone().expect("web build sets the proxy");
-            wasm_bindgen_futures::spawn_local(async move {
-                let desc = wgpu::InstanceDescriptor::new_with_display_handle(Box::new(display));
-                let instance = wgpu::util::new_instance_with_webgpu_detection(desc).await;
-                let gfx = Gfx::new(instance, window, &info).await.map(Box::new);
-                let _ = proxy.send_event(UserEvent::Gfx(gfx));
-            });
-        }
+        self.start_graphics(window, event_loop);
     }
 
     /// Android takes the window's surface away while the app is in the background: drop the
@@ -683,9 +784,10 @@ impl ApplicationHandler<UserEvent> for App {
                     if matches!(code, KeyCode::ShiftLeft | KeyCode::ShiftRight) {
                         self.shift = pressed;
                     }
-                    // a text field of the front end takes the keys as typed text
-                    #[cfg(not(target_arch = "wasm32"))]
+                    // a text field of the front end takes the keys as typed text (not with
+                    // Ctrl / Cmd: the page's paste comes as text of its own, `web::type_text`)
                     if pressed
+                        && !self.ctrl
                         && let Some(f) = &mut self.front
                         && f.key_text(code, event.text.as_deref())
                     {

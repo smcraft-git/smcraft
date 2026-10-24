@@ -47,4 +47,8 @@ pub mod web_import;
 #[cfg(target_arch = "wasm32")]
 pub mod web_net;
 #[cfg(target_arch = "wasm32")]
+pub mod web_pool;
+/// The course server from the browser (its run-again loop is tested natively).
+pub mod web_server;
+#[cfg(target_arch = "wasm32")]
 pub mod web_tgr;

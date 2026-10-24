@@ -58,8 +58,11 @@ smcraft.example.org {
 }
 ```
 
-Browser players then use `wss://smcraft.example.org/relay` as the relay address. The UDP relay
-can't go through an HTTP proxy; desktop players connect to UDP port 8640 directly.
+Browser players then use `wss://smcraft.example.org/relay` as the relay address, and
+`https://smcraft.example.org` as the web page's **Course server…** (Course World, accounts,
+uploads). The API answers pages of any site (CORS `*`, Private Network Access allowed, so a
+public page may also call a server on the player's own machine at `http://localhost:8640`). The
+UDP relay can't go through an HTTP proxy; desktop players connect to UDP port 8640 directly.
 
 ## Accounts
 
