@@ -1423,6 +1423,9 @@ impl Sounds {
                     let user = self.user("Balloon");
                     self.sfx_at(world, &user, key, &PropList::default(), pe, 0);
                 }
+                Event::ConditionLost => {
+                    self.player_sfx(world, "p_lose_missionClear", &[]);
+                }
                 Event::ConditionMet => {
                     if !self.player_sfx(world, "p_get_missionClear", &[]) {
                         self.object_sfx(world, "p_GoalMission_Bubble_appear", pe);

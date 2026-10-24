@@ -91,9 +91,11 @@ pub enum Event {
     Pipe,
     Checkpoint,
     Switch,
-    /// A clear-condition count went up / the condition is now met.
+    /// A clear-condition count went up / the condition is now met / an action condition was
+    /// just broken (no damage, no landing, …).
     ConditionCount,
     ConditionMet,
+    ConditionLost,
     /// SMM1 extras: a costumed player landed, started a skid, began the taunt (their costume
     /// sounds); Lanky Mario's float cue during a held jump.
     Land,
@@ -2044,6 +2046,7 @@ impl World {
         self.despawn();
         self.actors.retain(|a| a.mode != Mode::Dead);
         // action conditions: damage taken this frame, landings
+        let was = self.clear.violated;
         if self
             .events
             .iter()
@@ -2057,6 +2060,9 @@ impl World {
         }
         if self.player.in_water {
             self.clear.in_water();
+        }
+        if self.clear.violated && !was {
+            self.events.push(Event::ConditionLost);
         }
         self.escort_toad_comeback();
 
@@ -7583,6 +7589,24 @@ mod tests {
         assert!(w.cleared);
         assert_eq!(w.time, 0);
         assert!(w.player.hidden);
+    }
+
+    #[test]
+    fn breaking_an_action_condition_is_told_once() {
+        let mut w = World::with_level(Level::flat(60));
+        w.clear.goal = crate::clear::Goal::NoLanding;
+        let mut lost = 0;
+        for i in 0..120 {
+            let b = if i == 5 { input::JUMP } else { 0 };
+            w.step(Input { buttons: b });
+            lost += w
+                .events
+                .iter()
+                .filter(|e| **e == Event::ConditionLost)
+                .count();
+        }
+        assert!(w.clear.violated, "the jump came down");
+        assert_eq!(lost, 1);
     }
 
     #[test]

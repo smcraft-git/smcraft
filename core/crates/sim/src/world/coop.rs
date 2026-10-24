@@ -686,6 +686,7 @@ impl World {
         self.check_checkpoints();
         self.player_interactions(jump_held);
         // this player's action conditions (their own events, their own landings)
+        let was = self.clear.violated;
         if self.events[self.coop.pass_events.min(self.events.len())..]
             .iter()
             .any(|e| matches!(e, Event::PowerDown | Event::Death))
@@ -698,6 +699,9 @@ impl World {
         }
         if self.player.in_water {
             self.clear.in_water();
+        }
+        if self.clear.violated && !was {
+            self.events.push(Event::ConditionLost);
         }
         self.check_goal();
         self.autoscroll_push();
