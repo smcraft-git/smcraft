@@ -46,6 +46,10 @@ pub const STOMP_FRAMES: i32 = 30;
 pub const SHELL_WAKE: i32 = 511;
 pub const SHELL_SHAKE: i32 = 96;
 pub const ITEM_SPEED: f32 = 1.0;
+/// A Yoshi's Egg: its box's half size round its position (profile YoshiEgg {0, 8, 22, 22}) and
+/// the hatch helper's count from Land (+0x8 reset to 0x28) [obs v3.0.3 0x71013f7990].
+const EGG_BOX: f32 = 22.0;
+const EGG_HATCH: i32 = 40;
 pub const FIREBALL_SPEED: f32 = 3.625;
 pub const FIREBALL_GRAVITY: f32 = -0.4375;
 pub const FIREBALL_BOUNCE: f32 = 4.0;
@@ -837,6 +841,9 @@ pub struct Actor {
     pub fly: Fly,
     /// A Swinging Claw's rope; the actor's own position is the rope's end (actors/claw.rs).
     pub claw: Option<ClawRope>,
+    /// Bowser's middle jump is a gap jump (its speed set to land past the gap; MiddleJump's
+    /// enter 0x71006b0370 flag +0x90).
+    pub gap_jump: bool,
 }
 
 impl Actor {
@@ -917,6 +924,7 @@ impl Actor {
             spiny_shell: false,
             fly: Fly::default(),
             claw: None,
+            gap_jump: false,
         }
     }
 
@@ -2271,15 +2279,39 @@ impl Actor {
             Kind::LavaBubble => self.step_lava_bubble(),
             Kind::FishBone => self.step_fish_bone(level),
             Kind::YoshiEgg { red } => {
-                // [inf: the hatch trigger isn't decoded] it hatches 30 frames after appearing
-                self.vy = (self.vy - 0.34).max(-4.0);
-                self.vx *= 0.9;
-                self.collide(level);
-                self.timer += 1;
-                if self.timer >= 30 && self.on_ground {
-                    self.kind = Kind::Yoshi { red };
-                    self.timer = 0;
-                    self.vx = 0.0;
+                if self.phase == 0 {
+                    // Wait: the item base's movement
+                    self.vy = (self.vy - 0.34).max(-4.0);
+                    self.vx *= 0.9;
+                    self.collide(level);
+                    // Land the first frame it stands on the ground with its box (22 px each
+                    // way round its position) touching the camera's view, edges included
+                    // (Wait exe 0x7100852bb0 → vfunc 0x4e8 0x71008cc760: the camera views
+                    // list; sticky through 0x4f8) [obs v1.0.0]; Land's enter plays "break"
+                    // and starts the hatch helper's 40-frame count (0x7100859b00 = v3.0.3
+                    // 0x710137acd0)
+                    let (cx, cy) = self.camera;
+                    let seen = self.x + EGG_BOX >= cx
+                        && self.x - EGG_BOX <= cx + crate::world::VIEW_W
+                        && self.y + EGG_BOX >= cy
+                        && self.y - EGG_BOX <= cy + crate::world::VIEW_H;
+                    if self.on_ground && seen {
+                        self.phase = 1;
+                        self.timer = EGG_HATCH;
+                        self.vx = 0.0;
+                    }
+                }
+                if self.phase == 1 {
+                    // the helper hatches it when its count runs out (0x71013f7990 [obs
+                    // v3.0.3]) [inf: it also waits for the break animation's end, taken as
+                    // no longer; the helper counting from Land's own frame]
+                    self.timer -= 1;
+                    if self.timer <= 0 {
+                        self.kind = Kind::Yoshi { red };
+                        self.phase = 0;
+                        self.timer = 0;
+                        self.vx = 0.0;
+                    }
                 }
             }
             Kind::Yoshi { .. } => self.step_yoshi(level),

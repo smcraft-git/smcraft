@@ -10719,6 +10719,26 @@ mod tests {
     }
 
     #[test]
+    fn a_yoshi_egg_hatches_40_frames_after_landing_in_view() {
+        let mut a = Actor::new(Kind::YoshiEgg { red: false }, 100.0, 32.0);
+        let lvl = Level::flat(60);
+        // off the view (the camera far to the right): it waits
+        a.camera = (600.0, 0.0);
+        for _ in 0..100 {
+            a.step(&lvl, 0.0);
+        }
+        assert!(matches!(a.kind, Kind::YoshiEgg { .. }));
+        // in view and on the ground: Land, then 40 frames to the hatch
+        a.camera = (0.0, 0.0);
+        let mut f = 0;
+        while matches!(a.kind, Kind::YoshiEgg { .. }) && f < 100 {
+            a.step(&lvl, 0.0);
+            f += 1;
+        }
+        assert_eq!(f, 40);
+    }
+
+    #[test]
     fn yoshi_hatches_is_ridden_eats_and_runs_off_when_hit() {
         let mut lvl = Level::flat(60);
         lvl.spawns

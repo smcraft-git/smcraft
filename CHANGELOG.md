@@ -34,6 +34,9 @@ SMCraft is back in development (it was archived in October 2026).
   turning at walls; a winged Dry Bones flies like a red Paratroopa; winged Boos, Cheep Cheeps,
   Fish Bones, Wigglers, Magikoopas, Hammer Bros, Monty Moles, Bloopers and Chain Chomps act as
   their wingless selves (the game runs the same behaviour for both) instead of drifting.
+- Bowser chasing you jumps walls in his way (a big jump for a tall one) and jumps across gaps,
+  aiming to land on the far side, instead of only turning round at ledges. A Yoshi's Egg hatches
+  40 frames after it first lands on screen (it was 30 frames after appearing).
 
 - **Import once, then no dump or keys.** SMCraft reads your NSPs and `prod.keys` itself (no
   hactool, nothing extracted) and writes its own asset pack; the game runs from the pack alone.
