@@ -1188,7 +1188,10 @@ impl MeshPlanner {
         for s in list {
             let key = (s.image.model, s.image.texture);
             // the 2D backdrop gives way to the background scene
-            if has_background && key.0.contains("_DV_") {
+            if key.0 == mmk_sim::world::BACKDROP_MODEL {
+                if !has_background {
+                    resolver.backdrop(world, &s, cache, sprites);
+                }
                 continue;
             }
             if let Some(store) = store.as_deref_mut() {

@@ -464,6 +464,10 @@ pub enum LightSource {
     Table(&'static str),
 }
 
+/// The backdrop's place in the sprite list: one sprite naming the model's origin (x, y); the host
+/// draws the theme's backdrop pictures from it (`mmk_host::backdrop`).
+pub const BACKDROP_MODEL: &str = "*backdrop";
+
 /// The start sign's layer: in front of the backdrop (0), behind everything else.
 pub const START_SIGN_LAYER: u32 = 1;
 
@@ -6235,51 +6239,25 @@ impl World {
         out
     }
 
-    /// Theme background model and texture (M1_DV_<theme>[_D]), if the theme has one.
-    /// Underground and castle have none (black). Ghost house only has the night art, which
-    /// SMB1 shows at night only: its daytime ghost house is plain black like the game's frame
-    /// [obs: smm2recomp reference frame, SMB1 ghost house day]; the other styles have a day
-    /// picture of their own.
-    pub fn background(&self) -> Option<(&'static str, &'static str)> {
-        let night = self.level.night;
-        if self.level.theme == 5 && !night && self.level.style == "M1" {
-            return None;
-        }
-        Some(match (self.level.theme, night) {
-            (0, false) => ("M1_DV_plain", "M1_DV_plain_00"),
-            (0, true) => ("M1_DV_plain_D", "M1_DV_plain_D_00.0"),
-            (3, false) => ("M1_DV_airship", "M1_DV_airship_00"),
-            (3, true) => ("M1_DV_airship_D", "M1_DV_airship_D.00.0"),
-            (4, false) => ("M1_DV_water", "M1_DV_water"),
-            (4, true) => ("M1_DV_water_D", "M1_DV_water_D_00.0"),
-            (5, _) => ("M1_DV_hauntedhouse_D", "M1_DV_hauntedhouse_D.00"),
-            (6, false) => ("M1_DV_snow", "M1_DV_snow_00"),
-            (6, true) => ("M1_DV_snow_D", "M1_DV_snow_D_00.0"),
-            (7, _) => ("M1_DV_desert", "M1_DV_desert_00"),
-            (8, _) => ("M1_DV_athletic", "M1_DV_athletic_00"),
-            (9, _) => ("M1_DV_woods", "M1_DV_woods_00"),
-            _ => return None,
-        })
-    }
-
-    /// The background: a 512×512 picture repeated sideways, anchored 32 px below the area bottom,
-    /// scrolling at half the camera speed [inf parallax 0.5: drawing only; the background
-    /// layer's scroll factor is set by the BG draw code, not traced this pass].
+    /// The backdrop: the theme's backdrop model (chosen and drawn by the host,
+    /// `mmk_host::backdrop`) with its origin at the area bottom, scrolling at half the camera
+    /// speed [inf parallax 0.5: drawing only; the background layer's scroll factor is set by the
+    /// BG draw code, not traced this pass]; its pictures start 32 px below the origin.
     fn background_sprites(&self, out: &mut Vec<Sprite>) {
-        let Some((model, tex)) = self.background() else {
-            return;
-        };
         // (a whole-course render pins the backdrop to the world so the views join up)
         let p = if self.map_view { 1.0 } else { 0.5 };
-        let ox = -128.0 + self.camera_x * (1.0 - p);
-        let oy = (self.level.bottom - 32.0 + self.camera_y * (1.0 - p)).min(self.camera_y);
-        let mut k = ((self.camera_x - ox) / 512.0).floor();
-        while ox + k * 512.0 < self.camera_x + VIEW_W {
-            let mut s = Self::model_sprite(model, tex, ox + k * 512.0, oy, 512.0, 512.0, false, 0);
-            s.image.rect = Some((0.0, 0.0, 512.0, 512.0));
-            out.push(s);
-            k += 1.0;
-        }
+        let ox = self.camera_x * (1.0 - p);
+        let oy = (self.level.bottom + self.camera_y * (1.0 - p)).min(self.camera_y + 32.0);
+        out.push(Self::model_sprite(
+            BACKDROP_MODEL,
+            "",
+            ox,
+            oy,
+            0.0,
+            0.0,
+            false,
+            0,
+        ));
     }
 
     #[allow(clippy::too_many_arguments)]
