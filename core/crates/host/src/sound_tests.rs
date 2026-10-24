@@ -414,3 +414,55 @@ fn course_maker_music_and_part_sounds() {
     // no edit track in the style: false, nothing played
     assert!(!r.s.edit_music("M1", 4));
 }
+
+/// With the owner's import (skipped without one): the maker's track of every style and theme
+/// and the parts' edit sounds resolve and load.
+#[test]
+fn the_imported_maker_music_and_edit_sounds_play() {
+    let Some(dir) = crate::paths::game_cache() else {
+        return;
+    };
+    let audio = dir.join("audio");
+    let read: FileReader = Box::new(move |rel| std::fs::read(audio.join(rel)).ok());
+    let Some(lib) = Library::load(read) else {
+        return;
+    };
+    if lib.db.user("M1_EditKuribo").is_none() {
+        return; // an import from before the maker's sounds
+    }
+    // every style and theme has its track on disk (one of them played: the streams are big)
+    for style in ["M1", "M3", "MW", "WU", "3W"] {
+        for theme in 0..10 {
+            let mut w = Vec::new();
+            let user = format!("CourseSceneBGM_{style}");
+            lib.db
+                .waves_of(&user, &crate::sound::edit_bgm_key(theme), &mut w);
+            let file = w.first().and_then(|w| lib.db.waves.get(w));
+            assert!(
+                file.is_some_and(|f| dir.join("audio").join(f).is_file()),
+                "{style} theme {theme}"
+            );
+        }
+    }
+    let (tx, rx) = command_channel(4096);
+    let clock: MusicClock = Arc::new(AtomicU64::new(u64::MAX));
+    let mut s = Sounds::new(tx, Arc::new(lib), shared_set(), clock, 48000);
+    let plays = |rx: &Receiver<Command>| {
+        rx.try_iter()
+            .filter(|c| matches!(c, Command::Play(_)))
+            .count()
+    };
+    assert!(s.edit_music("M1", 0));
+    assert_eq!(plays(&rx), 1);
+    for style in ["M1", "M3", "MW", "WU", "3W"] {
+        for key in [
+            "set", "drag", "eraser", "invalid", "partsMax", "Block_in", "voice",
+        ] {
+            assert!(
+                s.edit_sound(style, &format!("{style}_EditKuribo"), key),
+                "{style} {key}"
+            );
+            assert!(plays(&rx) >= 1, "{style} {key}");
+        }
+    }
+}
