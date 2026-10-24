@@ -6162,9 +6162,15 @@ impl World {
     }
 
     /// Theme background model and texture (M1_DV_<theme>[_D]), if the theme has one.
-    /// Underground and castle have none (black). Ghost house only has the night art.
+    /// Underground and castle have none (black). Ghost house only has the night art, which
+    /// SMB1 shows at night only: its daytime ghost house is plain black like the game's frame
+    /// [obs: smm2recomp reference frame, SMB1 ghost house day]; the other styles have a day
+    /// picture of their own.
     pub fn background(&self) -> Option<(&'static str, &'static str)> {
         let night = self.level.night;
+        if self.level.theme == 5 && !night && self.level.style == "M1" {
+            return None;
+        }
         Some(match (self.level.theme, night) {
             (0, false) => ("M1_DV_plain", "M1_DV_plain_00"),
             (0, true) => ("M1_DV_plain_D", "M1_DV_plain_D_00.0"),
