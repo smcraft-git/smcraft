@@ -133,6 +133,37 @@ fn a_coin_plays_when_taken() {
 }
 
 #[test]
+fn a_pink_coin_plays_when_taken() {
+    let c = course(vec![], vec![object(92, 8, 1, 42)]);
+    let mut w = World::from_course(&c);
+    let mut s = SoundParts::new(&c);
+    let cues = run(&mut w, &mut s, input::RIGHT, 120);
+    assert_eq!(w.pink.len(), 1, "taken");
+    assert_eq!(
+        cues.iter().map(|c| (c.id, c.source)).collect::<Vec<_>>(),
+        vec![(42, Source::Part(PartTrigger::Taken))]
+    );
+}
+
+#[test]
+fn mario_s_effect_on_damage() {
+    let mut c = course(vec![], vec![]);
+    c.header.player_sound_effect = 0; // Shock
+    let mut w = World::from_course(&c);
+    let mut s = SoundParts::new(&c);
+    w.player.form = crate::player::Form::Fire;
+    run(&mut w, &mut s, 0, 2);
+    s.cues.clear();
+    // a hit: Fire → Super, the world's power-down event
+    w.player.form = crate::player::Form::Super;
+    w.events.push(Event::PowerDown);
+    w.tick += 1;
+    s.step(&w);
+    assert_eq!(s.cues.len(), 1, "{:?}", s.cues);
+    assert_eq!(s.cues[0].source, Source::Player(0));
+}
+
+#[test]
 fn mario_s_effect_at_the_start_and_on_a_running_jump() {
     let mut c = course(vec![], vec![]);
     c.header.player_sound_effect = 13; // Jump

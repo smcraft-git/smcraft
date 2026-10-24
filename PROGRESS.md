@@ -231,8 +231,8 @@ sway, importer and pack 12, the dev cache already at v12).
   (the play calls' trigger kinds 1 / 5 / 6); Mario's effect at the start and on its action
   (running jump ≥ 3.0, damage, a fall out of the view, power-up, getting in, a skid:
   0x71015d4900–0x71015d4fa0); the voices (16 shared, one long, own with hold: the table
-  0x710294f468) and the music effects' start ranges (200 / 160) and ends (a spot's 160, an
-  object's 180: 0x7101537ab0, 0x7100e443c0). ✅ the host: the effects' `cue` sounds, music effects
+  0x710294f468) and the music effects' start range (an object's 160) and ends (a spot's 160,
+  an object's 180: 0x7101537ab0, 0x7100e443c0). ✅ the host: the effects' `cue` sounds, music effects
   in the theme track's place (`cue_bgm` / `_hurry`, the `_Link` / `_USA` users), the music-like
   ones (Heartbeat, Silence, Peaceful, Horror) over a stopped track [inf], the pictures (the
   effect users of the effects import). ✅ the maker: the palette's sound button, the effect window

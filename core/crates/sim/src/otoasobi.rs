@@ -248,13 +248,14 @@ pub enum Trigger {
 }
 
 impl Trigger {
-    /// A music effect from this source starts only within this distance of the players
-    /// (0x7101537ab0: 200 px for kinds 1 / 4 / 6, 160 for 5; Mario's and the spots' always).
+    /// A music effect from this source starts only within this distance of the players: an
+    /// object's within 160 px (0x7101537ab0, kind 5); Mario's and a spot's always (kinds 0 / 3);
+    /// an enemy's and a pipe's at once (0x7101537c40 skips the test for kinds 1 / 2 / 6; their
+    /// 200 px is the music source registry's, 0x7101538eb0).
     pub fn start_range(self) -> f32 {
         match self {
-            Trigger::Enemy | Trigger::Pipe => 200.0,
             Trigger::Object => 160.0,
-            Trigger::Player | Trigger::Spot => f32::INFINITY,
+            Trigger::Player | Trigger::Spot | Trigger::Enemy | Trigger::Pipe => f32::INFINITY,
         }
     }
 
@@ -742,7 +743,7 @@ impl SoundParts {
                     }
                     Some(PlayerTrigger::Damage) => {
                         (old.alive && !p.alive())
-                            || (hurt && p.alive() && (p.form as u8) < old.form)
+                            || (hurt && p.alive() && (p.form as u8) != old.form)
                     }
                     Some(PlayerTrigger::Fall) => {
                         let below = p.y < world.camera_y - 32.0;
@@ -909,14 +910,7 @@ impl SoundParts {
             }
         }
         // coins on the grid: gone while the count went up
-        let present: BTreeSet<(i32, i32)> = world
-            .level
-            .coins
-            .iter()
-            .chain(&world.level.pink_coins)
-            .map(|c| (c.x, c.y))
-            .filter(|c| area.tiles.get(c).is_some_and(|t| t.1 == PartTrigger::Taken))
-            .collect();
+        let present = Self::coins_left(world, &area);
         let taken: Vec<(i32, i32)> = self.coins.difference(&present).copied().collect();
         for c in taken {
             let (x, y) = (c.0 as f32 * TILE + 8.0, c.1 as f32 * TILE);
@@ -944,6 +938,23 @@ impl SoundParts {
             }
         }
         self.coin_count = world.coins;
+    }
+
+    /// The tagged coins still there: grid coins, and pink coins not yet in `World::pink`.
+    fn coins_left(world: &World, area: &AreaParts) -> BTreeSet<(i32, i32)> {
+        let pink = world
+            .level
+            .pink_coins
+            .iter()
+            .filter(|c| !world.pink.contains(&(world.area, c.x, c.y)));
+        world
+            .level
+            .coins
+            .iter()
+            .chain(pink)
+            .map(|c| (c.x, c.y))
+            .filter(|c| area.tiles.get(c).is_some_and(|t| t.1 == PartTrigger::Taken))
+            .collect()
     }
 
     fn near_player(world: &World, x: f32, y: f32) -> bool {
@@ -979,14 +990,7 @@ impl SoundParts {
             })
             .collect();
         if self.coins.is_empty() {
-            self.coins = world
-                .level
-                .coins
-                .iter()
-                .chain(&world.level.pink_coins)
-                .map(|c| (c.x, c.y))
-                .filter(|c| area.tiles.get(c).is_some_and(|t| t.1 == PartTrigger::Taken))
-                .collect();
+            self.coins = Self::coins_left(world, area);
         }
         self.coin_count = world.coins;
     }
