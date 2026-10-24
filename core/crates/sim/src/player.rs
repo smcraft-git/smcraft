@@ -187,6 +187,8 @@ pub fn change_shows_old(timer: i32) -> bool {
 // Death (DownPose 0x71009e13e0 / DownFall 0x71009e1ea0): 45-frame pose, then a hop at 3.2 with
 // gravity −0.16; the restart request comes 140 frames into the fall.
 pub const DOWN_POSE_FRAMES: i32 = 45;
+/// The propeller's spin speed after a Spin press in PropellerFall (0x71015e62a0) [obs].
+const PROP_SPIN_FAST: i32 = 0x1388_0000;
 /// The raccoon's TailSlowFall wag cycle (frames).
 const TAIL_WAG_FRAMES: i32 = 18;
 /// Slip on flat ground ends once the speed is below this (v3 0x71015ddb40: 1.1) [obs].
@@ -461,6 +463,9 @@ pub struct Player {
     /// tail's air mode since the first flap or wag of this air time (+0x488 bit 15).
     tail_flying: bool,
     flap_again: bool,
+    /// The attack counter at the start of this frame's countdown and of the last frame's.
+    attack_start: i32,
+    prev_attack: i32,
     /// Raccoon: frames left of TailAttack (state 75, 18: its `tail_attack` animation), on the
     /// ground or in the air.
     tail_state: i32,
@@ -531,6 +536,11 @@ pub struct Player {
     pub prop_rise: i32,
     pub prop_fall: bool,
     prop_used: bool,
+    /// Propeller: SpinHipAttack's minimum-frames count (> 0 drilling), the propeller's spin
+    /// speed in the fall (+0x2844, binary angle a frame) and the fall spin's cooldown.
+    pub prop_drill: i32,
+    prop_spin: i32,
+    prop_cooldown: i32,
     prev_down: bool,
     prev_spin: bool,
     /// Spin held last frame (the Cat dive's press).
@@ -667,6 +677,8 @@ impl Player {
             p_ground: 0,
             tail_flying: false,
             tail_state: 0,
+            attack_start: 0,
+            prev_attack: 0,
             flap_again: false,
             tail_air: false,
             top_y: f32::INFINITY,
@@ -707,6 +719,9 @@ impl Player {
             prop_rise: 0,
             prop_fall: false,
             prop_used: false,
+            prop_drill: 0,
+            prop_spin: 0,
+            prop_cooldown: 0,
             prev_down: false,
             prev_spin: false,
             prev_spin_dive: false,
@@ -1141,6 +1156,7 @@ impl Player {
         } else {
             SKID_ENTER
         };
+        let mut entered = false;
         if self.skid == SkidPhase::None
             && !self.keep_facing
             && dir != 0
@@ -1148,13 +1164,18 @@ impl Player {
             && self.vx.abs() >= skid_from
             && !(self.style == Style::W3 && self.on_ice)
         {
+            // Turn's enter faces against the motion (and takes that as the stick's side for
+            // its first frame) [obs v3.0.3 0x71015f36d0; Ryujinx trace MW_form cape_pullup: a
+            // stick held the way the player still slides after a turned landing skids for two
+            // frames]
             self.skid = SkidPhase::Braking;
             self.cues |= CUE_SKID;
-            self.facing = dir;
+            self.facing = if self.vx >= 0.0 { -1 } else { 1 };
+            entered = true;
         }
         // letting go (or pressing back) ends the Turn state, but only after this frame's move:
         // the exec sets the phase's target and rate before its stick check (0x7100a19b40) [obs]
-        let leaving = self.skid != SkidPhase::None && dir != self.facing;
+        let leaving = self.skid != SkidPhase::None && !entered && dir != self.facing;
         match self.skid {
             SkidPhase::Braking | SkidPhase::Pause(_) => {
                 let decel = match (self.on_ice, star) {
@@ -1481,7 +1502,9 @@ impl Player {
             self.tail_state = 0;
         }
         let tail_attack = self.tail_state > 0;
-        self.tail_state = self.tail_state.saturating_sub(1);
+        self.tail_state = (self.tail_state - 1).max(0);
+        self.prev_attack = self.attack_start;
+        self.attack_start = self.attack;
         if self.attack > 0 {
             self.attack -= 1;
         }
@@ -1650,13 +1673,19 @@ impl Player {
                     self.air(inp);
                     if dir == 0 && self.vx.abs() <= 0.3 {
                         self.vx = 0.0;
-                    } else if self.style == Style::MW {
+                    } else if self.style == Style::MW && !self.crouch {
+                        // (Down held lands in Crouch at once [obs: Ryujinx trace MW_form
+                        // cape_divedown])
                         self.land_hold = 4;
                     }
                 } else if self.land_hold > 0 {
                     // no movement routine: the speed keeps moving toward the air routine's
-                    // last target at its last rate [obs: Ryujinx trace, SMW]
+                    // last target at its last rate; the facing follows the stick [obs: Ryujinx
+                    // traces, SMW; MW_form cape_pullup: turned in Landing, no skid after it]
                     self.land_hold -= 1;
+                    if inp.dir_x() != 0 {
+                        self.facing = inp.dir_x();
+                    }
                     self.vx = approach(self.vx, self.air_move.0, self.air_move.1);
                 } else {
                     self.ground(inp);
@@ -1821,7 +1850,7 @@ impl Player {
         }
         self.step_dash(inp, vx_before, grounded_before);
         self.step_wall_and_pound(inp, pressed, level, vy_before);
-        self.step_propeller(inp, spin_pressed, vy_before);
+        self.step_propeller(inp, spin_pressed, vy_before, vx_before);
         // NSMBU flutter (yoshi.md §4): falling faster than 2.0 with jump held, Yoshi flutters —
         // gravity turns upward (+0.2, +0.07 above −1.0) until vy > 2.4 or jump is released;
         // once per jump
@@ -1866,7 +1895,10 @@ impl Player {
                 && self.cape == CapeState::None
                 && jump
                 && self.vy < 0.0
+                && !(self.prev_attack == 1 && self.attack == 0)
             {
+                // (the frame an air cape spin ends is Fall's first, whose begin sets max fall
+                // −4: no float that frame [obs: Ryujinx trace MW_form cape_spin_air])
                 self.vy = self.vy.max(-1.0);
             }
         } else {
@@ -2097,20 +2129,31 @@ impl Player {
     /// at +0.7/frame up to 3.0 with no gravity, 38 frames counted down from the launch frame (the
     /// frame the count runs out is the first PropellerFall frame) [obs: v3 begin 0x71015d5160,
     /// the 38-frame branch (+0x2488 set, as in every traced course); Ryujinx traces WU_form
-    /// form_spin / form_spin_walk]; then PropellerFall: gravity −0.1, max fall −1.25; Down while
-    /// falling drills down at up to −6.0. Air control: target ±2.5 while rising (in the fall too
-    /// while the frame starts with vy ≥ 0) / ±1.5 falling, accel 0.08 / 0.07, 0.11 reversing,
-    /// 0.05 without input.
-    fn step_propeller(&mut self, inp: Input, spin_pressed: bool, vy_before: f32) {
+    /// form_spin / form_spin_walk]; then PropellerFall (exec 0x71015d5cd0): gravity −0.1, max
+    /// fall −1.25, or −1.0 while a Spin press in the fall (0x71015e62a0: 20-frame cooldown
+    /// +0x2850) spins the propeller fast (+0x2844 = 0x13880000, easing by 0x500000 a frame;
+    /// −1.0 until it is under 0x7d00000: 37 frames). The ground-pound command (Down held 5
+    /// frames) in the fall drills (SpinHipAttack, begin 0x71015d60a0 / exec 0x71015d6270): the
+    /// speeds zeroed, gravity −0.34, max fall −6.0, at least 10 frames (+0x247c), then back to
+    /// PropellerFall once Down is let go. Air control (it replaces the normal air routine):
+    /// ±2.5 at 0.08 while the frame starts with vy ≥ 0, else ±1.5 at 0.07 (0.11 against the
+    /// motion), no direction → 0 at 0.05 [obs: Ryujinx traces WU_form prop_drill, prop_shake,
+    /// prop_run].
+    fn step_propeller(&mut self, inp: Input, spin_pressed: bool, vy_before: f32, vx_before: f32) {
         if self.form != Form::Propeller || self.in_water {
             self.prop_rise = 0;
             self.prop_fall = false;
+            self.prop_drill = 0;
+            self.prop_spin = 0;
             return;
         }
+        self.prop_cooldown = (self.prop_cooldown - 1).max(0);
         if self.on_ground && self.vy <= 0.0 {
             self.prop_used = false;
             self.prop_fall = false;
             self.prop_rise = 0;
+            self.prop_drill = 0;
+            self.prop_spin = 0;
         }
         let mut vy_before = vy_before;
         if spin_pressed && !self.prop_used && self.held.is_none() {
@@ -2120,6 +2163,10 @@ impl Player {
             self.on_ground = false;
             self.spinning = false;
             vy_before = 0.5;
+        } else if spin_pressed && self.prop_fall && self.prop_drill == 0 && self.prop_cooldown == 0
+        {
+            self.prop_spin = PROP_SPIN_FAST;
+            self.prop_cooldown = 20;
         }
         if self.prop_rise > 0 {
             self.prop_rise -= 1;
@@ -2128,16 +2175,35 @@ impl Player {
             }
         }
         let rising = self.prop_rise > 0;
+        if !rising && self.prop_fall && !self.on_ground {
+            if self.prop_drill > 0 {
+                self.prop_drill -= 1;
+                if self.prop_drill == 0 && inp.held(input::DOWN) {
+                    self.prop_drill = 1;
+                }
+            } else if self.pound_hold == 5 {
+                self.prop_drill = 10;
+                self.prop_spin = 0;
+                vy_before = 0.0;
+            }
+        }
+        if self.prop_drill > 0 {
+            self.vx = 0.0;
+            self.vy = (vy_before - 0.34).max(-6.0);
+            return;
+        }
         // (the fall keeps the rising air control while the frame starts going up)
         let up = rising || vy_before >= 0.0;
         if rising {
             self.vy = (vy_before + 0.7).min(3.0);
         } else if self.prop_fall && !self.on_ground {
-            self.vy = if inp.held(input::DOWN) {
-                (vy_before - 0.34).max(-6.0)
+            self.prop_spin = (self.prop_spin - 0x50_0000).max(0x3e8_0000);
+            let cap = if self.prop_spin >= 0x7d0_0000 {
+                -1.0
             } else {
-                (vy_before - 0.1).max(-1.25)
+                -1.25
             };
+            self.vy = (vy_before - 0.1).max(cap);
         } else {
             return;
         }
@@ -2145,14 +2211,14 @@ impl Player {
         let target = dir * if up { 2.5 } else { 1.5 };
         let acc = if dir == 0.0 {
             0.05
-        } else if self.vx * dir < 0.0 {
-            0.11
         } else if up {
             0.08
+        } else if vx_before * dir < 0.0 {
+            0.11
         } else {
             0.07
         };
-        self.vx = approach(self.vx, target, acc);
+        self.vx = approach(vx_before, target, acc);
     }
 
     /// Cat wall climb (§5.4 Neko): pushing into a wall in the air climbs it at 1.0 px/f (1.5
@@ -2333,6 +2399,8 @@ impl Player {
         }
         if self.style.has_jump_chain()
             && self.pound_hold == 5
+            // (PropellerFall takes the command as its drill: step_propeller)
+            && !(self.form == Form::Propeller && self.prop_fall)
             && self.pound == 0
             && !self.dive
             && self.cat_climb == 0
@@ -2543,13 +2611,13 @@ impl Player {
         }
         // SMW cape meter (0x71009f5d10) [obs]: +1 a frame running on the ground with Run and a
         // direction held at ≥ 2.1 px/f, up to 30; anything else empties it, except that a full
-        // meter is kept in the air
+        // meter is kept in the air; a take-off frame is already in the air (29 there empties
+        // it) [obs: Ryujinx trace MW_form cape_dive, meter +0x29b4]
         if self.style == Style::MW {
-            let running =
-                self.on_ground && inp.held(input::RUN) && dir != 0 && self.vx.abs() >= 2.1;
+            let running = grounded && inp.held(input::RUN) && dir != 0 && self.vx.abs() >= 2.1;
             if running {
                 self.cape_meter = (self.cape_meter + 1).min(30);
-            } else if !(self.cape_meter == 30 && !self.on_ground) {
+            } else if !(self.cape_meter == 30 && !grounded) {
                 self.cape_meter = 0;
             }
         }
