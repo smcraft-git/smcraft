@@ -820,6 +820,45 @@ fn hold_on_part(m: &mut MakerFlow, host: &mut MockHost, saves: &mut Saves, ticks
 }
 
 #[test]
+fn the_balloon_offers_every_form_and_a_tap_steps_through_them() {
+    use mmk_editor::attr::Attr;
+    let (mut host, mut saves) = (MockHost::default(), Saves::default());
+    let mut m = maker(&mut host, &mut saves, MakerStart::New("M1".into()));
+    // a conveyor: its own speed and the fast one (the 2-bit field, as the engine plays it)
+    let belt = m.editor.place(53, 12, 3).unwrap();
+    m.cur = (12, 3);
+    hold_on_part(&mut m, &mut host, &mut saves, attr::HOLD);
+    assert_eq!(
+        m.attr_options_shown().unwrap(),
+        [Attr::Form(0), Attr::Form(1)]
+    );
+    run(&mut m, &mut host, &mut saves, idle());
+    // the first new choice is selected: confirm
+    run(&mut m, &mut host, &mut saves, press(Buttons::CONFIRM));
+    run(&mut m, &mut host, &mut saves, idle());
+    let f = m.editor.object(belt).unwrap().flags;
+    assert_eq!(((f >> 18) & 3, f & 0x4), (1, 0), "fast, not the 0x4 bit");
+    // a 10-coin's three values: a tap steps 10 → 30 → 50 → 10
+    let coin = m.editor.place(70, 20, 3).unwrap();
+    m.cur = (20, 3);
+    let mut seen = Vec::new();
+    for _ in 0..3 {
+        run(&mut m, &mut host, &mut saves, press(Buttons::CONFIRM));
+        run(&mut m, &mut host, &mut saves, idle());
+        let o = m.editor.object(coin).unwrap();
+        seen.push(mmk_editor::parts::form_of(o));
+    }
+    assert_eq!(seen, [1, 2, 0]);
+    assert!(
+        host.edit_sounds
+            .iter()
+            .any(|(_, k)| k == "p_AttributeChange"),
+        "{:?}",
+        host.edit_sounds
+    );
+}
+
+#[test]
 fn holding_a_part_still_opens_its_balloon_and_wings_and_a_parachute_go_on() {
     let (mut host, mut saves) = (MockHost::default(), Saves::default());
     let mut m = maker(&mut host, &mut saves, MakerStart::New("M1".into()));
@@ -837,8 +876,8 @@ fn holding_a_part_still_opens_its_balloon_and_wings_and_a_parachute_go_on() {
     assert_eq!(
         shown,
         [
-            Attr::Form(false),
-            Attr::Form(true),
+            Attr::Form(0),
+            Attr::Form(1),
             Attr::Big(true),
             Attr::Wings(true),
             Attr::Parachute(true)
@@ -975,7 +1014,7 @@ fn holding_a_part_of_a_selection_gives_the_whole_selection_wings() {
     let k = shown.iter().position(|a| *a == Attr::Wings(true)).unwrap();
     let first = shown
         .iter()
-        .position(|a| !matches!(a, Attr::Form(false)))
+        .position(|a| !matches!(a, Attr::Form(0)))
         .unwrap();
     for _ in first..k {
         run(&mut m, &mut host, &mut saves, press(Buttons::RIGHT));
@@ -1046,6 +1085,24 @@ fn a_goomba_dropped_on_a_goomba_stacks_on_it() {
 }
 
 #[test]
+fn a_parachuting_goomba_does_not_stack() {
+    let (mut host, mut saves) = (MockHost::default(), Saves::default());
+    let mut m = maker(&mut host, &mut saves, MakerStart::New("M1".into()));
+    let base = m.editor.place(0, 20, 1).unwrap();
+    let para = m.editor.place(0, 24, 1).unwrap();
+    m.editor.set_parachute(para, true).unwrap();
+    m.cur = (24, 1);
+    run(&mut m, &mut host, &mut saves, press(Buttons::CONFIRM));
+    m.cur = (20, 1);
+    run(&mut m, &mut host, &mut saves, held(Buttons::CONFIRM));
+    run(&mut m, &mut host, &mut saves, idle());
+    // the game's drop handler keeps riders and parachutes out of columns (0x7100f5ad90)
+    assert_eq!(m.editor.column_from(base).len(), 1);
+    assert_eq!(m.editor.object(base).unwrap().flags & 0x1000, 0);
+    assert!(m.editor.object_at(24, 1).is_some(), "it stays where it was");
+}
+
+#[test]
 fn tower_stack_pitch_wraps_every_28_rows() {
     assert_eq!(
         [0, 2, 27, 28, 30, -1].map(super::tower_scale),
@@ -1071,35 +1128,159 @@ fn a_pipe_dragged_by_its_mouth_turns_round_its_base() {
 }
 
 #[test]
+fn a_clear_pipe_is_drawn_by_dragging_bent_carried_and_erased() {
+    use mmk_formats::smm2::clear_pipe::Dir as P;
+    let (mut host, mut saves) = (MockHost::default(), Saves::default());
+    let mut m = maker(&mut host, &mut saves, MakerStart::New("3W".into()));
+    m.palette[0] = Tool::ClearPipe;
+    m.slot = 0;
+    let drag = |m: &mut MakerFlow, host: &mut MockHost, saves: &mut Saves, path: &[(i32, i32)]| {
+        m.cur = path[0];
+        run(m, host, saves, press(Buttons::CONFIRM));
+        for &t in &path[1..] {
+            m.cur = t;
+            run(m, host, saves, held(Buttons::CONFIRM));
+        }
+        run(m, host, saves, idle());
+    };
+    // a press alone puts nothing down; dragging right starts a pipe on the press's corner,
+    // then up beside its end bends it
+    m.cur = (20, 6);
+    run(&mut m, &mut host, &mut saves, press(Buttons::CONFIRM));
+    run(&mut m, &mut host, &mut saves, idle());
+    assert!(m.editor.area().clear_pipes.is_empty());
+    drag(
+        &mut m,
+        &mut host,
+        &mut saves,
+        &[(20, 6), (24, 6), (24, 6), (25, 10)],
+    );
+    let pipes = m.editor.clear_pipes();
+    assert_eq!(pipes.len(), 1);
+    let (k, s) = pipes[0].clone();
+    assert_eq!(s.runs, [(P::Right, 4), (P::Up, 3)]);
+    assert_eq!(
+        m.editor.clear_pipe_at(21, 6),
+        Some(k),
+        "from the corner (21, 7)"
+    );
+    assert!(
+        host.edit_sounds.iter().any(|(_, key)| key == "set"),
+        "{:?}",
+        host.edit_sounds
+    );
+    // one undo step for the whole drawing
+    run(&mut m, &mut host, &mut saves, keys(keys::UNDO));
+    run(&mut m, &mut host, &mut saves, idle());
+    assert!(m.editor.area().clear_pipes.is_empty());
+    run(&mut m, &mut host, &mut saves, keys(keys::REDO));
+    run(&mut m, &mut host, &mut saves, idle());
+    // by its mouth it draws on, with any tool
+    m.slot = 1;
+    drag(&mut m, &mut host, &mut saves, &[(25, 10), (25, 13)]);
+    assert_eq!(
+        m.editor.clear_pipe(k).unwrap().runs,
+        [(P::Right, 4), (P::Up, 6)]
+    );
+    // elsewhere it is carried
+    drag(&mut m, &mut host, &mut saves, &[(22, 6), (22, 8)]);
+    assert_eq!(m.editor.clear_pipe_at(22, 6), None);
+    assert_eq!(m.editor.clear_pipe_at(22, 8), Some(k));
+    // the eraser takes all of it
+    m.cur = (22, 9);
+    run(&mut m, &mut host, &mut saves, press(Buttons::BACK));
+    run(&mut m, &mut host, &mut saves, idle());
+    assert!(m.editor.area().clear_pipes.is_empty());
+    // a new pipe turns round its corner with the cursor, and brought back to the corner before
+    // it grew it is taken back: no undo step
+    m.slot = 0;
+    m.cur = (40, 6);
+    run(&mut m, &mut host, &mut saves, press(Buttons::CONFIRM));
+    m.cur = (44, 6);
+    run(&mut m, &mut host, &mut saves, held(Buttons::CONFIRM));
+    m.cur = (40, 10);
+    run(&mut m, &mut host, &mut saves, held(Buttons::CONFIRM));
+    let (_, s) = m.editor.clear_pipes()[0].clone();
+    assert_eq!(s.runs, [(P::Up, 2)], "turned up");
+    m.cur = (40, 6);
+    run(&mut m, &mut host, &mut saves, held(Buttons::CONFIRM));
+    run(&mut m, &mut host, &mut saves, idle());
+    assert!(m.editor.area().clear_pipes.is_empty());
+    run(&mut m, &mut host, &mut saves, keys(keys::UNDO));
+    run(&mut m, &mut host, &mut saves, idle());
+    assert!(
+        m.editor.area().clear_pipes.len() == 1,
+        "the undo step was the eraser's"
+    );
+    // only 3D World has the part
+    let entry = catalog::entry(Tool::ClearPipe).unwrap();
+    assert!(catalog::available(&entry, "3W") && !catalog::available(&entry, "M1"));
+}
+
+#[test]
+fn the_clear_pipe_capture_draws_two_pipes_in_3d_world() {
+    let (mut host, mut saves) = (MockHost::default(), Saves::default());
+    let mut m = maker(&mut host, &mut saves, MakerStart::New("3W".into()));
+    assert!(with(&mut host, &mut saves, |cx| m.debug_open(cx, "clearpipe")));
+    let pipes = m.editor.clear_pipes();
+    assert_eq!(pipes.len(), 2);
+    assert_eq!(pipes[0].1.runs.len(), 3, "up, right, down");
+    assert_eq!(m.tool(), Tool::ClearPipe);
+    let mut m = maker(&mut host, &mut saves, MakerStart::New("M1".into()));
+    assert!(!with(&mut host, &mut saves, |cx| m.debug_open(cx, "clearpipe")));
+}
+
+#[test]
 fn a_track_is_drawn_by_dragging_and_a_lift_put_on_it_rides_it() {
     let (mut host, mut saves) = (MockHost::default(), Saves::default());
     let mut m = maker(&mut host, &mut saves, MakerStart::New("M1".into()));
     m.palette[0] = Tool::Track;
     m.slot = 0;
-    m.cur = (20, 6);
-    run(&mut m, &mut host, &mut saves, press(Buttons::CONFIRM));
-    m.cur = (24, 6);
-    run(&mut m, &mut host, &mut saves, held(Buttons::CONFIRM));
-    m.cur = (28, 6);
-    run(&mut m, &mut host, &mut saves, held(Buttons::CONFIRM));
-    run(&mut m, &mut host, &mut saves, idle());
-    assert_eq!(
-        m.editor.area().tracks.len(),
-        3,
-        "a piece, then one per 2 tiles dragged"
+    let drag = |m: &mut MakerFlow, host: &mut MockHost, saves: &mut Saves, path: &[(i32, i32)]| {
+        m.cur = path[0];
+        run(m, host, saves, press(Buttons::CONFIRM));
+        for &t in &path[1..] {
+            m.cur = t;
+            run(m, host, saves, held(Buttons::CONFIRM));
+        }
+        run(m, host, saves, idle());
+    };
+    // a press alone lays nothing (the game's `begin_draw`)
+    drag(&mut m, &mut host, &mut saves, &[(20, 6)]);
+    assert_eq!(m.editor.area().tracks.len(), 0);
+    // dragging lays a piece of 2 tiles a step toward the cursor
+    drag(
+        &mut m,
+        &mut host,
+        &mut saves,
+        &[(20, 6), (24, 6), (28, 6), (30, 6)],
     );
+    assert_eq!(m.editor.area().tracks.len(), 3, "20 → 22 → 24 → 26");
     // a press on its far end opens it (new ends are closed)
-    assert_eq!(m.editor.track_end_open((25, 6)), Some(false));
-    m.cur = (25, 6);
-    run(&mut m, &mut host, &mut saves, press(Buttons::CONFIRM));
-    run(&mut m, &mut host, &mut saves, idle());
-    assert_eq!(m.editor.track_end_open((25, 6)), Some(true));
+    assert_eq!(m.editor.track_end_open((26, 6)), Some(false));
+    drag(&mut m, &mut host, &mut saves, &[(26, 6)]);
+    assert_eq!(m.editor.track_end_open((26, 6)), Some(true));
     assert_eq!(m.editor.area().tracks.len(), 3, "no new piece");
+    // drawing on from the open end: the new end is open too; back over the last piece takes
+    // it away and leaves the end open
+    drag(&mut m, &mut host, &mut saves, &[(26, 6), (28, 8), (30, 10)]);
+    assert_eq!(m.editor.area().tracks.len(), 5, "two diagonal pieces");
+    assert_eq!(m.editor.track_end_open((30, 10)), Some(true));
+    assert_eq!(m.editor.track_end_open((26, 6)), None, "a joint now");
+    drag(&mut m, &mut host, &mut saves, &[(30, 10), (28, 8)]);
+    assert_eq!(m.editor.area().tracks.len(), 4);
+    assert_eq!(m.editor.track_end_open((28, 8)), Some(true));
+    // one undo step a press
     m.editor.undo();
-    // one undo step for the whole drag
+    assert_eq!(m.editor.area().tracks.len(), 5);
+    m.editor.undo();
+    m.editor.undo();
+    assert_eq!(m.editor.track_end_open((26, 6)), Some(false));
     m.editor.undo();
     assert_eq!(m.editor.area().tracks.len(), 0);
-    m.editor.redo();
+    for _ in 0..4 {
+        m.editor.redo();
+    }
     // a lift put down on the track rides it
     m.palette[1] = Tool::Part(11);
     m.slot = 1;

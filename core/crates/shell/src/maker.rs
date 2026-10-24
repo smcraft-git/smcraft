@@ -331,10 +331,7 @@ impl Maker {
                 e.toggle_flags(i, 0x2);
                 Ok("wings".into())
             }),
-            'f' => self.step(|e| {
-                e.toggle_flags(i, 0x4);
-                Ok("form".into())
-            }),
+            'f' => self.step(|e| e.next_form(i).map(|_| "form".into())),
             'b' => self.step(|e| e.toggle_big(i).map(|_| "size".into())),
             'i' => self.step(|e| match tool {
                 Tool::Part(p) if o.id == 9 => e.put_in_pipe(i, p).map(|_| "in the pipe".into()),

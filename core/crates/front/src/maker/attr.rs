@@ -46,7 +46,7 @@ impl Balloon {
     pub fn flags_after(&self, k: usize, flags: u32) -> u32 {
         self.options
             .get(k)
-            .map_or(flags, |o| o.attr.apply_to(flags))
+            .map_or(flags, |o| o.attr.apply_to(self.part, flags))
     }
 }
 

@@ -224,6 +224,55 @@ pub fn forms(part: i16) -> u8 {
     row(part).map_or(1, |r| r.forms)
 }
 
+/// Parts whose form is the two-bit field (flags >> 18) & 3 rather than the 0x4 bit: the
+/// pipe's colour, the semisolid's and mushroom platform's looks, the conveyor's (and slope
+/// conveyor's) speed, the door's kind, the big coin's value, the spike block's mode and the
+/// Mechakoopa's kind [obs: a tile part's variant is that field, or the 0x4 bit when the field
+/// is 0 (0x71003d2600); the Mechakoopa reads the field and ignores 0x4 (0x7100d80df0); corp:
+/// in the sample these parts use the field and never 0x4, every other part with forms 0x4].
+const FIELD_FORMS: &[i16] = &[9, 14, 16, 53, 55, 70, 94, 110, 111];
+
+/// Whether part `part` keeps its form in (flags >> 18) & 3 (else in the 0x4 bit).
+pub fn form_in_field(part: i16) -> bool {
+    FIELD_FORMS.contains(&part)
+}
+
+/// A placed part's form: 0 its own, 1… the others.
+pub fn form_of(o: &CourseObject) -> u8 {
+    if form_in_field(o.id) {
+        ((o.flags >> 18) & 3) as u8
+    } else {
+        u8::from(o.flags & 0x4 != 0)
+    }
+}
+
+/// The flags of part `part` with `flags` in form `form`.
+pub fn with_form(part: i16, flags: u32, form: u8) -> u32 {
+    if form_in_field(part) {
+        (flags & !(3 << 18)) | ((form as u32 & 3) << 18)
+    } else if form > 0 {
+        flags | 0x4
+    } else {
+        flags & !0x4
+    }
+}
+
+/// The forms part `part` has in game style `style`: the editor table's, less the alternates
+/// one style alone has — SMB1's Master Sword (Super Mushroom), Superball Flower (Fire Flower)
+/// and Cursed Key, 3D World's Red POW Block [obs data: `PartsIconName` names them only as
+/// `M1_SuperKinoko_01`, `M1_FireFlower_01`, `M1_Key_01`, `3W_PowBlock_01`].
+pub fn forms_in(part: i16, style: &str) -> u8 {
+    let only = match part {
+        20 | 34 | 95 => Some("M1"),
+        19 => Some("3W"),
+        _ => None,
+    };
+    match only {
+        Some(s) if s != style => 1,
+        _ => forms(part),
+    }
+}
+
 /// Size in tiles a freshly placed part gets (the editor table's base footprint).
 pub fn default_size(part: i16) -> (u8, u8) {
     // 2.0 / 3.0 parts aren't in the v1.0.0 table [v3.0.3 Edit* params]
@@ -438,5 +487,26 @@ mod tests {
         assert!(!caps(6).inside, "hard blocks don't go in blocks");
         assert!(caps(20).inside && !caps(20).big);
         assert_eq!(forms(9), 4, "pipe colours");
+    }
+
+    #[test]
+    fn forms_live_in_the_bit_or_the_field() {
+        let belt = new_object(53, 0, 0, 3, 1, 0x0600_0040);
+        assert_eq!(form_of(&belt), 0);
+        let fast = with_form(53, belt.flags, 1);
+        assert_eq!((fast >> 18) & 3, 1, "a fast conveyor: the field");
+        assert_eq!(fast & 0x4, 0);
+        assert_eq!(with_form(55, 0x0600_0040, 2) >> 18 & 3, 2, "a key door");
+        assert_eq!(
+            with_form(1, 0x0600_0040, 1) & 0x4,
+            0x4,
+            "a red Koopa: the bit"
+        );
+        assert_eq!(with_form(1, 0x0600_0044, 0) & 0x4, 0);
+        assert_eq!(forms_in(20, "M1"), 2, "the Master Sword");
+        assert_eq!(forms_in(20, "M3"), 1);
+        assert_eq!(forms_in(19, "3W"), 2, "the red POW");
+        assert_eq!(forms_in(19, "WU"), 1);
+        assert_eq!(forms_in(70, "MW"), 3, "10, 30, 50 coins");
     }
 }
