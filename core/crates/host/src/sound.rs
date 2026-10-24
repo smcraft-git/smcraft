@@ -69,6 +69,8 @@ const RESUME_ALIGN: u32 = 0x480;
 /// Handles for loops the director stops itself.
 const H_TIMER: u32 = 1;
 const H_AMBIENT: u32 = 2;
+/// 3D World's conveyor belts' running loop.
+const H_CONVEYOR: u32 = 3;
 const H_FIRST_FREE: u32 = 16;
 /// The maker's music fades out over this many frames (60 fps) [inf].
 const EDIT_MUSIC_FADE: f32 = 10.0;
@@ -163,6 +165,8 @@ pub struct Sounds {
     pink: usize,
     /// The blinking blocks' group last heard (3D World).
     blink_alt: bool,
+    /// The conveyor loop playing: Some(fast) (3D World).
+    conveyor: Option<bool>,
     burning: [bool; 2],
     /// The worn SMM1 costume's sounds (Phase 11).
     costume: CostumeSounds,
@@ -218,6 +222,7 @@ impl Sounds {
             keys: 0,
             pink: 0,
             blink_alt: false,
+            conveyor: None,
             burning: [false; 2],
             costume: CostumeSounds::default(),
             log: Vec::new(),
@@ -920,6 +925,7 @@ impl Sounds {
         self.keys = world.keys;
         self.pink = world.pink.len();
         self.blink_alt = world.blink_alt;
+        self.conveyor = None;
         self.burning = [
             world.burner_flame(false) > 0.0,
             world.burner_flame(true) > 0.0,
@@ -1889,6 +1895,38 @@ impl Sounds {
                 };
                 self.object_sfx(world, "blink_block_change", e);
             }
+        }
+        // conveyor belts on screen run a loop (fast belts their own) [inf: one loop for all, the
+        // fast one from 1.5 px a frame]
+        let belt = world
+            .level
+            .conveyors
+            .iter()
+            .map(|&(x0, x1, y, speed)| ((x0 + x1 + 1) as f32 * 8.0, y as f32 * 16.0 + 8.0, speed))
+            .find(|&(x, y, _)| on_screen(x, y));
+        let want = belt.map(|(_, _, speed)| speed.abs() >= 1.5);
+        if want != self.conveyor {
+            if self.conveyor.is_some() {
+                self.send(Command::StopHandle {
+                    handle: H_CONVEYOR,
+                    fade: 0,
+                });
+            }
+            if let (Some(fast), Some((x, y, _))) = (want, belt) {
+                let user = self.user("ObjectCommon");
+                let key = if fast {
+                    "Conveyor_Move_HighSpeed"
+                } else {
+                    "Conveyor_Move"
+                };
+                let e = Emitter {
+                    x,
+                    y,
+                    water: self.in_water(world, y),
+                };
+                self.sfx_at(world, &user, key, &PropList::default(), e, H_CONVEYOR);
+            }
+            self.conveyor = want;
         }
         let spike_key = match (world.area_timer % 240 + 180) % 240 {
             118 => Some("NeedleBlock_AppearSign"),

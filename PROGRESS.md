@@ -457,8 +457,8 @@ Nextendo; `docs/nextendo-network-play.md`, spec `research/specs/network-play.md`
   (`mmk audio-render --log`, run and walk) against the data: 3D World's enemy fireball spit on
   the Fire Piranha Plant (land / water), helmets on / off, a shoe knocked off, a key door that
   won't open (`key_notget`), breaking an action condition (`p_lose_missionClear`), 3D World's
-  donut blocks (shake, drop, back), blinking blocks and timed spike blocks ✅ · ⬜ loops (3D World
-  conveyors, the donut shake as a loop), 3D World flip panels, ice / cloud block breaks, the
+  donut blocks (shake, drop, back), blinking blocks and timed spike blocks, the conveyor loop
+  (on screen; fast belts' own) ✅ · ⬜ the donut shake as a loop, 3D World flip panels, ice / cloud block breaks, the
   power-ups' item-specific sounds the scripted runs never reach
 
 **G9 — Every platform** 🔄

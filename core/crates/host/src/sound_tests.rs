@@ -89,7 +89,8 @@ fn db() -> serde_json::Value {
                 asset("playCoin", "Coin"),
                 asset("block_hit", "Bump"),
                 asset("blink_block_change", "BlinkSwap"),
-                asset("NeedleBlock_Appear", "SpikesOut")
+                asset("NeedleBlock_Appear", "SpikesOut"),
+                asset("Conveyor_Move", "BeltLoop")
             ]},
             "M1_Kuribo": {"calls": [
                 {"key": "r_damage_stamp", "kind": "switch", "watch": "ScaleLevel", "children": [1, 2]},
@@ -385,6 +386,19 @@ fn blinking_blocks_swap_and_spike_blocks_come_out_with_their_sounds() {
     w.area_timer = 238;
     r.s.after_step(&w);
     assert_eq!(r.played(), ["sfx:SpikesOut"]);
+}
+
+#[test]
+fn a_conveyor_on_screen_runs_its_loop_once() {
+    let mut r = rig();
+    let mut w = world();
+    r.s.start_course(&w);
+    r.played();
+    w.level.conveyors.push((3, 8, 1, 1.0));
+    r.s.after_step(&w);
+    assert_eq!(r.played(), ["sfx:BeltLoop"]);
+    r.s.after_step(&w);
+    assert!(r.played().is_empty(), "still running, not restarted");
 }
 
 #[test]
