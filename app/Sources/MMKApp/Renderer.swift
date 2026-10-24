@@ -272,7 +272,8 @@ final class Renderer: NSObject, MTKViewDelegate {
         // the 3D styles' background scene, with its own camera and depth
         if let bgFrame, let meshRenderer {
             let cam = MeshRenderer.Camera(viewProj: MeshRenderer.matrix(scene3d.background_view_proj), layered: false,
-                                          flipY: flipY, light: MeshRenderer.lightRows(scene3d.background_light))
+                                          flipY: flipY, light: MeshRenderer.lightRows(scene3d.background_light),
+                                          scroll: true)
             meshRenderer.encode(bgEnc, frame: bgFrame, range: 0..<bgFrame.posed.count, camera: cam)
         }
         bgEnc.endEncoding()
