@@ -997,8 +997,10 @@ impl Actor {
                     // its part, through the Jugem (thrown) context; a Spiny egg by default
                     // [inf: the thrown state's motion for parts other than the egg]
                     let face = if px < self.x { -1.0 } else { 1.0 };
+                    // (a Key is held, dropped on defeat, not thrown)
                     let part = self
                         .holds
+                        .filter(|&(id, _)| id != 95)
                         .and_then(|(id, flags)| level.part_actor(id, flags));
                     let kind = part.map_or(Kind::SpinyEgg, |p| p.0);
                     let mut egg = Actor::new(kind, self.x, self.y + 16.8);
