@@ -409,8 +409,8 @@ Nextendo; `docs/nextendo-network-play.md`, spec `research/specs/network-play.md`
   out to belong to the parts' 0xC0000 bits, not stacks) · ⬜ the editor's height limit (play
   takes 128 members at most), pulling a member off a column
 - 🔄 Physics: re-recording every trace (2026-10-24; the old 428 / 454 was not a true count — the
-  old items / form traces were all small Mario). Re-recorded, current engine: **481 / 481 exact**
-  over 43 courses (2026-10-24 physics7: the shell courses now compare the shell too, which showed
+  old items / form traces were all small Mario). Re-recorded, current engine: **486 / 486 exact**
+  over 45 courses (2026-10-24 physics7: the shell courses now compare the shell too, which showed
   3 carried-shell throws off; and object traces: the player plus every simulated actor matched to
   a recorded game object, found by scans while the game is paused in the trace hook): M1/M3/MW/WU/3W flat 34 each, M1/M3/MW/WU/3W items 34 each, M1/M3/MW/WU/3W
   slope 4 each, M1/M3/MW/WU/3W wall 4 each, M1/M3/MW/WU/3W water 2 each, M3/MW/WU/3W form 16 each
@@ -444,7 +444,14 @@ Nextendo; `docs/nextendo-network-play.md`, spec `research/specs/network-play.md`
   view rect found in memory, within 0.0002 px), objects reaching last frame's spawn zone appear and
   act in the same frame, a walker placed on the ground walks from its first frame, a knocked-off
   enemy keeps its speeds on the hit frame and is removed once 40 px below the view, and a shell's
-  side hit reaches the block in front of it (it turns a frame later). 3D World
+  side hit reaches the block in front of it (it turns a frame later); M1 shellq (the shell into
+  a ? Block with a Super Mushroom) and M1 blocks (small Mario's head into a brick, a ? Block twice,
+  a ten-coin brick four times, a ? Block's mushroom chased and collected): flush under a block
+  (no 0.001 gap), a block's bounce starts the frame after the hit (a shell's side hit lands after
+  the blocks' update: one more), its item appears at the block's last offset (+0.429) and doesn't
+  move that frame, a mushroom stands on the frame it comes out, stands on its centre ±1 with
+  inclusive column edges, is taken in its own update the frame after the touch (one more fall
+  step, no landing) and the player grows a frame after that. 3D World
   slide-end stoop
   3 frames confirmed. 3D World recording works with a local Ryujinx fix (a zero-sized guest
   texture with 2 levels made Metal abort under MoltenVK). ⬜ still to record: the Cat dive's real

@@ -316,6 +316,9 @@ pub struct World {
     /// Frames of the player's Throw state left before a carried shell leaves the hands (Run let
     /// go while carrying one).
     throw_wait: Option<u8>,
+    /// Items taken by their own update, collected (the player's form change) after a frame:
+    /// (kind, x, y, SMM1 subtype, frames left).
+    pending_collect: Vec<(Kind, f32, f32, u8, u8)>,
     /// Key-door pairs unlocked: (area, warp id >> 1).
     unlocked_doors: std::collections::BTreeSet<(usize, u8)>,
     /// Warp-box pairs unlocked with a key, and pairs used up (single player: a box vanishes
@@ -626,6 +629,7 @@ impl World {
             yoshi_prev_run: false,
             run_held: false,
             throw_wait: None,
+            pending_collect: Vec::new(),
             unlocked_doors: Default::default(),
             unlocked_boxes: Default::default(),
             gone_boxes: Default::default(),
@@ -2014,10 +2018,9 @@ impl World {
         // frame after the view's zone reached it]
         self.activate();
 
-        // blocks, actors, effects
-        for r in self.blocks.step() {
-            self.release(r);
-        }
+        // blocks, actors, effects (a block's item appears after the actors have moved: it
+        // doesn't move on its first frame [obs: Ryujinx traces M1_blocks blk_mush, M1_shellq])
+        let releases = self.blocks.step();
         let px = self.player.x;
         let py = self.player.y;
         let mut born = Vec::new();
@@ -2111,6 +2114,9 @@ impl World {
         for n in born {
             self.add_actor(n);
         }
+        for r in releases {
+            self.release(r);
+        }
         self.koopaling_world();
         self.step_generators();
         self.step_blasters();
@@ -2146,6 +2152,20 @@ impl World {
         self.check_checkpoints();
         self.shell_walls();
         self.actor_interactions();
+        // items taken last frame: the player's form changes now, after this frame's move
+        let due: Vec<_> = self
+            .pending_collect
+            .iter()
+            .filter(|p| p.4 == 0)
+            .map(|p| (p.0, p.1, p.2, p.3))
+            .collect();
+        self.pending_collect.retain(|p| p.4 > 0);
+        for p in &mut self.pending_collect {
+            p.4 -= 1;
+        }
+        for (kind, x, y, sub) in due {
+            self.collect_item(kind, x, y, sub);
+        }
         self.player_interactions(jump_held);
         self.step_effects();
         self.carry_clown_riders();
@@ -2652,7 +2672,7 @@ impl World {
             Contents::YoshiEgg => Some(Kind::YoshiEgg { red: false }),
         };
         let Some(kind) = item else { return };
-        let mut a = Actor::new(kind, bx, by);
+        let mut a = Actor::new(kind, bx, by + r.offset);
         a.dir = 1;
         if kind.is_item() {
             // rise 16 px at 0.5 (down: 1.0), no gravity
@@ -2977,11 +2997,17 @@ impl World {
                 continue;
             }
             if a.kind.is_item() {
-                if overlap(contact, ab) {
+                // a touch (box B, the contact box) is taken by the item in its next update, and
+                // the player changes form a frame after that (it still moves on that frame) [obs:
+                // Ryujinx trace M1_blocks blk_mush: touching 12.83 px apart at frame N, the
+                // mushroom's last move at N+1, the growth freeze from N+3]
+                if a.taken == 0 && overlap(contact, ab) {
+                    self.actors[i].taken = 1;
+                } else if a.taken == 2 {
                     let kind = a.kind;
                     let (ax, ay, sub) = (a.x, a.y, a.smm1_item);
-                    self.actors[i].mode = Mode::Dead;
-                    self.collect_item(kind, ax, ay, sub);
+                    self.actors[i].taken = 3;
+                    self.pending_collect.push((kind, ax, ay, sub, 0));
                 }
                 i += 1;
                 continue;

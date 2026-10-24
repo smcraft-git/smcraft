@@ -641,6 +641,9 @@ pub struct Actor {
     pub kick_lock: i32,
     /// DieFall speeds taken on the next update (die_by).
     pub die_pending: Option<(f32, f32)>,
+    /// An item touched by the player: 1 = touched at the end of last frame (this update moves it
+    /// once more, without landing, and takes it), 2 = taken (the world collects it), 3 = gone.
+    pub taken: u8,
     /// A kick's slide speed (signed), taken up by the shell's next update: the kick message
     /// is handled a frame later [obs: Ryujinx trace M1_koopa koopa_kick, vx still 0 on the
     /// kick frame, moving at the kick speed from the next].
@@ -752,6 +755,7 @@ impl Actor {
             age: 0,
             kick_lock: 0,
             die_pending: None,
+            taken: 0,
             kick_speed: 0.0,
             bounce_pending: false,
             chain: 0,
@@ -1634,6 +1638,29 @@ impl Actor {
         let player_x = self.target.0;
         let mut spawned = None;
         self.age += 1;
+        // an item the player touched is taken in its own next update (20-super-mushroom.md: the
+        // touching player is latched and handled in the item update): it moves once more, with
+        // no landing, and stops [obs: Ryujinx trace M1_blocks blk_mush, the mushroom's last
+        // frame at y 16 − 0.1875]
+        match self.taken {
+            0 => {}
+            1 => {
+                if let Mode::Emerge { .. } = self.mode {
+                    self.y += self.vy;
+                } else {
+                    // (the fall step moves it, its vy field stays) [obs]
+                    self.x += self.vx;
+                    self.y += (self.vy + ENEMY_GRAVITY).max(MAX_FALL);
+                }
+                self.taken = 2;
+                return None;
+            }
+            2 => return None,
+            _ => {
+                self.mode = Mode::Dead;
+                return None;
+            }
+        }
         self.wall = false;
         if self.kick_lock > 0 {
             self.kick_lock -= 1;
@@ -1651,11 +1678,19 @@ impl Actor {
             Mode::Emerge { until } => {
                 self.y += self.vy;
                 if (self.vy > 0.0 && self.y >= until) || (self.vy < 0.0 && self.y <= until) {
+                    let up = self.vy > 0.0;
                     self.y = until;
                     self.mode = Mode::Normal;
                     self.vy = 0.0;
+                    // out on the block top, a mushroom stands that frame and walks from the next
+                    // [obs: Ryujinx traces M1_shellq, M1_blocks blk_mush: vx 0 on the frame it
+                    // reaches the top, +1 the frame after]
+                    if up && matches!(self.kind, Kind::Mushroom | Kind::OneUp) {
+                        self.on_ground = true;
+                    }
                     self.vx = match self.kind {
-                        Kind::Mushroom | Kind::OneUp | Kind::Star => ITEM_SPEED * self.dir as f32,
+                        Kind::Mushroom | Kind::OneUp => 0.0,
+                        Kind::Star => ITEM_SPEED * self.dir as f32,
                         Kind::PowerItem { what } if powerups::walks(what, 0) => {
                             ITEM_SPEED * self.dir as f32
                         }
@@ -4021,7 +4056,9 @@ impl Actor {
         self.y += self.vy;
         // feet: 3 px in from the sides; a shell stands on its centre ±1 (it drops off a ledge
         // once its centre is 1 px past it) [obs: Ryujinx trace M1_koopa koopa_kick]
-        let fx = if matches!(self.kind, Kind::Shell { .. }) {
+        // a mushroom too: off a block's edge once its centre is 2 px past it [obs: Ryujinx traces
+        // M1_blocks blk_mush, M1_shellq]
+        let fx = if matches!(self.kind, Kind::Shell { .. } | Kind::Mushroom | Kind::OneUp) {
             1.0
         } else {
             (hw - 3.0).max(1.0)
@@ -4042,7 +4079,16 @@ impl Actor {
             for dx in [-fx, fx] {
                 let (px, py) = (self.x + dx, self.y);
                 let top = ((py / TILE).floor() + 1.0) * TILE;
-                let cell = level.cell_at(px, py);
+                let mut cell = level.cell_at(px, py);
+                // a foot exactly on a column boundary also stands on the column to its left, as
+                // the player's do [obs: Ryujinx trace M1_blocks blk_mush, a mushroom at x 401
+                // still on a block ending at 400]
+                if !cell.is_solid() && px == (px / TILE).floor() * TILE {
+                    let left = level.cell_at(px - 0.01, py);
+                    if left.is_solid() {
+                        cell = left;
+                    }
+                }
                 if cell.is_solid() || (cell == Cell::SemiTop && prev_y >= top - 0.01) {
                     landed = Some(landed.map_or(top, |t: f32| t.max(top)));
                 }
@@ -4281,6 +4327,9 @@ mod tests {
             n += 1;
         }
         assert_eq!(n, 32);
+        // it stands on the frame it comes out and walks from the next
+        assert_eq!(a.vx, 0.0);
+        a.step(&level, 0.0);
         assert_eq!(a.vx, ITEM_SPEED);
     }
 

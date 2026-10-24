@@ -2760,7 +2760,9 @@ impl Player {
                     self.x + hits[0]
                 };
                 self.head_hit = Some(((cx / TILE).floor() as i32, (hy / TILE).floor() as i32));
-                self.y = (hy / TILE).floor() * TILE - s.head_y - 0.001;
+                // flush under the block [obs: Ryujinx trace M1_blocks blk_brick, y 52.0 under a
+                // brick at 64 for small Mario's head at +12]
+                self.y = (hy / TILE).floor() * TILE - s.head_y;
                 self.vy = 0.0;
             }
             self.on_ground = false;
