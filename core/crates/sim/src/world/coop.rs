@@ -70,6 +70,8 @@ const POLE_DELAY: i32 = 20;
 /// Warps (§7): the first player in waits this long for the others (while any is free), then the
 /// followers come out 15 frames apart.
 const WARP_WAIT: i32 = 180;
+/// The P switch's time held while the others may still follow through a P door.
+const P_DOOR_HOLD: i32 = 182;
 const WARP_GAP: i32 = 15;
 /// Carrying a player (§5.3, not SMB1): the hold before Jump / Spin frees them, the window after
 /// which 12 presses do, the escape jumps, the throw and its no-contact time; how far in front and
@@ -655,6 +657,13 @@ impl World {
         }
         if timer > 1 && (0..n).any(|k| self.free(k)) {
             self.coop.warp_wait = Some((lead, timer - 1));
+            // a P door the first player went through stays open for the others: the P switch's
+            // time is held at 182 until the last one is in (§7.5) [inf]
+            if let State::Enter(t) = self.coop.slots[lead].state
+                && t.from.kind == crate::level::WarpKind::Door(1)
+            {
+                self.p_timer = self.p_timer.max(P_DOOR_HOLD);
+            }
             return;
         }
         self.coop.warp_wait = None;
@@ -1927,6 +1936,40 @@ mod tests {
         assert_eq!(w.area, 1);
         assert!(w.in_play(0) && w.in_play(1), "both came out");
         assert!((w.slot(1).x - w.slot(0).x).abs() < 32.0);
+    }
+
+    #[test]
+    fn a_p_door_stays_open_while_the_others_may_follow() {
+        use crate::level::{Warp, WarpKind};
+        let mut lvl = Level::flat(60);
+        for (id, x) in [(2u8, 200.0f32), (3, 600.0)] {
+            lvl.warps.push(Warp {
+                kind: WarpKind::Door(1),
+                id,
+                x,
+                y: 32.0,
+                len: 2,
+            });
+            lvl.doors.push((x, 32.0, 1));
+        }
+        let mut w = World::with_level(lvl);
+        w.set_players(2);
+        w.player.x = 200.0;
+        w.others[0].x = 100.0;
+        run(&mut w, &[NONE, NONE], 3);
+        w.p_timer = 20;
+        let up = Input { buttons: input::UP };
+        run(&mut w, &[up, NONE], 1);
+        assert!(
+            matches!(w.coop.slots[0].state, State::Enter(_)),
+            "in the door"
+        );
+        run(&mut w, &[NONE, NONE], 40);
+        assert!(
+            w.p_timer >= P_DOOR_HOLD - 1,
+            "held for the others: {}",
+            w.p_timer
+        );
     }
 
     #[test]

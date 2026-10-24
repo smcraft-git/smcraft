@@ -44,7 +44,7 @@ sway, importer and pack 12, the dev cache already at v12).
      (`blocks::Contents` keeps only the 0x4 form; its behaviour wants the binary), NSMBU / 3D
      World wing art, the contents balloon (`Edit_BalloonPartsIn_00`, state `cDispInParts`: not
      built at all); tracks and links.
-  3. Co-op: a players screen in SMM2's layouts; the P-door hold for followers.
+  3. Co-op: a players screen in SMM2's layouts.
   3b. Research queue (binary → spec → code), each an agent's task: the Toad House minigames
      (`super-worlds.md` "Toad House minigames": the three Seq classes); stacking's tower rules and
      `Tower_stack` (maker C11); the maker's Water Level mode (`L_WaterLevelBtn_00`, mode banner
@@ -168,8 +168,7 @@ sway, importer and pack 12, the dev cache already at v12).
   - ✅ Warps (§7): the first into a pipe / door waits inside up to 180 frames while the others
     play on (and may follow); with nobody else free it goes at once; then everyone is taken
     along, also through a warp within the area; a player sinking into a pipe is drawn behind it
-  - ⬜ Not yet: a players screen in SMM2's layouts (the question is a toast); the P-door hold
-    for followers (§7.5)
+  - ⬜ Not yet: a players screen in SMM2's layouts (the question is a toast) · ✅ the P-door hold for followers (§7.5, 182 [inf])
 
 **G4 — Course Maker for any course** 🔄
 - ✅ Editor core (`mmk-editor`): parts, areas, links, tracks, selection, settings, the game's limits
