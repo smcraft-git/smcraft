@@ -28,7 +28,7 @@ use serde_json::json;
 use crate::fade::FadeKind;
 use crate::host::{CourseEntry, Source};
 use crate::layout::{Layout, Ui};
-use crate::menu::{Buttons, MenuCursor, Script, UiInput, hit, nearest};
+use crate::menu::{Buttons, MenuCursor, Script, UiInput, hit};
 use crate::play::{CoursePlay, PlayEvent, PlayInput, RunLink};
 use crate::screens::{CardInfo, CourseScreens};
 use crate::smm1::RunCardInfo;
@@ -286,11 +286,15 @@ struct PlanetScene {
     tick: i32,
     selection: usize,
     picks: Vec<Pick>,
-    pending: Option<(usize, i32)>,
+    /// The pick to play at a tick, and whether together.
+    pending: Option<(usize, i32, bool)>,
+    /// The card's button with the cursor: Play (false) or Play Together (true).
+    together_btn: bool,
 }
 
 enum PlanetEvent {
-    Play(Pick),
+    /// Play the pick (`true`: Play Together).
+    Play(Pick, bool),
     Back,
 }
 
@@ -303,9 +307,8 @@ impl PlanetScene {
         let mut l = ui.layout(PLANETS)?;
         l.play("In", 0);
         l.play("InContents", 0);
-        // no shuffle (one page of picks) and no co-op play here [departure]
+        // no shuffle (one page of picks) [departure]; Play Together (click it, or ZR)
         l.show("L_ShuffleBtn_00", false);
-        l.show("L_MyWMapInfo_00/L_CoopModeBtn_00", false);
         l.show("L_MyWMapInfo_00/L_MiiBtn_00", false);
         l.show("L_MyWMapInfo_00/L_NationalFlag_00", false);
         l.show("L_MyWMapInfo_00/N_AlignGoodCount_00", false);
@@ -328,6 +331,7 @@ impl PlanetScene {
             selection: 0,
             picks: Vec::new(),
             pending: None,
+            together_btn: false,
         };
         s.set_picks(picks);
         s.select(selection.min(s.picks.len().saturating_sub(1)));
@@ -406,16 +410,22 @@ impl PlanetScene {
     fn step(&mut self, input: &UiInput, script: &mut Script) -> Option<PlanetEvent> {
         self.tick += 1;
         let mut pressed = input.pressed | script.step();
-        if let Some((i, at)) = self.pending {
+        if let Some((i, at, together)) = self.pending {
             if self.tick >= at {
                 self.pending = None;
-                return self.picks.get(i).cloned().map(PlanetEvent::Play);
+                return self
+                    .picks
+                    .get(i)
+                    .cloned()
+                    .map(|p| PlanetEvent::Play(p, together));
             }
             return None;
         }
+        let mut together = pressed.has(Buttons::ZR);
         if let Some(p) = input.click {
             let mut panes: Vec<String> = (0..self.picks.len()).map(planet_bound).collect();
             panes.push("L_MyWMapInfo_00/L_PlayBtn_00/B_Btn_00".into());
+            panes.push("L_MyWMapInfo_00/L_CoopModeBtn_00/B_Btn_00".into());
             match hit(&mut self.layout, self.tick, &panes, p) {
                 Some(i) if i < self.picks.len() => {
                     if i == self.selection {
@@ -425,51 +435,75 @@ impl PlanetScene {
                         self.select(i);
                     }
                 }
+                Some(i) if i > self.picks.len() => together = true,
                 Some(_) => pressed = pressed | Buttons::CONFIRM,
                 None => {}
             }
         }
-        if let Some(dir) = pressed.direction() {
-            self.layout.apply(self.tick);
-            let here = self
-                .layout
-                .rect(&planet_bound(self.selection))
-                .map_or([0.0, 0.0], |r| r.center);
-            let targets: Vec<(usize, [f32; 2])> = (0..self.picks.len())
-                .filter_map(|i| self.layout.rect(&planet_bound(i)).map(|r| (i, r.center)))
-                .collect();
-            let next = nearest(here, dir, &targets).or_else(|| {
-                // around the ring when nothing lies that way
-                let n = self.picks.len();
-                (n > 1).then(|| {
-                    if dir[0] < 0.0 || dir[1] > 0.0 {
-                        (self.selection + n - 1) % n
-                    } else {
-                        (self.selection + 1) % n
-                    }
-                })
-            });
-            if let Some(n) = next {
-                self.ui.sound_button(PLANETS, "L_MyWBtn_00", Event::Select);
-                self.select(n);
+        if together && !self.picks.is_empty() {
+            let b = "L_MyWMapInfo_00/L_CoopModeBtn_00";
+            self.ui.sound_button(PLANETS, b, Event::Decide);
+            let a = format!("{b}/Decide");
+            self.layout.play(&a, self.tick);
+            self.pending = Some((self.selection, self.tick + self.layout.ticks(&a, 1), true));
+            return None;
+        }
+        // L / R (the card's arrows) change worlds; left / right move between Play Together and
+        // Play
+        let shoulder = if pressed.has(Buttons::L) {
+            Some(-1)
+        } else if pressed.has(Buttons::R) {
+            Some(1)
+        } else {
+            None
+        };
+        if let Some(d) = shoulder
+            && self.picks.len() > 1
+        {
+            let n = self.picks.len() as i32;
+            self.ui.sound_button(PLANETS, "L_MyWBtn_00", Event::Select);
+            self.select(((self.selection as i32 + d).rem_euclid(n)) as usize);
+        } else if let Some(dir) = pressed.direction()
+            && dir[0] != 0.0
+        {
+            let to = dir[0] < 0.0;
+            if to != self.together_btn {
+                self.together_btn = to;
+                let b = if to {
+                    "L_MyWMapInfo_00/L_CoopModeBtn_00"
+                } else {
+                    "L_MyWMapInfo_00/L_PlayBtn_00"
+                };
+                self.ui.sound_button(PLANETS, b, Event::Select);
             }
+        } else if pressed.has(Buttons::CONFIRM) && self.together_btn && !self.picks.is_empty() {
+            together = true;
+            let b = "L_MyWMapInfo_00/L_CoopModeBtn_00";
+            self.ui.sound_button(PLANETS, b, Event::Decide);
+            let a = format!("{b}/Decide");
+            self.layout.play(&a, self.tick);
+            self.pending = Some((
+                self.selection,
+                self.tick + self.layout.ticks(&a, 1),
+                together,
+            ));
         } else if pressed.has(Buttons::CONFIRM) && !self.picks.is_empty() {
             let b = "L_MyWMapInfo_00/L_PlayBtn_00";
             self.ui.sound_button(PLANETS, b, Event::Decide);
             let a = format!("{b}/Decide");
             self.layout.play(&a, self.tick);
-            self.pending = Some((self.selection, self.tick + self.layout.ticks(&a, 1)));
+            self.pending = Some((self.selection, self.tick + self.layout.ticks(&a, 1), false));
         } else if pressed.has(Buttons::BACK) {
             self.ui.sound_back(PLANETS, "normal");
             return Some(PlanetEvent::Back);
         }
         let alpha = if self.pending.is_none() { 1.0 } else { 0.0 };
-        self.cursor.place(
-            &mut self.layout,
-            "L_MyWMapInfo_00/L_PlayBtn_00/B_Btn_00",
-            self.tick,
-            alpha,
-        );
+        let focus = if self.together_btn {
+            "L_MyWMapInfo_00/L_CoopModeBtn_00/B_Btn_00"
+        } else {
+            "L_MyWMapInfo_00/L_PlayBtn_00/B_Btn_00"
+        };
+        self.cursor.place(&mut self.layout, focus, self.tick, alpha);
         None
     }
 
@@ -972,6 +1006,8 @@ pub struct SuperWorldFlow {
     /// The picks call to the server (TGRCode's picked-up worlds).
     picks_call: Option<u32>,
     run: Option<SwRun>,
+    /// Players of this run (Play Together: 2–4).
+    players: u32,
     leaving: bool,
     /// Captures: menu presses at global UI ticks.
     pub script: Script,
@@ -1018,6 +1054,7 @@ impl SuperWorldFlow {
             picks: Vec::new(),
             picks_call: None,
             run: None,
+            players: 1,
             leaving: false,
             script: Script::default(),
         };
@@ -1127,6 +1164,7 @@ impl SuperWorldFlow {
     /// Play the course under Mario.
     fn play(&mut self, cx: &mut Cx) {
         let ui = self.ui.clone();
+        cx.host.set_players(self.players.max(1));
         let Some(run) = &mut self.run else {
             return;
         };
@@ -1247,7 +1285,10 @@ impl SuperWorldFlow {
         match &mut self.stage {
             Stage::Planets(p) => match p.step(ui, &mut self.script)? {
                 PlanetEvent::Back => return Some(SuperWorldEvent::Exit),
-                PlanetEvent::Play(pick) => {
+                PlanetEvent::Play(pick, together) => {
+                    // Play Together: one player per controller, one shared life counter
+                    // (local-coop.md §1.1, the Super World's co-op)
+                    self.players = if together { cx.together()? } else { 1 };
                     if let Stage::Planets(scene) = std::mem::replace(&mut self.stage, Stage::None) {
                         self.pick(cx, pick, scene);
                     }
@@ -1544,6 +1585,32 @@ mod tests {
         press(&mut f, &mut host, Buttons::RIGHT);
         idle(&mut f, &mut host, 40);
         assert_eq!(flow(&mut f).progress().unwrap().1.x, 3);
+    }
+
+    #[test]
+    fn play_together_plays_the_worlds_courses_with_every_controller() {
+        let mut host = MockHost {
+            library: library(7),
+            controllers: 2,
+            ..Default::default()
+        };
+        let Some(mut f) = front(&mut host) else {
+            return;
+        };
+        assert!(f.capture(&mut host, "superworld", 0, 0));
+        // left onto Play Together, confirm
+        press(&mut f, &mut host, Buttons::LEFT);
+        press(&mut f, &mut host, Buttons::CONFIRM);
+        idle(&mut f, &mut host, 40);
+        assert_eq!(flow(&mut f).stage_name(), "title");
+        press(&mut f, &mut host, Buttons::CONFIRM);
+        idle(&mut f, &mut host, 40);
+        press(&mut f, &mut host, Buttons::RIGHT);
+        idle(&mut f, &mut host, 20);
+        press(&mut f, &mut host, Buttons::CONFIRM);
+        idle(&mut f, &mut host, 5);
+        assert_eq!(flow(&mut f).stage_name(), "playing");
+        assert_eq!(host.players.last(), Some(&2), "both controllers play");
     }
 
     #[test]

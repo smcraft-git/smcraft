@@ -290,7 +290,8 @@ sway, importer and pack 12, the dev cache already at v12).
 - ⬜ The map in 3D with the game's models (`MyWorld_Model.pack`: fields, roads, points, Mario's
   walk / swim / climb animations from `WM_*Anime`), the map music and sounds
 - ⬜ Toad House minigames (`MyWEdit_Minigame_00…02`; a fixed 3-life gift for now), enemy-icon
-  courses that start on contact, point icons by model, map ghosts, co-op ("Play Together")
+  courses that start on contact, point icons by model, map ghosts · ✅ co-op: the card's Play Together
+  (left onto it, or a click; L / R change worlds), every controller plays, one shared life counter
 - ⬜ Super World maker (later)
 
 **G6 — Network Play through Nextendo** 🔄 (works end to end on a local server; live waits for
