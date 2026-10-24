@@ -1123,3 +1123,21 @@ fn every_catalog_part_can_be_put_down_in_the_styles_that_offer_it() {
         }
     }
 }
+
+#[test]
+fn an_empty_sub_area_asks_for_its_orientation() {
+    let (mut host, mut saves) = (MockHost::default(), Saves::default());
+    let mut m = maker(&mut host, &mut saves, MakerStart::New("M1".into()));
+    if m.ui.layout("Edit_SubAreaWindow_00").is_none() {
+        return; // no UI import here
+    }
+    run(&mut m, &mut host, &mut saves, keys(keys::AREA));
+    run(&mut m, &mut host, &mut saves, idle());
+    assert_eq!(m.editor.area, 1);
+    assert!(m.subarea.is_some(), "the orientation window");
+    run(&mut m, &mut host, &mut saves, press(Buttons::RIGHT));
+    run(&mut m, &mut host, &mut saves, press(Buttons::CONFIRM));
+    run(&mut m, &mut host, &mut saves, idle());
+    assert!(m.subarea.is_none());
+    assert_ne!(m.editor.area().header.orientation, 0, "vertical");
+}

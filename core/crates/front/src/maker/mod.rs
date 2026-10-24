@@ -33,6 +33,7 @@
 pub mod attr;
 pub mod catalog;
 pub mod mission;
+pub mod subarea;
 pub mod view;
 
 use mmk_editor::parts::Dir;
@@ -148,6 +149,8 @@ enum Mode {
     Window(u8),
     /// The clear-condition window.
     Mission,
+    /// The sub-area's orientation window.
+    SubArea,
     Test,
 }
 
@@ -263,6 +266,7 @@ pub struct MakerFlow {
     pub selection: Option<Rect>,
     /// The clear-condition window while open.
     mission: Option<mission::MissionWindow>,
+    subarea: Option<subarea::SubAreaWindow>,
     /// The animation that opened the left window.
     window_tab: &'static str,
     /// The course changed since the host last showed it.
@@ -353,6 +357,7 @@ impl MakerFlow {
             pointer_tick: -1000,
             selection: None,
             mission: None,
+            subarea: None,
             window_tab: "ChangeTab00",
             dirty: true,
             shown: false,
@@ -628,6 +633,25 @@ impl MakerFlow {
             Mode::Save => self.save_tick(pressed, click, cx),
             Mode::Window(w) => {
                 self.window_tick(w, pressed, click, cx);
+                None
+            }
+            Mode::SubArea => {
+                let ev = self.subarea.as_mut().and_then(|w| w.step(pressed, click));
+                if let Some(e) = ev {
+                    if let subarea::SubAreaEvent::Choose(v) = e
+                        && v != (self.editor.area().header.orientation != 0)
+                    {
+                        self.editor.checkpoint();
+                        if self.editor.set_vertical(v).is_ok() {
+                            self.changed();
+                        } else {
+                            self.editor.discard_checkpoint();
+                        }
+                    }
+                    self.subarea = None;
+                    self.mode = Mode::Edit;
+                    self.dirty = true;
+                }
                 None
             }
             Mode::Mission => {
@@ -1561,6 +1585,15 @@ impl MakerFlow {
         self.cur = (8, 2);
         self.glove = self.tile_center(self.cur);
         self.dirty = true;
+        // an empty sub-area: its orientation first (Edit_SubAreaWindow_00)
+        let a = self.editor.area();
+        if to == 1 && a.objects.items.is_empty() && a.ground.is_empty() && a.tracks.is_empty() {
+            let vertical = a.header.orientation != 0;
+            self.subarea = subarea::SubAreaWindow::new(&self.ui, vertical);
+            if self.subarea.is_some() {
+                self.mode = Mode::SubArea;
+            }
+        }
     }
 
     fn select_slot(&mut self, i: usize) {
@@ -2976,6 +3009,13 @@ impl MakerFlow {
             && let Some(m) = &mut self.mission
         {
             push_layout(out, &mut m.layout, m.tick);
+        } else if self.mode == Mode::SubArea
+            && let Some(w) = &mut self.subarea
+        {
+            push_layout(out, &mut w.layout, w.tick);
+            let pane = format!("{}/B_Btn_00", subarea::BUTTONS[w.sel]);
+            self.cursor.place(&mut w.layout, &pane, tick, 1.0);
+            self.cursor.draw(tick, out);
         } else if self.mode == Mode::Save {
             let b = self.save_buttons();
             let pane = format!("{}/B_Btn_00", b[self.save_sel.min(b.len() - 1)]);
