@@ -61,6 +61,10 @@ pub fn condition(category: u8, index: u8, n: i16) -> Option<Condition> {
         (clear::STATUS, 72) => (16, 0),
         (clear::ACTIONS, 70) => (9, 0),
         (clear::ACTIONS, 71) => (10, 0),
+        // the 3.0 update's (formats clear.rs 78–98)
+        (clear::PARTS, 78..=87) => (1, index as u32),
+        (clear::STATUS, 88..=93) => (30, [12, 17, 13, 14, 15, 16][index as usize - 88]),
+        (clear::STATUS, 94..=98) => (31, [2, 1, 3, 5, 4][index as usize - 94]),
         _ => return None,
     };
     Some(Condition {
@@ -79,12 +83,15 @@ pub fn choices(tab: usize, style: &str) -> Vec<(u8, u8)> {
     match tab {
         0 => vec![(clear::ACTIONS, 70), (clear::ACTIONS, 71)],
         1 => (1..=41u8)
+            .chain(78..=87)
             .chain([43, 53, 54, 55, 66, 67, 68, 69])
             .filter(|&i| {
-                // the Red POW Block and the 3D World enemies only where they are [inf]
+                // the Red POW Block and the 3D World enemies only where they are; Mechakoopas and
+                // the Koopalings not in 3D World [inf]
                 match i {
                     54 => style == "3W",
                     31..=36 => style == "3W",
+                    80..=87 => style != "3W",
                     _ => true,
                 }
             })
@@ -92,12 +99,14 @@ pub fn choices(tab: usize, style: &str) -> Vec<(u8, u8)> {
             .collect(),
         _ => {
             // the style's own power-up and rides [inf]
+            // (the update's: Link and SMB2 Mario in SMB1, Frog, Balloon, Flying Squirrel,
+            // Boomerang Mario and the wearables in 3D World)
             let own: &[u8] = match style {
-                "M1" => &[58, 62],
-                "M3" => &[47, 58, 62],
-                "MW" => &[48, 59, 62],
-                "WU" => &[49, 59, 62],
-                _ => &[50, 51, 64],
+                "M1" => &[58, 62, 88, 89],
+                "M3" => &[47, 58, 62, 90],
+                "MW" => &[48, 59, 62, 91],
+                "WU" => &[49, 59, 62, 92],
+                _ => &[50, 51, 64, 93, 94, 95, 96, 97, 98],
             };
             [42, 44, 45]
                 .iter()

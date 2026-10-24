@@ -7,33 +7,13 @@
 //! checked when the goal is touched) and action conditions (reach the goal without taking damage /
 //! landing: violated for the rest of the attempt by the first offence).
 
-/// Index in the game's condition list (1-based; 0 none), from the header's CRC32. 1–77 are the
-/// v1.0.0 list's; 78–98 the names v3.0.3 adds (its list, 98 names, has them in among the others:
-/// the CRC32 of the name is what courses store, so the order here is ours) [obs v3.0.3 0x22a97f8].
+/// Index in the game's condition list (1-based), from the header's CRC32 (the formats crate's
+/// table: v1.0.0's 77 names, then the 21 v3.0.3 adds); None for 0 or an unknown hash.
 pub fn index_of(hash: u32) -> Option<u8> {
-    const HASHES: [u32; 98] = [
-        0x7f07acbf, 0xc77685e8, 0xcce12a46, 0xc7dad20f, 0x4b115542, 0xdf6717de, 0xe50302f7,
-        0xce9a707b, 0xe47c2be8, 0xe25c5f60, 0x563755f2, 0xa3aec34a, 0x5a085610, 0x634a6671,
-        0xa09bb51f, 0x794c6eb3, 0x387c22ca, 0x103bba8c, 0xfe75363e, 0x4c44da92, 0x7a128199,
-        0xce2e5a15, 0xcf81610a, 0x48d111e0, 0x7f88648a, 0x501c7c00, 0x756120ee, 0xffe76309,
-        0xf571d608, 0x66c2b75e, 0xf0f35cba, 0xe3f62c75, 0x4067ab4e, 0x3f50b513, 0x3f4124e8,
-        0x467afb58, 0x4b980b7f, 0xca315249, 0x3c164eb1, 0x6daa9a3f, 0x405dce65, 0xed1023ea,
-        0x62b74a93, 0x2a8e77bb, 0xc73be7ec, 0x7c8612d5, 0x35a5af47, 0xbb926013, 0x3a2f3996,
-        0x7ddb5d7f, 0xb7402052, 0x6a1ce415, 0x66477be4, 0x48b4157b, 0x63f3d532, 0xe6f2eebe,
-        0x553a9590, 0x1a098d50, 0xfae86a49, 0xb4fa3d4b, 0xde0abfc6, 0xd9893249, 0x4c8772a3,
-        0xde56ffb5, 0x97f8a309, 0xf55b3863, 0xc78f5040, 0xf5b932c2, 0xa3e39544, 0x1664515a,
-        0x08327ae6, 0x3eab9aa1, 0x97f4cf7a, 0x3af23bde, 0xc2a80228, 0xef026a7f, 0x46219146,
-        // EnemyGabon, EnemySambo, EnemyMechaKoopa, the Koopalings (Larry, Iggy, Wendy, Lemmy, Roy,
-        // Morton, Ludwig)
-        0x3b8a1111, 0x671f29b5, 0x0be56f93, 0x2cc36aab, 0x86aae3fd, 0xbd35b4ac, 0x7981172f,
-        0x54fea275, 0x5559be79, 0xece74bc7,
-        // ItemLink, ItemKinokoUSA, ItemFrogSuit, ItemPowerBalloon, ItemSuperDonguri,
-        // ItemBoomerangFlower
-        0xc5963651, 0xd16f4c4e, 0x2c66b03e, 0xf7967ebd, 0xaa2f7449, 0x196743a3,
-        // AdditionalItemHeadBlock Houdai (Cannon Box), Propeller, Kuribo, Killer, RedPow
-        0xbf1b11c3, 0x3b49b792, 0x449eb152, 0x7bc4d388, 0xf8ad45c4,
-    ];
-    HASHES.iter().position(|&h| h == hash).map(|i| i as u8 + 1)
+    if hash == 0 {
+        return None;
+    }
+    mmk_formats::smm2::clear::index(hash)
 }
 
 /// Enemy classes of the defeat conditions (list indices 1–41). Only the ones the engine has.
