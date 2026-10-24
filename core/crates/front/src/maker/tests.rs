@@ -1015,3 +1015,30 @@ fn a_winged_part_put_into_a_block_keeps_its_wings() {
     assert_eq!(o.child_id, 0, "the Goomba went in");
     assert_eq!(o.child_flags & 0x2, 0x2, "with its wings");
 }
+
+#[test]
+fn a_goomba_dropped_on_a_goomba_stacks_on_it() {
+    let (mut host, mut saves) = (MockHost::default(), Saves::default());
+    let mut m = maker(&mut host, &mut saves, MakerStart::New("M1".into()));
+    let base = m.editor.place(0, 20, 1).unwrap();
+    m.editor.place(0, 24, 1).unwrap();
+    m.cur = (24, 1);
+    run(&mut m, &mut host, &mut saves, press(Buttons::CONFIRM));
+    assert!(m.carrying());
+    m.cur = (20, 1);
+    run(&mut m, &mut host, &mut saves, held(Buttons::CONFIRM));
+    host.edit_sounds.clear();
+    run(&mut m, &mut host, &mut saves, idle());
+    let base = m.editor.object_at(20, 1).unwrap_or(base);
+    let column = m.editor.column_from(base);
+    assert_eq!(column.len(), 2, "on top of it");
+    assert!(m.editor.object_at(24, 1).is_none(), "moved, not copied");
+    for i in column {
+        assert_ne!(m.editor.object(i).unwrap().flags & 0x1000, 0);
+    }
+    assert!(
+        host.edit_sounds
+            .iter()
+            .any(|(u, k)| u == "M1_EditKuribo" && k == "Combine")
+    );
+}

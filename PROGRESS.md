@@ -369,8 +369,9 @@ Nextendo; `docs/nextendo-network-play.md`, spec `research/specs/network-play.md`
 - 🔄 Stacked parts in play (2026-10-24): every member of a column carries 0x1000 (the 550-course
   sample: 569 stacks, 2–19 tall, each member right on the one below); a rider keeps its place
   on its base and its facing while the base lives, then is free [inf] · ⬜ the game's tower
-  rules (a middle member knocked out, stomp order), stacking in the maker (`Combine`,
-  `Tower_stack`; maker spec C11)
+  rules (a middle member knocked out, stomp order), `Tower_stack` and its pitch; in the maker ✅
+  a carried part dropped on one that stacks goes on top of its column (`mmk_editor::stack`,
+  `Combine`) [inf: the gesture; the palette pen on a part still picks it up]
 - 🔄 Physics: re-recording every trace (2026-10-24; the old 428 / 454 was not a true count — the
   old items / form traces were all small Mario). Re-recorded so far, current engine: **352 / 352
   exact** over 26 courses: M1/M3/MW/WU flat 34 each, M1/M3/MW/WU items 34 each, M1/M3/MW/WU

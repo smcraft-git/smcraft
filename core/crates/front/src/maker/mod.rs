@@ -1223,7 +1223,7 @@ impl MakerFlow {
                 return;
             }
             if let Tool::Part(p) = self.tool()
-                && let Some(key) = self.put_into(i, p, DEFAULT_FLAGS)
+                && let Some(key) = self.put_into(i, p, DEFAULT_FLAGS, false)
             {
                 self.changed();
                 let into = self.editor.object(i).map_or(7, |o| o.id);
@@ -1351,7 +1351,7 @@ impl MakerFlow {
             .filter(|&t| t != index)
             // it goes in as it is: its wings, parachute, form and size (the contents
             // balloon draws a child's wings and parachute, maker spec C10)
-            && let Some(key) = self.put_into(t, o.id, DEFAULT_FLAGS | (o.flags & CHILD_KEEPS))
+            && let Some(key) = self.put_into(t, o.id, DEFAULT_FLAGS | (o.flags & CHILD_KEEPS), true)
         {
             let into = self.editor.object(t).map_or(7, |x| x.id);
             self.editor.erase_object(index);
@@ -1388,9 +1388,16 @@ impl MakerFlow {
 
     /// Part `part` goes into (or onto) the placed part `i`: a container's contents (blocks,
     /// Bill Blasters, Lakitu, trees, checkpoints, a pipe's), or a Super Mushroom makes it big
-    /// [inf: as dropping an item on a part does in the game]. The edit sound key if something
-    /// changed (`Block_in`, `Dokan_in` …, `scaleChange`).
-    fn put_into(&mut self, i: usize, part: i16, child_flags: u32) -> Option<&'static str> {
+    /// [inf: as dropping an item on a part does in the game]; with `stack` (a carried part
+    /// dropped on it) parts that stack make a column. The edit sound key if something changed
+    /// (`Block_in`, `Dokan_in` …, `scaleChange`, `Combine`).
+    fn put_into(
+        &mut self,
+        i: usize,
+        part: i16,
+        child_flags: u32,
+        stack: bool,
+    ) -> Option<&'static str> {
         let o = self.editor.object(i).cloned()?;
         let key = catalog::put_in_key(o.id, part);
         if o.id == 9 {
@@ -1405,6 +1412,14 @@ impl MakerFlow {
         }
         if part == 20 && mmk_editor::parts::caps(o.id).big && !o.is_big() {
             return self.editor.toggle_big(i).is_ok().then_some("scaleChange");
+        }
+        // parts that stack: it goes on top of the column (`Combine`, maker spec C11)
+        if stack && mmk_editor::parts::caps(o.id).stack && mmk_editor::parts::caps(part).stack {
+            return self
+                .editor
+                .stack_onto(i, part, child_flags)
+                .is_ok()
+                .then_some("Combine");
         }
         None
     }

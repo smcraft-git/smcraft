@@ -17,6 +17,7 @@ pub mod paths;
 pub mod rules;
 pub mod select;
 pub mod settings;
+pub mod stack;
 pub mod tracks;
 
 use mmk_formats::record::Record;
