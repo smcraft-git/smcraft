@@ -515,8 +515,8 @@ Nextendo; `docs/nextendo-network-play.md`, spec `research/specs/network-play.md`
   out to belong to the parts' 0xC0000 bits, not stacks) · ⬜ the editor's height limit (play
   takes 128 members at most), pulling a member off a column
 - 🔄 Physics: re-recording every trace (2026-10-24; the old 428 / 454 was not a true count — the
-  old items / form traces were all small Mario). Re-recorded, current engine: **574 / 580 exact**
-  over 113 courses + 10 whole courses (2026-10-24 physics7: the shell courses now compare the shell too, which showed
+  old items / form traces were all small Mario). Re-recorded, current engine: **576 / 580 exact**
+  over 113 courses + 9 whole courses (5 whole exact: W_3064188, W_3046973, W_3065813, and W_3051046, W_3051605 to their deaths, the title course not restarting) (2026-10-24 physics7: the shell courses now compare the shell too, which showed
   3 carried-shell throws off; and object traces: the player plus every simulated actor matched to
   a recorded game object, found by scans while the game is paused in the trace hook): M1/M3/MW/WU/3W flat 34 each, M1/M3/MW/WU/3W items 34 each, M1/M3/MW/WU/3W
   slope 4 each, M1/M3/MW/WU/3W wall 4 each, M1/M3/MW/WU/3W water 2 each, M3/MW/WU/3W form 16 each
@@ -581,8 +581,8 @@ Nextendo; `docs/nextendo-network-play.md`, spec `research/specs/network-play.md`
   frame from a slope still moves along it; sliding shells are met where they stood before their
   move too; a ground block above a slope's surface holds the feet; at 374 the game walks flat
   over a slope that overlaps ground, unexplained [?]); W_3065813 exact
-  (a wall of dotted-line blocks: their 0x4 variant is the red one, solid at ON), W_3051046 to its death at 103 (then the title course's death sequence), W_3006094 to
-  481, W_3051605 to 418, the player through its death at 233 (a big Paragoomba walked into while falling past its top: the after-move touch covers winged walkers, with the stomp's own window) to the title course's death sequence (its packed row of Goombas: a walker turns a frame after a wall or an enemy met in front, then 8 frames of Turn, stopped by another enemy met in front; from the binary's Walk / Turn and enemy contact, timing from a recording of the Turn fields; its staircase's six Goombas exact: an actor on an incline steps x · cos θ, lands by its centre, stands a frame after a fall, and walkers turn on each other only head-on), W_3145588 to 384, W_3010660 to 137 (a Seesaw's tilt starts 2 frames later in the game). Object courses in all styles exact
+  (a wall of dotted-line blocks: their 0x4 variant is the red one, solid at ON), W_3051046 exact to its death at 103 and through it (the title course doesn't restart: compared to the engine's restart), W_3006094 to
+  481, W_3051605 exact to the title course's death sequence, the player through its death at 233 (a big Paragoomba walked into while falling past its top: the after-move touch covers winged walkers, with the stomp's own window) to the title course's death sequence (its packed row of Goombas: a walker turns a frame after a wall or an enemy met in front, then 8 frames of Turn, stopped by another enemy met in front; from the binary's Walk / Turn and enemy contact, timing from a recording of the Turn fields; its staircase's six Goombas exact: an actor on an incline steps x · cos θ, lands by its centre, stands a frame after a fall, and walkers turn on each other only head-on), W_3145588 to 384, W_3010660 to 137 (a Seesaw's tilt starts 2 frames later in the game). Object courses in all styles exact
   (3D World's Trampoline eases 3 px, its falling Donut is gone after 21 frames, a lift pushes up
   feet at most 6 px under its top, a foot on a column boundary rides both donuts; SMW turn
   blocks spin 240 frames, passable; small Mario's head at 15.9 in SMW / NSMBU / 3D World; walkers

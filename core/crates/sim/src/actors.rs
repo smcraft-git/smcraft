@@ -4333,6 +4333,8 @@ impl Actor {
         // M1_blocks blk_mush, M1_shellq]
         let fx = if matches!(self.kind, Kind::Shell { .. } | Kind::Mushroom | Kind::OneUp) {
             1.0
+        } else if basic {
+            4.0
         } else {
             (hw - 3.0).max(1.0)
         };
@@ -4349,8 +4351,15 @@ impl Actor {
             self.on_ground = false;
         } else {
             let mut landed: Option<f32> = None;
+            // (a fall ending exactly on a tile's top lands on it [obs: Ryujinx trace W_3051605,
+            // a Paragoomba's hop down to y 32.0 at −2.8125: vy 0 that frame])
+            let py = if self.vy < 0.0 && self.y == (self.y / TILE).floor() * TILE {
+                self.y - 0.001
+            } else {
+                self.y
+            };
             for dx in [-fx, fx] {
-                let (px, py) = (self.x + dx, self.y);
+                let px = self.x + dx;
                 let top = ((py / TILE).floor() + 1.0) * TILE;
                 // a slope's columns are probed at the centre only (below), unless a block
                 // stands above its surface (as the player's feet)

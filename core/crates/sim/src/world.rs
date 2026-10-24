@@ -368,6 +368,11 @@ pub struct World {
     /// Items taken by their own update, collected (the player's form change) after a frame:
     /// (kind, x, y, SMM1 subtype, frames left).
     pending_collect: Vec<(Kind, f32, f32, u8, u8)>,
+    /// Walker contacts of last frame's enemy pass (walker id, other id): the touch flags, set
+    /// at the next update for others still there after the player's update (a stomp then
+    /// ends a contact) [obs: Ryujinx trace W_3051605, a Goomba beside one stomped that frame
+    /// walks on].
+    touch_pairs: Vec<(u32, u32)>,
     /// The goal pole was touched at the end of last frame (grabbed in this one), and frames on
     /// the pole since the grab.
     pub(crate) goal_touch: bool,
@@ -702,6 +707,7 @@ impl World {
             run_held: false,
             throw_wait: None,
             pending_collect: Vec::new(),
+            touch_pairs: Vec::new(),
             spring_ride: None,
             turn_rolling: Vec::new(),
             goal_touch: false,
@@ -2231,6 +2237,16 @@ impl World {
         // Ryujinx trace M1_hit hit_combo, a Goomba first seen one step into its walk, on the
         // frame after the view's zone reached it]
         self.activate();
+        for (w, o) in std::mem::take(&mut self.touch_pairs) {
+            if self
+                .actors
+                .iter()
+                .any(|a| a.id == o && a.alive() && a.solid_contact())
+                && let Some(a) = self.actors.iter_mut().find(|a| a.id == w)
+            {
+                a.touch_front = true;
+            }
+        }
 
         // blocks, actors, effects (a block's item appears after the actors have moved: it
         // doesn't move on its first frame [obs: Ryujinx traces M1_blocks blk_mush, M1_shellq])
@@ -3194,6 +3210,7 @@ impl World {
         let level_ref = &self.level;
         let n = self.actors.len();
         let mut scores = Vec::new();
+        let mut touch_pairs = Vec::new();
         for i in 0..n {
             for j in (i + 1)..n {
                 let (a, b) = {
@@ -3300,10 +3317,10 @@ impl World {
                         };
                         if !tilted(a) && !tilted(b) {
                             if flag(a, ab, bb, dx) {
-                                a.touch_front = true;
+                                touch_pairs.push((a.id, b.id));
                             }
                             if flag(b, bb, ab, -dx) {
-                                b.touch_front = true;
+                                touch_pairs.push((b.id, a.id));
                             }
                         }
                     }
@@ -3311,6 +3328,7 @@ impl World {
                 }
             }
         }
+        self.touch_pairs = touch_pairs;
         if !scores.is_empty() {
             self.events.push(Event::EnemyDown);
         }
