@@ -10860,7 +10860,8 @@ mod tests {
     fn super_leaf_gives_tail_attack_and_p_meter_flight() {
         let mut lvl = Level::flat(200);
         lvl.style = "M3".into();
-        lvl.spawns.push(spawn(Kind::StyleItem, 80.0, 32.0));
+        // (a placed leaf sways down through the floor: just ahead of the player, at head height)
+        lvl.spawns.push(spawn(Kind::StyleItem, 70.0, 44.0));
         lvl.spawns.push(spawn(Kind::Goomba, 300.0, 32.0));
         let mut w = World::with_level(lvl);
         w.style = crate::player::Style::M3;
