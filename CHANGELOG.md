@@ -38,7 +38,8 @@ SMCraft is back in development (it was archived in October 2026).
   Endless runs.
 - **Network Play screens** (co-op and versus) over Nextendo matchmaking, tested against a local
   server.
-- **A Mods page** on the title screen with every option below.
+- **A Mods page** on the title screen with every mod option (SMM1 extras, the recomp's mods, Course
+  World's source).
 - **100 Mario: SMM1's Mystery Mushroom reward**: a finished run wins a costume.
 - **Lanky Mario's own sounds** (jump, float, growth), keys' and pink coins' sounds, Burners.
 - **Pictures closer to the game**: the start sign, the 2D styles' drop shadow, animated
