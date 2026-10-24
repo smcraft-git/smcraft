@@ -2355,3 +2355,92 @@ fn the_2p_menu_and_the_dummies_follow_the_game_s_sides_and_pictures() {
     assert_eq!((sq.width, sq.height), (4, 4));
     assert_eq!(&sq.rgba[16..32], &icon.rgba[..16], "centred: one row down");
 }
+
+#[test]
+fn sound_effects_go_on_tiles_parts_and_mario_from_their_window() {
+    let (mut host, mut saves) = (MockHost::default(), Saves::default());
+    let mut m = maker(&mut host, &mut saves, MakerStart::New("M1".into()));
+    run(&mut m, &mut host, &mut saves, idle());
+    // a Goomba first, then the sound palette
+    m.slot = m.palette.iter().position(|&t| t == Tool::Part(0)).unwrap();
+    m.cur = (12, 3);
+    run(&mut m, &mut host, &mut saves, press(Buttons::CONFIRM));
+    run(&mut m, &mut host, &mut saves, idle());
+    m.toggle_sound_mode();
+    assert!(m.se.on);
+    assert_eq!(m.sound_effect(), Some(0), "Shock first");
+    // the window's Music page: Boss Music, chosen to the front of the palette
+    run(&mut m, &mut host, &mut saves, keys(keys::PARTS));
+    assert_eq!(m.mode, Mode::Ring);
+    for _ in 0..4 {
+        run(&mut m, &mut host, &mut saves, press(Buttons::DOWN));
+        run(&mut m, &mut host, &mut saves, idle());
+    }
+    run(&mut m, &mut host, &mut saves, press(Buttons::CONFIRM));
+    assert_eq!(m.mode, Mode::Edit);
+    assert_eq!((m.se.palette[0], m.se.slot), (9, 0));
+    assert_eq!(m.se.palette.len(), SLOTS);
+    host.edit_sounds.clear();
+    // onto an empty tile, onto the Goomba, onto Mario
+    m.cur = (20, 4);
+    run(&mut m, &mut host, &mut saves, press(Buttons::CONFIRM));
+    run(&mut m, &mut host, &mut saves, idle());
+    assert_eq!(
+        std::mem::take(&mut host.edit_sounds),
+        [("EditOtoasobi09".to_string(), "cue".to_string())]
+    );
+    m.cur = (12, 3);
+    run(&mut m, &mut host, &mut saves, press(Buttons::CONFIRM));
+    run(&mut m, &mut host, &mut saves, idle());
+    m.cur = m.editor.mario_tiles()[0];
+    run(&mut m, &mut host, &mut saves, press(Buttons::CONFIRM));
+    run(&mut m, &mut host, &mut saves, idle());
+    let c = &m.editor.course;
+    assert_eq!(c.header.player_effect(), Some(9));
+    assert_eq!(c.main.sound_effects.len(), 1);
+    let g = m.editor.object_at(12, 3).unwrap();
+    assert_eq!(m.editor.object(g).unwrap().sound_effect(), Some(9));
+    // the course shows three icons
+    let mut q = Vec::new();
+    m.sound_effect_quads(&mut q);
+    assert_eq!(q.len(), 3);
+    // the back button takes the spot off; undo brings it back
+    m.cur = (20, 4);
+    run(&mut m, &mut host, &mut saves, press(Buttons::BACK));
+    run(&mut m, &mut host, &mut saves, idle());
+    assert!(m.editor.course.main.sound_effects.is_empty());
+    run(&mut m, &mut host, &mut saves, keys(keys::UNDO));
+    run(&mut m, &mut host, &mut saves, idle());
+    assert_eq!(m.editor.course.main.sound_effects.len(), 1);
+    // ground refuses one
+    m.cur = (20, 0);
+    run(&mut m, &mut host, &mut saves, press(Buttons::CONFIRM));
+    run(&mut m, &mut host, &mut saves, idle());
+    assert_eq!(m.editor.sound_effect_at(20, 0), None);
+    // the sound button again: parts
+    m.toggle_sound_mode();
+    assert!(!m.se.on);
+    let saved = m.editor.save().unwrap();
+    let back = mmk_formats::smm2::Course::parse(&saved).unwrap();
+    assert_eq!(back.to_bytes().unwrap(), saved);
+    assert_eq!(back.header.player_effect(), Some(9));
+}
+
+#[test]
+fn the_sound_capture_states_open() {
+    for what in ["sound", "sound-ring", "sound-icons"] {
+        let (mut host, mut saves) = (MockHost::default(), Saves::default());
+        let mut m = maker(&mut host, &mut saves, MakerStart::New("M1".into()));
+        assert!(
+            with(&mut host, &mut saves, |cx| m.debug_open(cx, what)),
+            "{what}"
+        );
+        assert!(m.se.on);
+        if what == "sound-ring" {
+            assert_eq!((m.mode, m.se.ring.category), (Mode::Ring, 4));
+        }
+        if what == "sound-icons" {
+            assert_eq!(m.editor.placed_effects().len(), 3);
+        }
+    }
+}

@@ -1,11 +1,11 @@
 //! The placed sound effects' ids (research/specs/sound-effect-parts.md, private): a spot's,
 //! a part's `sound_effect_id` and the header's `player_sound_effect` hold an effect's course id
-//! 0–55. The maker offers 47 of them, in this order (its palette, its pages and the icons'
-//! labels); 21, 22, 27, 28, 33, 34, 39, 40 and 55 have sound users but are never offered. What
-//! they play is `mmk_sim::otoasobi`'s.
+//! 0–55. The maker offers 47 of them (by icon: their labels, pages and course icons); 21, 22,
+//! 27, 28, 33, 34, 39, 40 and 55 have sound users but are never offered. What they play is
+//! `mmk_sim::otoasobi`'s.
 
-/// The effects the maker offers, in icon order (the palette's and the pages' order): their
-/// course ids [obs 0x71023ca370].
+/// The effects the maker offers, in icon order (the order of the game's label table; the
+/// window's pages group them, [`PAGES`]): their course ids [obs 0x71023ca370].
 pub const ICON_IDS: [u8; 47] = [
     0, 11, 6, 25, 3, 14, 7, 23, 24, 26, 1, 12, 2, 13, 17, 5, 29, 30, 31, 32, 8, 18, 4, 15, 35, 36,
     37, 38, 16, 41, 42, 43, 44, 45, 9, 19, 10, 20, 48, 49, 50, 51, 52, 53, 54, 46, 47,
@@ -63,10 +63,21 @@ pub const ICON_LABELS: [&str; 47] = [
     "SoundEffect",
 ];
 
-/// The pages of the effect window (the ring's five categories, `Edit_RingCategory_01`) as
-/// ranges of icon order: the rows of the course icons' sheet `Otoasobi_CategoryPanel` (10, 10,
-/// 7, 9 and 11 icons) [obs data].
-pub const PAGES: [(usize, usize); 5] = [(0, 10), (10, 10), (20, 7), (27, 9), (36, 11)];
+/// The effect window's five categories (the ring's `Edit_RingCategory_01`), each one page: the
+/// icons (indices into [`ICON_IDS`]) in their order. They are the rows of the course icons'
+/// sheet `Otoasobi_CategoryPanel` (yellow, orange, green, purple, blue), which put Flash and the
+/// two filters with the animations [obs data: the sheet's cells against the palette pictures].
+pub const PAGES: [&[usize]; 5] = [
+    &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
+    &[10, 11, 12, 13, 14, 15, 16, 17, 18, 19],
+    &[20, 21, 22, 23, 24, 26, 27],
+    &[28, 29, 30, 31, 32, 33, 45, 46, 25],
+    &[34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44],
+];
+
+/// The categories' names: `CategoryName_<key>` of `Edit_MainPage_00` (Feelings, Stingers,
+/// Reactions, Animations, Music) [obs data].
+pub const CATEGORY_KEYS: [&str; 5] = ["Emotion", "OneShot", "Eval", "Visual", "BGM"];
 
 /// The icon (index into [`ICON_IDS`]) of course id `id`, None for an id the maker never offers.
 pub fn icon(id: u8) -> Option<usize> {
@@ -88,6 +99,13 @@ pub fn page_of(id: u8) -> Option<(usize, usize)> {
     let i = icon(id)?;
     PAGES
         .iter()
-        .position(|&(s, n)| i >= s && i < s + n)
-        .map(|p| (p, i - PAGES[p].0))
+        .enumerate()
+        .find_map(|(p, page)| page.iter().position(|&k| k == i).map(|at| (p, at)))
+}
+
+/// The effect's cells in `Otoasobi_CategoryPanel` (1536 × 1290, 128-px cells): its big icon at
+/// (column, row) = (place on its page, page), its small framed one five rows lower (an 88-px
+/// picture 20 px into the cell) [obs data].
+pub fn sheet_cell(id: u8) -> Option<(usize, usize)> {
+    page_of(id).map(|(p, at)| (at, p))
 }

@@ -121,7 +121,7 @@ pub const VOICES: [Voice; IDS] = {
 };
 
 pub use mmk_formats::smm2::sound_effects::{
-    ICON_IDS, ICON_LABELS, PAGES, icon, label, page_of, valid,
+    CATEGORY_KEYS, ICON_IDS, ICON_LABELS, PAGES, icon, label, page_of, sheet_cell, valid,
 };
 
 /// The sound and picture user: `Otoasobi<id>`, or its Link / SMB2 version where the data has

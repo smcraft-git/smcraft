@@ -51,11 +51,15 @@ fn tables_agree_with_the_game() {
     ids.sort();
     ids.dedup();
     assert_eq!(ids.len(), 47);
-    assert_eq!(PAGES.iter().map(|p| p.1).sum::<usize>(), 47);
-    for (k, &(s, n)) in PAGES.iter().enumerate().skip(1) {
-        assert_eq!(s, PAGES[k - 1].0 + PAGES[k - 1].1);
-        assert!(n <= 13, "a ring page holds 13");
-    }
+    let mut on_pages: Vec<usize> = PAGES.iter().flat_map(|p| p.iter().copied()).collect();
+    on_pages.sort();
+    assert_eq!(
+        on_pages,
+        (0..47).collect::<Vec<_>>(),
+        "every icon on one page"
+    );
+    assert!(PAGES.iter().all(|p| p.len() <= 13), "a ring page holds 13");
+    assert_eq!(sheet_cell(36), Some((8, 3)), "Flash with the animations");
     for unused in [21, 22, 27, 28, 33, 34, 39, 40, 55] {
         assert!(!valid(unused));
     }
@@ -71,7 +75,8 @@ fn tables_agree_with_the_game() {
         assert_eq!(matches!(v, Voice::Ambient(_)), 99 >> slot & 1 != 0);
     }
     assert_eq!(label(25), Some("LoudLaughter"));
-    assert_eq!(page_of(54), Some((4, 8)));
+    assert_eq!(page_of(54), Some((4, 10)));
+    assert_eq!(page_of(47), Some((3, 7)));
     assert_eq!(user(9, Variant::Link), "Otoasobi09_Link");
     assert_eq!(user(9, Variant::Usa), "Otoasobi09_USA");
     assert_eq!(user(8, Variant::Usa), "Otoasobi08");
