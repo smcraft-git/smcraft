@@ -119,7 +119,7 @@ const FIRE_COUNTER: [u8; 2] = [5, 10];
 /// Return toward home once 96 px away [obs slot 91].
 const HOME_RANGE: f32 = 96.0;
 /// Long Wait when there is nowhere to hop, by HP 3 / 2 / 1: [100,150), [80,120), [60,90).
-const LONG_WAIT: [(i32, i32); 3] = [(60, 30), (80, 40), (100, 50)];
+const LONG_WAIT: [(i32, i32); 3] = [(100, 50), (80, 40), (60, 30)];
 const SHELL_WAIT_2D: i32 = 65;
 const SHELL_WAIT_WU: i32 = 35;
 const SHELL_SLIDE_FRAMES: i32 = 300;
@@ -737,7 +737,7 @@ impl Actor {
         }
         if self.kl_blocked(level, 1) && self.kl_blocked(level, -1) {
             let (lo, n) = LONG_WAIT[hp_ix(self.v3.hp)];
-            self.timer = lo + self.rand(n as u32) as i32 + if self.v3.hp == 3 { 40 } else { 0 };
+            self.timer = lo + self.rand(n as u32) as i32;
             return;
         }
         match w {
