@@ -814,17 +814,23 @@ impl MakerFlow {
         }
         // carrying something: each tile the cursor moves to sounds `move` in the carried thing's
         // edit user [inf: the key every part's user has; when the game plays it not read]
+        // (a multigrab rectangle being drawn ticks `cursor` instead [inf])
         if self.cur != self.move_cur {
             let part = match self.drag {
-                Some(Drag::Carry { index, .. }) => self.editor.object(index).map(|o| o.id),
-                Some(Drag::MoveSelection { .. }) => Some(7),
-                Some(Drag::Start { .. }) => Some(START_GROUND),
-                Some(Drag::Goal { .. }) => Some(GOAL_GROUND),
-                Some(Drag::Resize { index, .. }) => self.editor.object(index).map(|o| o.id),
+                Some(Drag::Carry { index, .. }) => {
+                    self.editor.object(index).map(|o| (o.id, "move"))
+                }
+                Some(Drag::MoveSelection { .. }) => Some((7, "move")),
+                Some(Drag::Select { .. }) => Some((7, "cursor")),
+                Some(Drag::Start { .. }) => Some((START_GROUND, "move")),
+                Some(Drag::Goal { .. }) => Some((GOAL_GROUND, "move")),
+                Some(Drag::Resize { index, .. }) => {
+                    self.editor.object(index).map(|o| (o.id, "move"))
+                }
                 _ => None,
             };
-            if let Some(p) = part {
-                self.sound(p, "move");
+            if let Some((p, key)) = part {
+                self.sound(p, key);
             }
             self.move_cur = self.cur;
         }

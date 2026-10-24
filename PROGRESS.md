@@ -228,8 +228,8 @@ sway, importer and pack 12, the dev cache already at v12).
     `edit_music` / `edit_sound`, routed in the shell and the FFI (so the Swift app has them) to a
     maker `Director` of their own. ✅ `move` per tile while carrying [inf: when], the start /
     goal drags (`<S>_EditGroundStart` / `GroundGoal`: drag, move, set) and stretching (the part's user), wings / parachutes
-    (`voice_getWing`, `lose_wing`, `p_EquipPara`, `p_RemovePara`) · ⬜ the selection frame's
-    `cursor` ticks, `Tower_stack` (stacking, research C11), a listen
+    (`voice_getWing`, `lose_wing`, `p_EquipPara`, `p_RemovePara`), the multigrab frame's
+    `cursor` per tile [inf: when] · ⬜ `Tower_stack` (stacking, research C11), a listen
     on hardware against SMM2
 - 🔄 Edit any course: the open row of the Course World / Coursebot lists has "Make" (the co-op
   button's slot, the Coursebot's word, the glove icon) → the maker; someone else's course (a
