@@ -268,6 +268,10 @@ const ICON_MODELS: [(&str, &str); 2] = [
 /// theme pictures, and the Water Level / Custom Scroll modes' lines, handles, path marks and
 /// birds.
 pub const EDIT_MODELS: &str = "EditModel";
+/// Texture group of co-op making's player 2 glove (`Edit_mainCursor2P`: the glove's textures
+/// under the same names, edged green instead of red) (research/specs/maker.md C16).
+pub const EDIT_MODELS_2P: &str = "EditModel2P";
+const EDIT_MODEL_2P_FILE: &str = "Edit_mainCursor2P";
 
 /// The Course Maker models whose textures go to [`EDIT_MODELS`] (`Pack/*.pack` members in
 /// v3.0.3, `Lyt_Edit_Icon` loose in `Model/`). The last five are the modes' (research/specs/
@@ -631,6 +635,11 @@ pub fn run_smm2_ui(cfg: &Smm2UiConfig, progress: Progress) -> Result<Smm2UiRepor
                 .into_iter()
                 .map(|(n, d)| (EDIT_MODELS, n, d))
         })
+        .chain(
+            models(&cfg.romfs, &[format!("{EDIT_MODEL_2P_FILE}.Nin_NX_NVN.zs")])
+                .into_iter()
+                .map(|(n, d)| (EDIT_MODELS_2P, n, d)),
+        )
         .collect();
     for (group, name, data) in models {
         progress("condition icons", mission_icons + skin_icons, 0);
@@ -897,6 +906,9 @@ mod tests {
             .collect();
         let found = models(&romfs, &wanted);
         assert_eq!(found.len(), wanted.len());
+        // and player 2's glove, its own model with the same texture names
+        let p2 = models(&romfs, &[format!("{EDIT_MODEL_2P_FILE}.Nin_NX_NVN.zs")]);
+        assert_eq!(p2.len(), 1);
         let mut names = BTreeSet::new();
         for (name, data) in found {
             let d = archive::unwrap(data).unwrap();
