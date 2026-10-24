@@ -4370,8 +4370,8 @@ impl World {
                 (_, true) => (48.0, 48.0),
                 _ => (32.0, 32.0),
             };
-            // a Lava Bubble hiding under the lava is still at home
-            let cy = if a.kind == Kind::LavaBubble {
+            // a Lava Bubble hiding under the lava is still at home (a winged one flies)
+            let cy = if a.kind == Kind::LavaBubble && !a.wings {
                 a.home_y
             } else {
                 a.y

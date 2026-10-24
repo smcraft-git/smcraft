@@ -2219,6 +2219,11 @@ impl Actor {
                     self.step_para_beetle(level);
                     return None;
                 }
+                // Bubble Wing: a straight flight bouncing off terrain (actors/wing.rs)
+                Kind::LavaBubble if self.pipe.is_none() && self.rail.is_none() => {
+                    self.step_winged_bubble(level);
+                    return None;
+                }
                 // its own Fly / Turn (actors/wing.rs)
                 Kind::BobOmb if self.phase == 0 => {
                     self.step_winged_bobomb(level);
