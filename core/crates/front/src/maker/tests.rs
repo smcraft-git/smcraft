@@ -768,7 +768,10 @@ fn the_maker_plays_its_music_and_the_parts_sounds() {
     m.cur = (14, 3);
     run(&mut m, &mut host, &mut saves, idle());
     // carried to a new tile (`move`), then put down
-    assert_eq!(sounds(&mut host), ["M1_EditKuribo:move", "M1_EditKuribo:set"]);
+    assert_eq!(
+        sounds(&mut host),
+        ["M1_EditKuribo:move", "M1_EditKuribo:set"]
+    );
     // a Super Mushroom on it makes it big
     m.slot = m.palette.iter().position(|&t| t == Tool::Part(20)).unwrap();
     run(&mut m, &mut host, &mut saves, press(Buttons::CONFIRM));
