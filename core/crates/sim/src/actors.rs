@@ -18,7 +18,7 @@ mod chute;
 mod claw;
 pub use claw::{ClawRope, NUDGE as CLAW_NUDGE, REACH as CLAW_REACH};
 mod clown;
-pub use clown::ClownFire;
+pub use clown::{ClownFire, charge_burst_tiles};
 mod dokan;
 pub use dokan::Dokan;
 mod fly;
@@ -2557,13 +2557,36 @@ impl Actor {
                 // a Fire Koopa Clown Car's PlayerShot (exe 0x7100ddf010, v3.0.3): straight at
                 // its launch speed, put out by terrain, at most 600 frames [obs]; the charged
                 // one (`phase` 1, ChargeShot 0x7100ddf610) has no life count and bursts on
-                // terrain (its burst's tile hits are not modelled)
+                // terrain (`phase` 2: ChargeExplode, its tiles hit by the world,
+                // actors/clown.rs `charge_burst_tiles`)
+                if self.phase == 2 {
+                    return None;
+                }
                 if self.phase != 1 {
                     self.timer -= 1;
                 }
                 self.x += self.vx;
                 self.y += self.vy;
-                if level.cell_at(self.x, self.y + 4.0).is_solid() || self.timer <= 0 {
+                if level.cell_at(self.x, self.y + 4.0).is_solid() {
+                    if self.phase == 1 {
+                        // the side it hit (+0x19ec: 1 wall, 2 floor, 3 ceiling) [inf: a wall
+                        // when the cell it came from sideways is free]
+                        let side = if !level.cell_at(self.x - self.vx, self.y + 4.0).is_solid() {
+                            1
+                        } else if self.vy > 0.0 {
+                            3
+                        } else {
+                            2
+                        };
+                        // (held outside, as the game's terrain check leaves it)
+                        self.x -= self.vx;
+                        self.y -= self.vy;
+                        self.phase = 2;
+                        self.hops = side;
+                    } else {
+                        self.mode = Mode::Dead;
+                    }
+                } else if self.timer <= 0 {
                     self.mode = Mode::Dead;
                 }
             }

@@ -51,6 +51,48 @@ pub const PLAYER_SHOT_SPEED: f32 = 3.625;
 /// ends it in ChargeExplode (0x7100ddf950: a 3-frame burst snapped to the tile it hit,
 /// sweeping the tile and its neighbours with hit kind 2, 0x7100e22210) [obs v3.0.3].
 pub const CHARGE_SHOT_SPEED: f32 = 4.0;
+/// The tiles a charged shot's ChargeExplode hits (enter 0x7100ddf950) [obs v3.0.3]: its
+/// position snapped to the centre of its 16-px tile, moved one tile toward what it hit (`side`
+/// 1 a wall, the way it faces; 2 the floor, down; 3 a ceiling, up); then the block hit
+/// 0x7100e22210 along that tile's row and column ±16 (±32 big, plus the 3 × 3 box round it),
+/// and, when it hit something (side ≠ 0), the column one tile behind it (±16 up and down).
+/// That block hit is the one a Bob-omb's and a Mechakoopa missile's blasts use (hit kind 2).
+pub fn charge_burst_tiles(x: f32, y: f32, side: u8, dir: i32, big: bool) -> Vec<(i32, i32)> {
+    let mut tx = (x / 16.0).floor() as i32;
+    let mut ty = (y / 16.0).floor() as i32;
+    let back = if dir < 0 { -1 } else { 1 };
+    match side {
+        3 => ty += 1,
+        2 => ty -= 1,
+        1 => tx += back,
+        _ => {}
+    }
+    let r = if big { 2 } else { 1 };
+    let mut tiles = Vec::new();
+    let mut add = |t: (i32, i32)| {
+        if !tiles.contains(&t) {
+            tiles.push(t);
+        }
+    };
+    if big {
+        for dy in -1..=1 {
+            for dx in -1..=1 {
+                add((tx + dx, ty + dy));
+            }
+        }
+    }
+    for d in -r..=r {
+        add((tx + d, ty));
+        add((tx, ty + d));
+    }
+    if side != 0 {
+        for dy in -1..=1 {
+            add((tx - back, ty + dy));
+        }
+    }
+    tiles
+}
+
 /// Hard cap on a shot's flight (it has no timer of its own; it ends on terrain or off
 /// screen) [inf].
 pub const SHOT_LIFE: i32 = 600;
@@ -373,6 +415,38 @@ impl Actor {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_charged_shot_bursts_in_a_plus_with_the_column_behind() {
+        // flying right into a wall at tile (10, 4): centre moved into the wall tile (11, 4)
+        let t = charge_burst_tiles(10.0 * 16.0 + 15.0, 4.0 * 16.0 + 6.0, 1, 1, false);
+        let mut t2 = t.clone();
+        t2.sort();
+        assert_eq!(
+            t2,
+            vec![
+                (10, 3),
+                (10, 4),
+                (10, 5),
+                (11, 3),
+                (11, 4),
+                (11, 5),
+                (12, 4)
+            ]
+        );
+        // a big one on the floor at tile (6, 3): centre (6, 2), the 3 × 3 box, the arms two
+        // tiles out; the column behind (facing left: x + 1) is inside the box
+        let mut b = charge_burst_tiles(100.0, 50.0, 2, -1, true);
+        b.sort();
+        let mut want = vec![(4, 2), (8, 2), (6, 0), (6, 4)];
+        for dy in 1..=3 {
+            for dx in 5..=7 {
+                want.push((dx, dy));
+            }
+        }
+        want.sort();
+        assert_eq!(b, want);
+    }
 
     fn fire_car() -> Actor {
         let mut a = Actor::new(Kind::ClownCar { fire: true }, 100.0, 100.0);
