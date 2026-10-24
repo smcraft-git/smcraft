@@ -56,6 +56,7 @@ SMCraft is back in development (it was archived in October 2026).
 - **Android**: Bluetooth controllers' buttons.
 - **Stacked enemies** move together as in the game.
 - **Frozen Coins** (the 3.0 update's): ice round a coin, thawed by fireballs.
+- **Koopalings on tracks.**
 - **Endless**: the map's "New High Score!" panel.
 - **Physics**: 352 player traces recorded in the game match frame by frame (walls, water,
   slopes, items, the raccoon tail and SMW cape, enemies).

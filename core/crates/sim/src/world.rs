@@ -9611,6 +9611,38 @@ mod tests {
     }
 
     #[test]
+    fn koopaling_rides_a_track() {
+        let mut lvl = Level::flat(60);
+        lvl.tracks = crate::track::Tracks::new([(9, 3, 0), (11, 3, 0)]);
+        let mut s = spawn(
+            Kind::Koopaling {
+                who: 5,
+                key: false,
+                clown: false,
+            },
+            168.0,
+            64.0,
+        );
+        s.rail = Some(0);
+        lvl.spawns.push(s);
+        let mut w = World::with_level(lvl);
+        w.player.x = 40.0;
+        run(&mut w, 0, 2);
+        let k = |w: &World| {
+            w.actors
+                .iter()
+                .find(|a| matches!(a.kind, Kind::Koopaling { .. }))
+                .map(|a| (a.x, a.rail.is_some()))
+                .unwrap()
+        };
+        let (x0, on) = k(&w);
+        assert!(on, "attached");
+        run(&mut w, 0, 20);
+        let (x1, _) = k(&w);
+        assert!((x1 - x0).abs() > 10.0, "carried along: {}", x1 - x0);
+    }
+
+    #[test]
     fn escort_toad_follows_the_player_and_comes_back_when_knocked_out() {
         let mut lvl = Level::flat(80);
         lvl.spawns.push(spawn(Kind::EscortToad, 40.0, 32.0));
