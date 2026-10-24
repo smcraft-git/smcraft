@@ -98,6 +98,10 @@ pub enum Event {
     ConditionLost,
     /// Up at a key door without a key.
     Locked,
+    /// A donut block began to shake under the player / dropped / came back.
+    DonutShake,
+    DonutFall,
+    DonutBack,
     /// SMM1 extras: a costumed player landed, started a skid, began the taunt (their costume
     /// sounds); Lanky Mario's float cue during a held jump.
     Land,
@@ -4969,7 +4973,10 @@ impl World {
         };
         self.donut_ride = match (under, self.donut_ride) {
             (Some(t), Some((r, n))) if t == r => Some((t, n + 1)),
-            (Some(t), _) => Some((t, 1)),
+            (Some(t), _) => {
+                self.events.push(Event::DonutShake);
+                Some((t, 1))
+            }
             _ => None,
         };
         if let Some(((x, y), n)) = self.donut_ride
@@ -4983,6 +4990,7 @@ impl World {
             a.home_y = y as f32;
             self.add_actor(a);
             self.donut_ride = None;
+            self.events.push(Event::DonutFall);
         }
         if self.coop.extra {
             return;
@@ -5005,6 +5013,7 @@ impl World {
             }
         });
         for (x, y) in back {
+            self.events.push(Event::DonutBack);
             self.blocks
                 .map
                 .insert((x, y), Block::new(BlockKind::Donut, None));
@@ -8013,11 +8022,22 @@ mod tests {
         let mut w = World::with_level(lvl);
         w.player.x = 12.0 * TILE + 8.0;
         w.player.y = 5.0 * TILE + 10.0;
-        run(&mut w, 0, 20);
-        assert!(w.player.on_ground);
-        run(&mut w, 0, 40);
+        let mut told: Vec<Event> = Vec::new();
+        for i in 0..60 {
+            w.step(Input::default());
+            told.extend(
+                w.events.iter().filter(|e| {
+                    matches!(e, Event::DonutShake | Event::DonutFall | Event::DonutBack)
+                }),
+            );
+            if i == 19 {
+                assert!(w.player.on_ground);
+            }
+        }
         assert!(w.actors.iter().any(|a| a.kind == Kind::Donut));
         assert!(w.blocks.get(12, 4).is_none());
+        // the shake as the player lands on it, the drop 48 frames later (their sounds)
+        assert_eq!(told, [Event::DonutShake, Event::DonutFall]);
     }
 
     #[test]

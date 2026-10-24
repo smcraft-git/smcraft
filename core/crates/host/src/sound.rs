@@ -1441,6 +1441,17 @@ impl Sounds {
                     let user = self.user("Balloon");
                     self.sfx_at(world, &user, key, &PropList::default(), pe, 0);
                 }
+                // donut blocks (3D World keeps their sounds on ObjectCommon) [inf: the shake
+                // loop played once as it starts]
+                Event::DonutShake => {
+                    self.object_sfx(world, "chikuwa_shake", pe);
+                }
+                Event::DonutFall => {
+                    self.object_sfx(world, "chikuwa_start_fall", pe);
+                }
+                Event::DonutBack => {
+                    self.object_sfx(world, "chikuwa_revival", pe);
+                }
                 Event::Locked => {
                     self.player_sfx(world, "key_notget", &[]);
                 }
