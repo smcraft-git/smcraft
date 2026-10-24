@@ -82,7 +82,10 @@ fn db() -> serde_json::Value {
                 asset("r_get_togemet", "SpikyHelmetOn"),
                 asset("r_lose_met", "HelmetOff"),
                 asset("spinjump_Ground", "SpinGround"),
-                asset("voice_spinjump", "SpinVoice")
+                asset("voice_spinjump", "SpinVoice"),
+                asset("squat", "Squat"),
+                asset("catchWall", "CatchWall"),
+                asset("wallslip", "WallSlip")
             ]},
             "M1_JumpStep": {"calls": [asset("jump", "Spring"), asset("high_jump", "SpringHigh")]},
             "M1_PowBlock": {"calls": [asset("pow", "Pow")]},
@@ -416,6 +419,23 @@ fn a_spin_jump_named_by_where_it_starts_and_its_voice() {
 }
 
 #[test]
+fn crouching_and_catching_a_wall_sound() {
+    let mut r = rig();
+    let mut w = world();
+    r.s.start_course(&w);
+    r.played();
+    w.player.on_ground = true;
+    w.player.crouch = true;
+    r.s.after_step(&w);
+    assert_eq!(r.played(), ["sfx:Squat"]);
+    w.player.crouch = false;
+    w.player.on_ground = false;
+    w.player.wall_slide = 5;
+    r.s.after_step(&w);
+    assert_eq!(r.played(), ["sfx:CatchWall", "sfx:WallSlip"]);
+}
+
+#[test]
 fn the_3d_world_dash_has_its_own_footsteps() {
     use mmk_sim::player::{Pose, Style};
     let mut r = rig();
@@ -520,10 +540,11 @@ fn springs_wall_kicks_pow_and_bob_ombs() {
     w.events = vec![Event::Jump];
     r.s.after_step(&w);
     assert_eq!(r.played(), ["sfx:SpringHigh"]);
-    // off a wall: the wall kick
+    // off a wall: the wall kick (after the wall caught and its slide)
     w.player.wall_slide = 5;
     w.events.clear();
     r.s.after_step(&w);
+    assert_eq!(r.played(), ["sfx:CatchWall", "sfx:WallSlip"]);
     w.player.wall_slide = 0;
     w.events = vec![Event::Jump];
     r.s.after_step(&w);

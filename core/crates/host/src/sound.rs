@@ -71,6 +71,8 @@ const H_TIMER: u32 = 1;
 const H_AMBIENT: u32 = 2;
 /// 3D World's conveyor belts' running loop.
 const H_CONVEYOR: u32 = 3;
+/// The player's slide down a wall (NSMBU, 3D World).
+const H_WALLSLIP: u32 = 4;
 const H_FIRST_FREE: u32 = 16;
 /// The maker's music fades out over this many frames (60 fps) [inf].
 const EDIT_MUSIC_FADE: f32 = 10.0;
@@ -590,6 +592,29 @@ impl Sounds {
         }
         if now.shoe && !prev.shoe {
             self.player_sfx(world, "kutsuIn", &[]);
+        }
+        // crouching (NSMBU's squat)
+        if now.squat && !prev.squat {
+            self.player_sfx(world, "squat", &[]);
+        }
+        // a wall caught: its sound, then the slide's loop until it ends (NSMBU, 3D World)
+        if now.wall_slide && !prev.wall_slide {
+            self.player_sfx(world, "catchWall", &[]);
+            let props = self.player_props(world);
+            let user = self.user("Player");
+            self.sfx_at(
+                world,
+                &user,
+                "wallslip",
+                &props,
+                Self::player_emitter(world),
+                H_WALLSLIP,
+            );
+        } else if prev.wall_slide && !now.wall_slide {
+            self.send(Command::StopHandle {
+                handle: H_WALLSLIP,
+                fade: 0,
+            });
         }
         // a hit knocks the shoe off (not stepping out of it) [inf: told by the hit's
         // invincibility]
@@ -1333,10 +1358,9 @@ impl Sounds {
                 }
                 Event::Death => {
                     self.stop_count(world);
-                    self.send(Command::StopHandle {
-                        handle: H_AMBIENT,
-                        fade: 0,
-                    });
+                    for handle in [H_AMBIENT, H_WALLSLIP] {
+                        self.send(Command::StopHandle { handle, fade: 0 });
+                    }
                     // 3D World: the character's last cry
                     self.player_sfx(world, "voice_damagelast", &[]);
                     let down = self.chara_key("FanfareDown");
@@ -2020,6 +2044,8 @@ struct PlayerSnap {
     in_water: bool,
     pound_start: bool,
     wall_slide: bool,
+    /// Crouching on the ground.
+    squat: bool,
     climbing: bool,
     shoe: bool,
     /// The shell worn as a helmet (1 Buzzy, 2 Spiny).
@@ -2048,6 +2074,7 @@ impl PlayerSnap {
             in_water: p.in_water,
             pound_start: p.pound > 0,
             wall_slide: p.wall_slide > 0,
+            squat: p.crouch && p.on_ground,
             climbing: p.climbing.is_some(),
             shoe: p.shoe.is_some(),
             helmet: p.helmet,
