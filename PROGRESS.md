@@ -132,6 +132,29 @@ sway, importer and pack 12, the dev cache already at v12).
   are the same defaults for Basic as for Tower, so pass 2's evidence doesn't decide it), the
   item touch boxes (not in EnemyDB or the item init 0x710134fe30; set by the shared enemy init
   0x7101286ee0) [inf]. 578 / 580 traces exact; coverage 550/550 + 273/273; simulate 0 crashes.
+- ✅ **Physics pass 8** (2026-10-25, branch `physics8`, research fidelity-log.md "physics8",
+  objects/93-clear-pipe.md "Traced", 91-seesaw.md, 87-gentle-slope.md): **583 / 583 traces exact**
+  (the 580 and three new whole-course traces), every whole course exact — W_3049200 to its end,
+  W_3010660 to its death. ✅ a gentle slope whose low end cap lies under a ground tile has its
+  first step full solid (the floor collider 0x10100a11, type 0x11 sub 10; v3.0.3 cell function
+  0x7100db8df0 replaces a cell whose art is a joint piece) — six arrangements traced on a test
+  course (`mmk trace-courses --only M1_slopejoin`); ✅ the stomp window from the enemy's top
+  before its move; a Koopa stomped in the air falls as its shell that frame; a walker stands a
+  frame after a fall only on a slope; ✅ the Seesaw ported from v3.0.3 (actors/seesaw.rs: physics
+  0x71013d7d90, integrator 0x71013d9950 — binary angle, the torque through the game's atan / sine
+  tables, the chord integrator, the damping before and the return to level after the turn, the
+  ends from the table rotation; the rider on the ends' line past the turned end, carried by the
+  ends' movement, stepping x · cos of the angle two frames before, the terrain sensor's slope
+  classes for its speed); ✅ Clear Pipes against the game (test courses 3W_cpipe / 3W_cpipeg:
+  straight, two bends, joined, blocked, a Goomba): side entry on the face after 10 held frames,
+  the entry frame standing, the out frame running the next state, enemies' in-pipe speeds 0 —
+  frame-exact; ✅ 3D World Goombas spot the player (80 px in front), stand 53 frames, run at 0.7
+  (the Kuribo3W Find / Run / Lost states); ✅ placed Super Mushrooms walk right from their first
+  frame, rest 0.1 px into walls and turn a frame late. Left [?]: the item touch distance (a
+  mushroom walking at a standing player touches at 10.1 px, not 11.1, while a chased one touched
+  at 12.83: test course M1_mushstart, its trace kept out of the regression), the clear pipe's push
+  entry (0x71015a9d00: 9 frames of pushing didn't take the player in), vertical clear-pipe mouths
+  untraced, steep slopes joined to ground untraced, the Seesaw's slam and blocked-rider sum.
 - **Agent queue** (when a helper slot frees; running 2026-10-25: the maker's Water Level and
   Custom Scroll modes, physics): ✅ a Koopaling in a Clown Car (2026-10-25, branch
   `kclown`, research 120-koopalings.md "In a Koopa Clown Car": KoKoopaDefault's Clown vtable
@@ -683,8 +706,8 @@ Nextendo; `docs/nextendo-network-play.md`, spec `research/specs/network-play.md`
   out to belong to the parts' 0xC0000 bits, not stacks) · ⬜ the editor's height limit (play
   takes 128 members at most), pulling a member off a column
 - 🔄 Physics: re-recording every trace (2026-10-24; the old 428 / 454 was not a true count — the
-  old items / form traces were all small Mario). Re-recorded, current engine: **578 / 580 exact**
-  over 113 courses + 9 whole courses (7 whole exact: W_3064188, W_3046973, W_3065813, W_3006094, and W_3051046, W_3051605, W_3145588 to their deaths, the title course not restarting) (2026-10-24 physics7: the shell courses now compare the shell too, which showed
+  old items / form traces were all small Mario). Re-recorded, current engine: **583 / 583 exact**
+  over 113 courses + 12 whole-course traces (2026-10-25 physics8: all 9 whole courses exact: W_3064188, W_3046973, W_3065813, W_3006094, W_3049200, and W_3051046, W_3051605, W_3145588, W_3010660 to their deaths, the title course not restarting; and the test courses X_slopejoin, X_cpipe, X_cpipeg) (2026-10-24 physics7: the shell courses now compare the shell too, which showed
   3 carried-shell throws off; and object traces: the player plus every simulated actor matched to
   a recorded game object, found by scans while the game is paused in the trace hook): M1/M3/MW/WU/3W flat 34 each, M1/M3/MW/WU/3W items 34 each, M1/M3/MW/WU/3W
   slope 4 each, M1/M3/MW/WU/3W wall 4 each, M1/M3/MW/WU/3W water 2 each, M3/MW/WU/3W form 16 each
@@ -745,11 +768,12 @@ Nextendo; `docs/nextendo-network-play.md`, spec `research/specs/network-play.md`
   SMB1 courses exact start to goal (W_3064188, W_3046973: player + Goombas; the pole touch is
   taken in the next update after a normal move, the enemies stop, the pole's x from the frame
   after, 12 frames of hold, the slide at −1.9, 93 frames in all, then x + 6 facing right);
-  W_3049200 (cloud blocks, Dry Bones, Cheep Cheeps, Koopas) exact to frame 374 (a jump's take-off
+  W_3049200 (cloud blocks, Dry Bones, Cheep Cheeps, Koopas) exact to the end (a jump's take-off
   frame from a slope still moves along it; sliding shells are met where they stood before their
-  move too; a ground block above a slope's surface holds the feet; at 374 the game walks flat
-  over a slope that overlaps ground, unexplained [?]; its Dry Bones on a cloud row high over a slope exact: a one-way top above a slope's surface holds the feet); W_3065813 exact
-  (a wall of dotted-line blocks: their 0x4 variant is the red one, solid at ON), W_3051046 exact to its death at 103 and through it (the title course doesn't restart: compared to the engine's restart), W_3006094 exact (a bridge is stood on at its lower row, the deck under its rails; off-screen actors go against the view after the frame's camera move), W_3051605 exact to the title course's death sequence, the player through its death at 233 (a big Paragoomba walked into while falling past its top: the after-move touch covers winged walkers, with the stomp's own window) to the title course's death sequence (its packed row of Goombas: a walker turns a frame after a wall or an enemy met in front, then 8 frames of Turn, stopped by another enemy met in front; from the binary's Walk / Turn and enemy contact, timing from a recording of the Turn fields; its staircase's six Goombas exact: an actor on an incline steps x · cos θ, lands by its centre, stands a frame after a fall, and walkers turn on each other only head-on), W_3145588 exact to its death at 421 (an unpressed P Switch is solid at its sides; parachute coins are Coin actors, never P Switch bricks; Goomba's Shoe: 50 frames and its wind-up animation before a hop, 24 frames in Walk, 12 winged; a big one's walls 14 px out, flipping off them a frame late; the winged one's hover from the binary, the engine's 256-step sine; it hurts after the player's move like the walkers), W_3010660 to 141 (the Seesaw: the player weighs 2 per px of lever arm from the third frame its centre is over the plank, the plank tilts after the player's move and carries the rider round its turning point 8 px under the top; the carry's last 0.002 px still off [?]). Object courses in all styles exact
+  move too; a ground block above a slope's surface holds the feet; at 374 a slope whose low cap
+  lies under a ground tile: its first step is full solid (physics8); at 424 a stomp on a falling
+  Koopa, measured from its top before its move; its Dry Bones on a cloud row high over a slope exact: a one-way top above a slope's surface holds the feet); W_3065813 exact
+  (a wall of dotted-line blocks: their 0x4 variant is the red one, solid at ON), W_3051046 exact to its death at 103 and through it (the title course doesn't restart: compared to the engine's restart), W_3006094 exact (a bridge is stood on at its lower row, the deck under its rails; off-screen actors go against the view after the frame's camera move), W_3051605 exact to the title course's death sequence, the player through its death at 233 (a big Paragoomba walked into while falling past its top: the after-move touch covers winged walkers, with the stomp's own window) to the title course's death sequence (its packed row of Goombas: a walker turns a frame after a wall or an enemy met in front, then 8 frames of Turn, stopped by another enemy met in front; from the binary's Walk / Turn and enemy contact, timing from a recording of the Turn fields; its staircase's six Goombas exact: an actor on an incline steps x · cos θ, lands by its centre, stands a frame after a fall, and walkers turn on each other only head-on), W_3145588 exact to its death at 421 (an unpressed P Switch is solid at its sides; parachute coins are Coin actors, never P Switch bricks; Goomba's Shoe: 50 frames and its wind-up animation before a hop, 24 frames in Walk, 12 winged; a big one's walls 14 px out, flipping off them a frame late; the winged one's hover from the binary, the engine's 256-step sine; it hurts after the player's move like the walkers), W_3010660 exact to its death (the Seesaw as v3.0.3 turns it, physics8: the rider's torque from the third frame its centre is over the plank, the plank tilting after the player's move and carrying the rider by its ends' movement; both Swinging Claws; a mushroom shut in a one-tile box). Object courses in all styles exact
   (3D World's Trampoline eases 3 px, its falling Donut is gone after 21 frames, a lift pushes up
   feet at most 6 px under its top, a foot on a column boundary rides both donuts; SMW turn
   blocks spin 240 frames, passable; small Mario's head at 15.9 in SMW / NSMBU / 3D World; walkers

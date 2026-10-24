@@ -15,13 +15,23 @@ SMCraft is back in development (it was archived in October 2026).
 - The Swift app's NSMBU / 3D World background clouds drift as in the game.
 
 - **Clear Pipes play as in SMM2** (3D World): their walls are solid, and Mario walks into a side
-  mouth (holding the direction, or pushing it), drops into an upward one with Down or jumps into a
+  mouth (holding the direction against it), drops into an upward one with Down or jumps into a
   downward one holding Up; he's carried through at the game's speed, round bends and through pipes
   joined end to end, and comes out the far end — or turns back when the way out is blocked. Enemies
   and items that walk into a mouth ride through too and shoot out of the other end. Riders are
   drawn in front of the pipe, turned along it (items shrunk), with the pipe's in / along / out
   sounds.
 - Clear Pipes are drawn as pale glass with brighter edges, in the Course Maker and in play.
+- Clear Pipes now match the game frame for frame: Mario goes into a side mouth once he has held
+  the direction against it for 10 frames, and comes out falling straight away; enemies shoot out
+  of the far end on the frame they get there and walk on the way they came out.
+- **Seesaws tilt exactly as in SMM2**: the plank's swing, how it carries Mario and how he walks
+  along it (slower uphill once it tilts past 7°) follow the game's own maths; he can stand on its
+  end a little past the edge.
+- 3D World Goombas notice Mario ahead of them, stop for a moment and run at him.
+- A gentle slope whose low end is buried under ground is walked over flat, as in SMM2.
+- Stomping a falling enemy works as in the game (a Koopa stomped in mid-air drops as its shell
+  at once); placed Super Mushrooms set off to the right from the very first frame.
 - **Wings as in SMM2**: winged power-ups, coins, springs, P Switches and POW Blocks fly slowly
   the way they face with a 16-px bob and pass through walls (they meet walls only in 3D World);
   winged blocks fly the same way, and winged Hard, Ice and Donut Blocks swing 48 px from side to
