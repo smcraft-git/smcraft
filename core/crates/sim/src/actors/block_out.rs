@@ -127,7 +127,7 @@ pub fn preset(kind: Kind, wings: bool) -> Preset {
         {
             Preset::PataTogezo
         }
-        // the 3D World Blooper has its own Out (Gesso3W 0x71011037a0) [?: not traced]
+        // (3D World's Blooper, Gesso3W, collides from the start: world.rs `release`)
         Kind::Boo | Kind::Blooper | Kind::Stingby => Preset::FloatSearch,
         // FishBone's Out (0x71010d8850 / 0x71010d88d0, vtable 0x71028cab38) is Pukupuku's
         Kind::CheepCheep { .. } | Kind::FishBone => Preset::Pukupuku,

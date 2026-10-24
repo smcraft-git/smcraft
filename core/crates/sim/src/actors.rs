@@ -2297,6 +2297,16 @@ impl Actor {
                     self.dir = -self.dir;
                 }
             }
+            Kind::Fireball if self.alt => {
+                // a Fire Koopa Clown Car's PlayerShot (exe 0x7100ddf010, v3.0.3): straight at
+                // its launch speed, put out by terrain, at most 600 frames [obs]
+                self.timer -= 1;
+                self.x += self.vx;
+                self.y += self.vy;
+                if level.cell_at(self.x, self.y + 4.0).is_solid() || self.timer <= 0 {
+                    self.mode = Mode::Dead;
+                }
+            }
             Kind::Fireball => {
                 self.timer -= 1;
                 self.vy = (self.vy + FIREBALL_GRAVITY).max(MAX_FALL);
@@ -3349,7 +3359,8 @@ impl Actor {
         let (px, py) = self.target;
         let (dx, dy) = (px - self.x, py + 8.0 - self.y);
         let chase = self.phase == 1 && dx.abs() <= 320.0 && dy.abs() <= 800.0;
-        if !chase {
+        // (a player flying it runs the record from the world: `clown_fire_player`)
+        if !chase && self.phase != 2 {
             self.clown_fire_idle();
         }
         match self.phase {

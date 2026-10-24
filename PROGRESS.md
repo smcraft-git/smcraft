@@ -45,8 +45,9 @@ sway, importer and pack 12, the dev cache already at v12).
   Fire Koopa Clown Car's own fireballs with an enemy rider (2026-10-25, branch `enemysys2`,
   research 42-koopa-clown-car.md "Pass 5": the car's fire helper 0x71028e83f8 / record, cooldown
   90 then [90, 180), a 90-frame charge braking the car, one KoopaClownFire EnemyShot at 1.5 px/f
-  plus the car's speed; bosses in a Fire car too; left: the player's own PlayerShot / ChargeShot,
-  the object budget); ✅ own Parachute falls (2026-10-25, branch `enemysys2`, actors/chute.rs,
+  plus the car's speed; bosses in a Fire car too; a player flying it fires PlayerShots on each
+  change of Run (cooldown 12 / 50, ≤ 8 out, three spread as Fire Mario [inf]); left: the
+  ChargeShot's own flight, the object budget); ✅ own Parachute falls (2026-10-25, branch `enemysys2`, actors/chute.rs,
   shared enemy draft §5.2 "Traced"): the Thwomp's Dossun action folds its parachute and opens it
   on each drop (vy ≤ −4: −0.1 / −1.0), the Lava Bubble's ends in lava or at its hiding level, the
   Cheep Cheep's and Porcupuffer's in water or below the area, the Wiggler's is the Default (its
@@ -62,8 +63,10 @@ sway, importer and pack 12, the dev cache already at v12).
   0x7102915ff0, 61-chain-chomp.md); ✅ water variants (shared enemy draft §5.9): a Goomba out of
   a block in water holds still, then swims; a Lava Bubble leaps 3.5 (5.0); Fish Bones fired in
   water glide level and slow to a stop, Wigglers swim off at once; the winged red Koopa's climb
-  eases by 0.06 out of water (the speed bands were its water variant); left: Hanachan's and
-  Togezo's water Block Outs (partial); the Super World map's ledge cliffs (field atlas
+  eases by 0.06 out of water (the speed bands were its water variant); ✅ Gesso3W's Block Out
+  (collides from the start); left: Hanachan's and Togezo's water Block Outs, the ItemBalloon /
+  ItemHeaddress eased Block Out (partial, shared enemy draft §5.9), the Coin Block Out and the
+  winged coin's own side-pipe state (none in either sample); the Super World map's ledge cliffs (field atlas
   rows 6–7), map ghosts, the goal's AppearGoalPoint / cannon and Passable states, the map music
   (branch `swmap` drew the map with the game's models); ✅ the Cursed Key and Phanto (2026-10-25,
   research 95-key.md; co-op: Phanto hurts only the player in front [inf]); ✅ SMM1 UI sounds for

@@ -1016,7 +1016,6 @@ impl World {
         let jump = input.held(input::JUMP);
         let run = input.held(input::RUN);
         let jump_pressed = jump && !self.clown_prev.0;
-        let run_pressed = run && !self.clown_prev.1;
         self.clown_prev = (jump, run);
         if jump_pressed && !input.held(input::DOWN) {
             self.player.clown = None;
@@ -1056,12 +1055,7 @@ impl World {
         let before = (car.x, car.y);
         car.collide(&self.level);
         car.moved = (car.x - before.0, car.y - before.1);
-        let (cx, cy, dir, fire) = (
-            car.x,
-            car.y,
-            car.dir,
-            matches!(car.kind, Kind::ClownCar { fire: true }),
-        );
+        let (cx, cy, dir) = (car.x, car.y, car.dir);
         let p = &mut self.player;
         p.x = cx;
         p.y = cy + 14.0;
@@ -1069,12 +1063,19 @@ impl World {
         p.vy = 0.0;
         p.on_ground = true;
         p.facing = dir;
-        if fire && run_pressed {
-            let mut f = Actor::new(Kind::Fireball, cx + dir as f32 * 18.0, cy + 10.0);
-            f.dir = dir;
-            f.vx = 4.0 * dir as f32;
-            self.add_actor(f);
+        // the Fire car shoots with Run (actors/clown.rs `clown_fire_player`)
+        let triple = self.player.form == Form::Fire;
+        let alive = self
+            .actors
+            .iter()
+            .filter(|a| a.kind == Kind::Fireball && a.alt && a.alive())
+            .count();
+        let shots = self.actors[i].clown_fire_player(run, triple, alive);
+        if !shots.is_empty() {
             self.events.push(Event::Fireball);
+        }
+        for f in shots {
+            self.add_actor(f);
         }
     }
 
@@ -2951,6 +2952,12 @@ impl World {
                 .filter(|l| !l.spec.full)
                 .map(|l| (l.y, l.water()));
             a.block_out(by, r.down, r.note);
+            if kind == Kind::Blooper && self.level.style == "3W" && !parachute {
+                // 3D World's Blooper (Gesso3W, Block vtable 0x71028d40f8: Out 0x71011037a0 /
+                // 0x71011037e0, v3.0.3) floats out as FloatSearch does but with terrain
+                // collision from the start [obs]
+                a.timer = 0;
+            }
             if kind.is_item() {
                 self.events.push(Event::ItemAppear);
             }
@@ -2985,7 +2992,7 @@ impl World {
         let mine: Vec<&Actor> = self
             .actors
             .iter()
-            .filter(|a| a.kind == Kind::Fireball)
+            .filter(|a| a.kind == Kind::Fireball && !a.alt)
             .collect();
         let recent = mine.iter().filter(|a| a.age < 60).count();
         if mine.len() >= 6 || recent >= 2 {

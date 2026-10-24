@@ -37,6 +37,15 @@ pub const SHOT_SPEED: f32 = 1.5;
 /// Frames of the car's speed averaged for the shot (the car's 16-entry ring at +0x578)
 /// [obs v3.0.3 capacity; inf: it holds the car's x speed per frame].
 const HISTORY: usize = 16;
+/// A player's shots (the helper's player branch, 0x7101191a20): the hold counter's cap and
+/// gate, the cooldowns, the most out at once, and PlayerShot's speed (exe 0x7100ddf010) [obs
+/// v3.0.3].
+const PLAYER_CHARGE: i32 = 60;
+const PLAYER_HOLD_GATE: i32 = 51;
+const PLAYER_COOLDOWN: i32 = 12;
+const PLAYER_COOLDOWN_LONG: i32 = 50;
+const PLAYER_MAX: usize = 8;
+pub const PLAYER_SHOT_SPEED: f32 = 3.625;
 /// Hard cap on a shot's flight (it has no timer of its own; it ends on terrain or off
 /// screen) [inf].
 pub const SHOT_LIFE: i32 = 600;
@@ -63,6 +72,8 @@ pub struct ClownFire {
     pub fired: bool,
     /// A shot to add: (x, y, vx).
     pub shot: Option<(f32, f32, f32)>,
+    /// A player rider's fire input as last seen (+0x14 / +0x15).
+    pub held: bool,
     history: [f32; HISTORY],
     filled: usize,
     next: usize,
@@ -80,6 +91,7 @@ impl Default for ClownFire {
             lean: (0.0, 0.0),
             fired: false,
             shot: None,
+            held: false,
             history: [0.0; HISTORY],
             filled: 0,
             next: 0,
@@ -273,6 +285,67 @@ impl Actor {
         }
     }
 
+    /// A player flying the Fire car (the helper's player branch, 0x7101191a20) [obs v3.0.3]:
+    /// each change of the fire input (`held`: Run) fires when the cooldown is out, unless the
+    /// input was held 60 frames — that release is the charged shot (ChargeShot, state 3;
+    /// [inf: its flight not traced, fired here as a PlayerShot]). The cooldown is then 12
+    /// frames with none of its shots out, else 50; at most 8 are out (`alive`). A shot is one
+    /// PlayerShot, or three at 0° / +15° / −15° when the player's +0x4a8 is 2 ([inf]: Fire
+    /// form). Returns the shots: `Kind::Fireball` with `alt` (actors.rs: 3.625 px/f along its
+    /// angle plus the car's speed, put out by terrain, 600 frames).
+    pub fn clown_fire_player(&mut self, held: bool, triple: bool, alive: usize) -> Vec<Actor> {
+        let (x, y, dir, scale) = (self.x, self.y, self.dir, if self.big { 2.0 } else { 1.0 });
+        let vx = self.vx;
+        let Some(cf) = self.clown_fire.as_mut() else {
+            return Vec::new();
+        };
+        cf.record(vx);
+        cf.timer = (cf.timer - 1).max(0);
+        let old = cf.charge;
+        let now = if !held {
+            cf.charge = 0;
+            false
+        } else if cf.timer < PLAYER_HOLD_GATE {
+            cf.charge = (cf.charge + 1).min(PLAYER_CHARGE);
+            true
+        } else {
+            cf.charge = 0;
+            true
+        };
+        let edge = now != cf.held;
+        cf.held = now;
+        let charged = old >= PLAYER_CHARGE;
+        if !edge || !(charged || cf.timer == 0) || alive >= PLAYER_MAX {
+            return Vec::new();
+        }
+        cf.timer = if !charged && alive == 0 {
+            PLAYER_COOLDOWN
+        } else {
+            PLAYER_COOLDOWN_LONG
+        };
+        let s = dir as f32;
+        let inherit = cf.mean_speed();
+        let inherit = if inherit * s < 0.0 { 0.0 } else { inherit };
+        let angles: &[f32] = if triple { &[0.0, 15.0, -15.0] } else { &[0.0] };
+        angles
+            .iter()
+            .map(|&a| {
+                let (sn, cs) = a.to_radians().dsin_cos();
+                let mut f = Actor::new(
+                    Kind::Fireball,
+                    x + SHOT_AHEAD * s * scale,
+                    y + SHOT_UP * scale,
+                );
+                f.alt = true;
+                f.dir = dir;
+                f.vx = PLAYER_SHOT_SPEED * cs * s + inherit;
+                f.vy = PLAYER_SHOT_SPEED * sn;
+                f.timer = SHOT_LIFE;
+                f
+            })
+            .collect()
+    }
+
     /// The shot the car's fire record let go this frame, if any: a KoopaClownFire in its
     /// EnemyShot state (`Kind::EnemyFire` with `alt`: flies level, snuffed by terrain).
     pub fn take_clown_shot(&mut self) -> Option<Actor> {
@@ -376,6 +449,36 @@ mod tests {
         chase(&mut a, 1);
         let t = a.clown_fire.as_ref().unwrap().timer;
         assert!((89..179).contains(&t), "{t}");
+    }
+
+    #[test]
+    fn a_player_fires_on_each_change_of_the_button_after_the_cooldown() {
+        let mut a = fire_car();
+        let mut fired = Vec::new();
+        // press for 5 frames, release, wait; then hold 70 frames and release
+        let script: Vec<bool> = (0..5)
+            .map(|_| true)
+            .chain((0..30).map(|_| false))
+            .chain((0..70).map(|_| true))
+            .chain((0..5).map(|_| false))
+            .collect();
+        for (f, held) in script.into_iter().enumerate() {
+            let shots = a.clown_fire_player(held, false, 0);
+            if !shots.is_empty() {
+                assert_eq!(shots[0].kind, Kind::Fireball);
+                assert!(shots[0].alt && (shots[0].vx - 3.625).abs() < 1e-4);
+                fired.push(f);
+            }
+        }
+        // the press; the release 5 frames later is inside the 12-frame cooldown; the next press;
+        // the release after a 60-frame hold (the charged shot)
+        assert_eq!(fired, vec![0, 35, 105]);
+        let three = {
+            let mut b = fire_car();
+            b.clown_fire_player(true, true, 0)
+        };
+        assert_eq!(three.len(), 3);
+        assert!(three[1].vy > 0.0 && three[2].vy < 0.0);
     }
 
     #[test]
