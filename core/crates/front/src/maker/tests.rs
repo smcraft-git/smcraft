@@ -1071,6 +1071,109 @@ fn a_pipe_dragged_by_its_mouth_turns_round_its_base() {
 }
 
 #[test]
+fn a_clear_pipe_is_drawn_by_dragging_bent_carried_and_erased() {
+    use mmk_formats::smm2::clear_pipe::Dir as P;
+    let (mut host, mut saves) = (MockHost::default(), Saves::default());
+    let mut m = maker(&mut host, &mut saves, MakerStart::New("3W".into()));
+    m.palette[0] = Tool::ClearPipe;
+    m.slot = 0;
+    let drag = |m: &mut MakerFlow, host: &mut MockHost, saves: &mut Saves, path: &[(i32, i32)]| {
+        m.cur = path[0];
+        run(m, host, saves, press(Buttons::CONFIRM));
+        for &t in &path[1..] {
+            m.cur = t;
+            run(m, host, saves, held(Buttons::CONFIRM));
+        }
+        run(m, host, saves, idle());
+    };
+    // a press alone puts nothing down; dragging right starts a pipe on the press's corner,
+    // then up beside its end bends it
+    m.cur = (20, 6);
+    run(&mut m, &mut host, &mut saves, press(Buttons::CONFIRM));
+    run(&mut m, &mut host, &mut saves, idle());
+    assert!(m.editor.area().clear_pipes.is_empty());
+    drag(
+        &mut m,
+        &mut host,
+        &mut saves,
+        &[(20, 6), (24, 6), (24, 6), (25, 10)],
+    );
+    let pipes = m.editor.clear_pipes();
+    assert_eq!(pipes.len(), 1);
+    let (k, s) = pipes[0].clone();
+    assert_eq!(s.runs, [(P::Right, 4), (P::Up, 3)]);
+    assert_eq!(
+        m.editor.clear_pipe_at(21, 6),
+        Some(k),
+        "from the corner (21, 7)"
+    );
+    assert!(
+        host.edit_sounds.iter().any(|(_, key)| key == "set"),
+        "{:?}",
+        host.edit_sounds
+    );
+    // one undo step for the whole drawing
+    run(&mut m, &mut host, &mut saves, keys(keys::UNDO));
+    run(&mut m, &mut host, &mut saves, idle());
+    assert!(m.editor.area().clear_pipes.is_empty());
+    run(&mut m, &mut host, &mut saves, keys(keys::REDO));
+    run(&mut m, &mut host, &mut saves, idle());
+    // by its mouth it draws on, with any tool
+    m.slot = 1;
+    drag(&mut m, &mut host, &mut saves, &[(25, 10), (25, 13)]);
+    assert_eq!(
+        m.editor.clear_pipe(k).unwrap().runs,
+        [(P::Right, 4), (P::Up, 6)]
+    );
+    // elsewhere it is carried
+    drag(&mut m, &mut host, &mut saves, &[(22, 6), (22, 8)]);
+    assert_eq!(m.editor.clear_pipe_at(22, 6), None);
+    assert_eq!(m.editor.clear_pipe_at(22, 8), Some(k));
+    // the eraser takes all of it
+    m.cur = (22, 9);
+    run(&mut m, &mut host, &mut saves, press(Buttons::BACK));
+    run(&mut m, &mut host, &mut saves, idle());
+    assert!(m.editor.area().clear_pipes.is_empty());
+    // a new pipe turns round its corner with the cursor, and brought back to the corner before
+    // it grew it is taken back: no undo step
+    m.slot = 0;
+    m.cur = (40, 6);
+    run(&mut m, &mut host, &mut saves, press(Buttons::CONFIRM));
+    m.cur = (44, 6);
+    run(&mut m, &mut host, &mut saves, held(Buttons::CONFIRM));
+    m.cur = (40, 10);
+    run(&mut m, &mut host, &mut saves, held(Buttons::CONFIRM));
+    let (_, s) = m.editor.clear_pipes()[0].clone();
+    assert_eq!(s.runs, [(P::Up, 2)], "turned up");
+    m.cur = (40, 6);
+    run(&mut m, &mut host, &mut saves, held(Buttons::CONFIRM));
+    run(&mut m, &mut host, &mut saves, idle());
+    assert!(m.editor.area().clear_pipes.is_empty());
+    run(&mut m, &mut host, &mut saves, keys(keys::UNDO));
+    run(&mut m, &mut host, &mut saves, idle());
+    assert!(
+        m.editor.area().clear_pipes.len() == 1,
+        "the undo step was the eraser's"
+    );
+    // only 3D World has the part
+    let entry = catalog::entry(Tool::ClearPipe).unwrap();
+    assert!(catalog::available(&entry, "3W") && !catalog::available(&entry, "M1"));
+}
+
+#[test]
+fn the_clear_pipe_capture_draws_two_pipes_in_3d_world() {
+    let (mut host, mut saves) = (MockHost::default(), Saves::default());
+    let mut m = maker(&mut host, &mut saves, MakerStart::New("3W".into()));
+    assert!(with(&mut host, &mut saves, |cx| m.debug_open(cx, "clearpipe")));
+    let pipes = m.editor.clear_pipes();
+    assert_eq!(pipes.len(), 2);
+    assert_eq!(pipes[0].1.runs.len(), 3, "up, right, down");
+    assert_eq!(m.tool(), Tool::ClearPipe);
+    let mut m = maker(&mut host, &mut saves, MakerStart::New("M1".into()));
+    assert!(!with(&mut host, &mut saves, |cx| m.debug_open(cx, "clearpipe")));
+}
+
+#[test]
 fn a_track_is_drawn_by_dragging_and_a_lift_put_on_it_rides_it() {
     let (mut host, mut saves) = (MockHost::default(), Saves::default());
     let mut m = maker(&mut host, &mut saves, MakerStart::New("M1".into()));

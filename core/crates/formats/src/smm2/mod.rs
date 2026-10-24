@@ -1,6 +1,7 @@
 //! Super Mario Maker 2 course data and `.bcd` wrapper.
 
 pub mod clear;
+pub mod clear_pipe;
 pub mod course;
 pub mod crypto;
 pub mod keyfind;

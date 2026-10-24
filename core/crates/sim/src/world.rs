@@ -566,6 +566,9 @@ pub const SCENE_LEAD: u64 = 63;
 
 /// The start sign's layer: in front of the backdrop (0), behind everything else.
 pub const START_SIGN_LAYER: u32 = 1;
+/// Clear pipes: over the player (50) and what rides through them [inf: the models are
+/// translucent].
+pub const CLEAR_PIPE_LAYER: u32 = 60;
 
 /// Animation frame `age / rate` cycling through `frames`.
 fn walk_frame(frames: &[&'static str], age: u32, rate: u32) -> &'static str {
@@ -6755,6 +6758,22 @@ impl World {
                         out.push(line(px, py, 1.5));
                     }
                 }
+            }
+        }
+        // clear pipes (3D World): a model of `3W_Object_dokan_tomei` per piece, its turn in the
+        // frame name (level/clear_pipe.rs); drawn in front of what rides through them [inf]
+        for p in &self.level.clear_pipes {
+            if visible(p.x, p.y) {
+                out.push(Self::model_sprite(
+                    crate::level::CLEAR_PIPE_MESH,
+                    p.frame(),
+                    p.x - TILE,
+                    p.y,
+                    2.0 * TILE,
+                    2.0 * TILE,
+                    false,
+                    CLEAR_PIPE_LAYER,
+                ));
             }
         }
         for t in &self.level.tiles {

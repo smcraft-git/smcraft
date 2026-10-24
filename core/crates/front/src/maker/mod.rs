@@ -44,6 +44,7 @@ pub mod subarea;
 pub mod trail;
 pub mod view;
 
+use mmk_editor::clearpipe::{CLEAR_PIPE, PipeEnd};
 use mmk_editor::parts::Dir;
 use mmk_editor::{DEFAULT_FLAGS, EditError, Editor, Rect};
 
@@ -79,6 +80,11 @@ pub mod keys {
 /// The start and goal grounds' edit sound users (`<style>_EditGroundStart` / `…GroundGoal`).
 const START_GROUND: i16 = 37;
 const GOAL_GROUND: i16 = 26;
+/// A clear pipe starts once the cursor is this far (world px) from the corner the press was
+/// on, and is taken back while the cursor is within `CLEAR_PIPE_BACK` of it again
+/// (0x7100fa9090) [obs].
+const CLEAR_PIPE_START: f32 = 24.0;
+const CLEAR_PIPE_BACK: f32 = 16.0;
 /// What a part keeps when it is put into another: wings, alternate form, size, parachute.
 const CHILD_KEEPS: u32 = 0x2 | 0x4 | 0x6000 | 0x8000;
 const PAGE: &str = "Edit_MainPage_00";
@@ -226,6 +232,21 @@ enum Drag {
         width: bool,
         height: bool,
         changed: bool,
+    },
+    /// Drawing a clear pipe: from grid corner `corner` until the cursor is far enough to start
+    /// one (`slot` None), then the pipe's `end` follows the cursor; `fresh` while it is still
+    /// the new two-tile pipe (taken back near the corner).
+    ClearPipe {
+        corner: (i32, i32),
+        slot: Option<usize>,
+        end: PipeEnd,
+        fresh: bool,
+        changed: bool,
+    },
+    /// Carrying a clear pipe grabbed at `from`.
+    CarryPipe {
+        slot: usize,
+        from: (i32, i32),
     },
 }
 
@@ -577,6 +598,19 @@ impl MakerFlow {
             (p[0] + 640.0) / SCALE + self.cam[0],
             (p[1] + 360.0) / SCALE + self.cam[1],
         ]
+    }
+
+    /// The cursor's point in the world: the glove's when it is on the cursor's tile (the
+    /// pointer), else the tile's centre (the d-pad).
+    fn cursor_world(&self) -> [f32; 2] {
+        if self.tile_at(self.glove) == self.cur {
+            self.to_world(self.glove)
+        } else {
+            [
+                (self.cur.0 as f32 + 0.5) * TILE,
+                (self.cur.1 as f32 + 0.5) * TILE,
+            ]
+        }
     }
 
     fn tile_at(&self, p: [f32; 2]) -> (i32, i32) {
@@ -979,6 +1013,7 @@ impl MakerFlow {
                 Some(Drag::Resize { index, .. }) => {
                     self.editor.object(index).map(|o| (o.id, "move"))
                 }
+                Some(Drag::CarryPipe { .. }) => Some((CLEAR_PIPE, "move")),
                 _ => None,
             };
             if let Some((p, key)) = part {
@@ -1091,6 +1126,18 @@ impl MakerFlow {
                     self.drag_resize();
                 } else {
                     self.end_drag();
+                }
+            }
+            Some(Drag::ClearPipe { .. }) => {
+                if place_held {
+                    self.draw_clear_pipe(cx);
+                } else {
+                    self.end_drag();
+                }
+            }
+            Some(Drag::CarryPipe { slot, from }) => {
+                if !place_held {
+                    self.drop_clear_pipe(cx, slot, from);
                 }
             }
             Some(Drag::Select { from }) => {
@@ -1427,12 +1474,152 @@ impl MakerFlow {
             self.sound(id, "drag");
             return;
         }
+        // a clear pipe: by its mouth it is drawn on from that end, elsewhere it is carried
+        // (0x7100ec1e90 tests the press against the mouths) [obs]
+        if let Some((slot, end)) = self.editor.clear_pipe_end_at(tx, ty) {
+            self.editor.checkpoint();
+            self.drag = Some(Drag::ClearPipe {
+                corner: (tx, ty),
+                slot: Some(slot),
+                end,
+                fresh: false,
+                changed: false,
+            });
+            self.sound(CLEAR_PIPE, "drag");
+            return;
+        }
+        if let Some(slot) = self.editor.clear_pipe_at(tx, ty) {
+            self.editor.checkpoint();
+            self.drag = Some(Drag::CarryPipe {
+                slot,
+                from: (tx, ty),
+            });
+            self.sound(CLEAR_PIPE, "drag");
+            return;
+        }
         self.editor.checkpoint();
+        if self.tool() == Tool::ClearPipe {
+            // the drawing starts at the grid corner nearest the press (the game's guide point)
+            let w = self.cursor_world();
+            let corner = ((w[0] / TILE).round() as i32, (w[1] / TILE).round() as i32);
+            self.drag = Some(Drag::ClearPipe {
+                corner,
+                slot: None,
+                end: PipeEnd::End,
+                fresh: false,
+                changed: false,
+            });
+            return;
+        }
         self.drag = Some(Drag::Place {
             last: self.cur,
             changed: false,
         });
         self.put(cx, true);
+    }
+
+    /// The clear pipe being drawn follows the cursor (`mmk_editor::clearpipe`): started once
+    /// the cursor is far enough from its corner, taken back while it is fresh and the cursor
+    /// comes back, else its end goes on, back or round a bend toward the cursor's tile.
+    fn draw_clear_pipe(&mut self, cx: &mut crate::Cx) {
+        let Some(Drag::ClearPipe {
+            corner,
+            slot,
+            end,
+            fresh,
+            changed,
+        }) = self.drag
+        else {
+            return;
+        };
+        let w = self.cursor_world();
+        let (dx, dy) = (w[0] - corner.0 as f32 * TILE, w[1] - corner.1 as f32 * TILE);
+        let dist = dx.hypot(dy);
+        let (mut slot, mut fresh, mut changed) = (slot, fresh, changed);
+        match slot {
+            None if dist >= CLEAR_PIPE_START => {
+                let dir = mmk_editor::clearpipe::drag_dir(dx, dy);
+                match self.editor.place_clear_pipe(corner, dir) {
+                    Ok(k) => {
+                        (slot, fresh, changed) = (Some(k), true, true);
+                        self.changed();
+                        self.sound(CLEAR_PIPE, "set");
+                    }
+                    Err(e) => {
+                        // refused: the press puts nothing down
+                        self.refuse(cx, CLEAR_PIPE, &e);
+                        self.drag = Some(Drag::Place {
+                            last: self.cur,
+                            changed: false,
+                        });
+                        return;
+                    }
+                }
+            }
+            None => {}
+            Some(k) if fresh && dist <= CLEAR_PIPE_BACK => {
+                self.editor.erase_clear_pipe(k);
+                self.changed();
+                (slot, fresh, changed) = (None, false, false);
+            }
+            Some(k)
+                if fresh
+                    && dist >= CLEAR_PIPE_START
+                    && self.editor.clear_pipe(k).map(|s| s.runs[0].0)
+                        != Some(mmk_editor::clearpipe::drag_dir(dx, dy)) =>
+            {
+                // the new pipe turns round its corner to the cursor's quarter [obs 0x7100fa9090]
+                let old = self.editor.clear_pipe(k);
+                self.editor.erase_clear_pipe(k);
+                let dir = mmk_editor::clearpipe::drag_dir(dx, dy);
+                slot = match self.editor.place_clear_pipe(corner, dir) {
+                    Ok(n) => {
+                        self.changed();
+                        Some(n)
+                    }
+                    Err(_) => {
+                        // it can't turn there: it stays as it was
+                        let back = old.map(|s| s.runs[0].0).unwrap_or(dir);
+                        self.editor.place_clear_pipe(corner, back).ok()
+                    }
+                };
+            }
+            Some(k) => {
+                if let Ok(true) = self.editor.draw_clear_pipe(k, end, self.cur) {
+                    (fresh, changed) = (false, true);
+                    self.changed();
+                    self.sound(CLEAR_PIPE, "move");
+                }
+            }
+        }
+        self.drag = Some(Drag::ClearPipe {
+            corner,
+            slot,
+            end,
+            fresh,
+            changed,
+        });
+    }
+
+    /// Drop a carried clear pipe: moved by the cursor's travel, or left where it was.
+    fn drop_clear_pipe(&mut self, cx: &mut crate::Cx, slot: usize, from: (i32, i32)) {
+        self.drag = None;
+        let (dx, dy) = (self.cur.0 - from.0, self.cur.1 - from.1);
+        if (dx, dy) == (0, 0) {
+            self.editor.discard_checkpoint();
+            self.sound(CLEAR_PIPE, "set");
+            return;
+        }
+        match self.editor.move_clear_pipe(slot, dx, dy) {
+            Ok(()) => {
+                self.changed();
+                self.sound(CLEAR_PIPE, "set");
+            }
+            Err(e) => {
+                self.editor.discard_checkpoint();
+                self.refuse(cx, CLEAR_PIPE, &e);
+            }
+        }
     }
 
     /// Put the selected part down at the cursor.
@@ -1454,7 +1641,7 @@ impl MakerFlow {
                 .editor
                 .place_warp_boxes((tx, ty), (tx + 4, ty), false)
                 .map(|_| ()),
-            Tool::Track => Ok(()),
+            Tool::Track | Tool::ClearPipe => Ok(()),
         };
         // a part put down on a track rides it (flag 0x400, the piece's link)
         if let (Ok(()), Tool::Part(p)) = (&r, tool)
@@ -1529,11 +1716,11 @@ impl MakerFlow {
 
     fn erase_here(&mut self) {
         let (tx, ty) = self.cur;
-        let part = self
-            .editor
-            .object_at(tx, ty)
-            .and_then(|i| self.editor.object(i))
-            .map_or(7, |o| o.id);
+        let part = match self.editor.object_at(tx, ty) {
+            Some(i) => self.editor.object(i).map_or(7, |o| o.id),
+            None if self.editor.clear_pipe_at(tx, ty).is_some() => CLEAR_PIPE,
+            None => 7,
+        };
         if self.editor.erase(tx, ty) {
             self.sound(part, "eraser");
             if let Some(Drag::Erase { changed }) = &mut self.drag {
@@ -1566,7 +1753,8 @@ impl MakerFlow {
             | Some(Drag::Erase { changed })
             | Some(Drag::Start { changed })
             | Some(Drag::Goal { changed, .. })
-            | Some(Drag::Resize { changed, .. }) => changed,
+            | Some(Drag::Resize { changed, .. })
+            | Some(Drag::ClearPipe { changed, .. }) => changed,
             _ => false,
         };
         if !changed {
@@ -2042,7 +2230,7 @@ impl MakerFlow {
 
     fn end_drag_if_any(&mut self) {
         if self.drag.is_some() {
-            if let Some(Drag::Carry { .. }) = self.drag {
+            if let Some(Drag::Carry { .. } | Drag::CarryPipe { .. }) = self.drag {
                 self.editor.discard_checkpoint();
                 self.drag = None;
             } else {
@@ -3447,6 +3635,24 @@ impl MakerFlow {
                 let _ = self.editor.set_vertical(true);
                 self.cam = [0.0, 0.0];
                 self.dirty = true;
+            }
+            // clear pipes drawn on the first screen (a 3D World course: --style 3W): up, round
+            // to the right and down, and a straight one; the Clear Pipe in the first slot
+            "clearpipe" => {
+                use mmk_formats::smm2::clear_pipe::Dir as P;
+                let Ok(k) = self.editor.place_clear_pipe((12, 4), P::Up) else {
+                    return false;
+                };
+                for t in [(12, 8), (16, 9), (17, 3)] {
+                    let _ = self.editor.draw_clear_pipe(k, PipeEnd::End, t);
+                }
+                if let Ok(j) = self.editor.place_clear_pipe((19, 10), P::Right) {
+                    let _ = self.editor.draw_clear_pipe(j, PipeEnd::End, (22, 9));
+                }
+                self.palette[0] = Tool::ClearPipe;
+                self.slot = 0;
+                self.dirty = true;
+                self.update_page();
             }
             // the Water Level mode in the forest: still water, rising (the button, its path),
             // rising and falling, the speed balloon; its tip

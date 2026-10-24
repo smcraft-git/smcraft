@@ -235,7 +235,9 @@ impl Editor {
                     if !embeds && self.ground_at(x, y).is_some() {
                         return Err(EditError::Occupied);
                     }
-                    if self.solid_part_at(x, y, skip, o.id == PIPE && self.smm1_overlap_pipes) {
+                    if self.solid_part_at(x, y, skip, o.id == PIPE && self.smm1_overlap_pipes)
+                        || self.clear_pipe_covers(x, y, None)
+                    {
                         return Err(EditError::Occupied);
                     }
                 }
@@ -278,7 +280,7 @@ impl Editor {
                 && !embeds_in_ground(p.id)
                 && parts::covers(p, x, y)
         });
-        if blocked {
+        if blocked || self.clear_pipe_covers(x, y, None) {
             return Err(EditError::Occupied);
         }
         if self.area().ground.len() >= GROUND_MAX {

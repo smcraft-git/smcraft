@@ -11,6 +11,7 @@
 
 pub mod attr;
 pub mod autotile;
+pub mod clearpipe;
 pub mod links;
 pub mod parts;
 pub mod paths;
@@ -448,12 +449,15 @@ impl Editor {
         Ok(())
     }
 
-    /// Erase what is at a tile: a part first, then a track piece, else ground. True if
-    /// something was removed.
+    /// Erase what is at a tile: a part first, then a clear pipe (all of it), a track piece,
+    /// else ground. True if something was removed.
     pub fn erase(&mut self, tx: i32, ty: i32) -> bool {
         if let Some(i) = self.object_at(tx, ty) {
             self.erase_object(i);
             return true;
+        }
+        if let Some(k) = self.clear_pipe_at(tx, ty) {
+            return self.erase_clear_pipe(k);
         }
         if self.erase_track_at(tx, ty) {
             return true;

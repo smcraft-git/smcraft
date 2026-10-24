@@ -11,7 +11,10 @@ use mmk_formats::smm2::{Area, Course, CourseObject};
 use crate::actors::Kind;
 use crate::blocks::{BlockKind, Contents};
 
+mod clear_pipe;
 mod v3;
+
+pub use clear_pipe::{CLEAR_PIPE_MESH, ClearPipeDraw, ClearPipeModel};
 pub use v3::V3Tiles;
 
 pub const TILE: f32 = 16.0;
@@ -382,6 +385,8 @@ pub struct Level {
     pub track_paths: Vec<(u8, Vec<u16>)>,
     /// Track graph (59-track.md).
     pub tracks: crate::track::Tracks,
+    /// Clear pipes (93): the pieces they draw (level/clear_pipe.rs).
+    pub clear_pipes: Vec<ClearPipeDraw>,
     /// Piranha Creeper paths (107): record index and node codes (actors/w3.rs).
     pub creepers: Vec<(u8, Vec<u8>)>,
     /// Custom autoscroll path (89 nodes): (node number, x, y, speed setting 0–2), in px.
@@ -938,6 +943,7 @@ impl Level {
             ceiling: Vec::new(),
             v3: V3Tiles::default(),
             tracks: Default::default(),
+            clear_pipes: Vec::new(),
             creepers: Vec::new(),
             liquid: None,
             oneway: Vec::new(),
@@ -1040,6 +1046,7 @@ impl Level {
             .values()
             .map(|c| (c.head.index, c.nodes.iter().map(|n| n.direction).collect()))
             .collect();
+        lvl.clear_pipes = clear_pipe::area_pieces(area);
         lvl.tracks = crate::track::Tracks::with_ends(
             area.tracks
                 .iter()
@@ -2049,6 +2056,7 @@ impl Level {
             ceiling: Vec::new(),
             v3: V3Tiles::default(),
             tracks: Default::default(),
+            clear_pipes: Vec::new(),
             creepers: Vec::new(),
             liquid: None,
             oneway: Vec::new(),

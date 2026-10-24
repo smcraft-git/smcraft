@@ -1639,6 +1639,33 @@ impl MeshStore {
         })
     }
 
+    /// The draw of a clear pipe's piece (sim `ClearPipeDraw`): the frame's model of
+    /// `3W_Object_dokan_tomei`, centred on the sprite's origin and turned about z by the
+    /// frame's quarter turns (the models stand along y, research: maker spec C14).
+    pub fn clear_pipe_draw(&mut self, s: &Sprite, tick: f32, order: u32) -> Option<MmkMeshDraw> {
+        let (model, turns) = mmk_sim::level::ClearPipeDraw::from_frame(s.image.texture)?;
+        let mesh = self.find(s.image.model);
+        let index = self
+            .mesh(mesh)?
+            .file
+            .models
+            .iter()
+            .position(|m| m.name == model)?;
+        let (sn, c) = (f32::from(turns) * std::f32::consts::FRAC_PI_2).sin_cos();
+        let (ox, oy) = (s.x + s.w / 2.0, s.y);
+        Some(MmkMeshDraw {
+            mesh,
+            model: index as u32,
+            anim: -1,
+            time: tick,
+            transform: [c, -sn, 0.0, ox, sn, c, 0.0, oy, 0.0, 0.0, 1.0, 0.0],
+            layer: s.layer,
+            order,
+            flags: 0,
+            variant: 0,
+        })
+    }
+
     /// Plan for a 3D World terrain or block tile at field-atlas index `atlas`.
     pub fn plan_tile(&mut self, field: &str, atlas: u32) -> Option<MeshPlan> {
         let (mesh, model) = if let Some(file) = block_model(atlas) {
@@ -1993,6 +2020,16 @@ impl MeshPlanner {
                 }
                 continue;
             }
+            if let Some(store) = store.as_deref_mut()
+                && key.0 == mmk_sim::level::CLEAR_PIPE_MESH
+            {
+                // a clear pipe's piece: its model of the file, turned in the plane (the sim's
+                // frame names the model and the quarter turns, sim level/clear_pipe.rs)
+                if let Some(d) = store.clear_pipe_draw(&s, tick, sprites.len() as u32) {
+                    meshes.push(d);
+                }
+                continue;
+            }
             if let Some(store) = store.as_deref_mut() {
                 let plan = match s.image.rect {
                     // 3D World terrain and blocks are models per field-atlas cell
@@ -2078,6 +2115,71 @@ mod tests {
         assert!(all.get("x").unwrap().is_some());
         all.provide("y", Some(vec![0; 1000]));
         assert_eq!(all.kept_bytes(), 2000);
+    }
+
+    /// A 3D World course's clear pipe draws `3W_Object_dokan_tomei`'s models, turned: the
+    /// imported cache's meshes (`MMK_ASSETS`, else ~/smm-work/cache/smm2-3.0.3; skipped
+    /// without them, as in CI).
+    #[test]
+    fn clear_pipes_draw_their_models_turned() {
+        use mmk_formats::smm2::clear_pipe::{Dir, Shape};
+        let root = std::env::var_os("MMK_ASSETS")
+            .map(PathBuf::from)
+            .or_else(|| {
+                std::env::var_os("HOME").map(|h| PathBuf::from(h).join("smm-work/cache/smm2-3.0.3"))
+            });
+        let Some(root) = root.filter(|r| r.join("meshes/3W_Object_dokan_tomei.mmesh").exists())
+        else {
+            eprintln!("no imported meshes: skipped");
+            return;
+        };
+        let cache = Cache::open(&root).expect("cache");
+        let mut store = MeshStore::new(root);
+        let mut course = mmk_formats::smm2::Course::blank("3W");
+        // up from (10, 4) and right: mouth, units, bend, units, mouth
+        let pipe = Shape {
+            origin: (10, 4),
+            runs: vec![(Dir::Up, 3), (Dir::Right, 2)],
+        };
+        course
+            .main
+            .clear_pipes
+            .slots
+            .insert(0, pipe.encode(0).unwrap());
+        let world = mmk_sim::World::from_course(&course);
+        let mut planner = MeshPlanner::default();
+        let (mut resolver, mut sprites, mut meshes) =
+            (crate::SpriteResolver::default(), Vec::new(), Vec::new());
+        planner.frame(
+            &world,
+            &cache,
+            Some(&mut store),
+            &mut resolver,
+            &mut sprites,
+            &mut meshes,
+        );
+        let mesh = store.find(mmk_sim::level::CLEAR_PIPE_MESH);
+        let file = &store.mesh(mesh).expect("loaded").file;
+        let pipe_draws: Vec<_> = meshes.iter().filter(|d| d.mesh == mesh).collect();
+        let names: Vec<&str> = pipe_draws
+            .iter()
+            .map(|d| file.models[d.model as usize].name.as_str())
+            .collect();
+        assert_eq!(
+            names.len(),
+            3 + 1 + 2,
+            "a model per tile and one for the bend"
+        );
+        assert_eq!(names[0], "dokan_tomei_top_model");
+        assert_eq!(names[3], "dokan_tomei_curve00_model");
+        assert_eq!(names[5], "dokan_tomei_top_model");
+        // the start's mouth faces down (half a turn), centred on its two tiles
+        let t = pipe_draws[0].transform;
+        assert!((t[0] + 1.0).abs() < 1e-5 && (t[5] + 1.0).abs() < 1e-5);
+        assert_eq!((t[3], t[7]), (176.0, 72.0));
+        // the end's mouth faces right: +y turned to +x
+        let t = pipe_draws[5].transform;
+        assert!((t[4] + 1.0).abs() < 1e-5, "{t:?}");
     }
 
     #[test]

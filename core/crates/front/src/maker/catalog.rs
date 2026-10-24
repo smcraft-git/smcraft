@@ -54,6 +54,8 @@ pub enum Tool {
     /// Tracks: a press lays a piece, dragging draws on from its end, 2 tiles a piece, straight
     /// or at 45° [inf: the game's gesture].
     Track,
+    /// Clear pipes (3D World): drawn from a corner by dragging (`mmk_editor::clearpipe`).
+    ClearPipe,
 }
 
 impl Tool {
@@ -66,6 +68,7 @@ impl Tool {
             Tool::Doors => 55,
             Tool::WarpBoxes => 97,
             Tool::Track => 59,
+            Tool::ClearPipe => 93,
         }
     }
 
@@ -98,7 +101,7 @@ const fn e(tool: Tool, label: &'static str, category: Category) -> Entry {
 }
 
 use Category::*;
-use Tool::{Doors, Ground as G, Part as P, Pipe, Track, WarpBoxes};
+use Tool::{ClearPipe, Doors, Ground as G, Part as P, Pipe, Track, WarpBoxes};
 
 pub const ENTRIES: &[Entry] = &[
     // Terrain
@@ -106,6 +109,7 @@ pub const ENTRIES: &[Entry] = &[
     e(P(87), "slope_l30", Terrain),
     e(P(88), "slope_l45", Terrain),
     e(Pipe, "Dokan", Terrain),
+    e(ClearPipe, "ToumeiDokan", Terrain),
     e(P(43), "Toge", Terrain),
     e(P(16), "GroundBox", Terrain),
     e(P(14), "GroundMushroom", Terrain),
