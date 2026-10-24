@@ -97,6 +97,7 @@ struct Snap {
     x: f32,
     y: f32,
     vx: f32,
+    vy: f32,
     on_ground: bool,
     wings: bool,
     big: bool,
@@ -1633,6 +1634,20 @@ impl Sounds {
                         && !prev.on_ground
                     {
                         todo.push((s.kind, "press", PropList::default(), s.x, s.y));
+                    } else if matches!(
+                        s.kind,
+                        Kind::Bowser { .. } | Kind::BowserJr { .. } | Kind::BoomBoom { .. }
+                    ) && s.mode == Mode::Normal
+                    {
+                        // a boss's jumps and landings (where its style has them: NSMBU's
+                        // Bowser); the small / large jump by take-off speed [inf]
+                        if prev.on_ground && !s.on_ground && s.vy > 0.0 {
+                            let key = if s.vy > 4.0 { "jump_l" } else { "jump_s" };
+                            todo.push((s.kind, key, PropList::default(), s.x, s.y));
+                        } else if !prev.on_ground && s.on_ground && prev.vy < -1.0 {
+                            // (a real fall: not settling onto the ground as it appears)
+                            todo.push((s.kind, "landing", PropList::default(), s.x, s.y));
+                        }
                     }
                 }
             }
@@ -1923,6 +1938,7 @@ fn snapshot(world: &World) -> BTreeMap<u32, Snap> {
                     x: a.x,
                     y: a.y,
                     vx: a.vx,
+                    vy: a.vy,
                     on_ground: a.on_ground,
                     wings: a.wings,
                     big: a.big,
