@@ -878,6 +878,12 @@ impl Sounds {
         for ev in &events {
             match ev {
                 // a costume jumps with its own sound (its second take every other jump)
+                // Lanky Mario's float cue (SMM1 "h_fuyu")
+                Event::LankyFloat => {
+                    if let Some(id) = self.costume.sound(world, "float") {
+                        self.play_id(world, id, false);
+                    }
+                }
                 Event::Jump if self.costume.sound(world, "jump").is_some() => {
                     if let Some(id) = self.costume.jump(world) {
                         self.play_id(world, id, false);

@@ -29,7 +29,7 @@ use serde_json::{Value, json};
 use crate::{ImportError, Progress, Result, read, write};
 
 /// 2: costume stage (`costumes/`, module `smm1_costumes`).
-pub const SMM1_IMPORTER_VERSION: u32 = 2;
+pub const SMM1_IMPORTER_VERSION: u32 = 3;
 
 #[derive(Clone, Debug)]
 pub struct Smm1Config {

@@ -1068,7 +1068,8 @@ Block.rpx v208 (private spec research/specs/smm1-extras.md).
   owned, uniformly among the categories the level draws (Easy 1, Normal ≤2, Expert ≤3, Super
   Expert 1/2/3/6; never 0/4/5/7), kept as `costumes.owned`, announced after the ending with
   SMM1's two "pool empty" notes (both hosts) · the random costume drawing only from owned ones (SMM1) as a setting ⬜
-- ⬜ Lanky Mario's float-cue and jump sounds (`M1_HEN_JUMP*`: not imported); pickup freeze length
+- ✅ Lanky Mario's jump, float-cue and growth sounds (`M1_HEN_JUMP`, `_FUWA`, `M1_HEN_LARGE` from SMM1's
+  `Pack/Sound.pack`, SMM1 import v3) · ⬜ pickup freeze length
   for costumes [?]; Inkling squid frames while swimming; the random Weird Mushroom easter egg
   (1 in 20, pity at 100; its gates are not understood)
 - ⬜ SMM2 mode fixes found on the way (fidelity log): still-shell stomps shouldn't bounce, SMM2's

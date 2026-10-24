@@ -46,6 +46,14 @@ use crate::smm1::{Overlay, to_mtex};
 use crate::{Progress, Result, fmt_err, read, write};
 
 /// Engine model name of costume `id`.
+/// Lanky Mario's sounds: the SMM1 wave and the name it gets in `audio/` (SLink `jump_3_Funny`,
+/// `h_fuyu`, `power_up_Funny` [inf: the keys' waves], smm1-extras-lanky.md §6.2).
+pub const LANKY_SOUNDS: [(&str, &str); 3] = [
+    ("M1_HEN_JUMP", "lanky_jump"),
+    ("M1_HEN_JUMP_FUWA", "lanky_float"),
+    ("M1_HEN_LARGE", "lanky_powerup"),
+];
+
 pub fn costume_model(id: usize) -> String {
     format!("SMM1_Costume_{id:03}")
 }
@@ -413,6 +421,30 @@ pub(crate) fn import_costumes(
             .unwrap()
             .as_bytes(),
     )?;
+    // Lanky Mario's own sounds (the Weird Mushroom extra): M1_Player.bars in Pack/Sound.pack
+    // holds the lanky jump, its float cue and the growth into Lanky
+    if let Some(p) = ov.file("Pack/Sound.pack") {
+        let bars = sarc_of(read(&p)?, &p)
+            .ok()
+            .and_then(|pack| member(&pack, "Sound/Resource/M1_Player.bars"))
+            .and_then(|b| sarc_of(b, &p).ok());
+        for (wave, sid) in LANKY_SOUNDS {
+            let Some(w) = bars
+                .as_ref()
+                .and_then(|b| b.get(&format!("{wave}.bfwav")))
+                .and_then(|d| Fwav::parse(d).ok())
+            else {
+                report.skipped.push(format!("sound {wave}: not found"));
+                continue;
+            };
+            write(&dir.join(format!("audio/{sid}.bwav")), &w.to_bwav())?;
+            audio.insert(
+                sid.to_string(),
+                json!({ "file": format!("{sid}.bwav"), "gain": 1.0 }),
+            );
+            report.sounds += 1;
+        }
+    }
     write(
         &dir.join("audio/index.json"),
         serde_json::to_string(&Value::Object(audio))

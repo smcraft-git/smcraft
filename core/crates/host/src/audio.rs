@@ -185,7 +185,7 @@ pub struct Director {
 
 enum Imp {
     Data(Box<Sounds>),
-    Legacy(Legacy),
+    Legacy(Box<Legacy>),
 }
 
 impl Director {
@@ -193,7 +193,7 @@ impl Director {
     pub fn new(tx: SyncSender<Command>, bank: &Bank) -> Self {
         Self {
             tx: tx.clone(),
-            imp: Imp::Legacy(Legacy::new(tx, bank)),
+            imp: Imp::Legacy(Box::new(Legacy::new(tx, bank))),
         }
     }
 
@@ -429,8 +429,8 @@ impl Legacy {
                     };
                     self.play_set(self.costume.sound(world, e), false);
                 }
-                // Lanky Mario's float cue: its SMM1 sound isn't imported [⬜]
-                Event::LankyFloat => {}
+                // Lanky Mario's float cue (SMM1 "h_fuyu")
+                Event::LankyFloat => self.play_set(self.costume.sound(world, "float"), false),
                 // the update power-ups' sounds (their names are on the Event variants): not
                 // mapped yet [⬜]
                 Event::SwordSlash
