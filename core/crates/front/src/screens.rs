@@ -666,6 +666,9 @@ impl CourseScreens {
         let skin = self.skin();
         let h = &mut self.hud;
         h.hold("TypeCharacter", s.character.min(3) as f32);
+        // co-op: the other players' icons beside player 1's (SMM2's co-op HUD, TypeMember =
+        // players − 1)
+        h.hold("TypeMember", s.players.clamp(1, 4) as f32 - 1.0);
         h.text(&format!("T_{skin}_Coin_00"), &digits(s.coins as i64, 2));
         h.text(&format!("T_{skin}_Zanki_00"), &digits(s.lives as i64, 2));
         h.text(&format!("T_{skin}_Score_00"), &digits(s.score as i64, 9));

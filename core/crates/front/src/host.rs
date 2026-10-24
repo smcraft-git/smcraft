@@ -365,6 +365,8 @@ pub struct CourseStatus {
     /// The sky colour (0xRRGGBBAA), for the title logo.
     pub clear_color: u32,
     pub condition: Option<Condition>,
+    /// Players in the course (1; 2–4 in local co-op).
+    pub players: u32,
 }
 
 /// My Courses slots of the Coursebot (SMM2 has 120, research/specs/coursebot.md A.3).
@@ -438,6 +440,15 @@ pub trait Host {
     fn restart_course(&mut self);
     /// Player 1's character: 0 Mario, 1 Luigi, 2 Toad, 3 Toadette.
     fn set_character(&mut self, character: u32);
+    /// Local co-op: how many players the next course start has (1–4; set before
+    /// `load_course` / `restart_course`, kept until changed).
+    fn set_players(&mut self, _players: u32) {}
+    /// How many players' controls the host has (the keyboard and each pad; touch counts as one):
+    /// Play Together takes one player per controller, 2–4 (the system controller set-up's
+    /// range in SMM2).
+    fn controllers(&mut self) -> u32 {
+        1
+    }
     /// Start the loaded course from a 100 Mario run's counters.
     fn set_run_counters(&mut self, score: u32, coins: u32, lives: u32);
     /// Local time minus UTC (seconds) at `secs` since 1970, for showing dates.

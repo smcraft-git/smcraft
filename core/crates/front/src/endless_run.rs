@@ -16,6 +16,7 @@ use std::collections::HashMap;
 use mmk_modes::endless::{Candidate, Difficulty, Outcome, Session, Step};
 
 use crate::challenge::{ChallengeEvent, ChallengeGo};
+use crate::coop::{Asked, PlayersAsk};
 use crate::endless::{EndlessBoard, EndlessEvent, EndlessMapScene, EndlessMenuScene, MapEntry};
 use crate::fade::FadeKind;
 use crate::host::{CourseEntry, Source};
@@ -247,6 +248,9 @@ pub struct EndlessFlow {
     pub header: String,
     /// Captures: start the course without the card.
     pub intro: bool,
+    /// Co-op: the run's players (one shared life counter), and the question before a run.
+    pub players: u32,
+    asking: Option<PlayersAsk>,
 }
 
 impl EndlessFlow {
@@ -291,6 +295,8 @@ impl EndlessFlow {
             handoff: None,
             header: header.unwrap_or_else(|| TITLE.to_string()),
             intro: true,
+            players: 1,
+            asking: None,
         };
         f.make_menu();
         f
@@ -376,6 +382,7 @@ impl EndlessFlow {
             return;
         };
         self.run.course = Some(course.clone());
+        cx.host.set_players(self.players.max(1));
         match cx.host.load_course(&Source::Library(course.id.clone())) {
             Ok(loaded) => {
                 self.run.apply(cx);
@@ -483,6 +490,25 @@ impl EndlessFlow {
             }
             return None;
         }
+        if let Some(a) = &mut self.asking {
+            match a.step(&input.ui, cx) {
+                None => {}
+                Some(Asked::Players(n)) => {
+                    let (d, resume) = (a.difficulty, a.resume);
+                    self.asking = None;
+                    self.players = n;
+                    if let Scene::Menu(s) = &mut self.scene {
+                        self.handoff = s.board.take();
+                    }
+                    self.start(cx, d, resume);
+                }
+                Some(Asked::Cancel) => {
+                    self.asking = None;
+                    self.make_menu();
+                }
+            }
+            return None;
+        }
         match &mut self.scene {
             Scene::Menu(s) => match s.step(&input.ui, &self.run)? {
                 EndlessEvent::Exit => {
@@ -490,8 +516,17 @@ impl EndlessFlow {
                     return Some(ChallengeEvent::Exit);
                 }
                 EndlessEvent::Start { difficulty, resume } => {
-                    self.handoff = s.board.take();
-                    self.start(cx, difficulty, resume);
+                    match PlayersAsk::open(cx, difficulty, resume) {
+                        Some(a) => {
+                            cx.toast(&a.question());
+                            self.asking = Some(a);
+                        }
+                        None => {
+                            self.players = 1;
+                            self.handoff = s.board.take();
+                            self.start(cx, difficulty, resume);
+                        }
+                    }
                 }
                 _ => {}
             },

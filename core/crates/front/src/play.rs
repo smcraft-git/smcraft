@@ -1147,9 +1147,18 @@ pub(crate) mod tests {
         pub saved: Vec<(Option<String>, Vec<u8>)>,
         pub tests: Vec<(usize, Option<[f32; 2]>)>,
         pub courses: HashMap<String, Vec<u8>>,
+        /// Controllers connected; the players asked for (`set_players`, last first).
+        pub controllers: u32,
+        pub players: Vec<u32>,
     }
 
     impl Host for MockHost {
+        fn controllers(&mut self) -> u32 {
+            self.controllers.max(1)
+        }
+        fn set_players(&mut self, n: u32) {
+            self.players.push(n);
+        }
         fn library(&mut self) -> Vec<CourseEntry> {
             self.library.clone()
         }

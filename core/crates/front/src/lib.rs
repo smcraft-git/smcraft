@@ -15,6 +15,7 @@ pub mod account;
 pub mod boot;
 pub mod challenge;
 pub mod challenge_modes;
+pub mod coop;
 pub mod coursebot;
 pub mod coursepage;
 pub mod endless;
@@ -184,6 +185,21 @@ impl Cx<'_> {
     pub fn toast(&mut self, text: &str) {
         *self.toast = Some((text.to_string(), TOAST_TICKS));
     }
+
+    /// Play Together's controller step: SMM2 opens the system controller set-up for 2–4
+    /// players, one per controller (local-coop.md §1.2); here the host's connected controllers
+    /// are the players. None (with a message) when there's only one.
+    pub fn together(&mut self) -> Option<u32> {
+        let n = self.host.controllers().min(4);
+        if n < 2 {
+            self.toast(
+                "Play Together: one controller per player (2–4). Connect another controller.",
+            );
+            return None;
+        }
+        self.toast(&format!("Play Together: {n} players"));
+        Some(n)
+    }
 }
 
 const TOAST_TICKS: i32 = 180;
@@ -274,7 +290,9 @@ impl CoursebotFlow {
             return None;
         }
         let back_to_maker = self.maker.is_some();
-        match self.scene.step(&input.ui, cx)? {
+        let event = self.scene.step(&input.ui, cx)?;
+        let together = matches!(event, E::Together(_));
+        match event {
             E::Back if back_to_maker => Some((FadeKind::Black, Go::BackToMaker)),
             // back to the title's Play menu, on the Coursebot button [inf]
             E::Back => Some((
@@ -316,7 +334,9 @@ impl CoursebotFlow {
                         .map_or_else(|| "M1".to_string(), |m| m.style()),
                 )),
             )),
-            E::Play(e) => {
+            E::Play(e) | E::Together(e) => {
+                let players = if together { cx.together()? } else { 1 };
+                cx.host.set_players(players);
                 match cx.host.load_course(&Source::Library(e.id.clone())) {
                     Ok(loaded) => {
                         let title = if loaded.name.is_empty() {

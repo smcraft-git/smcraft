@@ -6,7 +6,6 @@ use mmk_formats::smm2::Course;
 use mmk_front::CourseEntry;
 use mmk_front::CourseStatus;
 use mmk_front::host::Condition;
-use mmk_sim::player::{Control, DOWN_FALL_FRAMES};
 use mmk_sim::world::Event;
 
 use crate::game::Game;
@@ -116,12 +115,8 @@ pub fn natural(a: &str, b: &str) -> std::cmp::Ordering {
 pub fn status(game: &Game) -> CourseStatus {
     let w = &game.session.world;
     let h = w.hud();
-    let dying = !w.player.alive();
-    let restart_in = match w.player.control {
-        Control::DownPose { timer } => timer + DOWN_FALL_FRAMES,
-        Control::DownFall { timer } => timer,
-        _ => -1,
-    };
+    let dying = w.all_down();
+    let restart_in = w.restart_in();
     CourseStatus {
         score: h.score,
         coins: h.coins,
@@ -143,6 +138,7 @@ pub fn status(game: &Game) -> CourseStatus {
         restart_in,
         clear_color: mmk_host::clear_color(w, &game.cache),
         condition: condition(w),
+        players: w.players() as u32,
     }
 }
 

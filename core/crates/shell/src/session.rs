@@ -93,6 +93,8 @@ pub struct Session {
     )>,
     /// Engine options (SMM1 extras, `--option`), kept across restarts.
     pub options: mmk_sim::Options,
+    /// Local co-op: players in the course (1–4), kept across restarts.
+    players: usize,
 }
 
 impl Session {
@@ -122,6 +124,7 @@ impl Session {
             cleared_replay: None,
             net: None,
             options: Default::default(),
+            players: 1,
         }
     }
 
@@ -212,6 +215,9 @@ impl Session {
             None => World::new(),
         };
         self.world.set_options(self.options);
+        if self.players > 1 {
+            self.world.set_players(self.players);
+        }
         if let Some(d) = &mut self.director {
             d.start_course(&self.world);
         }
@@ -276,6 +282,18 @@ impl Session {
                 0
             }
         }
+    }
+
+    /// Local co-op: `n` players (1–4) from now on, kept across restarts.
+    pub fn set_players(&mut self, n: usize) {
+        self.players = n.clamp(1, 4);
+        if self.world.players() != self.players {
+            self.world.set_players(self.players);
+        }
+    }
+
+    pub fn players(&self) -> usize {
+        self.players
     }
 
     /// Play online from here: `players` players (2–4), we are player `me` (0-based).
@@ -361,7 +379,7 @@ impl Session {
             e.step(&self.world);
         }
         let h = self.world.hud();
-        let dying = !self.world.player.alive();
+        let dying = self.world.all_down();
         if self.was_dying && !dying && h.lives == 0 {
             self.set_phase(Phase::GameOver, input.buttons);
         }

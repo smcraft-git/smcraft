@@ -370,6 +370,24 @@ impl World {
         !self.anyone_in_play()
     }
 
+    /// The player whose death sequence restarts the course (with one player: player 1, while
+    /// dead; in co-op: the last one down, once nobody is in play).
+    pub fn down_player(&self) -> Option<&Player> {
+        if self.others.is_empty() {
+            return (!self.player.alive()).then_some(&self.player);
+        }
+        self.all_down().then(|| self.slot(self.coop.last_down))
+    }
+
+    /// Frames until the death sequence restarts the course; −1 while someone plays.
+    pub fn restart_in(&self) -> i32 {
+        match self.down_player().map(|p| p.control) {
+            Some(Control::DownPose { timer }) => timer + crate::player::DOWN_FALL_FRAMES,
+            Some(Control::DownFall { timer }) => timer,
+            _ => -1,
+        }
+    }
+
     /// Who runs the world this tick.
     fn pick_lead(&self) -> usize {
         if self.goal_phase != GoalPhase::None

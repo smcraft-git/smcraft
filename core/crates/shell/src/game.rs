@@ -112,7 +112,9 @@ impl Game {
     /// Play `course` (None: the demo strip) from its start, keeping the sound output.
     pub fn set_course(&mut self, course: Option<Course>) {
         let audio = self.session.audio.clone();
+        let players = self.session.players();
         self.session = Session::new(course);
+        self.session.set_players(players);
         self.session.set_audio(audio);
         self.resolver.reset();
         self.planner.reset();

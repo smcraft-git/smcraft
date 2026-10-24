@@ -9,6 +9,7 @@ use mmk_modes::challenge::Challenge;
 use mmk_modes::hundred::{Difficulty, Next, Outcome};
 use mmk_modes::pool::CourseRef;
 
+use crate::coop::{Asked, PlayersAsk};
 use crate::endless::{
     self, EndlessBoard, EndlessEvent, EndlessMapScene, EndlessMenuScene, MapEntry,
 };
@@ -76,6 +77,9 @@ pub struct ChallengeFlow {
     pub intro: bool,
     /// The SMM2 menu's header instead of "100 Mario Challenge" (Challenge Modes' ZL / ZR hint).
     pub header: Option<String>,
+    /// Co-op: the run's players (one shared life counter), and the question before a run.
+    pub players: u32,
+    asking: Option<PlayersAsk>,
 }
 
 /// What a step tells the owner.
@@ -271,6 +275,8 @@ impl ChallengeFlow {
             endless_handoff: None,
             intro: true,
             header: None,
+            players: 1,
+            asking: None,
         };
         f.make_menu();
         f
@@ -310,6 +316,36 @@ impl ChallengeFlow {
         } else {
             ChallengeMenuScene::new(&self.ui, d, &self.run).map_or(Scene::None, Scene::Smm1Menu)
         };
+    }
+
+    /// New Game / Continue decided: with two or more controllers, ask how many play first.
+    fn begin(&mut self, cx: &mut Cx, d: usize, resume: bool) {
+        match PlayersAsk::open(cx, d, resume) {
+            Some(a) => {
+                cx.toast(&a.question());
+                self.asking = Some(a);
+            }
+            None => {
+                self.players = 1;
+                self.start_from_menu(cx, d, resume);
+            }
+        }
+    }
+
+    /// Start the run from the select screen, handing its map over to the run's.
+    fn start_from_menu(&mut self, cx: &mut Cx, d: usize, resume: bool) {
+        match std::mem::replace(&mut self.scene, Scene::None) {
+            Scene::Menu(mut s) => {
+                self.endless_handoff = s.board.take().map(|mut b| {
+                    // the run's map: the mode's own name again
+                    b.layout.text("T_Title_00", "100 Mario Challenge");
+                    b
+                });
+            }
+            Scene::Smm1Menu(s) => self.handoff = s.into_handoff(),
+            other => self.scene = other,
+        }
+        self.start(cx, d, resume);
     }
 
     pub fn start(&mut self, cx: &mut Cx, d: usize, resume: bool) {
@@ -381,6 +417,7 @@ impl ChallengeFlow {
             return;
         };
         let entry = self.run.entries.get(&course.id).cloned();
+        cx.host.set_players(self.players.max(1));
         match cx.host.load_course(&Source::Library(course.id.clone())) {
             Ok(loaded) => {
                 self.run.apply(cx);
@@ -522,6 +559,22 @@ impl ChallengeFlow {
             return None;
         }
         let ui: &UiInput = &input.ui;
+        if let Some(a) = &mut self.asking {
+            match a.step(ui, cx) {
+                None => {}
+                Some(Asked::Players(n)) => {
+                    let (d, resume) = (a.difficulty, a.resume);
+                    self.asking = None;
+                    self.players = n;
+                    self.start_from_menu(cx, d, resume);
+                }
+                Some(Asked::Cancel) => {
+                    self.asking = None;
+                    self.make_menu();
+                }
+            }
+            return None;
+        }
         match &mut self.scene {
             Scene::Menu(s) => match s.step(ui, &self.run)? {
                 EndlessEvent::Exit => {
@@ -529,14 +582,7 @@ impl ChallengeFlow {
                     return Some(ChallengeEvent::Exit);
                 }
                 EndlessEvent::Locked(d) => cx.toast(endless::locked_message(d)),
-                EndlessEvent::Start { difficulty, resume } => {
-                    self.endless_handoff = s.board.take().map(|mut b| {
-                        // the run's map: the mode's own name again
-                        b.layout.text("T_Title_00", "100 Mario Challenge");
-                        b
-                    });
-                    self.start(cx, difficulty, resume);
-                }
+                EndlessEvent::Start { difficulty, resume } => self.begin(cx, difficulty, resume),
                 _ => {}
             },
             Scene::Map(s) => match s.step(ui)? {
@@ -552,12 +598,7 @@ impl ChallengeFlow {
                     return Some(ChallengeEvent::Exit);
                 }
                 Smm1Event::Locked(d) => cx.toast(endless::locked_message(d)),
-                Smm1Event::Start { difficulty, resume } => {
-                    if let Scene::Smm1Menu(s) = std::mem::replace(&mut self.scene, Scene::None) {
-                        self.handoff = s.into_handoff();
-                    }
-                    self.start(cx, difficulty, resume);
-                }
+                Smm1Event::Start { difficulty, resume } => self.begin(cx, difficulty, resume),
                 _ => {}
             },
             Scene::Smm1Intro(s) => match s.step(ui)? {
