@@ -710,6 +710,13 @@ pub struct Actor {
     /// many of its children are alive (set by the world before it steps).
     pub parent: Option<u32>,
     pub children: u32,
+    /// Rides a tower (a stacked member above the base): the world places it, and its own
+    /// motion is skipped (world/tower.rs).
+    pub stacked: bool,
+    /// A rider's drawn sideways sway (px), its amplitude and phase (degrees).
+    pub sway: f32,
+    pub sway_amp: f32,
+    pub sway_phase: u32,
 }
 
 impl Actor {
@@ -766,6 +773,10 @@ impl Actor {
             v3: V3State::default(),
             parent: None,
             children: 0,
+            stacked: false,
+            sway: 0.0,
+            sway_amp: 0.0,
+            sway_phase: 0,
         }
     }
 

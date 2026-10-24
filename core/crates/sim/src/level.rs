@@ -353,9 +353,9 @@ pub struct Level {
     /// Conveyor belts: left tile, right tile (inclusive), row, speed (px/frame, + = right).
     pub conveyors: Vec<(i32, i32, i32, f32)>,
     pub burners: Vec<Burner>,
-    /// Stacked parts (flag 0x1000 on every member of a column, the bottom one too): each rider
-    /// spawn and the spawn it stands on, bottom first.
-    pub stacks: Vec<(usize, usize)>,
+    /// Stacked parts (flag 0x1000 on every member of a column, the bottom one too): the
+    /// columns, bottom first (objects/stacks.md).
+    pub towers: Vec<TowerColumn>,
     pub firebars: Vec<FireBar>,
     pub cannons: Vec<Cannon>,
     /// Snake blocks: leftmost tile, row, length, fast, head on the left, path node codes.
@@ -578,23 +578,84 @@ fn block_kind(id: i16) -> Option<BlockKind> {
     })
 }
 
-/// Stacked spawns paired with the one each stands on: the nearest stacked spawn below it in
-/// the same column (data: every member of a stack carries 0x1000 and sits right on the one
-/// below), bottom first.
-fn stack_pairs(spawns: &[Spawn], stacked: &[usize]) -> Vec<(usize, usize)> {
-    let mut pairs: Vec<(usize, usize)> = stacked
-        .iter()
-        .filter_map(|&r| {
-            let s = &spawns[r];
-            stacked
-                .iter()
-                .filter(|&&b| b != r && (spawns[b].x - s.x).abs() < 1.0 && spawns[b].y < s.y)
-                .max_by(|&&a, &&b| spawns[a].y.total_cmp(&spawns[b].y))
-                .map(|&b| (r, b))
-        })
-        .collect();
-    pairs.sort_by(|a, b| spawns[a.0].y.total_cmp(&spawns[b.0].y));
-    pairs
+/// A column of stacked parts, bottom first.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct TowerColumn {
+    /// A Bill Blaster or Cannon at the bottom (it stays put): its x and top (px).
+    pub fixed: Option<(f32, f32)>,
+    /// Spawn indices of the members that move, bottom first.
+    pub members: Vec<usize>,
+}
+
+/// A part that can be in a column: centre x, feet y, height in tiles, and either its spawn or
+/// (a Bill Blaster / Cannon) its top.
+#[derive(Clone, Copy, Debug)]
+struct TowerPart {
+    x: f32,
+    y: f32,
+    h: i32,
+    spawn: Option<usize>,
+    top: f32,
+}
+
+/// Stacked flag 0x1000 with no pipe, Clown Car, track, parachute, Lakitu's Cloud or claw, and
+/// the facing field at its default [obs: the spawn record's tower bit, 0x710041b840 v1.0.0].
+fn tower_flags(flags: u32) -> bool {
+    flags & 0x0E03_9601 == 0x0600_1000
+}
+
+/// Chain the stacked parts into columns [obs 0x7100404f80 / 0x710041bc10 v1.0.0]: from the
+/// lowest part not yet in a column, the next member is a stacked part whose feet are in the
+/// 8-px row right above the current one's top and whose x is within 0.2 px of the bottom one's;
+/// a part with nothing on it is no column. A Bill Blaster or Cannon in a column is a fixed base
+/// for the ones above it (SMCraft builds them as terrain).
+fn tower_columns(parts: &[TowerPart]) -> Vec<TowerColumn> {
+    let mut order: Vec<usize> = (0..parts.len()).collect();
+    order.sort_by(|&a, &b| parts[a].y.total_cmp(&parts[b].y));
+    let mut used = vec![false; parts.len()];
+    let mut out = Vec::new();
+    for &first in &order {
+        if used[first] {
+            continue;
+        }
+        used[first] = true;
+        let mut chain = vec![first];
+        loop {
+            let last = parts[*chain.last().unwrap()];
+            let top = last.y + last.h as f32 * TILE;
+            let next = order.iter().copied().find(|&q| {
+                !used[q]
+                    && (parts[q].x - parts[first].x).abs() <= 0.2
+                    && parts[q].y >= top - 0.5
+                    && parts[q].y < top + 8.0
+            });
+            let Some(q) = next else { break };
+            used[q] = true;
+            chain.push(q);
+        }
+        if chain.len() < 2 {
+            continue;
+        }
+        let mut col = TowerColumn::default();
+        for &p in &chain {
+            match parts[p].spawn {
+                Some(s) => col.members.push(s),
+                None => {
+                    if col.members.len() + col.fixed.is_some() as usize >= 2 {
+                        out.push(std::mem::take(&mut col));
+                    }
+                    col = TowerColumn {
+                        fixed: Some((parts[p].x, parts[p].top)),
+                        members: Vec::new(),
+                    };
+                }
+            }
+        }
+        if col.members.len() + col.fixed.is_some() as usize >= 2 {
+            out.push(col);
+        }
+    }
+    out
 }
 
 impl Level {
@@ -625,7 +686,7 @@ impl Level {
             blasters: Vec::new(),
             conveyors: Vec::new(),
             burners: Vec::new(),
-            stacks: Vec::new(),
+            towers: Vec::new(),
             firebars: Vec::new(),
             cannons: Vec::new(),
             snakes: Vec::new(),
@@ -658,8 +719,8 @@ impl Level {
             autoscroll: h.autoscroll_type,
             timer: course.header.timer,
         };
-        // spawns of stacked parts (their columns are paired up at the end)
-        let mut stacked: Vec<usize> = Vec::new();
+        // stacked parts (chained into columns at the end)
+        let mut tower_parts: Vec<TowerPart> = Vec::new();
 
         // liquid by theme: underwater = all water; castle = lava; forest = water (poison at night)
         let height = |b: u8| b as f32 * TILE + 12.0;
@@ -1010,8 +1071,14 @@ impl Level {
                     clown: o.flags & 0x200 != 0,
                     alt: o.flags & 0x4 != 0,
                 });
-                if o.flags & 0x1000 != 0 {
-                    stacked.push(lvl.spawns.len() - 1);
+                if tower_flags(o.flags) {
+                    tower_parts.push(TowerPart {
+                        x: ox,
+                        y: oy - 8.0,
+                        h: hgt,
+                        spawn: Some(lvl.spawns.len() - 1),
+                        top: 0.0,
+                    });
                 }
                 continue;
             }
@@ -1053,6 +1120,16 @@ impl Level {
                     }),
                     _ => None,
                 };
+                if !on_track && tower_flags(o.flags) {
+                    // a Bill Blaster adds its height less 2 px [obs]
+                    tower_parts.push(TowerPart {
+                        x: tx as f32 * TILE + TILE / 2.0,
+                        y: ty as f32 * TILE,
+                        h: hgt.max(2),
+                        spawn: None,
+                        top: ty as f32 * TILE + hgt.max(2) as f32 * TILE - 2.0,
+                    });
+                }
                 lvl.blasters.push(Blaster {
                     x: tx as f32 * TILE + TILE / 2.0,
                     y: ty as f32 * TILE,
@@ -1240,6 +1317,16 @@ impl Level {
                 // cannon: solid block
                 if !on_track {
                     lvl.set(tx, ty, Cell::Solid);
+                }
+                if !on_track && tower_flags(o.flags) {
+                    // a Cannon adds 14 px [obs]
+                    tower_parts.push(TowerPart {
+                        x: tx as f32 * TILE + 8.0,
+                        y: ty as f32 * TILE,
+                        h: 1,
+                        spawn: None,
+                        top: ty as f32 * TILE + 14.0,
+                    });
                 }
                 lvl.cannons.push(Cannon {
                     x: tx as f32 * TILE + 8.0,
@@ -1506,7 +1593,7 @@ impl Level {
         if lvl.autoscroll == 4 {
             lvl.finish_custom_scroll(course, area_index);
         }
-        lvl.stacks = stack_pairs(&lvl.spawns, &stacked);
+        lvl.towers = tower_columns(&tower_parts);
         lvl
     }
 
@@ -1795,7 +1882,7 @@ impl Level {
             blasters: Vec::new(),
             conveyors: Vec::new(),
             burners: Vec::new(),
-            stacks: Vec::new(),
+            towers: Vec::new(),
             firebars: Vec::new(),
             cannons: Vec::new(),
             snakes: Vec::new(),
@@ -1869,39 +1956,59 @@ mod tests {
     }
 
     #[test]
-    fn a_stack_of_goombas_rides_its_bottom_one() {
-        // three Goombas in a column, every one flagged as stacked; a lone one beside them
+    fn stacked_parts_chain_into_columns_bottom_first() {
         let lvl = level(
             vec![
+                // a column of three Goombas, listed out of order
+                object(0, 20, 3, 1, 1, 0x1000),
                 object(0, 20, 1, 1, 1, 0x1000),
                 object(0, 20, 2, 1, 1, 0x1000),
-                object(0, 20, 3, 1, 1, 0x1000),
-                object(0, 24, 1, 1, 1, 0),
+                // a lone stacked Goomba, and one with a gap above it: no columns
+                object(0, 24, 1, 1, 1, 0x1000),
+                object(0, 28, 1, 1, 1, 0x1000),
+                object(0, 28, 3, 1, 1, 0x1000),
+                // stacked but on a parachute: not a member
+                object(0, 32, 1, 1, 1, 0x1000),
+                object(0, 32, 2, 1, 1, 0x1000 | 0x8000),
+                // a big (2-tall) Muncher with a Piranha Plant two tiles up
+                object(57, 36, 1, 2, 2, 0x1000 | 0x4000),
+                object(2, 36, 3, 1, 1, 0x1000),
             ],
             0,
         );
-        assert_eq!(lvl.stacks, [(1, 0), (2, 1)], "bottom first");
-        // in play, on flat ground: the column moves as one
-        let mut flat = Level::flat(60);
-        for k in 0..3 {
-            flat.spawns.push(Spawn {
-                y: 32.0 + 16.0 * k as f32,
-                ..lvl.spawns[k]
-            });
-        }
-        flat.stacks = lvl.stacks.clone();
-        let mut w = crate::World::with_level(flat);
-        for _ in 0..240 {
-            w.step(crate::input::Input::default());
-        }
-        let at = |s: usize| w.actors.iter().find(|a| a.spawn == Some(s)).unwrap();
-        let (a, b, c) = (at(0), at(1), at(2));
-        assert!(
-            (a.x - 20.0 * 16.0 - 8.0).abs() > 8.0,
-            "the bottom one walked"
+        let cols: Vec<Vec<usize>> = lvl.towers.iter().map(|c| c.members.clone()).collect();
+        let at = |x: f32, y: f32| {
+            lvl.spawns
+                .iter()
+                .position(|s| (s.x - x).abs() < 1.0 && (s.y - y).abs() < 1.0)
+                .unwrap()
+        };
+        let goombas = vec![at(328.0, 16.0), at(328.0, 32.0), at(328.0, 48.0)];
+        assert_eq!(cols[0], goombas, "bottom first");
+        assert_eq!(
+            cols.len(),
+            2,
+            "lone, gapped and parachute parts make no column: {cols:?}"
         );
-        assert_eq!((b.x, b.y - a.y), (a.x, 16.0), "the middle one rides it");
-        assert_eq!((c.x, c.y - b.y), (b.x, 16.0), "the top one rides that");
+        assert_eq!(lvl.spawns[cols[1][0]].kind, Kind::Muncher);
+        assert!(matches!(lvl.spawns[cols[1][1]].kind, Kind::Piranha { .. }));
+    }
+
+    #[test]
+    fn a_bill_blaster_is_a_fixed_base() {
+        // a 2-tall Bill Blaster with a Goomba on it
+        let lvl = level(
+            vec![
+                object(13, 20, 1, 1, 2, 0x1000),
+                object(0, 20, 3, 1, 1, 0x1000),
+            ],
+            0,
+        );
+        assert_eq!(lvl.towers.len(), 1);
+        let col = &lvl.towers[0];
+        // its top is its height less 2 px
+        assert_eq!(col.fixed, Some((328.0, 16.0 + 32.0 - 2.0)));
+        assert_eq!(col.members.len(), 1);
     }
 
     #[test]
