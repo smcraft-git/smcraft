@@ -49,7 +49,7 @@ use serde_json::{Value, json};
 use crate::smm1::{font_to_json, to_mtex};
 use crate::{ImportError, Progress, Result, read, write};
 
-pub const SMM2_UI_IMPORTER_VERSION: u32 = 8;
+pub const SMM2_UI_IMPORTER_VERSION: u32 = 9;
 
 #[derive(Clone, Debug)]
 pub struct Smm2UiConfig {
