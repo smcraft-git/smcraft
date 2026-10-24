@@ -344,7 +344,8 @@ Nextendo; `docs/nextendo-network-play.md`, spec `research/specs/network-play.md`
   the cause), spin-jump stomps (`r_damage_spin`), stomps from Yoshi (`r_damage_ystamp`), a sliding
   shell's knock-outs climbing its combo (`DownComboCount` along the shell's chain), enemies and
   items splashing into and out of the area's liquid (`r_splash_in` / `_out` by `BgWaterType`); the
-  Master Sword, Superball Flower and SMB2 Mushroom's own course music, hurry track and fanfares ✅
+  Master Sword, Superball Flower and SMB2 Mushroom's own course music, hurry track and fanfares; the
+  update power-ups' sounds (sword, shield, arrow, SMB2 pull / throw, balloon, wearables, boomerang) ✅
 
 **G9 — Every platform** 🔄
 - 🔄 macOS (Swift app) · 🔄 iOS / iPadOS (built for the Simulator; the owner's iPad) · 🔄 Windows ·

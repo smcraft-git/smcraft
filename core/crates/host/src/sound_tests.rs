@@ -72,7 +72,8 @@ fn db() -> serde_json::Value {
                 {"key": "jump_1", "parent": 0, "if": ["==", "Super"], "wave": "JumpBig"},
                 asset("pole", "Pole"),
                 asset("swim", "Swim"),
-                asset("kabekick", "WallKick")
+                asset("kabekick", "WallKick"),
+                asset("swordAttack", "Slash")
             ]},
             "M1_JumpStep": {"calls": [asset("jump", "Spring"), asset("high_jump", "SpringHigh")]},
             "M1_PowBlock": {"calls": [asset("pow", "Pow")]},
@@ -297,6 +298,9 @@ fn the_master_sword_plays_links_music_and_fanfare() {
     w.player.form = Form::Link;
     r.s.after_step(&w);
     r.played();
+    w.events = vec![Event::SwordSlash];
+    r.s.after_step(&w);
+    assert_eq!(r.played(), ["sfx:Slash"]);
     w.events = vec![Event::Death];
     w.player.kill();
     r.s.after_step(&w);

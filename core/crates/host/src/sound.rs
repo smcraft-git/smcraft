@@ -1351,6 +1351,33 @@ impl Sounds {
                 Event::ConditionCount => {
                     self.object_sfx(world, "p_GoalMission_CountUp", pe);
                 }
+                // the update power-ups (Link, the SMB2 Mushroom, the 3D World wearables …): the
+                // player's own keys where the style has them
+                Event::SwordSlash => _ = self.player_sfx(world, "swordAttack", &[]),
+                Event::SwordDashHit => _ = self.player_sfx(world, "p_DashSwoadHit", &[]),
+                Event::SwordThrust => _ = self.player_sfx(world, "hipdrop_start", &[]),
+                Event::ShieldHit => _ = self.player_sfx(world, "shieldHit", &[]),
+                Event::Pull => _ = self.player_sfx(world, "usa_pull", &[]),
+                Event::Throw => {
+                    if !self.player_sfx(world, "throw2", &[]) {
+                        self.player_sfx(world, "throw", &[]);
+                    }
+                }
+                Event::SquatCharge => _ = self.player_sfx(world, "voice_squat_charge", &[]),
+                Event::BalloonBounce => _ = self.player_sfx(world, "wall_hit", &[]),
+                Event::Wearing => _ = self.player_sfx(world, "Wearing", &[]),
+                Event::HeadDressOff => _ = self.player_sfx(world, "HeadDressOff", &[]),
+                Event::KillerBreak => _ = self.player_sfx(world, "KillerBreak", &[]),
+                Event::PropellerBox => _ = self.player_sfx(world, "PropellerFly", &[]),
+                Event::BoomerangThrow => _ = self.player_sfx(world, "fireball", &[]),
+                Event::ArrowShoot => {
+                    let user = self.user("PlayerArrow");
+                    self.sfx_at(world, &user, "shotArrow", &PropList::default(), pe, 0);
+                }
+                Event::Rebound => {
+                    let user = self.user("PlayerBoomerang");
+                    self.sfx_at(world, &user, "Rebound", &PropList::default(), pe, 0);
+                }
                 // co-op: a player goes into a bubble / a bubble pops (the bubble is the
                 // `Balloon` object; SMB1's has only the pop)
                 Event::Bubble | Event::BubblePop => {
