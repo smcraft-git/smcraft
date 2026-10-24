@@ -2373,12 +2373,22 @@ impl World {
             .filter(|a| a.alive())
             .filter_map(|a| a.parent)
             .collect();
+        // the Trampolines' bodies (type-0x25 BG units) for Bowser's jump-height search
+        let springs: Vec<(f32, f32, f32, f32)> = self
+            .actors
+            .iter()
+            .filter(|a| a.kind == Kind::Spring && a.mode == Mode::Normal && !a.held)
+            .map(|a| (a.x - 8.0, a.y, a.x + 8.0, a.y + 15.0))
+            .collect();
         for a in &mut self.actors {
             if a.held || a.mode == Mode::ClearPipe || self.cpipe.carries(a.id) {
                 continue;
             }
             if a.kind.is_platform() {
                 continue; // already moved before the player
+            }
+            if matches!(a.kind, Kind::Bowser { .. }) {
+                a.overhead_units.clone_from(&springs);
             }
             // a tower rider: the tower places it; it only idles, or keeps its own action in place
             let rider = a.stacked.then_some((a.x, a.y, a.dir));

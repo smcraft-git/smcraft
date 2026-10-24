@@ -864,6 +864,14 @@ pub struct Actor {
     pub bro_wing: BroWing,
     /// NSMBU's Propeller Mushroom's Move (actors/propeller.rs).
     pub prop: Prop,
+    /// Bowser: the Trampoline bodies in the area (x0, y0, x1, y1; set by the world), what his
+    /// jump-height search found over him (height from his feet), and his jump reaches
+    /// (actors/bosses.rs `bowser_height_search`).
+    pub overhead_units: Vec<(f32, f32, f32, f32)>,
+    pub spring_over: Option<f32>,
+    pub spring_reach_mid: f32,
+    pub spring_reach_big: f32,
+    pub spring_reach_body: f32,
 }
 
 impl Actor {
@@ -948,6 +956,11 @@ impl Actor {
             wing_rate: 1.0,
             bro_wing: BroWing::default(),
             prop: Prop::default(),
+            overhead_units: Vec::new(),
+            spring_over: None,
+            spring_reach_mid: 0.0,
+            spring_reach_big: 0.0,
+            spring_reach_body: 0.0,
         }
     }
 
