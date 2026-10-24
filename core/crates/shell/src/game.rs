@@ -279,6 +279,7 @@ impl Game {
                 view_proj: &field.view_proj,
                 layered: true,
                 flip_y: upside_down,
+                scroll: false,
             },
         );
         match scene.as_ref().and_then(|s| s.background) {
@@ -291,6 +292,7 @@ impl Game {
                     view_proj: &bg.view_proj,
                     layered: false,
                     flip_y: upside_down,
+                    scroll: true,
                 },
             ),
             None => self.background_frame.clear(),

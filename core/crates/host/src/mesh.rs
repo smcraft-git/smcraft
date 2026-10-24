@@ -6,7 +6,9 @@
 //! SMB1 models and frames (`M1_Enemy_kuribo`, `walk.1`). For NSMBU / 3D World the model resolves
 //! to the style's file (`WU_Enemy_kuribo`, players and blocks through tables below), the frame
 //! stem picks an animation (`walk` → `walk` / `Walk`, synonyms in `ANIM_SYNONYMS`), and the
-//! animation time is the world tick [inf: the sim keeps no per-actor animation clock].
+//! animation time is the course scene's frame (`World::scene_frame`) [inf: the sim keeps no
+//! per-actor animation clock; meas: NSMBU's night backdrops and day airship fit the scene's clock
+//! better than the player's (WU night means −2.6)].
 
 use std::collections::{HashMap, HashSet};
 use std::ffi::{CString, c_char};
@@ -15,7 +17,8 @@ use std::sync::{Arc, Mutex};
 
 use mmk_assets::Cache;
 use mmk_assets::mesh::{
-    AnimInfo, Binding, MeshFile, Pose, SkelAnim, anim_file_name, anim_index_from_json, find_ci,
+    AnimInfo, Binding, MeshFile, MeshMaterial, MeshModel, Pose, SkelAnim, anim_file_name,
+    anim_index_from_json, find_ci,
 };
 use mmk_formats::bfres::{Affine, IDENTITY, mul};
 use mmk_sim::Sprite;
@@ -832,6 +835,11 @@ pub struct MeshStore {
     pub shape_texture: Vec<u32>,
     pub shape_visible: Vec<u8>,
     pub preview: Vec<MmkMeshDraw>,
+    /// Per animation folder: its animations with texture-matrix tracks (`MeshStore::scroll`).
+    pub srt_anims: HashMap<String, Vec<i32>>,
+    /// After `scroll`: per material of the model, a copy with the animated texture matrices
+    /// (None: as the model has it).
+    pub scrolled: Vec<Option<MeshMaterial>>,
 }
 
 pub fn default_visible(file: &MeshFile) -> Vec<Vec<bool>> {
@@ -1077,6 +1085,82 @@ impl MeshStore {
             self.shape_texture.push(t);
         }
         Some((bones, self.shape_texture.len()))
+    }
+
+    /// The model's materials with their texture matrices `time` frames into the scene: every
+    /// texture-matrix track of the model file's own animations at once, each on its own length
+    /// (a background scene plays them together: NSMBU's clouds drift by their `_fts` while its
+    /// bones move by the skeletal animation of another length [inf: the game's frames of NSMBU's
+    /// skies fit the scrolled clouds]). Fills `scrolled`.
+    pub fn scroll(&mut self, mesh: i32, model: usize, time: f32) {
+        self.scrolled.clear();
+        let Some(folder) = self.mesh(mesh).map(|lm| lm.name.clone()) else {
+            return;
+        };
+        let ids = match self.srt_anims.get(&folder) {
+            Some(ids) => ids.clone(),
+            None => {
+                let names: Vec<String> = self
+                    .index(&folder)
+                    .iter()
+                    .filter(|a| a.srt)
+                    .map(|a| a.name.clone())
+                    .collect();
+                let ids: Vec<i32> = names
+                    .iter()
+                    .map(|n| self.load_anim(&folder, n))
+                    .filter(|&id| id >= 0)
+                    .collect();
+                // (a host still handing the index over: ask again next frame)
+                if self.anim_index.contains_key(&folder) && ids.len() == names.len() {
+                    self.srt_anims.insert(folder, ids.clone());
+                }
+                ids
+            }
+        };
+        let Some(m) = self
+            .meshes
+            .get(mesh as usize)
+            .and_then(|lm| lm.file.models.get(model))
+        else {
+            return;
+        };
+        if ids.is_empty() {
+            return;
+        }
+        self.scrolled.resize(m.materials.len(), None);
+        for id in ids {
+            let Some(a) = self.anims.get(id as usize) else {
+                continue;
+            };
+            for t in &a.srt {
+                let Some(i) = m.materials.iter().position(|x| x.name == t.material) else {
+                    continue;
+                };
+                let mat = self.scrolled[i].get_or_insert_with(|| m.materials[i].clone());
+                let key = format!("tex_srt{}", t.index);
+                let mut v = [0.0, 1.0, 1.0, 0.0, 0.0, 0.0];
+                if let Some(p) = mat.param(&key) {
+                    for (x, &y) in v.iter_mut().zip(p) {
+                        *x = y;
+                    }
+                }
+                t.apply(time, &mut v);
+                match mat.params.iter_mut().find(|(n, _)| *n == key) {
+                    Some((_, p)) => *p = v.to_vec(),
+                    None => mat.params.push((key, v.to_vec())),
+                }
+            }
+        }
+    }
+
+    /// Material `i` of the model last given to `scroll` as drawn: the scrolled copy, else the
+    /// model's own.
+    pub fn material<'a>(&'a self, model: &'a MeshModel, i: usize) -> Option<&'a MeshMaterial> {
+        self.scrolled
+            .get(i)
+            .and_then(Option::as_ref)
+            .or(model.materials.get(i))
     }
 
     /// Texture index of a shape look's extra texture in mesh file `mesh` (`TEXTURE_NONE` if
@@ -1783,7 +1867,7 @@ impl MeshPlanner {
         self.background.clear();
         self.scene = None;
         let mut store = store.filter(|s| mesh_style(style) && s.available());
-        let tick = world.tick as f32;
+        let tick = world.scene_frame() as f32;
         let mut has_background = false;
         if let Some(store) = store.as_deref_mut() {
             let cam = world.view_camera();
@@ -1811,11 +1895,27 @@ impl MeshPlanner {
                     variant: 0,
                 });
             }
+            // the sky's layers drift by the background's texture-matrix animation (3D World's
+            // `Sky_fts`)
+            let mut background_env = t.background_env;
+            if let (Some(sky), Some((mesh, model, _))) = (&mut background_env.sky, t.background) {
+                store.scroll(mesh, model as usize, tick);
+                if let Some(mat) = store
+                    .scrolled
+                    .iter()
+                    .flatten()
+                    .find(|m| m.option("enable_sky") == Some("1"))
+                {
+                    for (i, m) in sky.srt.iter_mut().enumerate() {
+                        *m = crate::scene3d::srt_matrix(
+                            mat.param(&format!("tex_srt{i}")).unwrap_or(&[]),
+                        );
+                    }
+                }
+            }
             self.scene = Some(Scene3dFrame {
                 field_light: t.field_env.uniform(field.eye),
-                background_light: t
-                    .background_env
-                    .uniform(background.map_or(field.eye, |c| c.eye)),
+                background_light: background_env.uniform(background.map_or(field.eye, |c| c.eye)),
                 field,
                 background,
             });

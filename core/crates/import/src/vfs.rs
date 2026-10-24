@@ -30,6 +30,13 @@ impl Vfs for StdFs {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
+        // a file already holding these bytes is left alone: a re-import into a copy-on-write
+        // clone of an earlier cache then takes disk space only for what changed
+        if std::fs::metadata(path).is_ok_and(|m| m.len() == data.len() as u64)
+            && std::fs::read(path).is_ok_and(|old| old == data)
+        {
+            return Ok(());
+        }
         std::fs::write(path, data)
     }
     fn read_dir(&self, dir: &Path) -> io::Result<Vec<PathBuf>> {

@@ -108,6 +108,9 @@ pub struct Projection<'a> {
     pub layered: bool,
     /// Underground night: the course is drawn upside down.
     pub flip_y: bool,
+    /// The materials' texture matrices follow their animations (the background scene,
+    /// `MeshStore::scroll`).
+    pub scroll: bool,
 }
 
 fn apply(m: &[f32], p: [f32; 3], w: f32) -> [f32; 3] {
@@ -150,16 +153,18 @@ pub fn build(
         let skin = store.skin.clone();
         let textures = store.shape_texture.clone();
         let visible = store.shape_visible.clone();
+        if proj.scroll {
+            store.scroll(d.mesh, d.model as usize, d.time);
+        } else {
+            store.scrolled.clear();
+        }
         let mut extras = std::collections::HashMap::new();
         if let Some(m) = store
             .mesh(d.mesh)
             .and_then(|lm| lm.file.models.get(d.model as usize))
         {
-            let looks: Vec<(usize, mmk_host::mesh::ShapeLook)> = m
-                .materials
-                .iter()
-                .enumerate()
-                .map(|(i, mat)| (i, shape_look(Some(mat))))
+            let looks: Vec<(usize, mmk_host::mesh::ShapeLook)> = (0..m.materials.len())
+                .map(|i| (i, shape_look(store.material(m, i))))
                 .filter(|(_, l)| l.extra.is_some() || l.extra2.is_some() || l.extra3.is_some())
                 .collect();
             for (i, l) in looks {
@@ -193,7 +198,7 @@ pub fn build(
             if visible.get(si) != Some(&1) || sh.index_count == 0 {
                 continue;
             }
-            let look = shape_look(m.materials.get(sh.material));
+            let look = shape_look(store.material(m, sh.material));
             let none = (TEXTURE_NONE, TEXTURE_NONE, TEXTURE_NONE);
             let (extra, extra2, extra3) = extras.get(&sh.material).copied().unwrap_or(none);
             let tev = match &look.tev {

@@ -48,7 +48,9 @@ pub mod sprites;
 /// 14: the Super World map's sound: the `MyWorld*` users (the map music `BGM_WorldMap_<Theme>`,
 ///     the player's, the points', the goal's, the Toad Houses'), with their action triggers and
 ///     the course point kind switch as `@point`.
-pub const IMPORTER_VERSION: u32 = 14;
+/// 15: the meshes' animated texture matrices (`SkelAnim::srt`, from the `_fts` / `_fsp`
+///     shader-parameter animations: NSMBU's and 3D World's scrolling clouds and skies).
+pub const IMPORTER_VERSION: u32 = 15;
 pub mod smm1;
 pub mod smm1_costumes;
 pub mod smm1_ui_sound;
