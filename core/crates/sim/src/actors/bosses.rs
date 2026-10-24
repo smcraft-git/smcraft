@@ -429,7 +429,7 @@ impl Actor {
                 self.heading = self.dir as f32;
                 self.chain = 0;
                 self.pause = self.bowser_fire_interval();
-                self.bowser_reset_big();
+                self.bowser_reset_big(st);
                 self.bowser_reset_jump(st);
                 if clown {
                     self.phase = bw::CLOWN;
@@ -792,19 +792,49 @@ impl Actor {
         self.bowser_set_flag(bwf::FIRED | bwf::BREATHING, false);
     }
 
-    /// Jump counter: SMB1 3 + random(0…1) decisions, other styles 1 + random(0…2); in the
-    /// chase / off-screen modes 4 + the same random part.
+    /// Jump counter (the decision's slot 0x370), [low, high) decisions by style and mode (0
+    /// normal, 1 / 2 the chases, 3 off screen) [obs v3.0.3]: SMB1 / SMB3 (0x710115ac00) SMB1
+    /// 3–4, SMB3 1–3, in modes 1–3 4 + the same random part; SMW (0x7101157fa0) 1–3, mode 1
+    /// 1–2, mode 2 3–4; NSMBU (0x7101152cb0, tables 0x71023cd664 / 0x71023cd670) 1–3, mode 1
+    /// 1–2, mode 2 4–5, mode 3 1–3.
     fn bowser_reset_jump(&mut self, st: usize) {
-        let (base, span) = if st == 0 { (3, 2) } else { (1, 3) };
-        let base = if self.bowser_mode() != 0 { 4 } else { base };
-        let j = base + self.rand(span) as u8;
+        let mode = self.bowser_mode();
+        let (lo, hi) = match st {
+            0 | 1 => {
+                let (base, span) = if st == 0 { (3, 2) } else { (1, 3) };
+                let base = if mode != 0 { 4 } else { base };
+                (base, base + span)
+            }
+            2 => match mode {
+                1 => (1, 3),
+                2 => (3, 5),
+                _ => (1, 4),
+            },
+            _ => match mode {
+                1 => (1, 3),
+                2 => (4, 6),
+                _ => (1, 4),
+            },
+        };
+        let j = (lo + self.rand(hi - lo)) as u8;
         self.set_byte(0, j);
     }
 
-    /// Big-jump counter: 5 or 6 decisions (chase / off-screen modes 9 or 10).
-    fn bowser_reset_big(&mut self) {
-        let base = if self.bowser_mode() != 0 { 9 } else { 5 };
-        let b = base + self.rand(2) as u8;
+    /// Big-jump counter (slot 0x378) [obs v3.0.3]: SMB1 / SMB3 (0x710115aca0) 5 or 6 decisions,
+    /// 9 or 10 in modes 1–3; SMW (0x7101158030, tables 0x71023cd67c / 0x71023cd688) 5–8, mode 1
+    /// 8–10, mode 2 9–11, mode 3 7–9; NSMBU (0x7101152d40, 0x71023cd64c / 0x71023cd658) 5–8,
+    /// mode 1 8–10, modes 2 and 3 7–9.
+    fn bowser_reset_big(&mut self, st: usize) {
+        let mode = self.bowser_mode();
+        let (lo, hi) = match (st, mode) {
+            (0 | 1, 0) => (5, 7),
+            (0 | 1, _) => (9, 11),
+            (_, 0) => (5, 9),
+            (_, 1) => (8, 11),
+            (2, 2) => (9, 12),
+            _ => (7, 10),
+        };
+        let b = (lo + self.rand(hi - lo)) as u8;
         self.set_byte(1, b);
     }
 
@@ -869,9 +899,21 @@ impl Actor {
                 };
             }
             bw::LITTLE_JUMP => {
-                // the low hop 0.7 is for a Trampoline found by the jump-height search
-                // (LittleJump 0x7101158ff0) [inf: not ported; its reach field +0x94 not read]
-                self.vy = 1.1;
+                // SMB1 / SMB3 (the Koopa / KoopaM3 action, vtable 0x71028e44b8): vy 1.1 (slot
+                // 0x3a8), but 0.7 — 0.35 under the water-speed rule — when the jump-height
+                // search found a Trampoline no higher than the hop's own reach (+0x94, in
+                // water +0x98) [obs v3.0.3 LittleJump enter 0x7101158ff0]. SMW's LittleJump
+                // (0x71011566e0) is a JumpSt wind-up and NSMBU's (0x7101150240) is empty; the
+                // engine keeps this hop for them [inf].
+                let low = st <= 1
+                    && self
+                        .spring_over
+                        .is_some_and(|h| h <= self.spring_reach_little);
+                self.vy = match (low, self.spring_slow) {
+                    (false, _) => 1.1,
+                    (true, false) => 0.7,
+                    (true, true) => 0.35,
+                };
                 self.on_ground = false;
                 self.bowser_walk_speed(st);
                 self.timer = 3;
@@ -1271,8 +1313,14 @@ impl Actor {
     /// The jump-counter tail of a decision: both counters count down; at 0 the big jump (if
     /// allowed: not SMB1, not while breathing) or the middle jump, otherwise a walk (SMB1) or
     /// little hop. No big jump with a Trampoline over him within its reach
-    /// (`bowser_height_search`) [obs v3.0.3 0x7101153750]; [inf: the decision's other use of
-    /// the search (middle jump → walk, 0x7101152520 slots 0x358–0x378) not ported].
+    /// (`bowser_height_search`) [obs v3.0.3 0x7101153750]; in SMB1 / SMB3 no middle jump
+    /// either with one within the middle jump's reach (the decision 0x7101152520's slot 0x368,
+    /// 0x710115ab40) [obs v3.0.3]. SMW and NSMBU have their own branch slots: SMW's middle
+    /// branch (0x7101157dd0) picks MiddleJump, LittleJump, MiddleJump (with +0xc1) or Fire at
+    /// random (Fire with such a Trampoline), its big branch (0x7101157c70) BeforeBigJump or
+    /// HipDrop; NSMBU's (0x7101152ab0) BeforeJump, Fire or JumpFire (Fire with a Trampoline),
+    /// its big one (0x7101152970) BeforeBigJump or SpreadFire [obs v3.0.3; not ported: the
+    /// engine has none of those states and runs the SMB1 / SMB3 decision for both].
     fn bowser_counters(&mut self, st: usize) {
         let j = self.byte(0).saturating_sub(1);
         let b = self.byte(1).saturating_sub(1);
@@ -1283,12 +1331,18 @@ impl Actor {
             && !self.bowser_flag(bwf::BREATHING)
             && !self.spring_over.is_some_and(|h| h <= self.spring_reach_big);
         if big_ok && b == 0 {
-            self.bowser_reset_big();
+            self.bowser_reset_big(st);
             self.bowser_rearm_fire();
             self.bowser_enter(bw::BIG_JUMP, st);
         } else if j == 0 {
             self.bowser_reset_jump(st);
-            self.bowser_enter(bw::MIDDLE_JUMP, st);
+            // SMB1 / SMB3: no middle jump with a Trampoline over him within its reach — he
+            // walks (hops) instead (slot 0x368 0x710115ab40 → slot 0x308) [obs v3.0.3]
+            if st <= 1 && self.spring_over.is_some_and(|h| h <= self.spring_reach_mid) {
+                self.bowser_walk(st);
+            } else {
+                self.bowser_enter(bw::MIDDLE_JUMP, st);
+            }
         } else {
             self.bowser_walk(st);
         }
@@ -1410,7 +1464,7 @@ impl Actor {
         if gap {
             if can && !wall {
                 self.bowser_reset_jump(st);
-                self.bowser_reset_big();
+                self.bowser_reset_big(st);
                 self.bowser_enter(bw::MIDDLE_JUMP, st);
                 self.vx = self.bowser_gap_speed(level, landing);
                 self.gap_jump = true;
@@ -1518,9 +1572,39 @@ impl Actor {
             }
             h + top + 16.0
         };
+        // in water / under the water-speed rule (0x71012a9180, or the liquid contact) the
+        // second set (+0x98 / +0xa0 / +0xa8): the gravity scaled by the speed's band, ×0.1
+        // under 0.3, ×0.15 under 0.7, ×0.2 under 1.2, else ×0.4, and half of each frame's v
+        // (0x710115aed0 / 0x71011530f0)
+        let apex_wet = |mut v: f32, g: f32| {
+            let mut h = 0.0;
+            loop {
+                let a = v.abs();
+                let k = if a < 0.3 {
+                    0.1
+                } else if a < 0.7 {
+                    0.15
+                } else if a < 1.2 {
+                    0.2
+                } else {
+                    0.4
+                };
+                v += g * k;
+                h += v * 0.5;
+                if v <= 0.0 {
+                    break;
+                }
+            }
+            h + top + 16.0
+        };
+        let slow = self.wet() || level.theme == 4 || (level.night && matches!(level.theme, 3 | 8));
+        let reach = |v: f32, g: f32| if slow { apex_wet(v, g) } else { apex(v, g) };
         let wings = self.wings;
-        self.spring_reach_mid = apex(if wings { 3.4 } else { 3.0 }, BOWSER_GRAVITY);
-        self.spring_reach_big = apex(if wings { 6.4 } else { 5.9 }, -0.1875);
+        self.spring_slow = slow;
+        // the little hop (vy 1.1 at −0.07, SMB1 / SMB3 slots 0x3a8 / 0x3c8: +0x94 / +0x98)
+        self.spring_reach_little = reach(1.1, -0.07);
+        self.spring_reach_mid = reach(if wings { 3.4 } else { 3.0 }, BOWSER_GRAVITY);
+        self.spring_reach_big = reach(if wings { 6.4 } else { 5.9 }, -0.1875);
         self.spring_reach_body = top + 16.0;
         if self.overhead_units.is_empty() {
             return None;
@@ -3450,6 +3534,80 @@ mod tests {
             assert!(!matches!(a.phase, bw::BIG_JUMP | bw::LITTLE_JUMP));
         }
         assert!(jumps >= 5, "{jumps} middle jumps");
+    }
+
+    #[test]
+    fn smb3_bowser_hops_low_and_skips_middle_jumps_under_a_low_trampoline() {
+        let (mut level, mut a) = boss(BOWSER, 30.0 * TILE);
+        level.style = "M3".to_string();
+        // little hop reach: 1.1 at −0.07 → 8.08 + 31.8 + 16
+        let _ = a.step_spawning(&level);
+        assert!(
+            (a.spring_reach_little - 55.88).abs() < 0.01,
+            "{}",
+            a.spring_reach_little
+        );
+        // a Trampoline 50 px over his feet: within the hop's, middle and big jumps' reaches
+        let (mut hops, mut low) = (0, 0);
+        for _ in 0..3000 {
+            a.overhead_units = vec![(a.x - 8.0, a.y + 50.0, a.x + 8.0, a.y + 65.0)];
+            let was = a.phase;
+            let _ = a.step_spawning(&level);
+            if a.phase == bw::LITTLE_JUMP && was != a.phase {
+                hops += 1;
+                low += i32::from((a.vy - 0.7).abs() < 1e-6);
+            }
+            assert!(!matches!(a.phase, bw::BIG_JUMP | bw::MIDDLE_JUMP));
+        }
+        assert!(hops > 20 && low == hops, "{low} of {hops} hops at 0.7");
+        // without it: 1.1 hops, and middle jumps again
+        a.overhead_units.clear();
+        let mut middle = 0;
+        for _ in 0..3000 {
+            let was = a.phase;
+            let _ = a.step_spawning(&level);
+            if a.phase == bw::LITTLE_JUMP && was != a.phase {
+                assert!((a.vy - 1.1).abs() < 1e-6, "vy {}", a.vy);
+            }
+            middle += i32::from(a.phase == bw::MIDDLE_JUMP && was != a.phase);
+        }
+        assert!(middle > 0);
+    }
+
+    #[test]
+    fn bowser_jump_counters_follow_the_styles_tables() {
+        let (_, mut a) = boss(BOWSER, 30.0 * TILE);
+        let seen = |a: &mut Actor, st: usize, mode: u8| {
+            let b = (a.byte(3) & !bwf::MODE) | mode;
+            a.set_byte(3, b);
+            let (mut j, mut g) = (
+                std::collections::BTreeSet::new(),
+                std::collections::BTreeSet::new(),
+            );
+            for _ in 0..400 {
+                a.bowser_reset_jump(st);
+                a.bowser_reset_big(st);
+                j.insert(a.byte(0));
+                g.insert(a.byte(1));
+            }
+            (
+                j.into_iter().collect::<Vec<_>>(),
+                g.into_iter().collect::<Vec<_>>(),
+            )
+        };
+        assert_eq!(seen(&mut a, 0, 0), (vec![3, 4], vec![5, 6]));
+        assert_eq!(seen(&mut a, 0, 2), (vec![4, 5], vec![9, 10]));
+        assert_eq!(seen(&mut a, 1, 1), (vec![4, 5, 6], vec![9, 10]));
+        // SMW (0x7101157fa0 / 0x7101158030)
+        assert_eq!(seen(&mut a, 2, 0), (vec![1, 2, 3], vec![5, 6, 7, 8]));
+        assert_eq!(seen(&mut a, 2, 1), (vec![1, 2], vec![8, 9, 10]));
+        assert_eq!(seen(&mut a, 2, 2), (vec![3, 4], vec![9, 10, 11]));
+        assert_eq!(seen(&mut a, 2, 3), (vec![1, 2, 3], vec![7, 8, 9]));
+        // NSMBU (0x7101152cb0 / 0x7101152d40)
+        assert_eq!(seen(&mut a, 3, 0), (vec![1, 2, 3], vec![5, 6, 7, 8]));
+        assert_eq!(seen(&mut a, 3, 1), (vec![1, 2], vec![8, 9, 10]));
+        assert_eq!(seen(&mut a, 3, 2), (vec![4, 5], vec![7, 8, 9]));
+        assert_eq!(seen(&mut a, 3, 3), (vec![1, 2, 3], vec![7, 8, 9]));
     }
 
     #[test]
