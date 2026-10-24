@@ -10,6 +10,7 @@ use crate::level::{Cell, Level, PipeDir, TILE};
 
 mod block_out;
 mod bosses;
+mod chute;
 mod clown;
 pub use clown::ClownFire;
 mod dokan;
@@ -1331,12 +1332,15 @@ impl Actor {
                     };
                     self.vy = 0.0;
                 } else {
-                    self.vy = (self.vy - 0.25).max(-5.0);
+                    // a parachute it carries opens as it falls (actors/chute.rs)
+                    let (g, cap) = self.thwomp_chute();
+                    self.vy = (self.vy + g).max(cap);
                 }
                 let before = (self.x, self.y);
                 self.collide(level);
                 let stuck = (self.x - before.0).abs() < 1e-5 && (self.y - before.1).abs() < 1e-5;
                 if (!side && self.on_ground) || (side && self.wall) || stuck {
+                    self.hops = 0; // Fall's exit folds the parachute
                     self.phase = 2;
                     self.timer = 64;
                     self.vx = 0.0;
@@ -1742,7 +1746,8 @@ impl Actor {
             held = true;
             rate *= 2.0;
         }
-        self.mode = if self.on_ground {
+        // a preset's own end (actors/chute.rs), else the Default landing
+        self.mode = if self.chute_fall_ends(level.theme) || self.on_ground {
             self.vx = 0.0;
             Mode::Normal
         } else {

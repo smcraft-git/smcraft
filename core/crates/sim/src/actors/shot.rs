@@ -449,7 +449,10 @@ impl Actor {
         if self.vx != 0.0 && self.kind != Kind::FloatCoin {
             self.dir = if self.vx < 0.0 { -1 } else { 1 };
         }
-        if std::mem::take(&mut self.chute) {
+        if Actor::folds_chute(self.kind) {
+            // its own action carries the parachute folded (actors/chute.rs)
+            self.mode = Mode::Normal;
+        } else if std::mem::take(&mut self.chute) {
             self.vx = 0.0;
             self.vy = 0.3;
             // a shot to the left swings leftward first

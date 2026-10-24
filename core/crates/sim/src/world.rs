@@ -3976,7 +3976,9 @@ impl World {
                 .map(|&(_, id, flags)| (id, flags));
             a.home_y = s.y;
             a.pipe = s.pipe;
-            if s.parachute {
+            if s.parachute && Actor::folds_chute(s.kind) {
+                a.chute = true;
+            } else if s.parachute {
                 a.mode = Mode::parachute(false);
             }
             a.rng ^= (idx as u32 + 1).wrapping_mul(0x85eb_ca6b);
@@ -6664,7 +6666,9 @@ impl World {
             if a.wings && !matches!(a.mode, Mode::DieFall) && visible(a.x, a.y) {
                 out.extend(Self::wing_sprites(a, self.style));
             }
-            if matches!(a.mode, Mode::Parachute { .. }) && visible(a.x, a.y) {
+            if (matches!(a.mode, Mode::Parachute { .. }) || a.thwomp_chute_open())
+                && visible(a.x, a.y)
+            {
                 out.push(Self::model_sprite(
                     "M1_Enemy_parachutecommon",
                     "parachute",
@@ -9457,6 +9461,51 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// A placed parachute Thwomp waits like any Thwomp, its parachute folded (actors/chute.rs);
+    /// a parachute Cheep Cheep in an underwater course swims at once.
+    #[test]
+    fn own_parachute_presets_spawn_their_way() {
+        let mut lvl = Level::flat(40);
+        let mut t = spawn(
+            Kind::Thwomp {
+                side: false,
+                right: false,
+            },
+            200.0,
+            200.0,
+        );
+        t.parachute = true;
+        lvl.spawns.push(t);
+        let mut c = spawn(Kind::CheepCheep { red: false }, 260.0, 120.0);
+        c.parachute = true;
+        lvl.spawns.push(c);
+        lvl.liquid = Some(crate::level::LiquidSpec {
+            kind: 1,
+            start: f32::MAX,
+            end: f32::MAX,
+            mode: 0,
+            speed: 0,
+            full: true,
+        });
+        let mut w = World::with_level(lvl);
+        w.player.x = 40.0;
+        run(&mut w, 0, 3);
+        let t = w
+            .actors
+            .iter()
+            .find(|a| matches!(a.kind, Kind::Thwomp { .. }))
+            .unwrap();
+        assert_eq!(t.mode, Mode::Normal);
+        assert!(t.chute && !t.thwomp_chute_open());
+        assert_eq!(t.y, 200.0);
+        let c = w
+            .actors
+            .iter()
+            .find(|a| matches!(a.kind, Kind::CheepCheep { .. }))
+            .unwrap();
+        assert_eq!(c.mode, Mode::Normal);
     }
 
     #[test]

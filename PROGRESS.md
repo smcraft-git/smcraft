@@ -46,7 +46,11 @@ sway, importer and pack 12, the dev cache already at v12).
   research 42-koopa-clown-car.md "Pass 5": the car's fire helper 0x71028e83f8 / record, cooldown
   90 then [90, 180), a 90-frame charge braking the car, one KoopaClownFire EnemyShot at 1.5 px/f
   plus the car's speed; bosses in a Fire car too; left: the player's own PlayerShot / ChargeShot,
-  the object budget); the Super World map's ledge cliffs (field atlas
+  the object budget); ✅ own Parachute falls (2026-10-25, branch `enemysys2`, actors/chute.rs,
+  shared enemy draft §5.2 "Traced"): the Thwomp's Dossun action folds its parachute and opens it
+  on each drop (vy ≤ −4: −0.1 / −1.0), the Lava Bubble's ends in lava or at its hiding level, the
+  Cheep Cheep's and Porcupuffer's in water or below the area, the Wiggler's is the Default (its
+  segments' rotation is drawn only); left: the Side Thwomp's (SideDossun Fall 0x7101265210); the Super World map's ledge cliffs (field atlas
   rows 6–7), map ghosts, the goal's AppearGoalPoint / cannon and Passable states, the map music
   (branch `swmap` drew the map with the game's models); ✅ the Cursed Key and Phanto (2026-10-25,
   research 95-key.md; co-op: Phanto hurts only the player in front [inf]); ✅ SMM1 UI sounds for
@@ -103,7 +107,7 @@ sway, importer and pack 12, the dev cache already at v12).
      variants (Kuribo / Pukupuku / Bubble / FishBone / Hanachan / RedPataPata in water), Block
      sideways (multiplayer) spreads and note blocks' contents, Gesso3W / Hanachan / FishBone /
      TeresaSpread Block Outs, KutsuKuribo, Togezo's ceiling flip, the winged coin's own pipe
-     state 8, Bubble / Thwomp / Porcupuffer / Wiggler / Cheep Cheep own Parachute Falls, the
+     state 8, ✅ Bubble / Thwomp / Porcupuffer / Wiggler / Cheep Cheep own Parachute Falls, the
      parachute body sway (drawn), DokanOutBig's 0.5 → 0.7 scale and other draw-only scales;
      Super World enemy-icon courses, point icons by model, map ghosts; ✅ CJK course
      names (branch `cjk`, 2026-10-24: the
