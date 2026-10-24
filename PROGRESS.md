@@ -54,9 +54,15 @@ sway, importer and pack 12, the dev cache already at v12).
      (`L_TrashCan_00`: UIEditMainPage part 8 at +0x800, set up in 0x71018cee20; `part(i)`
      0x71018fc060 is virtual; placed from code, the pane sits at 0,0; Act 45 plays
      `se_ui_edit_trash` + `SE_DropErase`; where it shows: one Ryujinx look when the slot is free);
-     ✅ winged / parachuted items and any part out of a block (2026-10-24); coins from a Bill
-     Blaster (the Coin actor's Killer Shot state: code not found yet, 0x71008484a0.. is template
-     plumbing); Super World enemy-icon courses, point icons by model, map ghosts; ✅ CJK course
+     ✅ winged / parachuted items and any part out of a block (2026-10-24); ✅ coins from a Bill
+     Blaster and the fired parts' launch (2026-10-24, branch `blaster`: the specs' addresses are
+     v1.0.0's (the decomp corpus); in v3.0.3 the Coin Shot enter is 0x7101366c30, the blaster
+     0x71011406f0 / 0x7101141e20. A coin blaster fires a TenCoin burst of 10 Coin actors, each
+     preset's Shot is in actors/shot.rs; left: coins from a Lakitu (Coin Jugem `Thrown`
+     0x7100847c20 is read, but after 50 frames it hands a coin over to the Wing context, whose
+     Move for an unwinged coin isn't traced), the red blaster's KillerSearch interval (770, and a
+     320-frame lock-out) and each preset's own Shot beyond Default / FlyStop / WingFly /
+     CloudShot / items); Super World enemy-icon courses, point icons by model, map ghosts; ✅ CJK course
      names (branch `cjk`, 2026-10-24: the
      UI pack keeps the decrypted scalable fonts (`ui/scalable/`, 31 MB) and each baked font's
      recipe; a character the sheets lack is rasterised on first use at the baked font's metrics
@@ -418,7 +424,7 @@ Nextendo; `docs/nextendo-network-play.md`, spec `research/specs/network-play.md`
 - ✅ Frozen Coins (3.0's `FreezeCoin`, the coin's 0x4 form; found blocking 4 of 38 recent TGRCode
   courses): solid ice round a coin (`<style>_Field_anime_coin_freeze`), the player's fireballs
   thaw it into the coin [inf: which fire thaws; `p_IceCoinThawing` isn't in the imported sound
-  users]. 32 of 38 recent TGRCode courses fully playable, 0 crashes (the coverage check now reads block and Bill Blaster contents; left: coins from a Bill Blaster, the Coin actor's Killer Shot state, 6 courses; 536 of the 550 sample)
+  users]. 32 of 38 recent TGRCode courses fully playable, 0 crashes (the coverage check now reads block and Bill Blaster contents); with coins from a Bill Blaster made (2026-10-24) 38 of 38 and 549 of the 550 sample (left: coins from a Lakitu, 1)
 - 🔄 Stacked parts (2026-10-24, from the game's tower manager; research objects/stacks.md): ✅
   play — columns chained as the game does (feet in the row above the lower top, x within 0.2 px
   of the bottom's; Bill Blasters / Cannons as fixed bases; 128 members at most); the base acts

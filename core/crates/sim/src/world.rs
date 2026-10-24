@@ -156,6 +156,24 @@ const GEN_INTERVAL: [i32; 4] = [180, 60, 240, 120];
 const GEN_FIRST: [i32; 4] = [90, 30, 90, 60];
 const GEN_RETRY: [i32; 4] = [30, 8, 41, 19];
 
+/// A coin blaster's TenCoin: 10 coins, one every 14 frames when winged (8-coin.md) [obs].
+const COIN_BURST: u8 = 10;
+const COIN_BURST_WING_GAP: u8 = 14;
+
+/// A TenCoin sending a coin blaster's coins out of its muzzle (x, y), toward `dir`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct CoinBurst {
+    x: f32,
+    y: f32,
+    dir: i32,
+    fast: bool,
+    wings: bool,
+    parachute: bool,
+    sent: u8,
+    wait: u8,
+    blaster: usize,
+}
+
 /// Goal pole demo (27-goal.md, GoalPole M1).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum GoalPhase {
@@ -274,6 +292,8 @@ pub struct World {
     next_id: u32,
     /// Bill Blaster countdowns (main timer, cooldown) for the current area.
     blaster_timers: Vec<(i32, i32)>,
+    /// Coin blasters' TenCoin bursts still sending coins out.
+    coin_bursts: Vec<CoinBurst>,
     /// Course-wide ON/OFF state (true = ON / red, the start state).
     pub on_off: bool,
     /// Shared 240-frame area timer of blinking and spike blocks; blinking group state.
@@ -605,6 +625,7 @@ impl World {
             big_coins: Default::default(),
             next_id: 1,
             blaster_timers: Vec::new(),
+            coin_bursts: Vec::new(),
             on_off: true,
             area_timer: 0,
             blink_alt: false,
@@ -797,7 +818,22 @@ impl World {
     }
 
     fn reset_generators(&mut self) {
-        self.blaster_timers = self.level.blasters.iter().map(|_| (60, 0)).collect();
+        // a coin blaster's first countdown gets its 0–59 extra frames too (0x710069e530) [obs]
+        self.blaster_timers = (0..self.level.blasters.len())
+            .map(|i| {
+                let coins = matches!(self.level.blasters[i].contents,
+                    Some(f) if f.kind == Kind::FloatCoin);
+                (
+                    60 + if coins {
+                        self.course_rand(60) as i32
+                    } else {
+                        0
+                    },
+                    0,
+                )
+            })
+            .collect();
+        self.coin_bursts.clear();
         self.cannon_timers = self.level.cannons.iter().map(|_| 60).collect();
         self.gen_timers = self
             .level
@@ -4988,10 +5024,15 @@ impl World {
     }
 
     /// Bill Blasters fire toward the player (13-bill-blaster.md): the first shot 60 frames after
-    /// the muzzle is on screen with no player at the blaster, then every 190 frames; with the
-    /// default content both get 0–59 extra frames from the course's shared generator each time
-    /// they are set (0x710069cea0: (word × 60) >> 32), so a held blaster draws every frame [obs].
+    /// the muzzle is on screen with no player at the blaster, then every 190 frames (380 for a
+    /// winged coin). Only a coin blaster (its content is TenCoin, engine id 0) adds 0–59 frames
+    /// from the course's shared generator each time it sets a timer (0x710069cea0 and
+    /// 0x710069e530 test the content's id against 0; (word × 60) >> 32), so a held coin blaster
+    /// draws every frame [obs; the same in v3.0.3 0x71011406f0 / 0x7101141e20]. Each blaster
+    /// keeps at most its part's `spout_killer_count` alive (limiter 0x7100364d80) [obs]. The part
+    /// leaves the muzzle (x ± 8, y + h − 16) in its Shot state (actors/shot.rs) [obs].
     fn step_blasters(&mut self) {
+        self.step_coin_bursts();
         let v = self.view_rect(0.0);
         for bi in 0..self.level.blasters.len() {
             let b = self.level.blasters[bi];
@@ -5003,8 +5044,9 @@ impl World {
             let p = &self.player;
             let at_blaster =
                 (p.x - b.x).abs() < 24.0 && (p.y - (b.y + h / 2.0)).abs() < h / 2.0 + 20.0;
+            let coins = b.contents.filter(|f| f.kind == Kind::FloatCoin);
             let extra = |w: &mut Self| {
-                if b.contents.is_none() {
+                if coins.is_some() {
                     w.course_rand(60) as i32
                 } else {
                     0
@@ -5020,26 +5062,92 @@ impl World {
             if *main > 0 || *cool > 0 {
                 continue;
             }
-            self.blaster_timers[bi].1 = 190 + extra(self);
+            // a winged coin's blaster waits 380 frames (0x17c, 0x710069e530) [obs]
+            let base = if coins.is_some_and(|f| f.wings) {
+                380
+            } else {
+                190
+            };
+            self.blaster_timers[bi].1 = base + extra(self);
+            let kind = b.contents.map_or(Kind::BulletBill, |f| f.kind);
             let alive = self
                 .actors
                 .iter()
-                .filter(|a| a.kind == Kind::BulletBill)
+                .filter(|a| a.blaster == Some(bi) && a.alive())
                 .count();
             let blocked = self.level.cell_at(mx + dir as f32 * 15.0, my).is_solid();
-            if alive >= 10 || blocked {
+            if alive >= crate::actors::spout_limit(kind) || blocked {
                 continue;
             }
-            let kind = b.contents.unwrap_or(Kind::BulletBill);
-            let mut a = Actor::new(kind, mx, my - 8.0);
-            a.dir = dir;
-            if kind == Kind::BulletBill {
-                a.vx = dir as f32;
-                a.phase = b.homing as u8;
-            }
-            self.add_actor(a);
             self.events.push(Event::Kick);
+            match b.contents {
+                Some(f) if f.kind == Kind::FloatCoin => self.coin_bursts.push(CoinBurst {
+                    x: mx,
+                    y: my,
+                    dir,
+                    fast: b.homing,
+                    wings: f.wings,
+                    parachute: f.parachute,
+                    sent: 0,
+                    wait: 0,
+                    blaster: bi,
+                }),
+                Some(f) => {
+                    let mut a = Actor::new(f.kind, mx, my);
+                    a.dir = dir;
+                    a.wings = f.wings;
+                    a.big = f.big;
+                    a.chute = f.parachute;
+                    a.home_y = my;
+                    a.blaster = Some(bi);
+                    a.launch(b.homing);
+                    self.add_actor(a);
+                }
+                None => {
+                    let mut a = Actor::new(Kind::BulletBill, mx, my - 8.0);
+                    a.dir = dir;
+                    a.vx = dir as f32;
+                    a.phase = b.homing as u8;
+                    a.blaster = Some(bi);
+                    self.add_actor(a);
+                }
+            }
         }
+    }
+
+    /// A coin blaster's shot is a TenCoin (engine id 0) at the muzzle that sends out 10 Coin
+    /// actors in the Killer context and deletes itself (TenCoin create 0x71008bf950, emit
+    /// 0x71008c01a0): two a frame (MoveNormalCreate exe 0x71008bfd30), or one every 14 frames
+    /// when the coin has wings (MoveNormalWingCreate exe 0x71008bfe60); the coin's slot in the
+    /// burst picks its launch [obs]. It starts the frame after the shot [inf].
+    fn step_coin_bursts(&mut self) {
+        let mut bursts = std::mem::take(&mut self.coin_bursts);
+        for c in &mut bursts {
+            let n = if c.wings {
+                if c.wait > 0 {
+                    c.wait -= 1;
+                    0
+                } else {
+                    c.wait = COIN_BURST_WING_GAP - 1;
+                    1
+                }
+            } else {
+                2
+            };
+            for _ in 0..n.min(COIN_BURST - c.sent) {
+                let mut a = Actor::new(Kind::FloatCoin, c.x, c.y);
+                a.dir = c.dir;
+                a.wings = c.wings;
+                a.chute = c.parachute;
+                a.blaster = Some(c.blaster);
+                a.coin_shot(c.sent as usize, c.fast);
+                a.home_y = a.y;
+                self.add_actor(a);
+                c.sent += 1;
+            }
+        }
+        bursts.retain(|c| c.sent < COIN_BURST);
+        self.coin_bursts = bursts;
     }
 
     // ---------------------------------------------------------------- switches, donuts, belts
@@ -7709,6 +7817,92 @@ mod tests {
                 .iter()
                 .any(|a| matches!(a.kind, Kind::Spiny | Kind::SpinyEgg))
         );
+    }
+
+    /// A 2-tall Bill Blaster at tile 12 (its muzzle toward the player, who starts left of it).
+    fn blaster_world(contents: Option<crate::level::Fired>, alt: bool) -> World {
+        let mut lvl = Level::flat(60);
+        lvl.set_solid(12, 2);
+        lvl.set_solid(12, 3);
+        lvl.blasters.push(crate::level::Blaster {
+            x: 12.0 * TILE + 8.0,
+            y: 32.0,
+            h: 2,
+            contents,
+            homing: alt,
+        });
+        World::with_level(lvl)
+    }
+
+    fn fired(kind: Kind) -> Option<crate::level::Fired> {
+        Some(crate::level::Fired {
+            kind,
+            wings: false,
+            parachute: false,
+            big: false,
+        })
+    }
+
+    #[test]
+    fn a_coin_blaster_sends_out_a_burst_of_ten_shot_coins() {
+        let mut w = blaster_world(fired(Kind::FloatCoin), false);
+        let coins = |w: &World| -> Vec<Actor> {
+            w.actors
+                .iter()
+                .filter(|a| a.kind == Kind::FloatCoin)
+                .cloned()
+                .collect()
+        };
+        let mut n = 0;
+        while coins(&w).is_empty() && n < 400 {
+            run(&mut w, 0, 1);
+            n += 1;
+        }
+        // the first shot 60 frames on plus the coin blaster's 0–59, then the burst
+        assert!((61..=121).contains(&n), "{n}");
+        assert_eq!(coins(&w).len(), 2, "two a frame");
+        run(&mut w, 0, 4);
+        let burst = coins(&w);
+        assert_eq!(burst.len(), 10);
+        // each slot's launch, toward the player: 0.6 × the slot's table speed
+        let mut vx: Vec<f32> = burst.iter().map(|c| -c.vx / 0.6).collect();
+        vx.sort_by(f32::total_cmp);
+        let mut want = vec![2.5, 0.75, 2.125, 1.75, 2.0, 1.0, 2.25, 0.5, 2.375, 1.5];
+        want.sort_by(f32::total_cmp);
+        assert!(
+            vx.iter().zip(&want).all(|(a, b)| (a - b).abs() < 1e-4),
+            "{vx:?}"
+        );
+        assert!(burst.iter().all(|c| matches!(c.mode, Mode::Shot { .. })));
+        // they come down and stay coins on the ground (or in the player's purse), before the
+        // next shot (190 frames on)
+        run(&mut w, 0, 150);
+        let left = coins(&w);
+        assert!(left.iter().all(|c| c.on_ground), "{left:?}");
+        assert_eq!(left.len() as u32 + w.coins, 10);
+    }
+
+    #[test]
+    fn the_alternate_blaster_fires_its_part_fast() {
+        let mut w = blaster_world(fired(Kind::Goomba), true);
+        let mut n = 0;
+        while !w.actors.iter().any(|a| a.kind == Kind::Goomba) && n < 400 {
+            run(&mut w, 0, 1);
+            n += 1;
+        }
+        // no extra frames for anything but coins: the first shot at frame 60
+        assert!((60..=61).contains(&n), "{n}");
+        let g = w.actors.iter().find(|a| a.kind == Kind::Goomba).unwrap();
+        assert!(
+            matches!(g.mode, Mode::Shot { fast: true, .. }),
+            "{:?}",
+            g.mode
+        );
+        assert!(g.vx < -4.4, "4.5 px/f toward the player: {}", g.vx);
+        let mut w = blaster_world(fired(Kind::Goomba), false);
+        run(&mut w, 0, 62);
+        let g = w.actors.iter().find(|a| a.kind == Kind::Goomba).unwrap();
+        assert!(g.vx < -1.4 && g.vx > -1.5, "1.5 px/f: {}", g.vx);
     }
 
     #[test]
