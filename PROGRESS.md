@@ -321,8 +321,11 @@ Nextendo; `docs/nextendo-network-play.md`, spec `research/specs/network-play.md`
   35.5 / 32 % (night 30.1), water night 49.3 / 86 %. Found, not fixed: the airship theme's camera
   sway; the night spotlight (darkness outside a circle round Mario, water / ghost house nights:
   `LightMaskTable`); SMB1's daytime ghost house backdrop is plain black ✅ (fixed);
-  the final colour table (every pixel 1–2 levels off; ramp captures ready). 60 of 90 reference
-  frames captured (all SMB1, most SMB3); tooling `research/tools/pixel-ref/`
+  the final colour table (every pixel 1–2 levels off; ramp captures ready). 72 of 90 reference
+  frames captured (all SMB1, SMB3 but sky / forest); tooling `research/tools/pixel-ref/`. Night
+  darkness: lit circles per light from `LightMaskTable` (the player's and, e.g., the start sign's),
+  shapes from `M0_Object_mask` (BC4, not imported yet); the scale → radius rule still open
+  (player 6.0 → ≈ 57 px, sign 3.5 → ≈ 52 px)
 - 🔄 Pixels: per style × theme frames against Ryujinx (2D styles exact; NSMBU / 3D World lighting,
   terrain variants, effects)
 - 🔄 Sound: every object's sounds, mixer behaviour checked against the game's output · keys
