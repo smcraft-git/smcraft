@@ -145,6 +145,8 @@ pub struct Env {
     pub sky: Option<Sky>,
     /// The game's last pass over the whole scene (both cameras' draws).
     pub grade: Grade,
+    /// Scale of the lit colour (row 23 x; [`EXPOSURE`] unless the style sets one).
+    pub light: Option<f32>,
 }
 
 /// The 3D styles' final pass (research/specs/render-3d.md "The final pass") [obs: the recomp's
@@ -169,6 +171,14 @@ impl Default for Grade {
         }
     }
 }
+
+/// 3D World's light scale: its lit colours come out about this much darker than the light
+/// sum [`Env::uniform`] models (ambient + hemisphere + wrapped directional lights) [meas: pixel
+/// table at k = 900 with the palette's lights, scales 0.5 … 1.0: 3D World mean 22.0 / 21.2 / 21.5 /
+/// 23.0 at 0.5 / 0.65 / 0.7 / 0.8; the game's diffuse light map — a second `LM_ConstructMem`
+/// cube the uber shader samples at the normal — is not modelled yet]. NSMBU measures flat
+/// around 1 (12.19 / 12.10 / 12.16 at 0.9 / 1 / 1.1).
+pub const LIGHT_3W: f32 = 0.65;
 
 /// 3D World's tone-map exposure [obs: the final pass's vertex constant 1.41421 (times a white
 /// texture's alpha); fitting the scene target against the pass's output gives 1.40 … 1.41].
@@ -330,6 +340,7 @@ pub fn load_env(cache: &Cache, name: &str) -> Option<Env> {
         fogs,
         sky: None,
         grade,
+        light: None,
     })
 }
 
@@ -385,7 +396,7 @@ impl Env {
             u[13] = [1.0, 1.0, 1.0, 0.0];
         }
         u[23] = [
-            EXPOSURE,
+            self.light.unwrap_or(EXPOSURE),
             self.grade.tone,
             self.grade.saturation,
             self.grade.brightness,

@@ -1902,11 +1902,13 @@ impl MeshPlanner {
             let mut field_env = env(row.as_ref().map(|r| r.env_model.as_str()));
             if l.style == "3W" {
                 field_env.grade.tone = crate::scene3d::TONE_3W;
+                field_env.light = Some(crate::scene3d::LIGHT_3W);
             }
             let grade = field_env.grade;
             let mut background_env = crate::scene3d::Env {
                 sky,
                 grade,
+                light: field_env.light,
                 ..env(row.as_ref().map(|r| r.env_dv.as_str()))
             };
             if l.style == "3W" && l.theme == 9 {
