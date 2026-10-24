@@ -44,6 +44,13 @@ sway, importer and pack 12, the dev cache already at v12).
      World wing art, the contents balloon (`Edit_BalloonPartsIn_00`, state `cDispInParts`: not
      built at all); tracks and links.
   3. Co-op: a players screen in SMM2's layouts; the P-door hold for followers.
+  3b. Research queue (binary → spec → code), each an agent's task: the Toad House minigames
+     (`super-worlds.md` "Toad House minigames": the three Seq classes); stacking's tower rules and
+     `Tower_stack` (maker C11); the maker's Water Level mode (`L_WaterLevelBtn_00`, mode banner
+     "Water / Poison / Lava Level"; fixed / rising and the speed — not in the text, likely
+     markers in the course), custom scroll nodes, Mario's Trail (`L_ZanzoBtn_00`), the trash can
+     (`L_TrashCan_00`); a winged / parachuted item coming out of a block; Super World enemy-icon
+     courses, point icons by model, map ghosts.
   4. Super Worlds' 3D map and Toad Houses; airship sway; the colour table; NSMBU / 3D World pixels.
   5. iPad / Android device runs; the macOS package; live Network Play once the ID and key arrive.
 
