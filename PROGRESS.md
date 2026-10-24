@@ -582,7 +582,7 @@ Nextendo; `docs/nextendo-network-play.md`, spec `research/specs/network-play.md`
   move too; a ground block above a slope's surface holds the feet; at 374 the game walks flat
   over a slope that overlaps ground, unexplained [?]); W_3065813 exact
   (a wall of dotted-line blocks: their 0x4 variant is the red one, solid at ON), W_3051046 to its death at 103 (then the title course's death sequence), W_3006094 to
-  481, W_3051605 to 167 (a crowd of Goombas at a slope's raised low cap: the game's walkers pause in their Turn state, still to model; its staircase's six Goombas exact: an actor on an incline steps x · cos θ, lands by its centre, stands a frame after a fall, and walkers turn on each other only head-on), W_3145588 to 384, W_3010660 to 137 (a Seesaw's tilt starts 2 frames later in the game). Object courses in all styles exact
+  481, W_3051605 to 233 (its packed row of Goombas exact to the death: a walker turns a frame after a wall or an enemy met in front, then 8 frames of Turn, stopped by another enemy met in front; from the binary's Walk / Turn and enemy contact, timing from a recording of the Turn fields; its staircase's six Goombas exact: an actor on an incline steps x · cos θ, lands by its centre, stands a frame after a fall, and walkers turn on each other only head-on), W_3145588 to 384, W_3010660 to 137 (a Seesaw's tilt starts 2 frames later in the game). Object courses in all styles exact
   (3D World's Trampoline eases 3 px, its falling Donut is gone after 21 frames, a lift pushes up
   feet at most 6 px under its top, a foot on a column boundary rides both donuts; SMW turn
   blocks spin 240 frames, passable; small Mario's head at 15.9 in SMW / NSMBU / 3D World; walkers

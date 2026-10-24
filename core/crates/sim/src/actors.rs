@@ -694,6 +694,13 @@ pub struct Actor {
     pub die_frames: u16,
     /// A walker's frames standing after a landing.
     pub land_wait: u8,
+    /// A walker's enemy contact on its front side at the end of last frame (EnemySys's touch
+    /// flag: Walk turns on it; in Turn it stops the walker for the rest of the turn).
+    pub touch_front: bool,
+    /// A walker in Turn stopped by an enemy in front (vx 0 until the turn ends).
+    pub turn_stop: bool,
+    /// A walker's wall contact at the end of last frame (Walk reads it a frame late).
+    pub wall_prev: bool,
     /// An item touched by the player: 1 = touched at the end of last frame (this update moves it
     /// once more, without landing, and takes it), 2 = taken (the world collects it), 3 = gone.
     pub taken: u8,
@@ -820,6 +827,9 @@ impl Actor {
             die_pending: None,
             die_frames: 0,
             land_wait: 0,
+            touch_front: false,
+            turn_stop: false,
+            wall_prev: false,
             taken: 0,
             kick_speed: 0.0,
             bounce_pending: false,
@@ -1664,6 +1674,7 @@ impl Actor {
         self.dir = -self.dir;
         self.vx = -self.vx;
         self.turn_lock = TURN_LOCK;
+        self.turn_stop = false;
     }
 
     /// One frame of behaviour and movement. `player_x` is used for facing rules.
@@ -2229,6 +2240,27 @@ impl Actor {
                 } else {
                     self.vx = self.vx.clamp(-speed, speed);
                 }
+                // an enemy met in front (the touch flag of last frame's contacts): Walk turns,
+                // this frame's move still the old way, then 8 frames of Turn, walking the new way
+                // unless stopped: an enemy met in front during the turn stops the walker from the
+                // next frame to the turn's end (the Basic action's Walk / Turn, 0x71005ecc70,
+                // 0x71005ecd60, turn-done 0x71005e5040; the flag 0x51a bit 3 set by the enemy
+                // contact 0x710072bca0 for a moving walker overlapping another enemy ≥ 0.1 px on
+                // its front side) [obs: Ryujinx trace W_3051605 with +0x53c / +0x540 recorded, a
+                // packed row of Goombas]
+                // (a wall is read the same way: the frame after the move that met it)
+                let touch = std::mem::take(&mut self.touch_front);
+                let wall_prev = std::mem::take(&mut self.wall_prev);
+                let mut touch_turn = false;
+                if self.turn_lock > 0 {
+                    if self.turn_stop {
+                        self.vx = 0.0;
+                    } else if touch {
+                        self.turn_stop = true;
+                    }
+                } else if (touch || wall_prev) && self.on_ground {
+                    touch_turn = true;
+                }
                 // the frame after landing from a fall it stands (Fall hands over to Walk) [obs:
                 // Ryujinx trace W_3051605, a Goomba landing on a slope, still a frame, then on]
                 if self.land_wait > 0 {
@@ -2241,7 +2273,15 @@ impl Actor {
                 if !was_on_ground && self.on_ground && self.age > 1 {
                     self.land_wait = 1;
                 }
-                if self.wall && self.turn_lock == 0 {
+                if touch_turn {
+                    self.dir = -self.dir;
+                    self.turn_lock = TURN_LOCK + 1;
+                    self.turn_stop = false;
+                } else if self.wall && self.on_ground && was_on_ground {
+                    // (pressed through a turn too: the Walk after it turns at once [obs:
+                    // W_3051605, a Goomba turned toward a wall pushing it to the turn's end])
+                    self.wall_prev = true;
+                } else if self.wall && self.turn_lock == 0 {
                     self.turn();
                 }
                 // a red Koopa turns at ledges: after the move, the floor is probed |foot sensor
@@ -4204,7 +4244,26 @@ impl Actor {
         // a shell's sides are 6 px out and it stops flush against a wall [obs: Ryujinx trace
         // M1_koopa koopa_kick: x 538.0 against a wall at 544, 342.0 against one at 336]
         let shell = matches!(self.kind, Kind::Shell { .. });
-        let (side_hw, gap) = if shell { (6.0, 0.0) } else { (hw, 0.001) };
+        // a Basic walker rests 0.1 px inside its half width from a wall it presses (its BG
+        // sensor) [obs: Ryujinx trace W_3051605, a Goomba at x 327.9 against a wall at 320]
+        let basic = matches!(
+            self.kind,
+            Kind::Goomba
+                | Kind::Goombrat
+                | Kind::Koopa { .. }
+                | Kind::Spiny
+                | Kind::Buzzy
+                | Kind::BobOmb
+                | Kind::DryBones
+        ) && !self.big
+            && self.mode == Mode::Normal;
+        let (side_hw, gap) = if shell {
+            (6.0, 0.0)
+        } else if basic {
+            (hw, -0.1)
+        } else {
+            (hw, 0.001)
+        };
         let was_ground = self.on_ground;
         let solid = |px: f32, py: f32| level.cell_at(px, py).is_solid();
 

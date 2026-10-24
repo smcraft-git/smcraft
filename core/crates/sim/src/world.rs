@@ -3191,6 +3191,7 @@ impl World {
     }
 
     fn actor_interactions(&mut self) {
+        let level_ref = &self.level;
         let n = self.actors.len();
         let mut scores = Vec::new();
         for i in 0..n {
@@ -3268,17 +3269,42 @@ impl World {
                         scores.push((Self::chain_score(s.chain), v.x, v.y + 24.0));
                         s.chain += 1;
                     }
-                    // (two walking the same way don't turn: a row of Goombas spawning a tile
-                    // apart walks off together [obs: Ryujinx trace W_3051605])
-                    (false, false) if walkers && a.dir != b.dir => {
-                        // walkers turn on touching each other (when moving toward each other)
-                        let toward = (b.x - a.x) * a.dir as f32 > 0.0;
-                        if a.mode == Mode::Normal && toward && a.turn_lock == 0 {
-                            a.turn();
-                        }
-                        let toward_b = (a.x - b.x) * b.dir as f32 > 0.0;
-                        if b.mode == Mode::Normal && toward_b && b.turn_lock == 0 {
-                            b.turn();
+                    // a moving walker (|vx| > 0.001) overlapping another enemy by 0.1 px or
+                    // more on its front side raises its touch flag, read by its next update
+                    // (Walk turns, Turn stops), unless the other's feet are within 4 px of its
+                    // head (enemy contact 0x710072bca0, box shapes) [obs: Ryujinx trace
+                    // W_3051605, a packed row of Goombas]; not with one in the air or tilted on
+                    // an incline's diagonal (its box turned with it [inf]) [obs: W_3051605, a
+                    // Goomba walking up a staircase into one falling onto it, then standing on
+                    // it, never turns]
+                    (false, false) if walkers => {
+                        let (ab, bb) = (a.bbox(), b.bbox());
+                        let ox = ab.2.min(bb.2) - ab.0.max(bb.0);
+                        let dx = b.x - a.x;
+                        let flag = |w: &Actor,
+                                    wb: (f32, f32, f32, f32),
+                                    ob: (f32, f32, f32, f32),
+                                    d: f32| {
+                            w.mode == Mode::Normal
+                                && w.vx.abs() > 0.001
+                                && ox >= 0.1
+                                && d.abs() >= 0.01
+                                && d * w.dir as f32 > 0.0
+                                && (ob.1 - wb.3).abs() >= 4.0
+                        };
+                        let tilted = |w: &Actor| {
+                            w.on_ground
+                                && level_ref.slope_at(w.x).is_some_and(|(sy, sl)| {
+                                    sl.on_diagonal(w.x) && (sy - w.y).abs() < 1.0
+                                })
+                        };
+                        if !tilted(a) && !tilted(b) && a.on_ground && b.on_ground {
+                            if flag(a, ab, bb, dx) {
+                                a.touch_front = true;
+                            }
+                            if flag(b, bb, ab, -dx) {
+                                b.touch_front = true;
+                            }
                         }
                     }
                     _ => {}
