@@ -183,6 +183,10 @@ SMCraft is back in development (it was archived in October 2026).
   opening its upper-left end opened the other one in play). A door or warp box whose partner's
   tile is taken can't be put there (it went to the next free column). The part balloon opens on
   the side of the part SMM2 chooses.
+- Course Maker: player 2's part menu shows the parts' pictures and English names and opens
+  beside player 2's glove on the side SMM2 picks (below it, left of it near the right edge); the
+  palette bar no longer empties while player 2 edits; the "what is inside" balloon shows its
+  dark frame with the content and real wings / parachute beside it (they were white boxes).
 - **Course Maker: Co-op Making**: the left column's co-op button asks "Start making
   cooperatively?" and, with a second controller, gives player 2 a green glove of their own:
   they move, put down, pick up and erase with their own part, chosen from the small part menu by
