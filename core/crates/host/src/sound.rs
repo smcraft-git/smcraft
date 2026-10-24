@@ -1751,6 +1751,18 @@ impl Sounds {
             if self.actor_sfx(world, kind, key, &props, x, y) {
                 continue;
             }
+            if kind == Kind::EnemyFire && key == "fire" {
+                // 3D World keeps the spit on the Fire Piranha Plant (`fire`, land / water by
+                // BodyWaterType); NSMBU on the fireball; the 2D styles have none [obs data]
+                let user = self.user("FirePakkun");
+                let e = Emitter {
+                    x,
+                    y,
+                    water: self.in_water(world, y),
+                };
+                self.sfx_at(world, &user, key, &props, e, 0);
+                continue;
+            }
             if key == "r_damage_ystamp" {
                 if !self.actor_sfx(world, kind, "r_damage_stamp", &props, x, y) {
                     self.generic_enemy(world, "r_damage_stamp");

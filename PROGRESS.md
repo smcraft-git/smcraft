@@ -457,7 +457,9 @@ Nextendo; `docs/nextendo-network-play.md`, spec `research/specs/network-play.md`
   Play menu, Course World, the library list, a course page and play by touch. Open: the import on
   the device (G1's NSP importer + a file picker), a real phone, Bluetooth controllers (winit key
   events), the 3D World sky drawn in stripes in the emulator, sound not checked (emulator audio off)
-- ⬜ Release packages for every platform (the game only; the player imports their own dump)
+- ⏳ Release packages for every platform (the game only; the player imports their own dump):
+  `release.yml` builds Windows, Linux x64 / arm64, macOS, Android and the web on a `v*` tag;
+  waiting for the owner's OK to tag the first one (CHANGELOG "Unreleased" is ready)
 
 ---
 

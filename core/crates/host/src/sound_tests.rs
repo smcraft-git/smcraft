@@ -92,6 +92,13 @@ fn db() -> serde_json::Value {
                 asset("r_damage_spin", "SpinKill")
             ]},
             "M1_koura": {"calls": [asset("kick", "Kick")]},
+            // (3D World's shape: the spit on the shooter, by the body's water)
+            "M1_FirePakkun": {"calls": [
+                {"key": "fire", "kind": "switch", "watch": "BodyWaterType", "children": [1, 2]},
+                {"key": "fire_Land", "parent": 0, "if": ["==", "None"], "wave": "Spit"},
+                {"key": "fire_Water", "parent": 0, "if": ["==", "Water"], "wave": "SpitWater"}
+            ]},
+            "M1_EnmyFire": {"calls": [asset("r_appear_title", "Magic")]},
             "M1_EditKuribo": {"calls": [asset("set", "EditSet"), asset("drag", "EditDrag")]}
         }
     })
@@ -323,6 +330,19 @@ fn a_cape_spin_sounds_once_when_it_starts() {
     w.player.attack = 11;
     r.s.after_step(&w);
     assert!(r.played().is_empty(), "not again while it lasts");
+}
+
+#[test]
+fn an_enemy_fireball_spits_on_its_shooter_where_the_style_keeps_it_there() {
+    let mut r = rig();
+    let mut w = world();
+    r.s.start_course(&w);
+    r.played();
+    let mut f = Actor::new(Kind::EnemyFire, w.player.x + 40.0, w.player.y + 16.0);
+    f.id = 5;
+    w.actors.push(f);
+    r.s.after_step(&w);
+    assert_eq!(r.played(), ["sfx:Spit"]);
 }
 
 #[test]
