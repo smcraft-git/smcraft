@@ -221,8 +221,8 @@ final class MeshRenderer {
             default: return albedo;
         }
     }
-    // the combiner's lit colour and alpha; tx: albedo, _a1, gsys_user0, indirect
-    float4 tev_color(thread const float4* tx, float4 vc, constant float4* T) {
+    // the combiner's registers after its stages; tx: albedo, _a1, gsys_user0, indirect
+    void tev_regs(thread const float4* tx, float4 vc, constant float4* T, thread float4& R0, thread float4& R1) {
         float4 r0 = T[8], r1 = T[9];
         float4 on = T[4], kind = T[5], so = T[6], sa = T[7];
         for (int st = 0; st < 2; st++) {
@@ -246,10 +246,8 @@ final class MeshRenderer {
             r0 = n0;
             r1 = n1;
         }
-        float4 f = T[14], k = T[15];
-        float3 rgb = tev_source(f.x, k, tx[0], vc, r0, r1).rgb;
-        float alpha = tev_source(f.y, k, tx[0], vc, r0, r1).a;
-        return float4(rgb, alpha * f.w);
+        R0 = r0;
+        R1 = r1;
     }
     fragment float4 mesh_fragment(O in [[stage_in]], texture2d<float> t [[texture(0)]],
                                   texture2d<float> extra [[texture(1)]],
@@ -267,10 +265,16 @@ final class MeshRenderer {
             float4 tx[4] = { t.sample(s, tev_uv(0, in.uv, T) + off * T[16].w),
                              extra2.sample(s, tev_uv(1, in.uv, T) + off * T[18].w),
                              extra.sample(s, tev_uv(2, in.uv, T) + off * T[20].w), ind };
-            float4 c = tev_color(tx, in.vc, T) * in.color;
+            float4 R0, R1;
+            tev_regs(tx, in.vc, T, R0, R1);
+            float4 f = T[14];
+            float4 c = float4(tev_source(f.x, T[15], tx[0], in.vc, R0, R1).rgb,
+                              tev_source(f.y, T[15], tx[0], in.vc, R0, R1).a * f.w) * in.color;
             if ((u.flags & 8) != 0 && c.a < u.misc.z) discard_fragment();
             float3 rgb = c.rgb;
             if ((u.flags & 2) == 0) rgb *= lighting(normalize(in.n), L) * L[23].x;
+            // the combiner's emission: _e0 (in gsys_user0's place) times emission_mul_color's colour
+            if (T[24].z > 0.5) rgb += tx[2].rgb * tev_source(T[24].x, T[25], tx[0], in.vc, R0, R1).rgb * T[24].y;
             rgb = clamp(rgb, 0.0, 2.0);
             rgb = fogged(rgb, in.world, u.flags, L);
             return float4(rgb, c.a);

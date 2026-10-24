@@ -348,7 +348,7 @@ fn form_of(m: &mmk_assets::mesh::MeshMaterial) -> Option<Form> {
 }
 
 /// Rows (vec4) of a shape's colour-combiner block ([`tev_of`], [`MmkMeshShape::tev`]).
-pub const TEV_ROWS: usize = 24;
+pub const TEV_ROWS: usize = 26;
 
 /// The uber shader's colour combiner as NSMBU's materials use it (`tev_tev0_color_*`,
 /// `tev_tev1_color_*`, `tev_tev0_alpha_*`, `tev_tev1_alpha_*`, `material_diffuse_color`,
@@ -377,7 +377,10 @@ pub const TEV_ROWS: usize = 24;
 /// the alpha's kind, 1, the alpha factor `gsys_xlu_zprepass_alpha`; 15 their constant (rgb, a);
 /// 16–23 the texture matrices (two rows: u, v) of the albedo, `_a1`, `gsys_user0`, `_i0`, with
 /// w of rows 16 / 18 / 20 = 1 if that texture's coordinates are offset, w of 22 / 23 the indirect
-/// scale. Kinds: 0 the albedo, 1 the constant, 2 the vertex colour, 3 / 4 register 0 / 1.
+/// scale; 24 the emission (kind of `emission_mul_color`, `emission_intensity`, 1 if on, –) and
+/// 25 its constant: the emission texture `_e0` (in `gsys_user0`'s place, with the albedo's
+/// coordinates [inf]) times that colour is added to the lit colour (3D World's airship blocks).
+/// Kinds: 0 the albedo, 1 the constant, 2 the vertex colour, 3 / 4 register 0 / 1.
 /// None for materials that colour themselves with the plain albedo (or the 3D World combiner's
 /// `form` results, codes 300–303).
 pub fn tev_of(m: &mmk_assets::mesh::MeshMaterial) -> Option<[f32; TEV_ROWS * 4]> {
@@ -466,6 +469,18 @@ pub fn tev_of(m: &mmk_assets::mesh::MeshMaterial) -> Option<[f32; TEV_ROWS * 4]>
         r[16 + 2 * t] = [k[0], k[1], k[2], off];
         r[17 + 2 * t] = [k[3], k[4], k[5], 0.0];
     }
+    // the emission (`_e0` · `emission_mul_color` · `emission_intensity`), in the user texture's
+    // place when the material has none
+    if m.option("enable_emission") == Some("1")
+        && m.texture("_e0").is_some()
+        && m.texture("gsys_user0").is_none()
+    {
+        let (kind, k) = source(m.option("emission_mul_color").unwrap_or("0"));
+        r[24] = [kind, p1("emission_intensity", 1.0), 1.0, 0.0];
+        r[25] = k;
+        r[20] = [r[16][0], r[16][1], r[16][2], r[16][3]];
+        r[21] = [r[17][0], r[17][1], r[17][2], 0.0];
+    }
     let ind = m.param("material_indirect_scale").unwrap_or(&[]);
     r[22][3] = ind.first().copied().unwrap_or(0.0);
     r[23][3] = ind.get(1).copied().unwrap_or(0.0);
@@ -540,7 +555,11 @@ pub fn shape_look(mat: Option<&mmk_assets::mesh::MeshMaterial>) -> ShapeLook {
     // the extra texture: the sky's base (HDRI) under its cloud layer, an emission map, or the
     // alpha mask the uber shader reads through `gsys_user0`
     let (extra_mode, extra) = if tev.is_some() {
-        (0, m.texture("gsys_user0"))
+        (
+            0,
+            m.texture("gsys_user0")
+                .or(m.texture("_e0").filter(|_| on("enable_emission"))),
+        )
     } else if on("enable_sky") && m.texture("_s0").is_some() {
         (3, m.texture("_s0"))
     } else if on("enable_emission") && m.texture("_e0").is_some() {

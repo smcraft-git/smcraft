@@ -232,7 +232,7 @@ fn vs(@location(0) clip: vec4<f32>, @location(1) world: vec3<f32>, @location(2) 
 
 // the colour combiner of NSMBU's materials (mmk_host::mesh::tev_of has the layout)
 struct Tev {
-    rows: array<vec4<f32>, 24>,
+    rows: array<vec4<f32>, 26>,
 };
 @group(2) @binding(0) var<uniform> tev: Tev;
 
@@ -309,8 +309,8 @@ fn tev_source(kind: f32, k: vec4<f32>, albedo: vec4<f32>, vc: vec4<f32>, r0: vec
     }
 }
 
-// the combiner's lit colour and alpha
-fn tev_color(tx: array<vec4<f32>, 4>, vc: vec4<f32>) -> vec4<f32> {
+// the combiner's two registers after its stages
+fn tev_regs(tx: array<vec4<f32>, 4>, vc: vec4<f32>) -> array<vec4<f32>, 2> {
     var r0 = tev.rows[8];
     var r1 = tev.rows[9];
     let on = tev.rows[4];
@@ -341,10 +341,15 @@ fn tev_color(tx: array<vec4<f32>, 4>, vc: vec4<f32>) -> vec4<f32> {
         r0 = n0;
         r1 = n1;
     }
+    return array<vec4<f32>, 2>(r0, r1);
+}
+
+// the combiner's lit colour and alpha
+fn tev_color(albedo: vec4<f32>, vc: vec4<f32>, r: array<vec4<f32>, 2>) -> vec4<f32> {
     let f = tev.rows[14];
     let k = tev.rows[15];
-    let rgb = tev_source(f.x, k, tx[0], vc, r0, r1).rgb;
-    let alpha = tev_source(f.y, k, tx[0], vc, r0, r1).a;
+    let rgb = tev_source(f.x, k, albedo, vc, r[0], r[1]).rgb;
+    let alpha = tev_source(f.y, k, albedo, vc, r[0], r[1]).a;
     return vec4<f32>(rgb, alpha * f.w);
 }
 
@@ -455,9 +460,10 @@ fn fs(i: VOut) -> @location(0) vec4<f32> {
     if (mode == 2u) {
         c.a = c.a * x.a;
     }
+    var regs = array<vec4<f32>, 2>(vec4<f32>(0.0), vec4<f32>(0.0));
     if (combiner) {
-        let tx = array<vec4<f32>, 4>(t, h, x, ind);
-        c = tev_color(tx, i.form_mul) * vec4<f32>(i.color.rgb, i.color.a);
+        regs = tev_regs(array<vec4<f32>, 4>(t, h, x, ind), i.form_mul);
+        c = tev_color(t, i.form_mul, regs) * vec4<f32>(i.color.rgb, i.color.a);
     } else if (sky) {
         // the uber shader's sky (`enable_sky`, research/specs/render-3d.md): the base (_s0)
         // colours constant colour 5 → 4 per channel with an HDR boost in its alpha; the horizon
@@ -491,6 +497,12 @@ fn fs(i: VOut) -> @location(0) vec4<f32> {
     }
     if (mode == 1u) {
         rgb = rgb + x.rgb * i.emission;
+    }
+    if (combiner && tev.rows[24].z > 0.5) {
+        // the combiner's emission: _e0 times `emission_mul_color`'s colour
+        let e = tev.rows[24];
+        let k = tev_source(e.x, tev.rows[25], t, i.form_mul, regs[0], regs[1]);
+        rgb = rgb + x.rgb * k.rgb * e.y;
     }
     // the uber shader clamps the lit colour to 0 … 2 before its fogs
     rgb = clamp(rgb, vec3<f32>(0.0), vec3<f32>(2.0));

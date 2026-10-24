@@ -32,7 +32,7 @@ sway, importer and pack 12, the dev cache already at v12).
   1. Physics (352 / 352 exact over 26 courses, enemy stomp / die included; the trace Ryujinx
      boots again from /private/tmp copies — a macOS privacy prompt hung it on ~/Documents and the
      SSD): the 3D World courses (a MoltenVK build without 3D texture compression is ready,
-     `ryubuild/no3dbc`), Koopa / shell traces, WU form. Pixels (3D World mean 46.0 → 29.6;
+     `ryubuild/no3dbc`), Koopa / shell traces, WU form. Pixels (3D World mean 46.0 → 29.5;
      NSMBU day 38.5 → 18.1, night 39.9 → 19.4; NSMBU's TEV stages ✅, its background's place ✅,
      the light-map domain ✅ (wrapped, with the light map's pow; needs re-import, pack 13)): specular /
      env-map reflections, rim light, baked AO (needs an importer bump), the other sky variants,
@@ -402,7 +402,9 @@ Nextendo; `docs/nextendo-network-play.md`, spec `research/specs/network-play.md`
   above), 3D World 32.8 → 29.6 (ground 34.9, underground 18.0, castle 32.3, airship 28.3, water
   37.1, ghost 22.4, snow 74.2 → 44.0, desert 19.8, sky 16.9 → 26.4, forest 32.6). 3D World now
   comes out ~25 too bright in the sky and ground themes: a light scale of 0.8 (the uber shader's
-  `User0[31].x`, value unknown) measures 28.7 — not adopted without the value.
+  `User0[31].x`, value unknown) measures 28.7 — not adopted without the value. The combiner's
+  emission (`_e0` · `emission_mul_color` · `emission_intensity`: 3D World airship's LED blocks)
+  → 3D World 29.6 → 29.5 (airship 28.3 → 27.9).
   3D World light pass (branch light3w, the uber shader read from its own programs,
   research/specs/render-3d.md): the sky material as the game computes it and g3d's "Maya"
   texture SRT → ground 38.6, underground 34.3, castle 75.9, airship 26.5, water 32.8, ghost

@@ -564,7 +564,7 @@ mod tests {
     fn layout_matches_header() {
         assert_eq!(size_of::<MmkMeshVertex>(), 56);
         assert_eq!(size_of::<MmkMeshModel>(), 80);
-        assert_eq!(size_of::<MmkMeshShape>(), 524);
+        assert_eq!(size_of::<MmkMeshShape>(), 556);
         assert_eq!(size_of::<MmkScene3d>(), 1380);
         assert_eq!(size_of::<MmkMeshPose>(), 32);
         assert_eq!(size_of::<MmkMeshDraw>(), 80);
