@@ -69,6 +69,21 @@ SMCraft is back in development (it was archived in October 2026).
   barrel (gliding for winged ones, Boos and Bloopers slowing to a stop, parachutes opening after
   the shot), three times as fast from the red blaster; each blaster keeps as many alive as the
   game allows. Fix: only coin blasters fire at random intervals.
+- **Parts come out of blocks, pipes and Bill Blasters as in SMM2** (each part's own way, from
+  the 3.0.3 game):
+  - Out of a block, an enemy hops up from inside the block and lands on top before it walks;
+    winged ones rise slowly, a winged red Koopa climbs well clear of the block, Boos and
+    Bloopers float out, a Lava Bubble leaps high, a Cheep Cheep faces you, P Switches and
+    springs pop higher; a parachute is shot up first and opens on the way down.
+  - Out of a pipe, a parachute is shot out and opens once clear; winged red Koopas fly out,
+    winged Bob-ombs and Buzzies hover at the mouth; big enemies squeeze out, get stuck for a
+    second and jump free; Lava Bubbles are launched; items face right. **Coins in pipes** now
+    come out as bursts of ten bouncing coins.
+  - From a Bill Blaster, Spinies and Buzzies stop on landing, Lava Bubbles fly on through
+    everything, P Switches and springs fly like items. The red blaster fires its next homing
+    Bullet Bill about 5 seconds after the last one is gone. Fix: Bullet Bills leave the barrel
+    at the right height (they came out 8 px low).
+  - Parachutes swing the right way after a shot to the left, and swing on at a wall.
 - **Enemies holding a Key** let it go when defeated; **Lakitus throw what they were given**,
   coins as a ten-coin burst.
 - **The 3.0 update's clear conditions**: defeat Spikes, Pokeys, Mechakoopas or a Koopaling;

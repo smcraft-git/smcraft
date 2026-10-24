@@ -8,7 +8,10 @@
 use crate::fmath::DetMath;
 use crate::level::{Cell, Level, PipeDir, TILE};
 
+mod block_out;
 mod bosses;
+mod dokan;
+pub use dokan::Dokan;
 mod koopalings;
 mod powerups;
 mod shot;
@@ -584,13 +587,22 @@ pub enum Mode {
     Emerge {
         until: f32,
     },
-    /// Enemy popping out of a block (vy 2.5 up, gravity on) for `timer` frames, no collisions.
-    PopOut,
-    /// Coming out of a pipe mouth toward (tx, ty): 1 px/frame vertically, 0.5 sideways, no
-    /// collisions (shared enemy draft §5.3).
+    /// Coming out of a block (the Block context's Out, actors/block_out.rs): the block centre
+    /// `yb`, where the motion started, this frame's gravity, whether it comes out downward
+    /// and a parachute's countdown; terrain collision is off while `timer` runs.
+    BlockOut {
+        yb: f32,
+        y0: f32,
+        gravity: f32,
+        down: bool,
+        left: i32,
+    },
+    /// Coming out of a pipe mouth (the Dokan context, actors/dokan.rs): the slide's target
+    /// (tx, ty) and where it is in the context.
     DokanOut {
         tx: f32,
         ty: f32,
+        state: Dokan,
     },
     /// Fired from a Bill Blaster (the Killer context's Shot, actors/shot.rs): the launch point,
     /// frames since the shot, the alternate blaster's fast flag, and whether it has landed.
@@ -602,10 +614,12 @@ pub enum Mode {
         landed: bool,
     },
     /// Drifting down under a parachute (shared enemy draft §5.2): gravity −0.01875, max fall
-    /// −0.4, swinging ±24 px around x0 (2.5°/frame); landing drops the parachute.
+    /// −0.4, swinging ±24 px (sin of `phase`, `rate` ±2.5°/frame, doubled while `held` at a
+    /// wall); landing drops the parachute.
     Parachute {
-        x0: f32,
         phase: f32,
+        rate: f32,
+        held: bool,
     },
     Normal,
     /// Flattened Goomba (DieStamp), deleted when the timer runs out.
@@ -619,6 +633,23 @@ pub enum Mode {
     /// Remove at the end of the frame.
     Dead,
 }
+
+impl Mode {
+    /// Opening a parachute: the swing starts at φ = 0, rightward, or leftward (−2.5°/frame)
+    /// for a part shot from a blaster or thrown by Lakitu facing left (Fall 0x71005f4210,
+    /// v3.0.3 0x7101058540) [obs].
+    pub fn parachute(left: bool) -> Mode {
+        Mode::Parachute {
+            phase: 0.0,
+            rate: if left { -CHUTE_RATE } else { CHUTE_RATE },
+            held: false,
+        }
+    }
+}
+
+/// The parachute's swing: 2.5°/frame (period 144 frames), ±24 px [obs].
+const CHUTE_RATE: f32 = 2.5;
+const CHUTE_SWING: f32 = 24.0;
 
 /// What knocked an actor out (its defeat sound: `r_damage_<cause>`, else `r_damage`).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -721,7 +752,8 @@ pub struct Actor {
     /// Left its track at an open end: falls with its last speed (objects without gravity of
     /// their own; enemies fall by their own rules).
     pub derailed: bool,
-    /// Came out of a block with a parachute: it opens when the pop out ends.
+    /// Carries a parachute it has not opened yet (out of a block, a pipe or a blaster): it
+    /// opens when that context ends.
     pub chute: bool,
     /// The part it holds (`Level::held`): id, flags.
     pub holds: Option<(i16, u32)>,
@@ -1027,10 +1059,7 @@ impl Actor {
                         (egg.wings, egg.big) = (wings, big);
                         if parachute {
                             egg.vx = 0.0;
-                            egg.mode = Mode::Parachute {
-                                x0: egg.x,
-                                phase: 0.0,
-                            };
+                            egg.mode = Mode::parachute(face < 0.0);
                         }
                     }
                     return Some(egg);
@@ -1450,7 +1479,8 @@ impl Actor {
     /// Can touch the player / other actors.
     pub fn solid_contact(&self) -> bool {
         (matches!(self.mode, Mode::Normal | Mode::ShellWait | Mode::ShellSlide)
-            || self.shot_clear())
+            || self.shot_clear()
+            || self.block_clear())
             && !(matches!(self.kind, Kind::LavaBubble | Kind::MontyMole) && self.phase == 0)
             && !self.boss_hidden()
             && !(matches!(self.kind, Kind::Piranha { .. }) && self.piranha_hidden())
@@ -1685,6 +1715,39 @@ impl Actor {
         self.vy = 0.0;
     }
 
+    /// The Parachute context's Fall (v3.0.3 0x7101058410 / 0x7101058540, v1.0.0 0x71005f36e0 …
+    /// 0x71005f4380) [obs]: gravity −0.01875 to −0.4; this frame's speed is the change of
+    /// 24·sin φ; touching a wall in the swing's direction holds it there at twice the swing
+    /// rate until the swing turns back; landing drops the parachute.
+    fn step_parachute(&mut self, level: &Level, phase: f32, rate: f32, held: bool) {
+        self.vy = (self.vy - 0.01875).max(-0.4);
+        let next = phase + rate;
+        let swing = CHUTE_SWING * (next.to_radians().dsin() - phase.to_radians().dsin());
+        // the swing's direction: the sign of d(sin φ)
+        let going = |p: f32| (rate * p.to_radians().dcos()).signum();
+        let (mut rate, mut held) = (rate, held);
+        if held && going(next) != going(phase) {
+            held = false;
+            rate /= 2.0;
+        }
+        self.vx = if held { 0.0 } else { swing };
+        self.collide(level);
+        if !held && self.wall && self.vx.signum() == going(next) {
+            held = true;
+            rate *= 2.0;
+        }
+        self.mode = if self.on_ground {
+            self.vx = 0.0;
+            Mode::Normal
+        } else {
+            Mode::Parachute {
+                phase: next,
+                rate,
+                held,
+            }
+        };
+    }
+
     fn step_inner(&mut self, level: &Level) -> Option<Actor> {
         let player_x = self.target.0;
         let mut spawned = None;
@@ -1752,64 +1815,9 @@ impl Actor {
                     }
                 }
             }
-            Mode::DokanOut { tx, ty } => {
-                let horizontal = (tx - self.x).abs() > 0.01;
-                let speed = if horizontal { 0.5 } else { 1.0 };
-                let step = |v: f32, t: f32| {
-                    if (t - v).abs() <= speed {
-                        t
-                    } else {
-                        v + speed * (t - v).signum()
-                    }
-                };
-                self.x = step(self.x, tx);
-                self.y = step(self.y, ty);
-                if self.x == tx && self.y == ty {
-                    self.mode = Mode::Normal;
-                    self.vx = match self.kind {
-                        Kind::Mushroom | Kind::OneUp | Kind::Star => ITEM_SPEED * self.dir as f32,
-                        Kind::PowerItem { what } if powerups::walks(what, 0) => {
-                            ITEM_SPEED * self.dir as f32
-                        }
-                        _ => 0.0,
-                    };
-                    self.vy = if matches!(self.pipe, Some((PipeDir::Down, _, _))) {
-                        -1.0
-                    } else {
-                        0.0
-                    };
-                    self.pipe = None;
-                }
-            }
-            Mode::Parachute { x0, phase } => {
-                self.vy = (self.vy - 0.01875).max(-0.4);
-                let phase = phase + 2.5;
-                let nx = x0 + 24.0 * phase.to_radians().dsin();
-                self.vx = nx - self.x;
-                self.collide(level);
-                self.mode = if self.on_ground {
-                    self.vx = 0.0;
-                    Mode::Normal
-                } else {
-                    Mode::Parachute { x0, phase }
-                };
-            }
-            Mode::PopOut => {
-                self.vy = (self.vy + ENEMY_GRAVITY).max(MAX_FALL);
-                self.y += self.vy;
-                self.timer -= 1;
-                if self.timer <= 0 {
-                    self.mode = if std::mem::take(&mut self.chute) {
-                        self.vy = 0.0;
-                        Mode::Parachute {
-                            x0: self.x,
-                            phase: 0.0,
-                        }
-                    } else {
-                        Mode::Normal
-                    };
-                }
-            }
+            Mode::DokanOut { .. } => self.step_dokan(level),
+            Mode::Parachute { phase, rate, held } => self.step_parachute(level, phase, rate, held),
+            Mode::BlockOut { .. } => self.step_block_out(level),
             Mode::Shot { .. } => self.step_shot(level),
             Mode::Stomped => {
                 self.timer -= 1;
@@ -3685,10 +3693,22 @@ impl Actor {
                     self.phase = 2;
                 }
             }
-            _ => {
+            2 => {
                 self.vy = (self.vy - 0.1875).max(-6.0);
                 self.y += self.vy;
                 if self.y < hide {
+                    self.phase = 0;
+                    self.timer = 120;
+                }
+            }
+            _ => {
+                // launched from a pipe (actors/dokan.rs): flies on, falling, until it is
+                // below its leap's hiding level
+                self.vy = (self.vy - 0.1875).max(-6.0);
+                self.x += self.vx;
+                self.y += self.vy;
+                if self.y < hide {
+                    self.vx = 0.0;
                     self.phase = 0;
                     self.timer = 120;
                 }
@@ -4309,6 +4329,46 @@ mod tests {
         a.on_ground = true;
         a.dir = 1;
         (level, a)
+    }
+
+    #[test]
+    fn a_parachute_held_at_a_wall_swings_twice_as_fast_until_it_turns() {
+        let mut level = Level::flat(100);
+        for y in 2..20 {
+            level.set(21, y, Cell::Solid);
+        }
+        // 2 px from the wall on its right, swinging right
+        let mut a = Actor::new(Kind::Goomba, 21.0 * TILE - 8.0 - 2.0, 15.0 * TILE);
+        a.mode = Mode::parachute(false);
+        let mut held = 0;
+        let mut xs = vec![];
+        for _ in 0..80 {
+            a.step(&level, 0.0);
+            if let Mode::Parachute {
+                held: true, rate, ..
+            } = a.mode
+            {
+                assert_eq!(rate, 5.0);
+                held += 1;
+            }
+            xs.push(a.x);
+        }
+        // φ from ≈ 3° to 90° at 5°/frame: about 18 frames against the wall
+        assert!((15..22).contains(&held), "{held}");
+        assert!(xs.iter().all(|&x| x <= 21.0 * TILE - 8.0 + 0.01));
+        assert!(matches!(
+            a.mode,
+            Mode::Parachute {
+                rate: 2.5,
+                held: false,
+                ..
+            }
+        ));
+        // a left shot swings left first
+        assert!(matches!(
+            Mode::parachute(true),
+            Mode::Parachute { rate: -2.5, .. }
+        ));
     }
 
     #[test]

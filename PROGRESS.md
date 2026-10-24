@@ -85,9 +85,20 @@ sway, importer and pack 12, the dev cache already at v12).
      0x71011406f0 / 0x7101141e20. A coin blaster fires a TenCoin burst of 10 Coin actors, each
      preset's Shot is in actors/shot.rs; left: coins from a Lakitu (Coin Jugem `Thrown`
      0x7100847c20 is read, but after 50 frames it hands a coin over to the Wing context, whose
-     Move for an unwinged coin isn't traced), the red blaster's KillerSearch interval (770, and a
-     320-frame lock-out) and each preset's own Shot beyond Default / FlyStop / WingFly /
-     CloudShot / items); Super World enemy-icon courses, point icons by model, map ghosts; ✅ CJK course
+     Move for an unwinged coin isn't traced)); ✅ the entry contexts (branch `contexts`,
+     2026-10-25, v3.0.3 addresses throughout): Block Out per preset (actors/block_out.rs:
+     Default, RedPataPata, PataTogezo, FloatSearch, Pukupuku, Bubble, MapObj; Default vtable
+     0x71028b2190), Dokan per preset (actors/dokan.rs: parachute, winged RedPataPata /
+     PataTogezo, DokanOutBig → JamBig → JumpOutBig, Bubble launch, item facing, coin pipes as
+     TenCoin bursts; init 0x710105e400), Killer leftovers (Togezo / Met / Karon, empty shells,
+     Bubble, MapObj = Item, Hacchin = CloudShot; the red blaster's 320-frame lock-out; Bullet
+     Bill at the muzzle's height), Parachute swing direction and wall hold. Left: liquid
+     variants (Kuribo / Pukupuku / Bubble / FishBone / Hanachan / RedPataPata in water), Block
+     sideways (multiplayer) spreads and note blocks' contents, Gesso3W / Hanachan / FishBone /
+     TeresaSpread Block Outs, KutsuKuribo, Togezo's ceiling flip, the winged coin's own pipe
+     state 8, Bubble / Thwomp / Porcupuffer / Wiggler / Cheep Cheep own Parachute Falls, the
+     parachute body sway (drawn), DokanOutBig's 0.5 → 0.7 scale and other draw-only scales;
+     Super World enemy-icon courses, point icons by model, map ghosts; ✅ CJK course
      names (branch `cjk`, 2026-10-24: the
      UI pack keeps the decrypted scalable fonts (`ui/scalable/`, 31 MB) and each baked font's
      recipe; a character the sheets lack is rasterised on first use at the baked font's metrics
