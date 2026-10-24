@@ -32,8 +32,9 @@ sway, importer and pack 12, the dev cache already at v12).
   1. Physics (352 / 352 exact over 26 courses, enemy stomp / die included; the trace Ryujinx
      boots again from /private/tmp copies — a macOS privacy prompt hung it on ~/Documents and the
      SSD): the 3D World courses (a MoltenVK build without 3D texture compression is ready,
-     `ryubuild/no3dbc`), Koopa / shell traces, WU form. Pixels (3D World mean 46.0 → 32.8;
-     NSMBU day 38.5 → 18.7, night 39.9 → 19.7; NSMBU's TEV stages ✅, its background's place ✅): the light-map lookup domain, specular /
+     `ryubuild/no3dbc`), Koopa / shell traces, WU form. Pixels (3D World mean 46.0 → 29.6;
+     NSMBU day 38.5 → 18.1, night 39.9 → 19.4; NSMBU's TEV stages ✅, its background's place ✅,
+     the light-map domain ✅ (wrapped, with the light map's pow; needs re-import, pack 13)): specular /
      env-map reflections, rim light, baked AO (needs an importer bump), the other sky variants,
      3D World snow, the colour table.
   2. Maker: ✅ wings / parachutes (the attribute balloon, merged 2026-10-24), ✅ over a multigrab
@@ -380,8 +381,8 @@ Nextendo; `docs/nextendo-network-play.md`, spec `research/specs/network-play.md`
   | SMB3 night | 1.8 / 1.6% | 2.1 / 4.3% | 4.5 / 5.0% | 5.0 / 5.4% | 0.6 / 0.8% | 0.7 / 0.9% | 1.3 / 1.1% | 1.8 / 1.7% | 1.7 / 1.5% | 5.5 / 5.1% | 2.5 |
   | SMW | 2.5 / 1.9% | 2.4 / 2.3% | 4.7 / 5.7% | 17.0 / 19.9% | 3.1 / 3.5% | 1.4 / 1.1% | 2.6 / 2.0% | 2.6 / 1.9% | 19.2 / 21.4% | 5.3 / 4.7% | 6.1 |
   | SMW night | 2.4 / 2.5% | 2.9 / 5.2% | 5.0 / 6.2% | 5.6 / 5.8% | 1.1 / 1.6% | 0.6 / 0.9% | 2.2 / 2.5% | 2.6 / 2.6% | 2.3 / 2.1% | 4.9 / 6.0% | 3.0 |
-  | NSMBU | 14.3 / 34% | 9.9 / 17% | 15.8 / 30% | 36.7 / 71% | 25.3 / 55% | 10.5 / 17% | 9.2 / 18% | 13.0 / 39% | 35.5 / 64% | 16.8 / 35% | 18.7 |
-  | NSMBU night | 21.4 / 36% | 21.3 / 34% | 26.7 / 49% | 18.0 / 58% | 3.0 / 8% | 2.6 / 4% | 20.5 / 34% | 26.9 / 51% | 20.4 / 34% | 36.0 / 52% | 19.7 |
+  | NSMBU | 16.1 / 45% | 9.2 / 14% | 16.2 / 31% | 33.4 / 63% | 24.3 / 54% | 8.0 / 15% | 7.4 / 12% | 13.6 / 43% | 35.0 / 62% | 17.8 / 38% | 18.1 |
+  | NSMBU night | 21.4 / 36% | 21.3 / 34% | 26.7 / 49% | 15.9 / 47% | 2.9 / 8% | 2.4 / 4% | 20.5 / 34% | 27.0 / 51% | 20.4 / 34% | 36.0 / 52% | 19.4 |
 
   NSMBU colour combiner (branch tev-wu, 2026-10-24; the uber shader's TEV stages read from the
   game's programs, research/specs/render-3d.md): two registers from `tev_color0` / `tev_color1`,
@@ -393,7 +394,15 @@ Nextendo; `docs/nextendo-network-play.md`, spec `research/specs/network-play.md`
   albedo) → 3D World 33.0 → 32.8 (ground 33.3, underground 19.2, castle 31.5, airship 29.6,
   water 35.6, ghost 22.2, snow 74.2, desert 24.6, sky 16.9, forest 41.1). The background model
   placed at SceneDB's `DV_pos_x` / `DV_pos_y` (NSMBU: 1920, 0; vertical areas `DV_V_pos_*`) →
-  NSMBU day 27.5 → 18.7 (ground 40.5 → 14.3), night 21.5 → 19.7 (table above).
+  NSMBU day 27.5 → 18.7 (ground 40.5 → 14.3), night 21.5 → 19.7. The light map as the game's
+  light-map program makes it (read from `agl_technique_lght`): per light mix(back-side colour,
+  colour, (n·l·½ + ½)^pow) — the LUT domain is the wrapped one —, only the lights the env set's
+  `.bagllmap` names (3D World's "Depth" light drops out), with its `effect` and `pow` (Fill and
+  hemisphere 50, Main 1); importer 13 / pack 13 → NSMBU day 18.7 → 18.1, night 19.7 → 19.4 (table
+  above), 3D World 32.8 → 29.6 (ground 34.9, underground 18.0, castle 32.3, airship 28.3, water
+  37.1, ghost 22.4, snow 74.2 → 44.0, desert 19.8, sky 16.9 → 26.4, forest 32.6). 3D World now
+  comes out ~25 too bright in the sky and ground themes: a light scale of 0.8 (the uber shader's
+  `User0[31].x`, value unknown) measures 28.7 — not adopted without the value.
   3D World light pass (branch light3w, the uber shader read from its own programs,
   research/specs/render-3d.md): the sky material as the game computes it and g3d's "Maya"
   texture SRT → ground 38.6, underground 34.3, castle 75.9, airship 26.5, water 32.8, ghost

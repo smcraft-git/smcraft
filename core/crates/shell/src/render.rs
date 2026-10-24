@@ -352,20 +352,21 @@ fn has(flags: f32, bit: u32) -> bool {
     return (u32(flags + 0.5) & bit) != 0u;
 }
 
+// the light map (the uber shader's `Diffuse` cube, made by the game's light-map program): per
+// light mix(back-side colour, colour, LUT(n·l · ½ + ½)^pow) with the identity "Lambert" LUT; the
+// hemisphere mix(ground, sky, (n·up · ½ + ½)^pow) [inf: which colour the narrow lobe takes]
 fn lighting(n: vec3<f32>) -> vec3<f32> {
     var c = light.rows[13].xyz;
     if (light.rows[10].w > 0.5) {
         let k = dot(n, light.rows[12].xyz) * 0.5 + 0.5;
-        c = c + mix(light.rows[11].xyz, light.rows[10].xyz, k);
+        c = c + mix(light.rows[11].xyz, light.rows[10].xyz, pow(k, max(light.rows[11].w, 1.0)));
     }
     for (var i = 0; i < 3; i = i + 1) {
         let d = light.rows[1 + 3 * i];
         if (d.w > 0.5) {
-            // light-map LUT indexed by n·l * 0.5 + 0.5 (identity "Lambert" curve): the light
-            // wraps around; the back-side colour fills the rest [inf]
-            let ndl = dot(n, -d.xyz);
-            c = c + light.rows[2 + 3 * i].xyz * max(ndl, 0.0)
-                  + light.rows[3 + 3 * i].xyz * max(-ndl, 0.0);
+            let k = dot(n, -d.xyz) * 0.5 + 0.5;
+            let p = max(light.rows[2 + 3 * i].w, 1.0);
+            c = c + mix(light.rows[3 + 3 * i].xyz, light.rows[2 + 3 * i].xyz, pow(k, p));
         }
     }
     return c;

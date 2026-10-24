@@ -139,17 +139,19 @@ final class MeshRenderer {
         o.fmul = u.formX.w > 0.5 ? saturate(fm) : fm;
         return o;
     }
+    // the light map (render.rs MESH_SHADER): per light mix(back-side colour, colour,
+    // (n.l / 2 + 1/2)^pow); the hemisphere mix(ground, sky, (n.up / 2 + 1/2)^pow)
     float3 lighting(float3 n, constant float4* L) {
         float3 c = L[13].xyz;
         if (L[10].w > 0.5) {
             float k = dot(n, L[12].xyz) * 0.5 + 0.5;
-            c += mix(L[11].xyz, L[10].xyz, k);
+            c += mix(L[11].xyz, L[10].xyz, pow(k, max(L[11].w, 1.0)));
         }
         for (int i = 0; i < 3; i++) {
             float4 d = L[1 + 3 * i];
             if (d.w > 0.5) {
-                float ndl = dot(n, -d.xyz);
-                c += L[2 + 3 * i].xyz * max(ndl, 0.0) + L[3 + 3 * i].xyz * max(-ndl, 0.0);
+                float k = dot(n, -d.xyz) * 0.5 + 0.5;
+                c += mix(L[3 + 3 * i].xyz, L[2 + 3 * i].xyz, pow(k, max(L[2 + 3 * i].w, 1.0)));
             }
         }
         return c;
