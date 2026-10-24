@@ -404,7 +404,9 @@ Nextendo; `docs/nextendo-network-play.md`, spec `research/specs/network-play.md`
   comes out ~25 too bright in the sky and ground themes: a light scale of 0.8 (the uber shader's
   `User0[31].x`, value unknown) measures 28.7 — not adopted without the value. The combiner's
   emission (`_e0` · `emission_mul_color` · `emission_intensity`: 3D World airship's LED blocks)
-  → 3D World 29.6 → 29.5 (airship 28.3 → 27.9).
+  → 3D World 29.6 → 29.5 (airship 28.3 → 27.9). `tex_coord0_calc` 6 (the sky theme's field: the
+  world projection pushed along the normal) world-projected too → sky 26.4 → 26.0. Tried and
+  dropped: the env sets' colour-correction saturation (`.baglccr`, 1.125–1.2) → 3D World 30.5–31.0.
   3D World light pass (branch light3w, the uber shader read from its own programs,
   research/specs/render-3d.md): the sky material as the game computes it and g3d's "Maya"
   texture SRT → ground 38.6, underground 34.3, castle 75.9, airship 26.5, water 32.8, ghost

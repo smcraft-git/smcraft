@@ -61,7 +61,8 @@ pub const MMK_MESH_FOG1: u32 = 1 << 14;
 /// Shape flag: the height fog applies (`enable_fog_y`).
 pub const MMK_MESH_FOG_Y: u32 = 1 << 15;
 /// Shape flag: texture coordinates from the world position (u = x / 64, v = ½ − y / 64, then
-/// the SRT) instead of the model's (`tex_coord0_calc` 5, a projection in the uber shader).
+/// the SRT) instead of the model's (`tex_coord0_calc` 5, a projection in the uber shader; 6 is
+/// the same projection from the position pushed along the normal by `User0[29].x` [obs]).
 pub const MMK_MESH_WORLD_UV: u32 = 1 << 16;
 /// World pixels one repeat of a world-mapped texture covers [inf: measured on the castle walls'
 /// bricks in a reference frame, 8 rows of ~8.1 px].
@@ -587,7 +588,7 @@ pub fn shape_look(mat: Option<&mmk_assets::mesh::MeshMaterial>) -> ShapeLook {
         | (on("enable_fog_y") as u32 * MMK_MESH_FOG_Y)
         | (on("enable_fog1_y") as u32 * MMK_MESH_FOG1_Y)
         | fog_calc(m)
-        | ((m.option("tex_coord0_calc") == Some("5")) as u32 * MMK_MESH_WORLD_UV)
+        | (matches!(m.option("tex_coord0_calc"), Some("5" | "6")) as u32 * MMK_MESH_WORLD_UV)
         | ((tev.is_some() && !on("enable_vertex_alpha")) as u32 * MMK_MESH_NO_VERTEX_ALPHA);
     if m.unlit {
         // cards are seen from both sides (mirrored for the walking direction)
