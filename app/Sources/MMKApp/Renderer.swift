@@ -53,6 +53,9 @@ final class Renderer: NSObject, MTKViewDelegate {
     let device = MTLCreateSystemDefaultDevice()!
     private lazy var queue = device.makeCommandQueue()!
     private var pipeline: MTLRenderPipelineState?
+    private var maskPipeline: MTLRenderPipelineState?
+    private var shadePipeline: MTLRenderPipelineState?
+    private var shadowMask: MTLTexture?
     private var sampler: MTLSamplerState?
     static let depthFormat: MTLPixelFormat = .depth32Float
     private lazy var spriteDepth = MeshRenderer.spriteDepthState(device)
@@ -114,6 +117,22 @@ final class Renderer: NSObject, MTKViewDelegate {
         if (c.a < 0.01) discard_fragment();
         return c;
     }
+    // the 2D drop shadow: the play field's coverage (most opaque texel wins), then laid over the
+    // backdrop in the shadow colour (as the portable shell's `shadow.rs`)
+    fragment float4 fmask(O in [[stage_in]], texture2d<float> t [[texture(0)]], sampler s [[sampler(0)]]) {
+        float a = t.sample(s, in.uv).a;
+        if (a < 0.01) discard_fragment();
+        return float4(a, 0, 0, 1);
+    }
+    struct P { float4 pos [[position]]; };
+    vertex P vfull(uint i [[vertex_id]]) {
+        P p; p.pos = float4(float((i << 1) & 2) * 2 - 1, float(i & 2) * 2 - 1, 0, 1); return p;
+    }
+    fragment float4 fshade(P in [[stage_in]], texture2d<float> mask [[texture(0)]], constant float4& color [[buffer(0)]]) {
+        float m = mask.read(uint2(in.pos.xy)).r;
+        if (m <= 0) discard_fragment();
+        return float4(color.rgb, color.a * m);
+    }
     """
 
     private func buildPipeline() throws {
@@ -130,6 +149,31 @@ final class Renderer: NSObject, MTKViewDelegate {
         ca.sourceAlphaBlendFactor = .one
         ca.destinationAlphaBlendFactor = .oneMinusSourceAlpha
         pipeline = try device.makeRenderPipelineState(descriptor: desc)
+        let mask = MTLRenderPipelineDescriptor()
+        mask.vertexFunction = lib.makeFunction(name: "vmain")
+        mask.fragmentFunction = lib.makeFunction(name: "fmask")
+        mask.colorAttachments[0].pixelFormat = .r8Unorm
+        let mc = mask.colorAttachments[0]!
+        mc.isBlendingEnabled = true
+        mc.rgbBlendOperation = .max
+        mc.alphaBlendOperation = .max
+        mc.sourceRGBBlendFactor = .one
+        mc.destinationRGBBlendFactor = .one
+        mc.sourceAlphaBlendFactor = .one
+        mc.destinationAlphaBlendFactor = .one
+        maskPipeline = try device.makeRenderPipelineState(descriptor: mask)
+        let shade = MTLRenderPipelineDescriptor()
+        shade.vertexFunction = lib.makeFunction(name: "vfull")
+        shade.fragmentFunction = lib.makeFunction(name: "fshade")
+        shade.colorAttachments[0].pixelFormat = .bgra8Unorm_srgb
+        shade.depthAttachmentPixelFormat = Self.depthFormat
+        let sc = shade.colorAttachments[0]!
+        sc.isBlendingEnabled = true
+        sc.sourceRGBBlendFactor = .sourceAlpha
+        sc.destinationRGBBlendFactor = .oneMinusSourceAlpha
+        sc.sourceAlphaBlendFactor = .one
+        sc.destinationAlphaBlendFactor = .oneMinusSourceAlpha
+        shadePipeline = try device.makeRenderPipelineState(descriptor: shade)
         let s = MTLSamplerDescriptor()
         s.minFilter = .nearest
         s.magFilter = .nearest
@@ -226,6 +270,16 @@ final class Renderer: NSObject, MTKViewDelegate {
         }
         bgEnc.endEncoding()
 
+        // the 2D drop shadow's coverage mask (its own pass, the drawable's size)
+        let sprites = UnsafeBufferPointer(start: snap.sprites, count: showCourse ? snap.sprite_count : 0)
+        var shadow = MmkFieldShadow()
+        let shadowOn = showCourse && fieldVP == nil && mmk_engine_field_shadow(engine, &shadow)
+        let shadowAt = shadowOn ? sprites.firstIndex { $0.layer >= shadow.min_layer } : nil
+        if let shadowAt {
+            encodeShadowMask(cmd, sprites: sprites, from: shadowAt, shadow: shadow, xform: xform,
+                             size: (Int(dw), Int(dh)), viewport: viewport)
+        }
+
         pass.colorAttachments[0].loadAction = .load
         pass.depthAttachment.loadAction = .clear
         guard let enc = cmd.makeRenderCommandEncoder(descriptor: pass) else { return }
@@ -238,7 +292,6 @@ final class Renderer: NSObject, MTKViewDelegate {
         if fieldVP != nil { xform = SIMD4<Float>(1, 1, 0, 0) }
         enc.setVertexBytes(&xform, length: MemoryLayout<SIMD4<Float>>.size, index: 1)
 
-        let sprites = UnsafeBufferPointer(start: snap.sprites, count: showCourse ? snap.sprite_count : 0)
         var verts: [SIMD4<Float>] = []
         verts.reserveCapacity(sprites.count * 6)
         var batchStart = 0
@@ -282,6 +335,17 @@ final class Renderer: NSObject, MTKViewDelegate {
 
         for (index, s) in sprites.enumerated() {
             drawMeshes(before: index)
+            if index == shadowAt, let shadePipeline, let mask = shadowMask {
+                flush()
+                enc.setRenderPipelineState(shadePipeline)
+                enc.setFragmentTexture(mask, index: 0)
+                var color = SIMD4<Float>(shadow.color.0, shadow.color.1, shadow.color.2, shadow.color.3)
+                enc.setFragmentBytes(&color, length: 16, index: 0)
+                enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
+                enc.setRenderPipelineState(pipeline)
+                enc.setVertexBytes(&xform, length: MemoryLayout<SIMD4<Float>>.size, index: 1)
+                batchTexture = .max
+            }
             let key = s.texture == MMK_TEXTURE_NONE ? (drawMissing ? Self.fallbackKey | min(s.layer, 0xFFFF) : MMK_TEXTURE_NONE) : s.texture
             if key != batchTexture { flush(); batchTexture = key }
             var (u0, u1) = (s.u0, s.u1)
@@ -361,6 +425,61 @@ final class Renderer: NSObject, MTKViewDelegate {
             cmd.waitUntilCompleted()
             DebugCapture.lastFrame = image(of: drawable.texture)
         }
+    }
+
+    /// The play field's sprites from `from` on, moved by the shadow offset (right and down on the
+    /// screen), into `shadowMask` (made at the drawable's size).
+    private func encodeShadowMask(_ cmd: MTLCommandBuffer, sprites: UnsafeBufferPointer<MmkSprite>, from: Int,
+                                  shadow: MmkFieldShadow, xform: SIMD4<Float>, size: (Int, Int), viewport: MTLViewport) {
+        guard let maskPipeline, size.0 > 0, size.1 > 0 else { return }
+        if shadowMask?.width != size.0 || shadowMask?.height != size.1 {
+            let d = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .r8Unorm, width: size.0, height: size.1, mipmapped: false)
+            d.usage = [.renderTarget, .shaderRead]
+            d.storageMode = .private
+            shadowMask = device.makeTexture(descriptor: d)
+        }
+        guard let mask = shadowMask else { return }
+        let pass = MTLRenderPassDescriptor()
+        pass.colorAttachments[0].texture = mask
+        pass.colorAttachments[0].loadAction = .clear
+        pass.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0)
+        pass.colorAttachments[0].storeAction = .store
+        guard let enc = cmd.makeRenderCommandEncoder(descriptor: pass) else { return }
+        enc.setViewport(viewport)
+        enc.setRenderPipelineState(maskPipeline)
+        enc.setFragmentSamplerState(sampler, index: 0)
+        // the offset in NDC: right, and down on the screen whichever way the course is shown
+        var moved = xform
+        moved.z += shadow.offset * abs(xform.x)
+        moved.w -= shadow.offset * abs(xform.y)
+        enc.setVertexBytes(&moved, length: 16, index: 1)
+        var verts: [SIMD4<Float>] = []
+        var batch: UInt32 = .max
+        func flush() {
+            guard !verts.isEmpty else { return }
+            if let tex = texture(forBatch: batch) {
+                enc.setFragmentTexture(tex, index: 0)
+                verts.withUnsafeBytes { raw in
+                    if raw.count <= 4096 {
+                        enc.setVertexBytes(raw.baseAddress!, length: raw.count, index: 0)
+                    } else if let buf = device.makeBuffer(bytes: raw.baseAddress!, length: raw.count) {
+                        enc.setVertexBuffer(buf, offset: 0, index: 0)
+                    }
+                }
+                enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: verts.count)
+            }
+            verts.removeAll(keepingCapacity: true)
+        }
+        for s in sprites[from...] where s.texture != MMK_TEXTURE_NONE {
+            if s.texture != batch { flush(); batch = s.texture }
+            var (u0, u1) = (s.u0, s.u1)
+            if s.flags & 1 != 0 { swap(&u0, &u1) }
+            let x0 = s.x.rounded(), y0 = s.y.rounded(), x1 = x0 + s.w, y1 = y0 + s.h
+            verts += [SIMD4(x0, y0, u0, s.v1), SIMD4(x1, y0, u1, s.v1), SIMD4(x1, y1, u1, s.v0),
+                      SIMD4(x0, y0, u0, s.v1), SIMD4(x1, y1, u1, s.v0), SIMD4(x0, y1, u0, s.v0)]
+        }
+        flush()
+        enc.endEncoding()
     }
 
     private func makeTextTexture(_ text: String, width: Int, height: Int) -> MTLTexture? {
