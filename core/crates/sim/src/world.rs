@@ -30,8 +30,18 @@ const CREEPER_OWNER: u32 = 0x9C00_0000;
 const TWISTER_HALF_W: f32 = 16.0;
 const TWISTER_BOX_H: f32 = 54.0;
 const TWISTER_MARGIN: f32 = 4.0;
-/// A held player's feet hang this far under the claw's end (the catch's hold point) [inf].
-const CLAW_HANG: f32 = 24.0;
+/// A held player's feet hang this far under the claw's end, the hold point of the player's
+/// crane record (+0x20; the catch tests its +0x24, the same): 22 px small, 23 px in any other
+/// form [obs v3.0.3: the player's constructor 0x7101587d10 and form change 0x71015d24c0 write
+/// −22 / −23; the claw's hold 0x71013e7f30 puts its end at y − that]. (The parameter table's
+/// mCraneCatchOfs / ...Big, −23 / −40, is not what the record is given.)
+fn claw_hang(form: Form) -> f32 {
+    if form == Form::Small { 22.0 } else { 23.0 }
+}
+/// Leaving a claw: the Crane state's exit gives a player with no speed of its own the frame's
+/// movement, held within ±4 (±2 in water) [obs v3.0.3 0x71015a0760].
+const CLAW_LEAVE_VX: f32 = 4.0;
+const CLAW_LEAVE_VX_WET: f32 = 2.0;
 use crate::fmath::DetMath;
 use crate::player::{Control, Form, Player, Pose, STAR_FRAMES};
 use crate::render::{Sprite, SpriteImage};
@@ -2352,6 +2362,9 @@ impl World {
                     .liquid
                     .is_some_and(|l| l.water() && l.covers(a.y + 16.0));
             }
+            if a.is_para_beetle() {
+                a.ridden = self.player.ride == Some(a.id) && self.player.on_ground;
+            }
             if a.kind == Kind::EnemyFire && a.alt {
                 a.ridden = self
                     .liquid
@@ -3613,6 +3626,13 @@ impl World {
                 i += 1;
                 continue;
             }
+            // a Para-Beetle is stood on: on top no stomp, its sides and bottom still hurt
+            if let (true, Some((_, _, _, y1, _))) = (a.is_para_beetle(), a.solid_box())
+                && (self.player.ride == Some(a.id) || self.player.y >= y1 - 0.5)
+            {
+                i += 1;
+                continue;
+            }
             // collapsed Dry Bones is harmless; a lit Bob-omb is kicked
             if a.kind == Kind::DryBones && a.phase == 1 {
                 i += 1;
@@ -4194,7 +4214,9 @@ impl World {
         };
         // a column's members spawn only through its tower manager record: a member record has
         // a tower id and no spawn of its own (0x71003fbef0), the manager's box reaching the zone
-        // spawns every member not out yet, then itself (0x71003fc820) [obs v1.0.0]
+        // spawns every member not out yet, then itself (0x71003fc820) [obs v1.0.0]; the same in
+        // v3.0.3 with the manager's actor id 0x124 [obs v3.0.3 0x7100e3fcd0 / 0x7100e40a10, box
+        // test 0x7100e41150]
         let column = self.tower_member_columns();
         let col_due: Vec<(bool, bool)> = self
             .level
@@ -4371,8 +4393,8 @@ impl World {
                 (_, true) => (48.0, 48.0),
                 _ => (32.0, 32.0),
             };
-            // a Lava Bubble hiding under the lava is still at home
-            let cy = if a.kind == Kind::LavaBubble {
+            // a Lava Bubble hiding under the lava is still at home (a winged one flies)
+            let cy = if a.kind == Kind::LavaBubble && !a.wings {
                 a.home_y
             } else {
                 a.y
@@ -4643,8 +4665,9 @@ impl World {
     /// under 46 px from the pivot and within (−8, 10) of the claw's height [obs v3.0.3
     /// 0x71013e87c0]; the claw's end goes to it and the player's speed into the rope. The player
     /// hangs from the end, their left / right nudging the rope ±0.05 a frame (0x71013e8bf0),
-    /// until jump is pressed, then leaves with the end's motion; 30-frame re-grab cooldown. The
-    /// hold point (the player's Crane record offsets) is taken 24 px over the feet [inf].
+    /// until jump is pressed, then jumps off as from standing with the end's last movement
+    /// (`claw_jump`, CLAW_LEAVE_VX); 30-frame re-grab cooldown. The hold point is the player's
+    /// crane record's, 22 px over the feet (23 in other forms; `claw_hang`).
     fn claws(&mut self, input: Input) {
         if let Some(id) = self.held_by {
             let Some(c) = self.actors.iter_mut().find(|a| a.id == id) else {
@@ -4653,9 +4676,10 @@ impl World {
                 return;
             };
             let (tx, ty) = c.claw_tip();
-            let (vx, vy) = (tx - self.player.x, ty - CLAW_HANG - self.player.y);
+            let hang = claw_hang(self.player.form);
+            let vx = tx - self.player.x;
             self.player.x = tx;
-            self.player.y = ty - CLAW_HANG;
+            self.player.y = ty - hang;
             let (hx, hy) = (c.home_x, c.home_y);
             if let Some(rope) = c.claw.as_mut() {
                 let nudge = match (input.held(input::LEFT), input.held(input::RIGHT)) {
@@ -4670,15 +4694,19 @@ impl World {
             }
             if input.held(input::JUMP) && !self.prev_jump_claw {
                 self.player.control = Control::Normal;
-                self.player.vx = vx.clamp(-3.0, 3.0);
-                self.player.vy = vy.max(0.0) + 3.0;
-                self.player.on_ground = false;
+                let lim = if self.player.in_water {
+                    CLAW_LEAVE_VX_WET
+                } else {
+                    CLAW_LEAVE_VX
+                };
+                self.player.vx = vx.clamp(-lim, lim);
+                self.player.claw_jump();
                 c.timer = 30;
                 self.held_by = None;
             }
         } else if self.player.control == Control::Normal {
             let p = &self.player;
-            let (hx, hy) = (p.x, p.y + CLAW_HANG);
+            let (hx, hy) = (p.x, p.y + claw_hang(p.form));
             let grab = self.actors.iter_mut().find(|a| {
                 if a.kind != Kind::Claw || a.timer > 0 {
                     return false;
@@ -11832,10 +11860,65 @@ mod tests {
         assert!(w.held_by.is_some());
         run(&mut w, 0, 30);
         assert_eq!(w.player.control, Control::Demo);
+        // a small player hangs 22 px under the claw's end
+        let (tx, ty) = w.actors[0].claw_tip();
+        assert!((w.player.y - (ty - 22.0)).abs() < 1e-4 && (w.player.x - tx).abs() < 1e-4);
         run(&mut w, input::JUMP, 1);
         assert!(w.held_by.is_none());
         assert_eq!(w.player.control, Control::Normal);
         assert!(w.player.vy > 0.0);
+    }
+
+    #[test]
+    fn a_para_beetle_carries_its_rider_dipping_then_climbing() {
+        let mut lvl = Level::flat(60);
+        let mut s = spawn(Kind::Buzzy, 200.0, 96.0);
+        s.wings = true;
+        lvl.spawns.push(s);
+        let mut w = World::with_level(lvl);
+        run(&mut w, 0, 2);
+        let (bx, by) = (w.actors[0].x, w.actors[0].y);
+        // drop the player onto its back
+        w.player.x = bx;
+        w.player.y = by + 20.0;
+        w.player.on_ground = false;
+        w.player.vy = 0.0;
+        let mut rode = false;
+        let mut dipped = false;
+        let mut climbed = false;
+        for _ in 0..60 {
+            run(&mut w, 0, 1);
+            let b = &w.actors[0];
+            rode |= w.player.ride == Some(b.id);
+            dipped |= b.hops == 1 && b.vy < 0.0;
+            climbed |= b.hops == 1 && b.vy > 0.4;
+        }
+        assert!(w.player.alive(), "standing on it doesn't hurt");
+        assert!(
+            w.actors[0].wings && w.actors[0].mode == Mode::Normal,
+            "not stomped"
+        );
+        assert!(rode && dipped && climbed, "{rode} {dipped} {climbed}");
+        // the rider is on its back
+        let b = &w.actors[0];
+        assert!(
+            (w.player.y - (b.y + b.height())).abs() < 1.5,
+            "{} {}",
+            w.player.y,
+            b.y
+        );
+    }
+
+    #[test]
+    fn jumping_off_a_claw_is_a_standing_jump_with_the_swing_s_last_movement() {
+        let mut w = World::with_level(Level::flat(60));
+        w.player.vx = 0.0;
+        w.player.claw_jump();
+        assert!((w.player.vy - 3.628).abs() < 1e-5, "{}", w.player.vy);
+        assert!(!w.player.on_ground);
+        // the exit's clamp of the frame's movement
+        assert_eq!((9.0f32).clamp(-CLAW_LEAVE_VX, CLAW_LEAVE_VX), 4.0);
+        assert_eq!(claw_hang(Form::Super), 23.0);
     }
 
     #[test]

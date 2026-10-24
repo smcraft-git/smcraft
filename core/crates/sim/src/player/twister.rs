@@ -16,11 +16,15 @@
 //! - **Jump**: a press in the column marks the player; marked, a rising player gains 1.0 a frame.
 //! - **Rise caps**: 3.0, marked 5.0; at night in the Sky theme 2.5, marked 3.5 (the low-gravity
 //!   integration still scales the gravity by 0.2).
+//! - **In water** (the flag word +0x230c bit 0, the swimming flag: the Crane exit and the
+//!   state picker 0x71015c75a0 read it so too): the released bands at half strength (table
+//!   0x71023d5488 × 0.5, turned upward the same way) in place of the swim's sinking, and caps
+//!   1.5, marked 3.0 (Sky night as above).
 //!
-//! Not ported [inf]: the block's paths for the flag word +0x230c bit 0 (half gravity, caps 1.5 /
-//! 3.0; taken to be the in-water one: a swimming player is left to the swim) and +0x494 bit 1
-//! (caps 2.0 / 1.5), the entry's reset of the jump-state flags (0x710158ed30), and the
-//! `Tornado_Up` / `Tornado_Down` sounds.
+//! Not ported [inf]: the +0x494 bit 1 path (caps 2.0, in water 1.5), the entry's reset of the
+//! jump-state flags (0x710158ed30), and the `Tornado_Up` / `Tornado_Down` sounds; in water,
+//! whether the swim's own stroke and its 1.8 cap still apply in a column (the stroke is kept,
+//! the cap left to the column's).
 
 use super::{GRAVITY_RELEASED, Player, approach, vy_band};
 
@@ -37,6 +41,9 @@ const TOP_GROUNDED: f32 = 2.0;
 const BOOST: f32 = 1.0;
 const CAP: [f32; 2] = [3.0, 5.0];
 const CAP_NIGHT: [f32; 2] = [2.5, 3.5];
+const CAP_WATER: [f32; 2] = [1.5, 3.0];
+/// In water the band gravity is halved (0x710158a590: the band table × 0.5).
+const WATER_GRAVITY: f32 = 0.5;
 
 /// What a Twister's contact hands the player for this frame (the receiver's top +0x18, the
 /// Twister's movement +0x20 and its column centre +0x2c) [obs v3.0.3 0x71013ec330].
@@ -72,10 +79,7 @@ impl Player {
         if self.tw.steer > 0 {
             self.tw.steer -= 1;
         }
-        let Some(tw) = self
-            .twister
-            .filter(|_| !self.in_water && self.yoshi.is_none())
-        else {
+        let Some(tw) = self.twister.filter(|_| self.yoshi.is_none()) else {
             self.tw.inside = false;
             self.tw.marked = false;
             return None;
@@ -105,14 +109,23 @@ impl Player {
                 self.x = approach(self.x, tw.cx, pull);
             }
         }
-        let g = GRAVITY_RELEASED[vy_band(self.vy)];
+        let mut g = GRAVITY_RELEASED[vy_band(self.vy)];
+        if self.in_water {
+            g *= WATER_GRAVITY;
+        }
         if self.vy > 0.0 && self.tw.marked {
             self.vy += BOOST;
         }
         if pressed {
             self.tw.marked = true;
         }
-        let caps = if self.low_gravity { CAP_NIGHT } else { CAP };
+        let caps = if self.low_gravity {
+            CAP_NIGHT
+        } else if self.in_water {
+            CAP_WATER
+        } else {
+            CAP
+        };
         self.vy = self.vy.min(caps[self.tw.marked as usize]);
         Some(TwisterMove {
             gravity: if rising { -g } else { g },
@@ -176,6 +189,26 @@ mod tests {
         for (v, w) in vys.iter().zip(want) {
             assert!((v - w).abs() < 1e-3, "{vys:?}");
         }
+    }
+
+    #[test]
+    fn in_water_the_column_lifts_at_half_gravity_up_to_1_5() {
+        let lvl = Level::flat(40);
+        let mut p = Player::new(100.0, 60.0);
+        p.on_ground = false;
+        p.in_water = true;
+        p.was_in_water = true;
+        p.vy = 1.0;
+        p.twister = pull(400.0);
+        let m = p.twister_block(false).unwrap();
+        assert!((m.gravity - 0.17).abs() < 1e-6, "{}", m.gravity);
+        let mut vys = vec![];
+        for _ in 0..30 {
+            p.step(crate::input::Input::default(), &lvl);
+            vys.push(p.vy);
+        }
+        // capped at 1.5 before the column's +0.17
+        assert!((vys[29] - 1.67).abs() < 1e-3, "{vys:?}");
     }
 
     #[test]

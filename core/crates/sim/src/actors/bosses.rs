@@ -1325,7 +1325,8 @@ impl Actor {
         self.bowser_chase(level, if fast { 2 } else { 1 }, st);
     }
 
-    /// Chase decision (0x71006ab370 [obs v1.0.0]): the first time, switch mode. While the
+    /// Chase decision (0x71006ab370 [obs v1.0.0]; unchanged in v3.0.3 [obs v3.0.3
+    /// 0x7101154260]): the first time, switch mode. While the
     /// player stays past his front edge he heads that way; otherwise home moves here and he
     /// goes back to patrolling. On the way, with a wall on his right (BG bit 12) he jumps it —
     /// the middle jump for a low one, the big jump for a high one — when the obstacle scan finds
@@ -1353,15 +1354,17 @@ impl Actor {
         self.bowser_decide(level, st);
     }
 
-    /// The chase's obstacle and gap jumps (0x71006ab370 [obs v1.0.0]); true when a jump
+    /// The chase's obstacle and gap jumps (0x71006ab370 [obs v1.0.0], the same in v3.0.3
+    /// [obs v3.0.3 0x7101154260: its vtable slots 0x18 further on]); true when a jump
     /// started. The obstacle kind (vtable slot 0x310 → 0x71006abfe0; SMB1 never takes the big
-    /// jump); whether that jump is allowed (slot 0x428, 0x71006aa9d0: not for kind 0; its
-    /// overhead and jump-height queries test collider kinds the engine has no source of, so
-    /// they pass [inf]); a wall on his right (BG bit 12: v1.0.0's +0x649 bit 4) with a way
-    /// over → kind 2 the big jump (slot 0x308, state BigJump), kind 1 the middle jump (slot
-    /// 0x300); then the gap scan (0x71006ab810): a gap with the jump allowed and no wall in the
-    /// way → the middle jump across (slot 0x2f8, the counters reset by slots 0x358 / 0x360,
-    /// the gap flag set for MiddleJump's enter 0x71006b0370), otherwise he turns round.
+    /// jump); whether that jump is allowed (slot 0x428, 0x71006aa9d0 = v3.0.3 0x7101153860:
+    /// not for kind 0; its overhead and jump-height queries test collider kinds the engine has
+    /// no source of, so they pass [inf]); a wall on his right (BG bit 12: v1.0.0's +0x649 bit
+    /// 4, v3.0.3's +0x659 bit 5) with a way over → kind 2 the big jump (slot 0x308, state
+    /// BigJump), kind 1 the middle jump (slot 0x300); then the gap scan (0x71006ab810): a gap
+    /// with the jump allowed and no wall in the way → the middle jump across (slot 0x2f8, the
+    /// counters reset by slots 0x358 / 0x360, the gap flag set for MiddleJump's enter
+    /// 0x71006b0370), otherwise he turns round.
     fn bowser_chase_jumps(&mut self, level: &Level, st: usize) -> bool {
         let mut kind = self.bowser_obstacle_kind(level);
         if st == 0 && kind > 1 {
@@ -1395,7 +1398,8 @@ impl Actor {
         false
     }
 
-    /// The obstacle scan (0x71006abfe0 [obs v1.0.0]): at 24 px ahead (big 36) the points 8,
+    /// The obstacle scan (0x71006abfe0 [obs v1.0.0] = [obs v3.0.3 0x7101154ed0], 36 at
+    /// 0x71023190a0): at 24 px ahead (big 36) the points 8,
     /// 24, 40, … px over his feet are tested for terrain until a free run as tall as he is (3
     /// tiles, big 5) is found; the run starting 0–2 tiles up is kind 1, 3–5 tiles up kind 2,
     /// higher or none kind 0.
@@ -1422,7 +1426,8 @@ impl Actor {
         0
     }
 
-    /// The gap scan (0x71006ab810 with no third argument [obs v1.0.0]): ground is looked for
+    /// The gap scan (0x71006ab810 with no third argument [obs v1.0.0] = [obs v3.0.3
+    /// 0x7101154700]): ground is looked for
     /// by downward rays at 2 + 24, 16, 8, 0 px ahead (big 2 + 48 … 0), farthest first, each from
     /// 8 px over his feet to 8 px under them, both stretched by its distance; none found, or no
     /// ground just past the one found (1, then 8 (16) and 16 (32) px further), is a gap. Returns
@@ -1449,7 +1454,8 @@ impl Actor {
         (gap, (x, y))
     }
 
-    /// The gap jump's speed (0x71006ac370 [obs v1.0.0]): the landing is looked for from the
+    /// The gap jump's speed (0x71006ac370 [obs v1.0.0] = [obs v3.0.3 0x7101155260, run by
+    /// MiddleJump's enter 0x7101159260; 1.8 at 0x71023188b4]): the landing is looked for from the
     /// tile 40 px past the ground found (rounded to tiles), every 32 px up to 6 times, by a
     /// 4-px ray down from 2 px over that tile row; the speed covers the distance in the
     /// jump's time, |d| / 2 · |g| / vy, at most 1.8 (in water × 0.6); with no landing found

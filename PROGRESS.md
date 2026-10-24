@@ -92,6 +92,27 @@ sway, importer and pack 12, the dev cache already at v12).
   Yoshi's Egg hatch: Land the first frame it is on the ground with its 22 × 22 box touching the
   camera view (Wait 0x7100852bb0, vfunc 0x4e8 0x71008cc760), then the helper's 40 frames (v3.0.3
   0x710137acd0 / 0x71013f7990).
+- 🔄 **Inferred-behaviour pass 3** (2026-10-25, branch `infres3`, research specs/inf-inventory.md
+  "Pass 3"): ✅ the v1.0.0-only findings confirmed in v3.0.3, no change — stacked columns spawn
+  through the manager record (0x7100e3fcd0 / 0x7100e40a10, box test 0x7100e41150; the manager is
+  actor 0x124, box {0, 8, 8, 8} flags 0x448 at 0x71023ce534), Bowser's chase jumps (0x7101154260,
+  obstacle scan 0x7101154ed0, gap scan 0x7101154700, landing speed 0x7101155260), the winged Dry
+  Bones = the red Paratroopa's Wing (factory 0x7101135770). ✅ the Boo (actors/boo.rs): a winged
+  one's PataCharge at the start and after every Stop (still, aiming, the wing helper 0x7101270eb0
+  easing its flap to 2.0 by 0.04, then 20 frames, Follow at 0.8 → 0.4), the aim as the binary
+  clamps it (±45° on the facing side, swinging over when the player crosses; starts pointing
+  down). ✅ the winged Lava Bubble (Bubble Wing 0x710109f400 / 0x710109f9b0 / bounce 0x710109da60:
+  1 px/f diagonal, reflecting off terrain once its drawn rotation has caught up). ✅ the
+  Para-Beetle ride (Met Wing PlayerOn 0x71011d73b0 / 0x71011d7480: stood on, dips −1.0, climbs
+  +0.04 to 0.5, FlyMove 18 frames after the rider leaves). ✅ the held player's claw hang 22 px
+  (23 in other forms; 0x7101587d10 / 0x71015d24c0) and the jump off it (the Crane state's
+  ordinary jump start, exit's ±4 / ±2 carry; 0x71015a06a0 / 0x71015a0760). ✅ the Twister in
+  water (0x710158a590 +0x230c bit 0: half bands, caps 1.5 / 3.0). ⬜ the Bros' WingWalk (v3.0.3
+  enter 0x71010961c0 / exe 0x7101096310, five sub-phases on the Bros action's vfuncs and the
+  +0x4e8 helper: not ported), a walker meeting a stacked rider (the action contact slots 12 / 13
+  are the same defaults for Basic as for Tower, so pass 2's evidence doesn't decide it), the
+  item touch boxes (not in EnemyDB or the item init 0x710134fe30; set by the shared enemy init
+  0x7101286ee0) [inf]. 578 / 580 traces exact; coverage 550/550 + 273/273; simulate 0 crashes.
 - **Agent queue** (when a helper slot frees; running 2026-10-25: the maker's Water Level and
   Custom Scroll modes, physics): ✅ a Koopaling in a Clown Car (2026-10-25, branch
   `kclown`, research 120-koopalings.md "In a Koopa Clown Car": KoKoopaDefault's Clown vtable

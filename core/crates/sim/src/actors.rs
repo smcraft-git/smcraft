@@ -9,6 +9,7 @@ use crate::fmath::DetMath;
 use crate::level::{Cell, Level, PipeDir, TILE};
 
 pub mod block_out;
+mod boo;
 mod bosses;
 mod ceiling;
 mod chute;
@@ -844,6 +845,9 @@ pub struct Actor {
     /// Bowser's middle jump is a gap jump (its speed set to land past the gap; MiddleJump's
     /// enter 0x71006b0370 flag +0x90).
     pub gap_jump: bool,
+    /// A winged enemy's wing helper: its flap rate (+0x20), eased toward the rate its body's
+    /// animation asks for (actors/boo.rs).
+    pub wing_rate: f32,
 }
 
 impl Actor {
@@ -925,6 +929,7 @@ impl Actor {
             fly: Fly::default(),
             claw: None,
             gap_jump: false,
+            wing_rate: 1.0,
         }
     }
 
@@ -946,6 +951,18 @@ impl Actor {
     }
 
     /// The solid surface this actor offers (for platforms): (x0, y0, x1, y1, top_only).
+    /// A flying winged Buzzy Beetle, the one players stand on.
+    pub fn is_para_beetle(&self) -> bool {
+        self.kind == Kind::Buzzy
+            && self.wings
+            && self.mode == Mode::Normal
+            && !self.ceiling
+            && !self.thrown
+            && !self.held
+            && self.rail.is_none()
+            && self.pipe.is_none()
+    }
+
     pub fn solid_box(&self) -> Option<(f32, f32, f32, f32, bool)> {
         match self.kind {
             // the P Switch is stood on (16 px; 4.8 once pressed) [obs: Ryujinx trace M1_pswitch];
@@ -960,6 +977,11 @@ impl Actor {
                     self.y + h,
                     self.phase > 0,
                 ))
+            }
+            // a Para-Beetle is stood on (its body box, from above) (actors/fly.rs)
+            Kind::Buzzy if self.is_para_beetle() => {
+                let (hw, h) = (self.half_w(), self.height());
+                Some((self.x - hw, self.y, self.x + hw, self.y + h, true))
             }
             Kind::Thwomp { .. } if self.mode == Mode::Normal => {
                 let hw = if self.big { 32.0 } else { 16.0 };
@@ -2189,9 +2211,9 @@ impl Actor {
                 }
                 // their Wing action is their Basic one (the same action class: Teresa,
                 // Pukupuku, FishBone, Hanachan, Kameck, Bros1st / BrosU / FireBros / MegaBros,
-                // Choropoo, Gesso, Wanwan) [obs v1.0.0 actionmap]: they act as unwinged
-                // [inf: the wing-only states inside it — the Boo's PataCharge, the Bros'
-                // WingWalk — are not ported]
+                // Choropoo, Gesso, Wanwan) [obs v1.0.0 actionmap]: they act as unwinged, but
+                // for the wing-only states inside it: the Boo's PataCharge (actors/boo.rs)
+                // [inf: the Bros' WingWalk is not ported]
                 Kind::Boo
                 | Kind::CheepCheep { .. }
                 | Kind::FishBone
@@ -2203,11 +2225,20 @@ impl Actor {
                 | Kind::ChainChomp { .. } => {}
                 // a Dry Bones' Wing is the red Paratroopa's (Karon Wing vtable 0x7102179e68 =
                 // NokonokoRed's; its Fly enter 0x7100697e40 is the same and its exe 0x7100697ec0
-                // runs NokonokoRed's Fly exe 0x710072b370) [obs v1.0.0]: step_wings
+                // runs NokonokoRed's Fly exe 0x710072b370) [obs v1.0.0]; the same in v3.0.3 [obs
+                // v3.0.3: factory 0x7101135770 builds NokonokoRed's Wing (0x71011fe070) and only
+                // swaps the vtable to 0x71028df578, whose Fly enter 0x710113adf0 is NokonokoRed's
+                // 0x71011fedf0 and whose exe 0x710113ae70 runs NokonokoRed's 0x71011fee70, then
+                // its bones' helper]: step_wings
                 Kind::DryBones => {}
                 // the Para-Beetle: the Spiny's hover without its wall turn (actors/fly.rs)
                 Kind::Buzzy | Kind::SpikeTop { .. } if !self.ceiling => {
                     self.step_para_beetle(level);
+                    return None;
+                }
+                // Bubble Wing: a straight flight bouncing off terrain (actors/wing.rs)
+                Kind::LavaBubble if self.pipe.is_none() && self.rail.is_none() => {
+                    self.step_winged_bubble(level);
                     return None;
                 }
                 // its own Fly / Turn (actors/wing.rs)
@@ -2240,7 +2271,7 @@ impl Actor {
                 self.x += self.vx;
                 self.y += self.vy;
             }
-            Kind::Boo => self.step_boo(),
+            Kind::Boo => self.step_boo(level.style == "3W"),
             Kind::RingBoo { slot } => {
                 let k = if self.big { 0.5 } else { 1.0 };
                 let r_max = if self.big { 52.0 * 1.4 } else { 52.0 };
@@ -3564,52 +3595,6 @@ impl Actor {
         h.vy = 3.0;
         h.dir = self.dir;
         h
-    }
-
-    /// Boo (41-boo.md): stops while the player faces it (speed decays by max(0.12·|v|, 0.002));
-    /// otherwise turns toward the player at ≤ 1°/frame (±45° from horizontal) and speeds up by
-    /// 0.005 to 0.4, with a wobble growing 0.0015/frame to 0.2 (2°/frame phase).
-    fn step_boo(&mut self) {
-        let (px, py) = self.target;
-        if self.age == 1 {
-            // spawned facing the player
-            self.heading = if self.dir < 0 { 180.0 } else { 0.0 };
-        }
-        let looking = (px < self.x) == (self.target_facing > 0);
-        if looking {
-            self.speed = (self.speed - (0.12 * self.speed).max(0.002)).max(0.0);
-        } else {
-            let want = (py + 8.0 - self.y).datan2(px - self.x).to_degrees();
-            let want = if want.abs() > 90.0 {
-                let w = if want < 0.0 { want + 360.0 } else { want };
-                w.clamp(135.0, 225.0)
-            } else {
-                want.clamp(-45.0, 45.0)
-            };
-            let mut diff = want - self.heading;
-            while diff > 180.0 {
-                diff -= 360.0;
-            }
-            while diff < -180.0 {
-                diff += 360.0;
-            }
-            self.heading += diff.clamp(-1.0, 1.0);
-            self.speed = (self.speed + 0.005).min(0.4);
-            self.dir = if px < self.x { -1 } else { 1 };
-        }
-        // wobble only while chasing (its amplitude grows from the start of the chase)
-        if looking {
-            self.timer = 0;
-        } else {
-            self.timer += 1;
-        }
-        let amp = (self.timer as f32 * 0.0015).min(0.2);
-        let w = amp * (self.timer as f32 * 2.0).to_radians().dsin();
-        let (s, c) = self.heading.to_radians().dsin_cos();
-        self.vx = self.speed * c - w * s;
-        self.vy = self.speed * s + w * c;
-        self.x += self.vx;
-        self.y += self.vy;
     }
 
     /// Koopa Clown Car (42-koopa-clown-car.md). Empty: velocity × 0.95 with a ±0.2 bob in 0.01
