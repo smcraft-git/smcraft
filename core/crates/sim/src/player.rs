@@ -1864,7 +1864,10 @@ impl Player {
             self.up_hold = 0;
         }
         self.landed = airborne && self.on_ground;
-        self.fell_off = !airborne && !self.on_ground && self.vy < 0.0;
+        // (a crouch walked off a ledge goes straight into its fall with gravity, no Walk to
+        // hand over [obs: Ryujinx trace X_pound_d: crouching off a Seesaw's end, −0.84 then
+        // −1.18])
+        self.fell_off = !airborne && !self.on_ground && self.vy < 0.0 && !self.crouch && !self.duck;
         if self.landed && self.crouch_jump {
             self.cje = match self.style {
                 Style::WU => 10,
@@ -2205,6 +2208,28 @@ impl Player {
 
     /// Wall slide / wall jump (§3.3, NSMBU and 3D World): falling against a wall with the stick toward
     /// it slides at ≥ −2.0; jump → vy 3.5 and 2.25 px/f away; 15 frames of stick held away let go.
+    /// Ground under the feet (either foot or the centre) within `depth` px: terrain, a slope's
+    /// surface or a moving solid's top.
+    fn ground_within(&self, level: &Level, depth: f32) -> bool {
+        let fx = self.sensors().foot_x;
+        let (lo, hi) = (self.y - depth, self.y);
+        [self.x - fx, self.x, self.x + fx].iter().any(|&x| {
+            let (r0, r1) = ((lo / TILE).floor() as i32, ((hi / TILE).floor() as i32) - 1);
+            let cell = (r0..=r1).any(|r| {
+                let c = level.cell_at(x, r as f32 * TILE + 1.0);
+                (c.is_solid() || c == Cell::SemiTop) && ((r + 1) as f32 * TILE) >= lo
+            });
+            let slope = level
+                .slope_at(x)
+                .is_some_and(|(sy, _)| sy >= lo && sy <= hi);
+            let solid = level
+                .solids
+                .iter()
+                .any(|b| x > b.x0 && x < b.x1 && (lo..=hi).contains(&b.top_at(x)));
+            cell || slope || solid
+        })
+    }
+
     /// Ground pound (NSMBU / 3DW, HipAttack): Down held 5 frames in the air → a wind-up with no
     /// speed or gravity for the `hip_start` animation plus 5 frames (NSMBU 10 + 5, 3D World 17 + 5
     /// [obs: Ryujinx trace]), then a dive that starts at −6.0 (fall cap −6.0) until landing.
@@ -2241,7 +2266,12 @@ impl Player {
             self.cat_climb = 0;
             self.dive = false;
         }
-        if down && (down_pressed || self.pound_hold > 0) {
+        // (a press with ground within 16 px under the feet starts nothing, and holding Down
+        // on doesn't try again [obs: Ryujinx traces X_pound_*: presses 13.9 / 13.2 / 7.1 /
+        // 0.7 px over the floor or a Seesaw no ground pound, 17.2 px and higher one])
+        if down_pressed && self.ground_within(level, 16.0) {
+            self.pound_hold = 0;
+        } else if down && (down_pressed || self.pound_hold > 0) {
             if inp.dir_x() == 0 {
                 self.pound_hold = self.pound_hold.saturating_add(1);
             }
@@ -2792,9 +2822,12 @@ impl Player {
                 };
                 (c, s * rise as f32)
             }
-            // along a tilted solid (a Seesaw) by its ground angle (actors/seesaw.rs)
+            // along a tilted solid (a Seesaw) by its ground angle (actors/seesaw.rs), y too: off
+            // its end the walk-off frame keeps the step along it [obs: Ryujinx trace X_pound_d:
+            // Δy = vy + vx · sin of the plank's angle on that frame]
             _ if self.on_ground && self.ride.is_some() && self.solid_angle != 0 => {
-                (crate::fmath::table_sin_cos(self.solid_angle).1, 0.0)
+                let (s, c) = crate::fmath::table_sin_cos(self.solid_angle);
+                (c, s)
             }
             _ => (1.0, 0.0),
         };
@@ -2819,6 +2852,16 @@ impl Player {
             {
                 wall_base = wall_base.min((hy / TILE).floor() * TILE - s.head_y);
             }
+        }
+        // ... and over a floor the fall reaches: the floor holds the feet before the walls are
+        // probed [obs: Ryujinx trace X_pound_e: a ground pound's −6 a frame to 4.3 px into the
+        // floor, no wall met]
+        if self.vy < 0.0
+            && [-s.foot_x, s.foot_x]
+                .iter()
+                .any(|&fx| level.cell_at(self.x + fx, wall_base).is_solid())
+        {
+            wall_base = wall_base.max((wall_base / TILE).floor() * TILE + TILE);
         }
         for dir in [-1.0f32, 1.0] {
             let wx = self.x + dir * s.wall_x;
@@ -2878,7 +2921,7 @@ impl Player {
         // vertical
         let prev_y = self.y;
         self.y += self.vy;
-        if takeoff {
+        if takeoff || sin != 0.0 && self.on_ground && self.slope.is_none() {
             self.y += self.vx * sin;
         }
         self.ride = None;
