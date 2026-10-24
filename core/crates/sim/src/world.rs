@@ -3268,7 +3268,9 @@ impl World {
                         scores.push((Self::chain_score(s.chain), v.x, v.y + 24.0));
                         s.chain += 1;
                     }
-                    (false, false) if walkers => {
+                    // (two walking the same way don't turn: a row of Goombas spawning a tile
+                    // apart walks off together [obs: Ryujinx trace W_3051605])
+                    (false, false) if walkers && a.dir != b.dir => {
                         // walkers turn on touching each other (when moving toward each other)
                         let toward = (b.x - a.x) * a.dir as f32 > 0.0;
                         if a.mode == Mode::Normal && toward && a.turn_lock == 0 {

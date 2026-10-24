@@ -692,6 +692,8 @@ pub struct Actor {
     pub die_pending: Option<(f32, f32)>,
     /// DieFall updates so far.
     pub die_frames: u16,
+    /// A walker's frames standing after a landing.
+    pub land_wait: u8,
     /// An item touched by the player: 1 = touched at the end of last frame (this update moves it
     /// once more, without landing, and takes it), 2 = taken (the world collects it), 3 = gone.
     pub taken: u8,
@@ -817,6 +819,7 @@ impl Actor {
             kick_lock: 0,
             die_pending: None,
             die_frames: 0,
+            land_wait: 0,
             taken: 0,
             kick_speed: 0.0,
             bounce_pending: false,
@@ -2226,9 +2229,18 @@ impl Actor {
                 } else {
                     self.vx = self.vx.clamp(-speed, speed);
                 }
+                // the frame after landing from a fall it stands (Fall hands over to Walk) [obs:
+                // Ryujinx trace W_3051605, a Goomba landing on a slope, still a frame, then on]
+                if self.land_wait > 0 {
+                    self.land_wait -= 1;
+                    self.vx = 0.0;
+                }
                 let was_on_ground = self.on_ground;
                 self.vy = (self.vy + ENEMY_GRAVITY).max(MAX_FALL);
                 self.collide(level);
+                if !was_on_ground && self.on_ground && self.age > 1 {
+                    self.land_wait = 1;
+                }
                 if self.wall && self.turn_lock == 0 {
                     self.turn();
                 }
@@ -4196,14 +4208,33 @@ impl Actor {
         let was_ground = self.on_ground;
         let solid = |px: f32, py: f32| level.cell_at(px, py).is_solid();
 
-        // horizontal
-        self.x += self.vx;
+        // horizontal: on a slope's incline the walk speed is along it (x · cos θ, the player's
+        // rule) [obs: Ryujinx trace W_3051605, a Goomba at 0.5 on a steep slope: x −0.3535 a
+        // frame]
+        let cos = match level.slope_at(self.x) {
+            // (the incline's ends inclusive: a Goomba at its foot's tile edge already walks it
+            // [obs: W_3051605])
+            Some((surf, sl))
+                if was_ground
+                    && self.x >= (sl.left + 1) as f32 * TILE
+                    && self.x <= (sl.left + sl.width - 1) as f32 * TILE
+                    && (surf - self.y).abs() < 1.0 =>
+            {
+                if sl.steep {
+                    std::f32::consts::FRAC_1_SQRT_2
+                } else {
+                    0.894_400_9
+                }
+            }
+            _ => 1.0,
+        };
+        self.x += self.vx * cos;
         if self.vx != 0.0 {
             let side = self.vx.signum();
             let wx = self.x + side * side_hw;
             let ys = [self.y + 2.0, self.y + (h - 2.0).max(2.0)];
             // one-way walls block only motion into them from their blocking side
-            let prev_wx = wx - self.vx;
+            let prev_wx = wx - self.vx * cos;
             let oneway = ys.iter().any(|&wy| {
                 let c = level.cell_at(wx, wy);
                 let cell_x = (wx / TILE).floor() * TILE;
@@ -4255,6 +4286,13 @@ impl Actor {
             for dx in [-fx, fx] {
                 let (px, py) = (self.x + dx, self.y);
                 let top = ((py / TILE).floor() + 1.0) * TILE;
+                // a slope's columns are probed at the centre only (below), unless a block
+                // stands above its surface (as the player's feet)
+                if let Some((surf, _)) = level.slope_at(px)
+                    && !(top > surf + 0.01 && level.cell_at(px, py).is_solid())
+                {
+                    continue;
+                }
                 let mut cell = level.cell_at(px, py);
                 // a foot exactly on a column boundary also stands on the column to its left, as
                 // the player's do [obs: Ryujinx trace M1_blocks blk_mush, a mushroom at x 401
@@ -4269,15 +4307,15 @@ impl Actor {
                     landed = Some(landed.map_or(top, |t: f32| t.max(top)));
                 }
             }
-            for dx in [-fx, 0.0, fx] {
-                if let Some((surf, _)) = level.slope_at(self.x + dx) {
-                    let reach = if was_ground { 6.0 } else { 0.0 };
-                    if self.y <= surf + reach
-                        && prev_y >= surf - 6.0
-                        && landed.is_none_or(|t| surf >= t)
-                    {
-                        landed = Some(surf);
-                    }
+            // (slopes are probed at the centre only, as the player's feet [obs: Ryujinx trace
+            // W_3051605, a Goomba landing on a steep slope at the surface under its centre])
+            if let Some((surf, _)) = level.slope_at(self.x) {
+                let reach = if was_ground { 6.0 } else { 0.0 };
+                if self.y <= surf + reach
+                    && prev_y >= surf - 6.0
+                    && landed.is_none_or(|t| surf >= t)
+                {
+                    landed = Some(surf);
                 }
             }
             match landed {
