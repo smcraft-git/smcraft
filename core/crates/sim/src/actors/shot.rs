@@ -20,12 +20,18 @@ const COIN_GRAVITY: f32 = -0.14;
 const COIN_VY: [f32; 10] = [1.5, 1.0, 1.8, 0.8, 1.2, 1.1, 1.8, 1.4, 1.2, 0.9];
 const COIN_VX: [f32; 10] = [2.5, 0.75, 2.125, 1.75, 2.0, 1.0, 2.25, 0.5, 2.375, 1.5];
 const COIN_VX_SCALE: f32 = 0.6;
+/// A burst slot's (|vx| before the 0.6 scale, vy): the side-pipe coin uses the same tables
+/// (Coin Dokan launch 0x7101367d10, v3.0.3) [obs].
+pub(super) fn coin_slot(slot: usize) -> (f32, f32) {
+    let s = slot % COIN_VY.len();
+    (COIN_VX[s], COIN_VY[s])
+}
 /// The fast (red) blaster triples a coin's vx (subtype 5 in 0x7100849240) [obs].
 const COIN_FAST: f32 = 3.0;
 /// The bounces on its 1st / 2nd / 3rd landing (0x710087eea0, table 0x7101c8bb30) [obs]; after
 /// the third it creeps along the floor at ±0.34 (+0xda0, 0x7101c8a574 / 0x7101c8a1bc) [obs].
 const COIN_BOUNCE: [f32; 3] = [2.0, 1.0, 0.0];
-const COIN_CREEP: f32 = 0.34;
+pub(super) const COIN_CREEP: f32 = 0.34;
 /// A Lakitu's coin: its thrown arc lasts 50 frames, falling at most 1.5 px/f (8-coin.md).
 const THROWN_FRAMES: i32 = 50;
 pub(super) const THROWN_FALL: f32 = -1.5;
@@ -42,6 +48,10 @@ const CHUTE_SPEED: [f32; 2] = [2.5, 5.0];
 const CHUTE_FRAMES: i32 = 18;
 /// Winged FlyStop / WingFly parts: 1.2 (3.6), no gravity (0x7101c8c440) [obs].
 const WING_SPEED: [f32; 2] = [1.2, 3.6];
+/// A wingless Lava Bubble's speed once falling: ×0.985 a frame [obs v3.0.3 0x710109d990].
+const BUBBLE_DRAG: f32 = 0.985;
+/// An empty shell enters the Shell context from the 4th frame on [obs v3.0.3].
+const SHELL_HOLD: u16 = 4;
 /// CloudShot: 2.7 (5.94) (0x7101c8c6d8) [obs].
 const CLOUD_SPEED: [f32; 2] = [2.7, 5.94];
 
@@ -60,8 +70,20 @@ pub enum Preset {
     Default,
     /// FlyStop (red Koopa, Bob-omb, Gabon): winged, a gliding stop, then hovers.
     FlyStop,
-    /// WingFly-like (Togezo / Met / Karon / Togemet): winged, straight, then hovers.
+    /// WingFly-like (Togemet): winged, straight, then hovers.
     WingFly,
+    /// Togezo / Met / Karon (Spiny, Buzzy Beetle, Dry Bones; launch 0x710127fe70, per frame
+    /// 0x710127ff60, Shot exe 0x71012801d0, v3.0.3): winged as WingFly; wingless the Default
+    /// hop, but the first landing ends it (vy × 0.25 into the floor: no bounce).
+    Togezo,
+    /// Their empty shells (TogezoShell / MetShell / KaronShell): the Default hop until, 4
+    /// frames on, a landing or a wall puts them in the Shell context.
+    Shell,
+    /// Bubble (Lava Bubble; Shot 0x710109d4e0 / 0x710109d560 / 0x710109d990, v3.0.3): the
+    /// Default launch (a big one 8 px lower); wingless it flies on through everything, losing
+    /// 1.5 % of its speed a frame once falling, and never leaves the Shot; winged it flies
+    /// straight without gravity until it touches terrain.
+    Bubble,
     /// CloudShot (Boo, Blooper, Koopa Clown Car): no gravity, slows to a stop.
     CloudShot,
     /// ItemDefault / ItemLeaf / BigKinoko: winged items fly 16 px straight.
@@ -76,8 +98,20 @@ pub fn preset(kind: Kind) -> Preset {
     match kind {
         Kind::FloatCoin => Preset::Coin,
         Kind::Koopa { red: true } | Kind::BobOmb => Preset::FlyStop,
-        Kind::Spiny | Kind::Buzzy | Kind::DryBones | Kind::SpikeTop { .. } => Preset::WingFly,
-        Kind::Boo | Kind::Blooper | Kind::ClownCar { .. } => Preset::CloudShot,
+        Kind::Spiny | Kind::Buzzy | Kind::DryBones => Preset::Togezo,
+        Kind::SpikeTop { .. } => Preset::WingFly,
+        Kind::EmptyShell { .. } => Preset::Shell,
+        Kind::LavaBubble => Preset::Bubble,
+        // Hacchin and Gesso3W have own Shots that only add an end on a hit / at a wall to
+        // CloudShot's (0x7101109710, 0x7101104430, v3.0.3) [obs]
+        Kind::Boo | Kind::Blooper | Kind::ClownCar { .. } | Kind::Stingby => Preset::CloudShot,
+        // MapObjDefault / MapObjYoshiEgg's Shot is the Item one (exe 0x7101370d20, v3.0.3)
+        Kind::PSwitch
+        | Kind::Pow
+        | Kind::Spring
+        | Kind::SideSpring
+        | Kind::Stone
+        | Kind::YoshiEgg { .. } => Preset::Item,
         k if k.is_item() => Preset::Item,
         _ => Preset::Default,
     }
@@ -127,7 +161,9 @@ impl Actor {
                 self.vx = CHUTE_SPEED[f] * d;
                 self.timer = CHUTE_FRAMES;
             }
-            Preset::FlyStop | Preset::WingFly if winged => self.vx = WING_SPEED[f] * d,
+            Preset::FlyStop | Preset::WingFly | Preset::Togezo if winged => {
+                self.vx = WING_SPEED[f] * d
+            }
             Preset::CloudShot => self.vx = CLOUD_SPEED[f] * d,
             _ => {
                 self.vx = SHOT_SPEED[f] * d;
@@ -135,6 +171,14 @@ impl Actor {
                 if !(preset == Preset::Item && winged) {
                     self.vy = SHOT_VY;
                 }
+            }
+        }
+        if preset == Preset::Bubble {
+            if winged {
+                self.vy = 0.0;
+            }
+            if self.big {
+                self.y -= 8.0;
             }
         }
         self.mode = Mode::Shot {
@@ -197,7 +241,9 @@ impl Actor {
             return false;
         };
         let r = if self.big { 16.0 } else { 8.0 };
-        self.kind == Kind::FloatCoin || (self.x - x0).dhypot(self.y - y0) >= r
+        // (a pipe coin once clear of the mouth: its terrain hold) [inf]
+        (self.kind == Kind::FloatCoin && self.turn_lock == 0)
+            || (self.x - x0).dhypot(self.y - y0) >= r
     }
 
     /// One frame of the Shot state.
@@ -236,7 +282,26 @@ impl Actor {
                 self.vx = self.vx.signum() * (s - (s * 0.03).max(0.01)).max(0.0);
                 self.collide(level);
             }
-            Preset::WingFly if winged => {
+            Preset::Bubble if winged => {
+                // straight, no gravity, until it touches terrain
+                let was = (self.vx, self.vy);
+                self.vy = 0.0;
+                self.collide(level);
+                if self.on_ground || self.wall || self.vy != 0.0 {
+                    return self.end_shot();
+                }
+                self.vx = was.0;
+            }
+            Preset::Bubble => {
+                // no terrain, no end: it falls away at its launch speed, slowing once falling
+                if self.vy < 0.0 {
+                    self.vx *= BUBBLE_DRAG;
+                }
+                self.vy = (self.vy + ENEMY_GRAVITY).max(MAX_FALL);
+                self.x += self.vx;
+                self.y += self.vy;
+            }
+            Preset::WingFly | Preset::Togezo if winged => {
                 // straight at its launch speed; hovers once 8 px (16 big) out at full size and
                 // full animation speed (vf 0x120 0x71005fed80 / 0x7100780d10) [obs]
                 let r = if self.big { 16.0 } else { 8.0 };
@@ -255,6 +320,23 @@ impl Actor {
                 let k: f32 = if fast { 2.2 } else { 1.0 } * if self.big { 0.5 } else { 1.0 };
                 self.vx = self.vx.signum() * (s - (0.06 * k).max(s * 0.02)).max(0.0);
                 self.collide(level);
+            }
+            Preset::Togezo if !self.chute => {
+                self.shot_hop(level, landed, grown);
+                // the first landing is the end, at a quarter of the impact: no bounce
+                if matches!(self.mode, Mode::Shot { landed: true, .. }) {
+                    self.vy = 0.0;
+                    self.end_shot();
+                }
+            }
+            Preset::Shell if !self.chute => {
+                self.shot_hop(level, landed, grown);
+                if t >= SHELL_HOLD
+                    && matches!(self.mode, Mode::Shot { .. })
+                    && (self.on_ground || self.wall)
+                {
+                    self.end_shot();
+                }
             }
             _ => self.shot_hop(level, landed, grown),
         }
@@ -328,6 +410,13 @@ impl Actor {
     /// creeps at 0.34; a ceiling sends it down at −2, a wall reverses it. It never leaves the
     /// Shot state (only collection or the despawn ends it).
     fn coin_bounce(&mut self, level: &Level) {
+        if self.turn_lock > 0 {
+            // a pipe coin's first frames: no terrain (actors/dokan.rs `coin_dokan`)
+            self.vy = (self.vy + COIN_GRAVITY).max(MAX_FALL);
+            self.x += self.vx;
+            self.y += self.vy;
+            return;
+        }
         if self.vy <= 0.0 && self.on_ground {
             if self.hops >= COIN_BOUNCE.len() as u8 {
                 self.vx = self.speed;
@@ -349,10 +438,11 @@ impl Actor {
         }
     }
 
-    /// Back to normal (the return-to-normal rule 0x7100796c00): a parachute first (it pops
-    /// open at vy +0.3 after a shot, 0x71005f36e0), then Wing for a winged part (it hovers from
-    /// here), else Basic [obs shared enemy draft §5.2].
-    fn end_shot(&mut self) {
+    /// Back to normal (the return-to-normal rule 0x7100796c00, v3.0.3 0x7101298b90): a
+    /// parachute first (it pops open at vy +0.3 after a shot, a block or a pipe, 0x71005f36e0),
+    /// then Wing for a winged part (it hovers from here), else Basic [obs shared enemy draft
+    /// §5.2]. The Block and Dokan contexts end through it too.
+    pub(super) fn end_shot(&mut self) {
         self.timer = 0;
         self.hops = 0;
         self.home_y = self.y;
@@ -362,10 +452,9 @@ impl Actor {
         if std::mem::take(&mut self.chute) {
             self.vx = 0.0;
             self.vy = 0.3;
-            self.mode = Mode::Parachute {
-                x0: self.x,
-                phase: 0.0,
-            };
+            // a shot to the left swings leftward first
+            let left = matches!(self.mode, Mode::Shot { .. }) && self.dir < 0;
+            self.mode = Mode::parachute(left);
         } else {
             if self.wings {
                 self.vx = 0.0;
@@ -514,6 +603,42 @@ mod tests {
         assert!(c.on_ground && matches!(c.mode, Mode::Shot { .. }));
         assert_eq!(c.vx, 0.34, "then it creeps");
         assert!(c.shot_clear(), "collectable");
+    }
+
+    #[test]
+    fn a_shot_buzzy_stops_on_its_first_landing() {
+        let lvl = floor();
+        let mut a = Actor::new(Kind::Buzzy, 20.0 * TILE, 4.0 * TILE);
+        a.dir = 1;
+        a.launch(false);
+        let mut n = 0;
+        while matches!(a.mode, Mode::Shot { .. }) && n < 200 {
+            a.step(&lvl, 0.0);
+            n += 1;
+        }
+        assert_eq!((a.mode, a.vy), (Mode::Normal, 0.0));
+        assert!(a.on_ground);
+    }
+
+    #[test]
+    fn a_shot_lava_bubble_flies_through_and_never_lands() {
+        let lvl = floor();
+        let mut a = Actor::new(Kind::LavaBubble, 20.0 * TILE, 4.0 * TILE);
+        a.dir = 1;
+        a.launch(false);
+        assert_eq!((a.vx, a.vy), (1.5, 0.6));
+        run(&mut a, &lvl, 30);
+        assert!(matches!(a.mode, Mode::Shot { .. }), "{:?}", a.mode);
+        assert!(a.y < 32.0, "through the floor: {}", a.y);
+        assert!(a.vx < 1.5 * 0.985_f32.powi(20), "slowing: {}", a.vx);
+    }
+
+    #[test]
+    fn a_shot_p_switch_flies_like_an_item() {
+        let mut a = Actor::new(Kind::PSwitch, 0.0, 0.0);
+        a.wings = true;
+        a.launch(false);
+        assert_eq!((a.vx, a.vy), (1.5, 0.0));
     }
 
     #[test]

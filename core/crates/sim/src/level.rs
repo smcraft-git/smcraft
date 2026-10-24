@@ -250,6 +250,7 @@ pub struct PipeGenerator {
     pub kind: Kind,
     pub big: bool,
     pub wings: bool,
+    pub parachute: bool,
     pub dir: PipeDir,
     /// Pipe entry point (outer edge of the mouth).
     pub x: f32,
@@ -1079,21 +1080,24 @@ impl Level {
                 // the Chain Chomp's stake is solid (WanwanPile has a collision body)
                 lvl.set(tx, ty, Cell::Solid);
             }
+            // a coin inside a pipe makes it a coin generator: TenCoin bursts (9-pipe.md "Coins
+            // in pipes") [obs v3.0.3 EnemyWaki update 0x71012aa1c0]
+            // inside a pipe (flag bit 0): the object sits on the pipe's entry point
+            let (ox, oy) = (o.x as f32 / 10.0, o.y as f32 / 10.0);
+            let in_pipe = (o.flags & 1 != 0)
+                .then(|| {
+                    pipe_entries
+                        .iter()
+                        .min_by(|a, b| {
+                            ((a.0 - ox).abs() + (a.1 - oy).abs())
+                                .total_cmp(&((b.0 - ox).abs() + (b.1 - oy).abs()))
+                        })
+                        .copied()
+                })
+                .flatten()
+                .filter(|e| (e.0 - ox).abs() + (e.1 - oy).abs() <= 16.0);
+            let actor = actor.or((o.id == 8 && in_pipe.is_some()).then_some(Kind::FloatCoin));
             if let Some(kind) = actor {
-                // inside a pipe (flag bit 0): the object sits on the pipe's entry point
-                let (ox, oy) = (o.x as f32 / 10.0, o.y as f32 / 10.0);
-                let in_pipe = (o.flags & 1 != 0)
-                    .then(|| {
-                        pipe_entries
-                            .iter()
-                            .min_by(|a, b| {
-                                ((a.0 - ox).abs() + (a.1 - oy).abs())
-                                    .total_cmp(&((b.0 - ox).abs() + (b.1 - oy).abs()))
-                            })
-                            .copied()
-                    })
-                    .flatten()
-                    .filter(|e| (e.0 - ox).abs() + (e.1 - oy).abs() <= 16.0);
                 if let Some((ex, ey, dir, colour)) = in_pipe {
                     if matches!(kind, Kind::Piranha { .. }) {
                         let travel =
@@ -1122,6 +1126,7 @@ impl Level {
                             kind,
                             big,
                             wings,
+                            parachute: o.flags & 0x8000 != 0,
                             dir,
                             x: ex,
                             y: ey,

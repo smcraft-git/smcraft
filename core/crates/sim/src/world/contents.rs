@@ -49,20 +49,12 @@ impl World {
         Some((a, parachute))
     }
 
-    /// Open a released actor's parachute: an enemy pops out first and opens it when the pop
-    /// ends; an item opens it at once [inf: the order of the Block Out and Parachute contexts
-    /// was not traced].
+    /// Open a released actor's parachute at once (a broken crate's, an attached block's
+    /// contents); blocks and trees shoot theirs out first (`Actor::block_out`).
     pub(super) fn open_parachute(a: &mut Actor) {
-        if a.mode == Mode::PopOut {
-            a.chute = true;
-            return;
-        }
         a.vx = 0.0;
         a.vy = 0.0;
-        a.mode = Mode::Parachute {
-            x0: a.x,
-            phase: 0.0,
-        };
+        a.mode = Mode::parachute(false);
     }
 
     /// A vine sprouts from the block at (x, by) (centre, bottom): up from its top, or down
