@@ -423,6 +423,11 @@ impl Layout {
         }
     }
 
+    /// Pane `name`'s integer user data `key`.
+    pub fn user_ints(&self, name: &str, key: &str) -> Option<Vec<i32>> {
+        self.player.pane_user_ints(name, key)
+    }
+
     /// Force a pane shown / hidden (`None`: back to its animations).
     pub fn visible(&mut self, pane: &str, v: Option<bool>) {
         self.player.set_visible(pane, v);

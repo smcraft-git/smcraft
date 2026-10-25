@@ -713,6 +713,22 @@ impl LayoutPlayer {
         })
     }
 
+    /// Pane `path`'s integer user data `key` (e.g. a beat pane's `BeatOffset`).
+    pub fn pane_user_ints(&self, path: &str, key: &str) -> Option<Vec<i32>> {
+        let (parts, name) = Self::split(path);
+        let p = self.part_ref(&parts)?;
+        let &i = p.res.pane_index.get(name)?;
+        p.res.nodes[i]
+            .pane
+            .user_data
+            .iter()
+            .find(|u| u.name == key)
+            .and_then(|u| match &u.value {
+                mmk_formats::lyt::UserDataValue::Ints(v) => Some(v.clone()),
+                _ => None,
+            })
+    }
+
     /// Message `label` with [`crate::ARG_PLACEHOLDER`] for each value it takes, from this
     /// layout's table or else its part layouts' (depth first).
     pub fn message(&self, label: &str) -> Option<String> {

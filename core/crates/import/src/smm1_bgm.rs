@@ -11,12 +11,16 @@
 //!   `EndingPeachBGM` / `EndingKinopioBGM`): streams in `Sound/Resource/Stream/`, except SMW's
 //!   egg-rescue tune, a wave of the `NetEndingDemoScene` bank [obs data].
 //!
-//! Output: `ui/sound/<name>.wav` (the same folder as the UI sounds: hosts play music cues from it).
+//! Output: `ui/sound/<name>.wav` (the same folder as the UI sounds: hosts play music cues from it),
+//! and (importer 6) `ui/sound/bgm.json`: each tune's beat data from its AMTA — `{ "<name>": {
+//! "rate", "loop": [start, end] | null, "marks": { "<marker>": sample } } }` (`beat:<n>`, `beatend`,
+//! `loopstart`, `Koopa`, …: what the layouts' beat bounces run on, smm1-100mario-screens.md §3).
 
 use std::path::Path;
 
 use mmk_formats::archive::{self, Sarc};
 use mmk_formats::audio::{Bwav, Fwav, bars_wiiu, fstm};
+use serde_json::{Map, Value, json};
 
 use crate::smm1::Overlay;
 use crate::{Progress, Result, read, write};
@@ -103,9 +107,55 @@ fn decode(w: &Fwav, pick: &[usize]) -> std::result::Result<Vec<Vec<i16>>, mmk_fo
     (0..b.channels.len()).map(|c| b.decode_channel(c)).collect()
 }
 
+/// The tunes' AMTAs (their markers), from every bank of `Pack/Sound.pack`.
+fn tune_metas(ov: &Overlay) -> Vec<bars_wiiu::Amta> {
+    let wanted: Vec<&str> = std::iter::once(COURSE_WORLD).chain(STREAMS).collect();
+    let mut out: Vec<bars_wiiu::Amta> = Vec::new();
+    for path in ov.files("Pack/Sound.pack") {
+        let Some(sarc) = read(&path)
+            .ok()
+            .and_then(|d| archive::unwrap(d).ok())
+            .and_then(|d| Sarc::parse(d).ok())
+        else {
+            continue;
+        };
+        for (_, bank) in sarc.files() {
+            let Some(b) = archive::unwrap(bank.to_vec())
+                .ok()
+                .and_then(|d| Sarc::parse(d).ok())
+            else {
+                continue;
+            };
+            for s in bars_wiiu::bank_sounds(&b) {
+                if let Some(a) = s.amta
+                    && wanted.contains(&a.name.as_str())
+                    && !out.iter().any(|o| o.name == a.name)
+                {
+                    out.push(a);
+                }
+            }
+        }
+        // the update's pack first: the base game's adds what it lacks
+    }
+    out
+}
+
 /// Import the menu music into `ui` (`<out>/ui`).
 pub(crate) fn import_bgm(ov: &Overlay, ui: &Path, progress: Progress) -> Result<BgmReport> {
     let mut report = BgmReport::default();
+    let mut beats = Map::new();
+    let mut meta = |name: &str, tune: &str, w: &Fwav, metas: &[bars_wiiu::Amta]| {
+        let marks: Map<String, Value> = metas
+            .iter()
+            .find(|a| a.name == tune)
+            .map(|a| a.marks.iter().map(|(n, p)| (n.clone(), json!(p))).collect())
+            .unwrap_or_default();
+        beats.insert(
+            name.to_string(),
+            json!({ "rate": w.sample_rate, "loop": w.loop_range, "marks": marks }),
+        );
+    };
+    let metas = tune_metas(ov);
     let total = STREAMS.len() + 1;
     let stream = |name: &str| -> Option<Fwav> {
         let path = ov.file(&format!("Sound/Resource/Stream/{name}.bfstm"))?;
@@ -123,6 +173,7 @@ pub(crate) fn import_bgm(ov: &Overlay, ui: &Path, progress: Progress) -> Result<
                     ));
                     continue;
                 }
+                meta(&format!("{COURSE_WORLD}_{t}"), COURSE_WORLD, &w, &metas);
                 match decode(&w, &pick) {
                     Ok(ch) => {
                         write(
@@ -154,6 +205,7 @@ pub(crate) fn import_bgm(ov: &Overlay, ui: &Path, progress: Progress) -> Result<
             report.skipped.push(format!("{name}: not found"));
             continue;
         };
+        meta(name, name, &w, &metas);
         let pick: Vec<usize> = (0..w.channels.len().min(2)).collect();
         match decode(&w, &pick) {
             Ok(ch) => {
@@ -167,6 +219,12 @@ pub(crate) fn import_bgm(ov: &Overlay, ui: &Path, progress: Progress) -> Result<
         }
     }
     progress("menu music", total, total);
+    write(
+        &ui.join("sound/bgm.json"),
+        serde_json::to_string(&Value::Object(beats))
+            .unwrap()
+            .as_bytes(),
+    )?;
     Ok(report)
 }
 
@@ -214,6 +272,17 @@ mod tests {
         assert_eq!(r.tracks, 3 + STREAMS.len());
         let cw = std::fs::read(tmp.join("sound/BGM_NetworkMainScene_6.wav")).unwrap();
         assert!(cw.windows(4).any(|x| x == b"smpl"), "Course World loops");
+        // the beat markers (smm1-100mario-screens.md §3): Course World's 56 beats ending at its
+        // loop end; the between-course map's count without an end or a loop
+        let beats: Value =
+            serde_json::from_slice(&std::fs::read(tmp.join("sound/bgm.json")).unwrap()).unwrap();
+        let cw = &beats["BGM_NetworkMainScene_2"];
+        assert_eq!(cw["marks"]["beat:56"], 0);
+        assert_eq!(cw["marks"]["beatend"], 1054117);
+        assert_eq!(cw["rate"], 32000);
+        let map = &beats["BGM_100MarioMap"];
+        assert!(map["marks"].get("beat:56").is_some());
+        assert!(map["marks"].get("beatend").is_none() && map["loop"].is_null());
         let _ = std::fs::remove_dir_all(&tmp);
     }
 }

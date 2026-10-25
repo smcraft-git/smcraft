@@ -35,6 +35,7 @@ pub mod play;
 pub mod screens;
 pub mod search;
 pub mod smm1;
+pub mod smm1_beat;
 pub mod smm1_costume;
 pub mod smm1_ending;
 pub mod smm1_fade;

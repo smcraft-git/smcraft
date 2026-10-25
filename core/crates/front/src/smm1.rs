@@ -12,6 +12,7 @@
 
 use crate::layout::{Layout, Ui};
 use crate::menu::{Buttons, UiInput, hit};
+use crate::smm1_beat::{BeatBounce, BeatClock, BeatEvents};
 use crate::smm1_sound::Ctx;
 use crate::smm1_window::{MessageWindow, WindowEvent, WindowKind};
 use crate::sound::SoundCue;
@@ -191,6 +192,9 @@ pub struct WorldMap {
     mario_until: i32,
     dots: Vec<(DotState, i32)>,
     castles: [i32; 2],
+    /// Its beat bounces and the music's clock that drives them ([`crate::smm1_beat`]).
+    beats: BeatBounce,
+    pub clock: Option<BeatClock>,
 }
 
 impl WorldMap {
@@ -205,6 +209,8 @@ impl WorldMap {
             mario_until: 0,
             dots: vec![(DotState::Init, 0); RUN_LENGTHS[d]],
             castles: [0; 2],
+            beats: BeatBounce::default(),
+            clock: None,
         };
         if d == 3 {
             let len = m.layout.length("MoveMario");
@@ -213,14 +219,14 @@ impl WorldMap {
             }
         }
         let l = &mut m.layout;
-        // resting loops; the beat bounces run on a fixed period here (the game syncs them to
-        // the music) [inf]
-        for a in ["Default", "Beat_00_00", "Beat_00_01"] {
-            l.play_loop(a, 0);
-        }
+        // the resting loops; the bounces (the balloon's `Beat_00_00`, the grass's `Beat_0x_01`,
+        // the castles' `Beat_0x_00` and Bowser's `Anm_Koopa_00`) wait for the music's beats
+        l.play_loop("Default", 0);
         for c in CASTLES {
             l.play_loop(&format!("{c}/Default"), 0);
         }
+        m.beats = BeatBounce::new(&mut m.layout, &CASTLES.map(String::from));
+        let l = &mut m.layout;
         // the LR slot at OutL frame 0: the fully shown pose [obs 0x024f4668]
         l.hold("OutL", 0.0);
         m.kuribo_init();
@@ -569,6 +575,19 @@ impl WorldMap {
         let ui = self.layout.ui();
         ui.push_cues(ui.smm1_state(&self.layout.name, part, state, &[]));
     }
+
+    /// The music's beats of this tick start the bounces they arm.
+    pub fn beat(&mut self, ev: &BeatEvents, tick: i32) {
+        self.beats.step(&mut self.layout, ev, tick);
+    }
+
+    /// One tick of the map's own music clock (the scene's tune), if it has one.
+    pub fn run_clock(&mut self, tick: i32) {
+        if let Some(c) = &mut self.clock {
+            let ev = c.step();
+            self.beats.step(&mut self.layout, &ev, tick);
+        }
+    }
 }
 
 // MARK: - music
@@ -665,6 +684,8 @@ pub struct ChallengeMenuScene {
     /// (`cAppearRecommend` waits for both, 0x02580e78) and while the maps slide after a tab
     /// change (64 frames) [obs; the slide's wait inf].
     ready_at: i32,
+    /// Course World's music's beats (its tracks share them).
+    clock: Option<BeatClock>,
 }
 
 impl ChallengeMenuScene {
@@ -685,6 +706,7 @@ impl ChallengeMenuScene {
             focus: 1,
             tick: 0,
             ready_at: 0,
+            clock: BeatClock::for_music(ui, &select_music(difficulty)),
         };
         s.prepare(difficulty, q)?;
         if let Some(m) = &mut s.maps[difficulty] {
@@ -703,7 +725,9 @@ impl ChallengeMenuScene {
     /// whether the map showed a Continue (its counter leaves in the New Game demo).
     pub fn into_handoff(mut self, q: &dyn RunQuery) -> Option<(WorldMap, Layout, bool)> {
         let had = q.can_continue(self.difficulty);
-        let m = self.maps[self.difficulty].take()?;
+        let mut m = self.maps[self.difficulty].take()?;
+        // the music plays on into the map's demo
+        m.clock = self.clock.take();
         Some((m, self.title, had))
     }
 
@@ -801,6 +825,16 @@ impl ChallengeMenuScene {
         self.tick += 1;
         if self.leaving.as_ref().is_some_and(|l| self.tick >= l.1) {
             self.leaving = None;
+        }
+        if let Some(c) = &mut self.clock {
+            let ev = c.step();
+            let t = self.tick;
+            for m in self.maps.iter_mut().flatten() {
+                m.beat(&ev, t);
+            }
+            if let Some((m, _)) = &mut self.leaving {
+                m.beat(&ev, t);
+            }
         }
         self.maps[self.difficulty].as_ref()?;
         if !self.ready() {
@@ -1112,8 +1146,10 @@ impl MapIntroScene {
                 s.demo = true;
                 s.show_select_pose(cleared);
                 s.set(MapState::FadeWait);
-                // the scene's Wait starts the map's music (0x0270864c) [obs]
+                // the scene's Wait starts the map's music (0x0270864c) [obs]; its streams have
+                // no beat end and no loop, so its maps don't bounce (0x02089898) [obs]
                 play_music(ui, map_music(difficulty));
+                s.map.clock = BeatClock::for_music(ui, map_music(difficulty));
             }
         }
         Some(s)
@@ -1179,6 +1215,7 @@ impl MapIntroScene {
         }
         let tick = self.tick;
         self.map.update(tick);
+        self.map.run_clock(tick);
         // A: the map's ShortCutA (accepted once the next course is ready: at once here)
         // [obs 0x0256fff4 / 0x025a05f0; a click / tap does the same, inf]
         let a = input.pressed.has(Buttons::CONFIRM) || input.click.is_some();
