@@ -22,10 +22,11 @@ const SEGMENT_HALF: f32 = 20.0;
 pub(super) fn sense(a: &mut Actor, liquid: Option<Liquid>, p: &Player) {
     // the parachute presets' own falls (actors/chute.rs), the winged flight (actors/fly.rs,
     // half speed in water) and the winged Hammer Bro's hop (actors/bros.rs) look at the liquid
-    // too, and so do the Spike Top's turns (actors.rs `spike_top_turn`)
+    // too, and so do the Spike Top's turns (actors.rs `spike_top_turn`) and Bowser Jr's shell
+    // slide (actors/bosses.rs)
     let chute = a.chute || matches!(a.mode, Mode::Parachute { .. });
     let fly = a.wings && (a.kind.flies_winged() || a.kind == Kind::HammerBro);
-    let crawl = matches!(a.kind, Kind::SpikeTop { .. });
+    let crawl = matches!(a.kind, Kind::SpikeTop { .. } | Kind::BowserJr { .. });
     if !a.kind.is_w3() && !chute && !fly && !crawl {
         return;
     }

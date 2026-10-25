@@ -231,10 +231,17 @@ const JR_SHELL_TOP: f32 = 1.6;
 const JR_SHELL_ACCEL: f32 = 0.1;
 const JR_SHELL_JERK: f32 = 0.02;
 const JR_SHELL_TURN: u8 = 10;
-/// ShellSlide sub-phases (+0x90): 1 settle and aim, 2 slide, 4 brake and turn.
+/// ShellSlide sub-phases (+0x90): 1 settle and aim, 2 slide, 3 the obstacle hop, 4 brake and
+/// turn.
 const SL_AIM: u8 = 1;
 const SL_SLIDE: u8 = 2;
+const SL_HOP: u8 = 3;
 const SL_BRAKE: u8 = 4;
+/// ShellSlide's hop over an obstacle: vy 3.0 at 1.5 px/f, gravity −0.1875 [obs v3.0.3
+/// 0x710108aa50]; the obstacle analysis looks h = 16 px over his feet + 8 (32 under the
+/// water-speed rule, 0x7102318d6c).
+const JR_SHELL_HOP_VY: f32 = 3.0;
+const JR_SHELL_HOP_VX: f32 = 1.5;
 /// ShellWakeup (0x7100617170): hops out at vy 3.0; at vy ≤ 0.4 the Basic action resumes.
 const JR_WAKE_HOP: f32 = 3.0;
 const JR_WAKE_END: f32 = 0.4;
@@ -2614,11 +2621,13 @@ impl Actor {
             || (self.vx > 0.0 && level.right - 16.0 <= self.x + w)
     }
 
-    /// ShellSlide (0x7100614b10). `pause` is the slide counter, `speed` the slide speed,
-    /// `heading` its acceleration, chain byte 1 the turn cooldown, `jr_sub` the sub-phase.
-    /// [?: the obstacle analysis when he meets a wall on the ground — hop a step at vy 3.0 /
-    /// 1.5 px/f, or wake up at a tall wall — is not modelled; he bounces back as the game does
-    /// for the walls it does not jump]
+    /// ShellSlide (0x7100614b10; v3.0.3 exe 0x710108aa50). `pause` is the slide counter,
+    /// `speed` the slide speed, `heading` its acceleration, chain byte 1 the turn cooldown,
+    /// `jr_sub` the sub-phase, `home_y` the x a hop left from. On the floor he looks under his
+    /// front edge each frame (`jr_shell_ledge_wakes`); a wall met on the floor is analysed the
+    /// next frame (`jr_shell_obstacle`): he hops it or comes out of the shell. In the air a
+    /// wall bounces him back at ×−0.2 (0x71023191a0). [?: with the wall-contact bit 16 set the
+    /// game only reverses the speed; what sets it is not known]
     fn jr_shell_slide(&mut self, level: &Level) {
         if self.pause > 0 {
             self.pause -= 1;
@@ -2631,6 +2640,21 @@ impl Actor {
                     self.dir = toward;
                     self.speed = 0.0;
                     self.heading = 0.0;
+                    self.jr_set_sub(SL_SLIDE);
+                }
+                return;
+            }
+            SL_HOP => {
+                // sub 3: lands, then slides on at 1.5; a hop that did not move him ends the
+                // slide counter and the turn cooldown. The speed (+0x274) outlasts a wall
+                // touch: the BG only stops the move.
+                self.vx = self.speed * self.dir as f32;
+                self.fall_capped(level, G, CAP);
+                if self.on_ground {
+                    if (self.x - self.home_y).abs() <= 1e-5 {
+                        self.pause = 0;
+                        self.set_byte(1, 0);
+                    }
                     self.jr_set_sub(SL_SLIDE);
                 }
                 return;
@@ -2655,6 +2679,15 @@ impl Actor {
             }
             _ => {}
         }
+        // chain byte 0: he met a wall on the floor last frame (+0x658 bit 14)
+        let wall = self.byte(0) != 0;
+        self.set_byte(0, 0);
+        if self.on_ground && self.jr_shell_ledge_wakes(level) {
+            self.vx = 0.0;
+            self.speed = 0.0;
+            self.jr_enter_wakeup();
+            return;
+        }
         if self.dir != toward && self.speed.abs() > 1e-5 {
             self.jr_set_sub(SL_BRAKE);
         }
@@ -2666,6 +2699,22 @@ impl Actor {
             self.jr_enter_wakeup();
             return;
         }
+        if wall && self.on_ground && self.dir == toward && self.speed.abs() > 1e-5 {
+            if self.jr_shell_obstacle(level) {
+                self.vy = JR_SHELL_HOP_VY;
+                self.speed = JR_SHELL_HOP_VX;
+                self.vx = self.speed * self.dir as f32;
+                self.home_y = self.x;
+                self.on_ground = false;
+                self.jr_set_sub(SL_HOP);
+                self.fall_capped(level, G, CAP);
+            } else {
+                self.vx = 0.0;
+                self.speed = 0.0;
+                self.jr_enter_wakeup();
+            }
+            return;
+        }
         if self.jr_at_area_edge(level) {
             self.jr_set_sub(SL_BRAKE);
         }
@@ -2674,11 +2723,104 @@ impl Actor {
         self.vx = self.speed * self.dir as f32;
         let ground = self.on_ground;
         self.fall_capped(level, G, CAP);
-        if self.wall {
-            // "koura_hit": back off the wall (in the air ×−0.2)
-            self.speed *= if ground { -1.0 } else { -0.2 };
+        if self.wall && ground && self.on_ground {
+            self.set_byte(0, 1);
+        } else if self.wall && !ground {
+            // "koura_hit": back off the wall
+            self.speed *= -0.2;
             self.vx = self.speed * self.dir as f32;
         }
+    }
+
+    /// ShellSlide's floor look under his front edge (x + 6·facing, big 12), each frame on the
+    /// floor [obs v3.0.3 0x710108aa50 sub 2 head, LAB_710108b184]: from 6 px under his feet
+    /// it scans down in 8-px steps to 142 px for a floor (one under the surface of lava, the
+    /// area's liquid type 2, does not count). Floor that deep: he slides off. Floor within 6
+    /// px, or none: if the floor is within 4 px of his feet at the front edge he slides on,
+    /// else he looks 16 px further: solid at his feet + 4 there wakes him, floor within 4 px
+    /// there lets him slide on, anything else (a drop, a pit, lava) wakes him (ShellWakeup).
+    /// [inf: slopes under the front edge are not followed]
+    fn jr_shell_ledge_wakes(&self, level: &Level) -> bool {
+        let f = self.dir as f32;
+        let front = self.x + 6.0 * self.scale() * f;
+        let lava = level.liquid.is_some_and(|l| l.kind == 2);
+        let surface = self.w3.liquid.map_or(f32::NEG_INFINITY, |(y, _)| y);
+        let mut k = -0.5_f32;
+        while k >= -8.0 {
+            let p = self.y + 16.0 * k + 2.0;
+            if floor_in(level, front, self.y, p).is_some() {
+                break;
+            }
+            if floor_in(level, front, p, p - 16.0).is_some_and(|hit| !(lava && hit < surface)) {
+                return false;
+            }
+            k -= 0.5;
+        }
+        if floor_in(level, front, self.y + 4.0, self.y - 4.0).is_some() {
+            return false;
+        }
+        let ahead = front + 16.0 * f;
+        if level.cell_at(ahead, self.y + 4.0).is_solid() {
+            return true;
+        }
+        !floor_in(level, ahead, self.y + 4.0, self.y - 4.0)
+            .is_some_and(|hit| (hit - self.y).abs() < 16.0)
+    }
+
+    /// ShellSlide meeting a wall on the floor, the frame after (the wall bit +0x658 bit 14
+    /// with ground contact): true = hop it, false = come out of the shell (ShellWakeup, speed
+    /// 0) [obs v3.0.3 0x710108aa50 sub 2]. From his front edge, h = 16 (32 under the
+    /// water-speed rule): anything solid up the face from his feet + 8 to + 8 + h, or across
+    /// the 16 px ahead at that height, wakes him. A further wall face 16..16 + 2h ahead at
+    /// that height with floor within h under it 8 px short of it: the hop. Otherwise the test
+    /// arc (vy 3.0, his gravity and fall cap; the water set, halved, under the rule): for a
+    /// landing height of 16 px (32 under the rule) down to −128 in 8-px steps, the frames
+    /// until the arc comes back down to it, at 1.5 px/f (halved under the rule; under it the
+    /// frames to rise 16 px don't count when solid stands at his feet + 24 within 8 px of the
+    /// front) — solid at that spot 2 px over the height wakes him, floor within 16 px under
+    /// that spot is the hop; no height found wakes him.
+    fn jr_shell_obstacle(&self, level: &Level) -> bool {
+        let f = self.dir as f32;
+        // just off the face he stands against [inf: the engine's body is 8 px a side (big 16)
+        // where the game's background half-width is 6 (12); the rays start at the face, as
+        // the game's do]
+        let front = self.x + (self.half_w() - 0.01) * f;
+        let slow = self.slow_rule(level);
+        let h = if slow { 32.0 } else { 16.0 };
+        let solid = |x: f32, y: f32| level.cell_at(x, y).is_solid();
+        let top = self.y + 8.0 + h;
+        if floor_in(level, front, top, self.y + 8.0).is_some()
+            || wall_in(level, top, front, front + 16.0 * f).is_some()
+        {
+            return false;
+        }
+        if wall_in(level, top, front + 16.0 * f, front + (16.0 + 2.0 * h) * f)
+            .is_some_and(|face| floor_in(level, face - 8.0 * f, top, top - h).is_some())
+        {
+            return true;
+        }
+        let skip = if slow && wall_in(level, self.y + 24.0, front, front + 8.0 * f).is_some() {
+            jr_arc_frames(slow, |sum, _| sum >= 16.0) - 1
+        } else {
+            0
+        };
+        let mut k: f32 = if slow { 2.0 } else { 1.0 };
+        while k >= -8.0 {
+            let n = jr_arc_frames(slow, |sum, v| v < 0.0 && sum <= k * 16.0);
+            let mut dx = f * 1.5 * (n - skip) as f32;
+            if slow {
+                dx *= 0.5;
+            }
+            let (x, y) = (front + dx, self.y + 16.0 * k + 2.0);
+            if solid(x, y) {
+                return false;
+            }
+            if floor_in(level, x, y, y - 16.0).is_some() {
+                return true;
+            }
+            k -= 0.5;
+        }
+        false
     }
 
     /// Both foot probes (x ∓ 4, big 8) find the floor within 10 px below.
@@ -3121,6 +3263,82 @@ fn sweep(level: &Level, a: (f32, f32), b: (f32, f32)) -> Option<(f32, f32, bool)
         prev = p;
     }
     None
+}
+
+/// The frames of ShellSlide's test arc (vy 3.0, gravity −0.1875 to the fall cap; under the
+/// water-speed rule the water set by |vy| — −0.01875 under 0.3, −0.028125 under 0.7, −0.0375
+/// under 1.2, else −0.075 — to half the cap, each step halved) before the one where `done`
+/// (height so far, vy) holds [obs v3.0.3 0x710108aa50].
+fn jr_arc_frames(slow: bool, done: impl Fn(f32, f32) -> bool) -> i32 {
+    let (mut v, mut sum, mut n) = (JR_SHELL_HOP_VY, 0.0_f32, 0);
+    loop {
+        let step = if slow {
+            let a = v.abs();
+            let g = if a < 0.3 {
+                -0.01875
+            } else if a < 0.7 {
+                -0.028125
+            } else if a < 1.2 {
+                -0.0375
+            } else {
+                -0.075
+            };
+            v = (v + g).max(CAP * 0.5);
+            v * 0.5
+        } else {
+            v = (v + G).max(CAP);
+            v
+        };
+        sum += step;
+        if done(sum, v) {
+            return n;
+        }
+        n += 1;
+        if n > 10_000 {
+            return n;
+        }
+    }
+}
+
+/// A downward ray at column `x` from `y_hi` to `y_lo`: the top of the first solid it meets
+/// (`y_hi` itself when it starts inside).
+fn floor_in(level: &Level, x: f32, y_hi: f32, y_lo: f32) -> Option<f32> {
+    let mut y = y_hi;
+    loop {
+        if level.cell_at(x, y).is_solid() {
+            return Some(y_hi.min(((y / TILE).floor() + 1.0) * TILE));
+        }
+        let next = (y / TILE).floor() * TILE - 0.001;
+        if next < y_lo {
+            return None;
+        }
+        y = next;
+    }
+}
+
+/// A sideways ray at height `y` from `x0` toward `x1`: the face of the first solid it meets.
+fn wall_in(level: &Level, y: f32, x0: f32, x1: f32) -> Option<f32> {
+    let d = if x1 >= x0 { 1.0 } else { -1.0 };
+    let mut x = x0;
+    loop {
+        if level.cell_at(x, y).is_solid() {
+            let c = (x / TILE).floor() * TILE;
+            return Some(if d > 0.0 {
+                c.max(x0)
+            } else {
+                (c + TILE).min(x0)
+            });
+        }
+        let next = if d > 0.0 {
+            ((x / TILE).floor() + 1.0) * TILE
+        } else {
+            (x / TILE).floor() * TILE - 0.001
+        };
+        if (next - x1) * d > 0.0 {
+            return None;
+        }
+        x = next;
+    }
 }
 
 /// The boss jump solver (0x7100619690): the launch (vx ≥ 0, vy) that lands `dy` above (or
@@ -4045,6 +4263,94 @@ mod tests {
         assert_eq!(a.boss_hit(BossAttack::Fire, a.x), BossHit::Ignored);
         assert_eq!(a.boss_hit(BossAttack::BlockHit, a.x), BossHit::Absorbed);
         assert_eq!((a.vy, a.boss_hp()), (2.0, 2));
+    }
+
+    /// Bowser Jr. sliding left in his shell at full speed, on the floor (y 32).
+    fn jr_sliding(level: Level, x: f32) -> (Level, Actor) {
+        let (_, mut a) = boss(BOWSER_JR, x);
+        a.phase = jr::SHELL;
+        a.pause = JR_SHELL_FRAMES;
+        a.jr_set_sub(SL_SLIDE);
+        a.dir = -1;
+        a.speed = JR_SHELL_TOP;
+        a.heading = JR_SHELL_ACCEL;
+        a.vx = -JR_SHELL_TOP;
+        a.target = (a.x - 2000.0, 32.0);
+        (level, a)
+    }
+
+    /// Steps until he leaves the shell or `stop` holds (at most 300 frames).
+    fn jr_run(level: &Level, a: &mut Actor, stop: impl Fn(&Actor) -> bool) {
+        for _ in 0..300 {
+            let _ = a.step_spawning(level);
+            if a.phase != jr::SHELL || stop(a) {
+                return;
+            }
+        }
+    }
+
+    #[test]
+    fn bowser_jr_in_his_shell_hops_a_step_and_a_block() {
+        // a step one tile high, four wide (tiles 26..=29): the arc lands on it
+        let mut level = Level::flat(80);
+        for x in 26..=29 {
+            level.set_solid(x, 2);
+        }
+        let (level, mut a) = jr_sliding(level, 40.0 * TILE);
+        jr_run(&level, &mut a, |a| a.jr_sub() == SL_HOP);
+        assert_eq!((a.phase, a.jr_sub()), (jr::SHELL, SL_HOP));
+        assert!((a.vx + JR_SHELL_HOP_VX).abs() < 1e-5, "{}", a.vx);
+        jr_run(&level, &mut a, |a| a.jr_sub() == SL_SLIDE);
+        assert_eq!(a.jr_sub(), SL_SLIDE);
+        assert_eq!(a.y, 48.0);
+        // a single block: the test arc lands beyond it, so he hops; the face holds him back
+        // while he rises, so he comes down on it and slides off the far side
+        let mut level = Level::flat(80);
+        level.set_solid(29, 2);
+        let (level, mut a) = jr_sliding(level, 40.0 * TILE);
+        jr_run(&level, &mut a, |a| a.jr_sub() == SL_HOP);
+        assert_eq!(a.jr_sub(), SL_HOP);
+        jr_run(&level, &mut a, |a| a.jr_sub() == SL_SLIDE);
+        assert_eq!(a.y, 48.0);
+        jr_run(&level, &mut a, |a| a.y == 32.0 && a.on_ground);
+        assert_eq!((a.phase, a.y), (jr::SHELL, 32.0));
+        assert!(a.x < 29.0 * TILE);
+    }
+
+    #[test]
+    fn bowser_jr_comes_out_of_his_shell_at_a_tall_wall_or_a_pit() {
+        // a wall two tiles high
+        let mut level = Level::flat(80);
+        level.set_solid(29, 2);
+        level.set_solid(29, 3);
+        let (level, mut a) = jr_sliding(level, 40.0 * TILE);
+        jr_run(&level, &mut a, |_| false);
+        assert_eq!(a.phase, jr::SHELL_OUT);
+        assert!(a.x > 30.0 * TILE);
+        // a pit: no floor under his front edge (tiles 20..=29 open)
+        let mut level = Level::flat(80);
+        for x in 20..=29 {
+            level.set(x, 0, Cell::Empty);
+            level.set(x, 1, Cell::Empty);
+        }
+        let (level, mut a) = jr_sliding(level, 40.0 * TILE);
+        jr_run(&level, &mut a, |_| false);
+        assert_eq!(a.phase, jr::SHELL_OUT);
+        assert!((a.x - (30.0 * TILE + 6.0)).abs() < 2.0, "{}", a.x);
+        // a drop to a floor two tiles down: he slides off it
+        let mut level = Level::flat(80);
+        for x in 0..=29 {
+            level.set(x, 1, Cell::Empty);
+        }
+        for x in 30..80 {
+            level.set_solid(x, 2);
+            level.set_solid(x, 3);
+        }
+        let (level, mut a) = jr_sliding(level, 40.0 * TILE);
+        a.y = 64.0;
+        jr_run(&level, &mut a, |a| a.y < 20.0);
+        assert_eq!(a.phase, jr::SHELL);
+        assert!(a.y < 20.0);
     }
 
     #[test]
