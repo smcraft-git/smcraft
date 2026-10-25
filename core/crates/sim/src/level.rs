@@ -1795,6 +1795,17 @@ impl Level {
             lvl.finish_custom_scroll(course, area_index);
         }
         lvl.towers = tower_columns(&tower_parts);
+        // 3D World plays an area with nothing built at or above 14 tiles as a low-camera one
+        // whatever its header byte says [obs: Ryujinx trace 3W_formw cat_climb_cam: header 0,
+        // a 14-tile wall the highest thing, the view's top held at 216 + 16 and the wall a
+        // scroll stop at its right face] [inf: what counts as built; terrain cells here]
+        if lvl.style == "3W" && lvl.boundary_type == 0 && !lvl.vertical {
+            let high = (0..lvl.width)
+                .any(|cx| (14..lvl.height).any(|cy| lvl.cell(lvl.min_x + cx, cy).is_solid()));
+            if !high {
+                lvl.boundary_type = 1;
+            }
+        }
         lvl
     }
 

@@ -492,6 +492,8 @@ pub struct Player {
     /// Feet limit: the view's top + 96 (the view's edge push, local-coop.md §4.5), set by the
     /// world each frame (no limit: +∞).
     pub top_y: f32,
+    /// The view's sides for the centre (left, right; ±∞: none), set with `top_y`.
+    pub view_x: (f32, f32),
     /// SMW cape flight and the cape run meter (0…30: frames running at ≥ 2.1 px/f); a cape
     /// dive landed this frame (the world shakes as for a POW); the head hit something last
     /// frame.
@@ -713,6 +715,7 @@ impl Player {
             flap_again: false,
             tail_air: false,
             top_y: f32::INFINITY,
+            view_x: (f32::NEG_INFINITY, f32::INFINITY),
             cape: CapeState::None,
             cape_meter: 0,
             cape_quake: false,
@@ -3457,6 +3460,15 @@ impl Player {
         if self.y > self.top_y {
             self.y = self.top_y;
             self.vy = self.vy.min(0.0);
+        }
+        // and its sides keep the centre inside, an outward speed zeroed [obs: Ryujinx trace
+        // 3W_formw cat_climb_cam: x held at the view's right 400 − 8.0, speedF 0]
+        if self.x > self.view_x.1 {
+            self.x = self.view_x.1;
+            self.vx = self.vx.min(0.0);
+        } else if self.x < self.view_x.0 {
+            self.x = self.view_x.0;
+            self.vx = self.vx.max(0.0);
         }
     }
 }

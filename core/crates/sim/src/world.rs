@@ -2071,10 +2071,22 @@ impl World {
             || (self.level.theme == 2 && self.level.night); // castle night: swim in the air
         // alone: the view's top edge holds the feet 96 px over it (80 in water / castle night;
         // local-coop.md §4.5); co-op does it in view_edges
-        self.player.top_y = if self.players() > 1 || self.player.control != Control::Normal {
+        let alone = self.players() == 1 && self.player.control == Control::Normal;
+        self.player.top_y = if !alone {
             f32::INFINITY
         } else {
             self.camera_y + VIEW_H + if self.player.in_water { 80.0 } else { 96.0 }
+        };
+        // the sides: 8.1 inside (8.0 in 3D World [obs: 3W_formw cat_climb_cam]; v1.0.0 8.1)
+        let m = if self.style == crate::player::Style::W3 {
+            8.0
+        } else {
+            8.1
+        };
+        self.player.view_x = if alone {
+            (self.camera_x + m, self.camera_x + VIEW_W - m)
+        } else {
+            (f32::NEG_INFINITY, f32::INFINITY)
         };
         self.jump_pressed_now = jump_held && !self.prev_jump_tramp;
         self.prev_jump_tramp = jump_held;
@@ -12393,6 +12405,8 @@ mod tests {
         lvl.night = true;
         let mut w = World::with_level(lvl);
         w.player.x = 600.0;
+        // (the view comes along: its sides hold the player)
+        w.reset_camera();
         // 6 s calm, then 4 s of wind to the left
         run(&mut w, 0, 300);
         assert!((w.player.x - 600.0).abs() < 1.0);
