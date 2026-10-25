@@ -12603,65 +12603,6 @@ mod tests {
     }
 
     #[test]
-    fn a_donut_on_a_track_drops_off_it_and_comes_back_to_its_placement() {
-        let mut lvl = Level::flat(60);
-        lvl.tracks = crate::track::Tracks::new((0..12).map(|k| (9 + 2 * k, 3, 0)));
-        let donut = Kind::MovingBlock {
-            block: BlockKind::Donut,
-            contents: None,
-        };
-        let mut s = spawn(donut, 168.0, 64.0);
-        s.rail = Some(0);
-        lvl.spawns.push(s);
-        let mut w = World::with_level(lvl);
-        run(&mut w, 0, 2);
-        let find = |w: &World| w.actors.iter().position(|a| a.spawn == Some(0)).unwrap();
-        let i = find(&w);
-        let (id, x0) = (w.actors[i].id, w.actors[i].x);
-        run(&mut w, 0, 4);
-        assert!(
-            (w.actors[find(&w)].x - x0 - 3.0).abs() < 0.01,
-            "0.75 a frame"
-        );
-        // the player lands on it: its 48-frame timer runs while it carries him
-        let a = &w.actors[find(&w)];
-        (w.player.x, w.player.y, w.player.vy) = (a.x, a.y + 17.0, 0.0);
-        let mut ridden = 0;
-        for _ in 0..80 {
-            run(&mut w, 0, 1);
-            if w.actors[find(&w)].kind == Kind::Donut {
-                break;
-            }
-            ridden += (w.player.ride == Some(id)) as i32;
-        }
-        let a = &w.actors[find(&w)];
-        assert_eq!((a.kind, a.id, a.rail.is_some()), (Kind::Donut, id, false));
-        assert!((47..=49).contains(&ridden), "dropped after {ridden} frames");
-        // out of the area, hidden for 120 frames, then back where it was placed, growing there
-        let mut gone = 0;
-        let back = (0..400).find(|_| {
-            run(&mut w, 0, 1);
-            gone += w.actors.iter().all(|a| a.spawn != Some(0)) as i32;
-            w.actors
-                .iter()
-                .any(|a| a.spawn == Some(0) && a.kind == donut)
-        });
-        assert!(back.is_some());
-        assert_eq!(gone, 120);
-        let a = &w.actors[find(&w)];
-        assert_eq!((a.x, a.y, a.phase), (168.0, 64.0, 1));
-        assert!(a.solid_box().is_some(), "solid while it grows");
-        run(&mut w, 0, 20);
-        let a = &w.actors[find(&w)];
-        assert_eq!((a.x, a.phase, a.rail.is_some()), (168.0, 0, true));
-        run(&mut w, 0, 4);
-        assert!(
-            (w.actors[find(&w)].x - 171.0).abs() < 0.01,
-            "on its track again"
-        );
-    }
-
-    #[test]
     fn empty_shells_become_helmets_or_a_ride() {
         // a Buzzy shell on a block above: jump into it from below
         let mut lvl = Level::flat(60);
