@@ -920,6 +920,10 @@ Nextendo; `docs/nextendo-network-play.md`, spec `research/specs/network-play.md`
 - ✅ (2026-10-25, `hundred3`) Challenge Modes' 100 Mario on the SMM1 screens runs on SMM1's own
   timing, fades and music and ends in SMM1's rescue scene (Phase 6); new captures
   `challenge-ending-smb3|-smw|-nsmbu`, `challenge-credits`
+- ✅ (2026-10-25, `hundred4`) …with SMM1's costume window after the credits, Save & Quit's
+  question, the shoe / Yoshi / helmet in the rescue scene and the maps' beat bounces (Phase 6);
+  new captures `challenge-costume`, `challenge-costume-last`, `challenge-quit`,
+  `challenge-ending-shoe|-yoshi|-helmet`
 - ✅ One Mods page in the front end (`front/src/mods.rs`, `mods_page.rs`; every platform:
   `mmk-play` desktop / web, Android, the Swift app's front end): SMM2's settings window
   (`Cmn_OptionWindow_00`) over the title, opened from SMM2's round menu button in the title's
@@ -1367,13 +1371,35 @@ Specs are private (`research/specs/`, gitignored): behaviour in prose/tables, no
     (`CueKind::Music` / `MusicTrack` / `StopMusic`, shell mixer + Swift); GAME OVER letter by letter
   - ✅ the maker group centred as SMM1 does, the pause's stars and players from the course data;
     the flag (no country), the Star button and comments (no service) stay out [departure]
-  - ⬜ left: the costume window after the credits (a toast now), the shoe / Yoshi demo Mario, the
-    clear colour behind the SMB3 / SMW stages [?], the beat bounces synced to the music, Save &
-    Quit's confirmation window, the NSMBU 3D demo Mario
-- 🔄 SMM1 → SMM2 course import design + documented losses: design ✅ (private
-  research/specs/smm1-course-import.md: header / start / goal / object / id mapping, losses);
-  converter ⬜ (waits on the goal position, pipes' bit 0x80, tracks and sound effects from the
-  SMM1 binary)
+  - ✅ (2026-10-25, branch `hundred4`) the costume window after the credits: SMM1's Mystery
+    Mushroom list in its get form (`smm1_costume`: the costume's title and name over its column,
+    the list scrolled to it with the owned costumes' art, its Valid reveal and trumpet, the A icon
+    after 180 frames, A or a tap closes it), then the "every costume" message (`smm1_window`,
+    `Cmn_CmnWindow_00`, Msg_0051 / 0052); Save & Quit's question in the same window (Msg_0006, No /
+    Yes) [obs 0x0259f4c4, 0x023ea714, 0x0241c510, 0x02413274]
+  - ✅ (`hundred4`) the demo Mario's Kuribo's Shoe (hops on 0x025eed54's constants, the shoe poses),
+    Yoshi in SMW's scene (his skeletal run / wait baked per frame, Mario on the saddle bone) and
+    the shell helmets; importer 6 (`ui/ending/ending.json` v2, `bfres_wiiu::skeletal_anims`)
+  - ✅ (`hundred4`) the maps' beat bounces on the music (`smm1_beat`: the tunes' AMTA markers in
+    `ui/sound/bgm.json`, half-beats, BeatOffset + 31, the castles' Bowser on `Koopa`); the
+    between-course maps' tunes have no beats [obs 0x02089898]; the card has no beat animations
+  - ✅ (`hundred4`) hundred3's guesses: the projection 384 × 216 [obs 0x0273e5dc], black behind the
+    SMB3 / SMW stages [obs 0x02703e14], per-character time `i · width / (n − 1)` [obs 0x02892384],
+    the rotation pivot (centre / bottom, obs 0x02885dc8), after a skip CourseInScene through the
+    plain fade [obs 0x02379580], the MapIn skip flag set by the same A [obs 0x0258ea40], the cover
+    held until the new scene has loaded [obs 0x02089750] · still [inf]: the music at a scene
+    change (the assets' StopFrame 0; the controller's 2.0 default), the half-beat mode
+  - ⬜ left: NSMBU's 3D demo Mario (still SMW's scene; plan in DECISIONS 2026-10-25), the WU
+    perspective camera (camera object 8)
+- ✅ SMM1 → SMM2 course import: design and the binary's answers (private
+  research/specs/smm1-course-import.md, 2026-10-25: the width in pixels and the goal from it,
+  pipes' 0x80 = "holds a part", tracks = SMM2's end words, the effects by their waves);
+  converter ✅ (`hundred4`: `mmk import-smm1-course`, `mmk_import::smm1_course`; `<stem>.course`
+  + `<stem>.losses.json`): the 76 built-ins all convert, load and simulate (0 crashes, 6 cleared by
+  the scripted run), 71 fully playable — Bowser Jr. (4) and a Donut Block on a track (1) wait on
+  the engine; losses: 23 effects (samba / disco, bird whistle, telephone), 20 Mystery Mushrooms
+  (as Super Mushrooms), 30 start areas widened · ⬜ the SMM1 import offering the built-ins to the
+  library
 - ⬜ App screens drawn with the SMM1 layouts (world map walk, intro card, clear, game over, ending)
 
 ### Phase 7 — Expansion ⬜

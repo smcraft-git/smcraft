@@ -4,8 +4,8 @@
 //! 0x025479a4 → the window's 0x023ea380 with mode 1, the contents' 0x023e75ac).
 //!
 //! - Window (class 0x023e8f14; states cInit, cIn 0x023ea53c, cWait 0x023ea630 / 0x023ea714,
-//!   cDecide 0x023eaa68, cOut 0x023eaafc): `In` (10 frames) with `Default` looping (the NEW!
-//!   badge), `Type` at frame 1 (the get form: NEW!, the "unlocked" line, no scroll bar),
+//!   cDecide 0x023eaa68, cOut 0x023eaafc): `In` (10 frames) with `Default` looping (the "new"
+//!   badge), `Type` at frame 1 (the get form: the badge, the unlock line, no scroll bar),
 //!   `BaloonPos` at the costume's column (0x023e9cbc), the balloon's title and name from
 //!   `Cmn_CharaMarioTitle` / `Cmn_CharaMarioName` (0x023e9d44). In cWait it counts 180 frames,
 //!   then the A icon comes in (`L_ABtnIcon_00`, class 0x025253c8: `In` 3, then its wait); with

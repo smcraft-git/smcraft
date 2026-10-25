@@ -1759,7 +1759,7 @@ impl RunOverlay {
     }
 
     /// The pause's Save & Quit asks first (0x02413274): the message window with the pause
-    /// menu's `Msg_0006` ("Exit game? (Your progress will be saved.)", message 0xb) and No / Yes,
+    /// menu's `Msg_0006` (message 0xb: leave, the run saved) and No / Yes,
     /// kept up after a Yes (window +0x285 := 1). False without the window layout.
     pub fn ask_quit(&mut self) -> bool {
         let msg = |l: &str| self.ui.message("Cmn_PauseMenu", l);

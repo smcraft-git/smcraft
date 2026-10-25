@@ -224,6 +224,22 @@ SMCraft is back in development (it was archived in October 2026).
   layouts use them). Needs the SMM1 import again (importer 5).
 - The SMM1-look 100 Mario's pause shows the course's stars and players when the course data has
   them, and the course card centres the maker's name and face as SMM1 does.
+- **The Mystery Mushroom you win at the end of an SMM1-look 100 Mario run comes in SMM1's own
+  costume window**: three seconds after the credits the costume list opens on your new costume
+  (its name over its column, your costumes' pictures, the rest as question marks), it flips in
+  with SMM1's trumpet, and A (or a tap) closes it once the A button has come up; when a level has
+  no costumes left the game's own message says so. Save & Quit in the pause asks first, in
+  SMM1's window (No / Yes).
+- **The rescue scene shows what Mario brings from the goal**: in a Kuribo's Shoe he hops all the
+  way to Peach (SMB1 and SMB3), in SMW he rides Yoshi, and a Buzzy or Spiny shell stays on his
+  head. **The world maps bounce to the music's beat** as in SMM1 — the grass, the castles, Peach's
+  balloon and Bowser on his castle on Course World's tune (the between-course maps' tunes have
+  no beat, so they stay still, as in SMM1). GAME OVER's letters drop on SMM1's exact spacing.
+  Import SMM1 again for these (`mmk import-smm1`, importer 6).
+- **`mmk import-smm1-course`** converts SMM1 courses (a saved course folder, or the game's
+  built-ins) into SMM2 course data SMCraft plays, with a list of what SMM2 can't hold (some
+  sound effects, Mystery Mushroom costumes, the maker's Mii). All 76 built-ins convert and play;
+  71 fully (the rest have Bowser Jr. or a Donut Block on a track).
 - **Koopalings in Koopa Clown Cars**: the car chases you while the Koopaling fires volleys of
   his magic (Lemmy his balls, Wendy her rings) from it; a stomp stops the car while he ducks in,
   then he spins in his shell for a while (stomps bounce off) before he comes out; the third stomp

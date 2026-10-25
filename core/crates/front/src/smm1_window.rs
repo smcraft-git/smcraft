@@ -265,7 +265,7 @@ mod tests {
     #[test]
     fn owner_question_window_answers() {
         let Some(ui) = smm1() else { return };
-        let mut w = MessageWindow::open(&ui, WindowKind::YesNo, "Exit game?", &["No", "Yes"], true)
+        let mut w = MessageWindow::open(&ui, WindowKind::YesNo, "Leave?", &["No", "Yes"], true)
             .expect("Cmn_CmnWindow_00");
         assert_eq!(w.cursor, 0);
         // the In (20 frames) reads no buttons
@@ -284,8 +284,8 @@ mod tests {
         let cues = ui.take_cues();
         assert!(cues.iter().any(|c| c.name == "SE_CmnYes"), "{cues:?}");
 
-        let mut w = MessageWindow::open(&ui, WindowKind::YesNo, "Exit game?", &["No", "Yes"], true)
-            .unwrap();
+        let mut w =
+            MessageWindow::open(&ui, WindowKind::YesNo, "Leave?", &["No", "Yes"], true).unwrap();
         for _ in 0..21 {
             w.step(&UiInput::default());
         }
