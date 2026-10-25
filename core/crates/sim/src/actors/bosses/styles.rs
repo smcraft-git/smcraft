@@ -55,8 +55,11 @@
 //!   v1.0.0]): falls 1.5 px/f, through terrain until it is first clear of it, then lands on the
 //!   next floor and burns there 120 frames.
 //!
-//! [?] The rain's anchor moves to 32 px behind the fifth flame's exit under an area condition
-//! (0x710168dcf0 byte 3, actor +0x520 bit 3) not identified; the engine keeps his own x. A
+//! [?] The rain's anchor moves to the fifth flame's exit ± 32 px only when the value at
+//! DAT_7102a692f8 + 0x28 is over 1 and byte 3 of the area record's object (+0x210, read
+//! through 0x710168dcf0) is set, with his +0x520 bit 3 clear; neither value is identified, so
+//! the engine keeps his own x (as a single-player run would, if the first is the player
+//! count). A
 //! flame destroyed before it leaves the screen leaves the manager waiting (the game's too).
 
 use super::{CAP, G, bw, bwf};
