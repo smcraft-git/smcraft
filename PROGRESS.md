@@ -265,8 +265,18 @@ sway, importer and pack 12, the dev cache already at v12).
   creation draws (the shared map-object init's three words for SMB1 … NSMBU actors, Bowser's
   150 + r(60), the SMW / NSMBU Bowser's decision objects), the player's Walk entry and moving
   frames, Bowser's fire helper ahead of his step, low-bit draws (the Bros' facing / jump).
-  **679 / 683 traces exact** (was 675; X_bowser_M1, _MW, _3W and X_wbros_M1 now exact, Bowser and
-  all six flames over 601 frames in X_bowser_M1).
+  **682 / 683 traces exact** (was 675): X_bowser_M1 / _M3 / _MW / _WU, X_bowserjr_M1 / _WU,
+  X_wbros_M1 exact (Bowser and all his flames over 601 frames in X_bowser_M1; Bowser exact in
+  re-recordings with his object for NSMBU, SMB3 to 357, SMW to 421; both Bowser Jrs exact).
+  ✅ found under the draws: SMW / NSMBU Bowsers take their counts from the decision objects and
+  never arm the breath helper; NSMBU's Fire state runs two frames longer, its flame (0.9 px/f,
+  level on its birth frame) leaves from the mouth joint and aims from there; Bowser Jr's
+  GoStraight fireballs (and the SMW / NSMBU straight flames) meet the player within 5 + 4 px and
+  hurt a frame later, like an enemy's touch; a boss whose own move kills freezes the actors
+  after him; NSMBU Bowser Jr's fireball (hand joint, a frame later, 62-frame cycle, table aim)
+  and his wind-up a frame past the clip. Left: X_bowser_3W (3D World's Bowser draws from the
+  game's clock-seeded global generator and isn't modelled from the game; the engine runs
+  NSMBU's rules on its own stream).
 - 🔄 **Inferred-behaviour pass 6** (2026-10-25, branch `infres6`, research specs/inf-inventory.md
   "Pass 6"): ✅ the Propeller Mushroom's own Move (#38, ItemPropeller 0x710134ca70 / 0x710134c3c0 /
   limits 0x710134c880; the Block context's enter 0x710134d550 skips the slow rise): out of a

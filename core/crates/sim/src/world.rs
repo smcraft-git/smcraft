@@ -2657,6 +2657,7 @@ impl World {
             }
             w3::sense(a, self.liquid, &self.player);
             a.pre = (a.x, a.y);
+            a.pre_tick = self.tick;
             self.budget.show(a);
             let reserve = a.budget;
             let spawned = a.step_spawning(&self.level);

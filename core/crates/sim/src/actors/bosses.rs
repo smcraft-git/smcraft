@@ -225,8 +225,10 @@ const JR_SHIFT_JUMP_BIG: f32 = 6.0;
 const JR_HOVER_AT: f32 = 0.4;
 /// The Hop and ShiftJump wind-up before the stored jump starts (anim tables at 0x7100186f90:
 /// none in SMB1, JumpSt in SMB3 / SMW, QuakeSt / JumpSt in NSMBU): SMB3 / SMW `squat` 4
-/// frames, NSMBU `bl_quake_st` / `bl_jump_st` 25, all at play rate 1.0 (EnemyModelParams).
-const JR_WINDUP: [i32; 4] = [0, 4, 4, 25];
+/// frames, NSMBU `bl_quake_st` / `bl_jump_st` 25, all at play rate 1.0 (EnemyModelParams); the
+/// jump leaves the frame after the clip's last [obs: Ryujinx whole trace X_bowserjr_WU, the hop
+/// 26 frames after the decision] [inf: SMB3 / SMW the same].
+const JR_WINDUP: [i32; 4] = [0, 5, 5, 26];
 /// `jr_sub` value while a wind-up plays.
 /// A Bowser flame's carried speed fades this much a frame [obs: Ryujinx trace X_bowser_M3].
 const FLAME_FADE: f32 = 0.04;
@@ -335,6 +337,12 @@ impl Kind {
 }
 
 impl Actor {
+    /// A boss's jump / big-jump counts (bytes 0 / 1).
+    pub(crate) fn boss_set_counts(&mut self, jump: u8, big: u8) {
+        self.set_byte(0, jump);
+        self.set_byte(1, big);
+    }
+
     fn byte(&self, n: u32) -> u8 {
         (self.chain >> (8 * n)) as u8
     }
@@ -457,10 +465,22 @@ impl Actor {
                 self.home_x = self.x;
                 self.dir = self.toward_target();
                 self.heading = self.dir as f32;
+                let counts = (self.byte(0), self.byte(1));
+                self.koopa.style = st as u8;
+                self.koopa.w3 = level.style == "3W";
                 self.chain = 0;
-                self.pause = self.bowser_fire_interval();
-                self.bowser_reset_big(st);
-                self.bowser_reset_jump(st);
+                if st < 2 || self.koopa.w3 {
+                    // SMB1 / SMB3's first update (0x7101158800): the fire timer, the big-jump
+                    // and jump counts; the SMW / NSMBU counts come from the decision objects
+                    // made at creation (`creation_draws`) and their helper isn't armed
+                    self.pause = self.bowser_fire_interval();
+                    self.bowser_reset_big(st);
+                    self.bowser_reset_jump(st);
+                } else {
+                    self.pause = 0;
+                    self.set_byte(0, counts.0);
+                    self.set_byte(1, counts.1);
+                }
                 if clown {
                     self.phase = bw::CLOWN;
                 } else if self.target.0 <= self.x && !self.in_view() {
@@ -497,6 +517,8 @@ impl Actor {
                 }
             }
             Kind::BowserJr { clown, .. } => {
+                self.koopa.style = st as u8;
+                self.koopa.w3 = level.style == "3W";
                 self.hops = 3;
                 self.set_byte(0, if self.big { 10 } else { 5 });
                 self.home_x = self.x;
@@ -860,8 +882,14 @@ impl Actor {
         base + self.rand(span) as i32
     }
 
-    /// Re-arms the fire timer and forgets any breath (helper +0x8 / +0x10 / +0x12).
-    fn bowser_rearm_fire(&mut self) {
+    /// Re-arms the fire timer and forgets any breath (helper +0x8 / +0x10 / +0x12). The SMW /
+    /// NSMBU Bowsers breathe fire through their own states: their helper is never armed (no
+    /// draw) [obs: Ryujinx traces X_bowser_MW / _WU, no re-arm draw in 600 frames].
+    fn bowser_rearm_fire(&mut self, st: usize) {
+        if st >= 2 && !self.koopa.w3 {
+            self.bowser_set_flag(bwf::FIRED | bwf::BREATHING, false);
+            return;
+        }
         self.pause = self.bowser_fire_interval();
         self.bowser_set_flag(bwf::FIRED | bwf::BREATHING, false);
     }
@@ -1064,7 +1092,7 @@ impl Actor {
         } else {
             0.3
         };
-        self.bowser_rearm_fire();
+        self.bowser_rearm_fire(self.koopa.style as usize);
         self.bowser_cancel_breath();
     }
 
@@ -1074,7 +1102,7 @@ impl Actor {
         let b = (self.byte(3) & !bwf::MODE) | (mode & bwf::MODE);
         self.set_byte(3, b);
         self.bowser_reset_jump(st);
-        self.bowser_rearm_fire();
+        self.bowser_rearm_fire(st);
         self.heading = 1.0;
         self.bowser_enter(bw::LAND_ON, st);
     }
@@ -1134,6 +1162,17 @@ impl Actor {
             && st != 0
         {
             self.bowser_flame_place(f, st);
+        }
+        // the SMW states' lane flames too [obs: Ryujinx whole trace X_bowser_MW frame 248, the
+        // carried speed 15/16 of his 0.3]
+        let mut spawned = self.koopa_take_spawns();
+        for f in &mut spawned {
+            if f.kind == Kind::BowserFire && !f.alt && !f.home_y.is_nan() && f.phase == 0 {
+                self.bowser_flame_place(f, st);
+            }
+        }
+        for f in spawned {
+            self.koopa_spawn_pub(f);
         }
         flame
     }
@@ -1486,7 +1525,7 @@ impl Actor {
             && !self.spring_over.is_some_and(|h| h <= self.spring_reach_big);
         if big_ok && b == 0 {
             self.bowser_reset_big(st);
-            self.bowser_rearm_fire();
+            self.bowser_rearm_fire(st);
             self.bowser_enter(bw::BIG_JUMP, st);
         } else if j == 0 {
             self.bowser_reset_jump(st);
@@ -1583,7 +1622,7 @@ impl Actor {
         self.home_x = self.x;
         let b = self.byte(3) & !bwf::MODE;
         self.set_byte(3, b);
-        self.bowser_rearm_fire();
+        self.bowser_rearm_fire(st);
         self.bowser_decide(level, st);
     }
 
@@ -3290,12 +3329,16 @@ impl Actor {
     /// frames into each.
     fn jr_fire_cycle(&mut self) -> Option<Actor> {
         let t = self.pause;
-        let out = if t % JR_FIRE_ANIM == JR_FIRE_AT && t / JR_FIRE_ANIM < 3 {
+        // NSMBU's skeletal `bl_fire` runs a frame longer, its fireball a frame later [obs:
+        // Ryujinx whole trace X_bowserjr_WU: born on frames 120, 182, 244]
+        let wu = i32::from(self.koopa.style == 3 && !self.koopa.w3);
+        let (anim, at) = (JR_FIRE_ANIM + wu, JR_FIRE_AT + wu);
+        let out = if t % anim == at && t / anim < 3 {
             Some(self.jr_fireball())
         } else {
             None
         };
-        if t >= 3 * JR_FIRE_ANIM {
+        if t >= 3 * anim {
             self.jr_enter_wait();
         }
         out
@@ -3317,11 +3360,25 @@ impl Actor {
     fn jr_fireball(&mut self) -> Actor {
         let d = self.dir as f32;
         let (ox, oy) = if self.big { (24.0, 18.0) } else { (12.0, 12.0) };
-        let (sx, sy) = (self.x + d * ox, self.y + oy);
         let (px, py) = self.target;
-        let mut a = (py + 12.0 - sy).datan2((px - sx) * d).to_degrees();
-        a = a.clamp(-JR_AIM, JR_AIM);
-        let (sn, cs) = a.to_radians().dsin_cos();
+        // NSMBU's leaves from its hand joint, (16, 13.22) from his feet, and aims from (that x,
+        // y + 12) at the player's (x, y + 8) [obs: Ryujinx whole trace X_bowserjr_WU: born at
+        // (247.69, 29.22) by Jr at (263.69, 16), its slope 4 / 175.69] [inf: big]
+        let wu = self.koopa.style == 3 && !self.koopa.w3 && !self.big;
+        let (sx, sy) = if wu {
+            (self.x + d * 16.0, self.y + 13.2217)
+        } else {
+            (self.x + d * ox, self.y + oy)
+        };
+        let (aim_y, at_y) = if wu {
+            (self.y + 12.0, py + 8.0)
+        } else {
+            (sy, py + 12.0)
+        };
+        // (the game's table angle and sines [obs: X_bowserjr_WU, vx −0.9997207])
+        let a = crate::fmath::table_atan2(at_y - aim_y, (px - sx) * d) as i32;
+        let lim = (JR_AIM / 360.0 * 4_294_967_296.0) as i32;
+        let (sn, cs) = crate::fmath::table_sin_cos(a.clamp(-lim, lim) as u32);
         let carry = if self.vx * d > 0.0 {
             self.vx.abs()
         } else {
@@ -3330,6 +3387,8 @@ impl Actor {
         let speed = JR_FIRE_SPEED + carry * cs * cs;
         let mut f = Actor::new(Kind::BowserFire, sx, sy);
         f.dir = self.dir;
+        // (`alt`: Bowser Jr's GoStraight fireball, its own box)
+        f.alt = true;
         // (still on its birth frame, its speed from the next)
         f.die_pending = Some((cs * speed * d, sn * speed));
         f.home_y = f32::NAN;
@@ -4429,7 +4488,7 @@ mod tests {
 
     #[test]
     fn bowser_jr_hop_and_shift_jump_wait_for_the_wind_up() {
-        for (style, wind) in [("M3", 4), ("WU", 25)] {
+        for (style, wind) in [("M3", 5), ("WU", 26)] {
             let (level, mut a) = boss(BOWSER_JR, 30.0 * TILE);
             let level = styled(level, style);
             let mut winding = 0;
