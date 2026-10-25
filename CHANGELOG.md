@@ -13,8 +13,8 @@ SMCraft is back in development (it was archived in October 2026).
   Feather's glide and dives, the Propeller Mushroom's fall spin and drill, the Super Bell's wall
   climb (Cat Mario climbs, hangs, slides down, jumps off and pops over the top as in 3D World),
   its dive, scratch and slide, 3D World's crouch slide and crawl for every form, Link's
-  down-thrust, the Frog Suit's hops, the Super Acorn's boost and twirl and the Super Hammer's
-  swing.
+  down-thrust, the Frog Suit's hops, the Super Acorn's boost and twirl, the Power Balloon's jet and the
+  Super Hammer's swing.
 - Placed Super Leaves, Cape Feathers and Propeller Mushrooms sway down through the floor as in
   the game and are gone once they leave the screen.
 - Goombas and other walkers ride Seesaws and tip them.
