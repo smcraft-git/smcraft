@@ -25,6 +25,7 @@
 //! bit-32 / previous-frame pair says it is only at the surface [inf: taken as covered by water].
 
 use super::{Actor, Kind};
+use crate::level::Level;
 
 /// The Thwomp's parachute opens at this fall speed (−2.5 in water), then falls at −0.1 / −1.0.
 const THWOMP_OPEN: f32 = -4.0;
@@ -96,6 +97,12 @@ impl Actor {
     /// In water (the world senses the liquid into `w3`).
     pub(super) fn wet(&self) -> bool {
         self.w3.flooded || self.w3.liquid.is_some_and(|(y, water)| water && self.y < y)
+    }
+
+    /// The water-speed rule (0x71012a9180, or the in-water flag +0x658 bit 31 [obs v3.0.3]): in
+    /// water, an underwater course or a night airship / sky course.
+    pub(super) fn slow_rule(&self, level: &Level) -> bool {
+        self.wet() || level.theme == 4 || (level.night && matches!(level.theme, 3 | 8))
     }
 
     pub(super) fn in_lava(&self) -> bool {

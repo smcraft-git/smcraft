@@ -1597,7 +1597,7 @@ impl Actor {
             }
             h + top + 16.0
         };
-        let slow = self.wet() || level.theme == 4 || (level.night && matches!(level.theme, 3 | 8));
+        let slow = self.slow_rule(level);
         let reach = |v: f32, g: f32| if slow { apex_wet(v, g) } else { apex(v, g) };
         let wings = self.wings;
         self.spring_slow = slow;
