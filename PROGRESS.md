@@ -283,6 +283,16 @@ sway, importer and pack 12, the dev cache already at v12).
   ported; Wiggler / Angry Sun / Monty Mole agree; Koopalings, Pom Pom, the 3D World enemies,
   tower sway, block debris not traced. Coverage 550 / 550 + 273 / 273 (as main); simulate 0
   crashes on both.
+- ⏸️ **Physics pass 12** (2026-10-25, branch `physics12`, paused with SMCraft; fidelity-log.md
+  "physics12"): the physics11 audit's random users, recorded whole with their objects and every
+  draw. 🔄 Ported but **not committed** (the gate couldn't finish: free disk under 3.5 GB; the diff
+  is stashed in the worktree and saved as research/tools/ryujinx-trace/physics12/physics12-wip.patch):
+  the walking Hammer Bro (Walk + the timed throw helper: X_hbro_M1 exact, all 27 draws) and the
+  Lakitu on its cloud (X_lakitu_M1 exact to the death frame; a Lakitu's own cloud is no separate
+  object; the Spiny's touch 1 px narrower) — 683 / 685 on the private copy. ⬜ Next: free disk,
+  gate + cmpall, commit; the death-frame order (actors before the hurting enemy still move);
+  Magikoopa, Rocky Wrench, Fire Piranha, Chain Chomp, Boom Boom, Fire Clown Car (recorded, sites
+  logged); then the unconfirmed-order users, 3D World's Bowser, re-seeding, the Sledge Bro course.
 - 🔄 **Inferred-behaviour pass 6** (2026-10-25, branch `infres6`, research specs/inf-inventory.md
   "Pass 6"): ✅ the Propeller Mushroom's own Move (#38, ItemPropeller 0x710134ca70 / 0x710134c3c0 /
   limits 0x710134c880; the Block context's enter 0x710134d550 skips the slow rise): out of a
