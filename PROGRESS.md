@@ -1227,13 +1227,18 @@ Specs are private (`research/specs/`, gitignored): behaviour in prose/tables, no
 - 🔄 Research: SMM1 100 Mario screen sequence from Block.rpx v208 + layout data — scene → layout
   map done (private `research/specs/smm1-layouts.md`: title, main menu, Course World, difficulty
   select, world maps + Mario/course/castle parts, course intro, skip, clear, pause, game over,
-  ending text, credits, costume reward); still open: the rescue scene itself (not a layout), the
-  run-flow timing between screens
+  ending text, credits, costume reward); ✅ (2026-10-25, branch `hundred3`) the run-flow timing
+  between screens (smm1-100mario-screens.md §8: the map class's states, SMM1's scene fader types /
+  speeds, the input locks), the rescue scene (smm1-ending.md §2.8: its models decoded), the Mii /
+  flag / Star / comment areas (§8b), the SMM1 → SMM2 course import design (smm1-course-import.md)
 - 🔄 SMM1 asset import (owner's disc dump): BFLYT/BFLAN layouts ✅, GX2 textures (BFLIM, AddrLib
   1D/2D untiling) ✅, BFFNT fonts ✅, MSBT text (English) ✅, UI sounds ✅ (2026-10-25: the banks of
   `Pack/Sound.pack` — SARCs of AMTA + BFWAV, not BARS — and the UI streams (BFSTM) → `ui/sound/*.wav`,
   417 sounds; the SLink2DB v0x15 (`mmk_formats::xlink_wiiu`) → `ui/sound/sounds.json`, 968 users;
-  `mmk audio` reads SMM1 waves, banks, `Sound.pack` and streams; importer 4), BGM streams ⬜
+  `mmk audio` reads SMM1 waves, banks, `Sound.pack` and streams; importer 4), BGM streams ✅
+  (2026-10-25, importer 5: Course World's tracks 2 / 3 / 6, the maps', game over's, the rescue
+  scene's by style, the staff rolls; loops in a `smpl` chunk) · the rescue scene's models ✅
+  (importer 5: `ui/ending/ending.json`, `mmk_formats::bfres_wiiu::{models, tex_patterns}`)
 - 🔄 Layout player (panes, text, keyframed animations) — pane tree, parts, pictures, windows,
   text with font fallback, SRT/visibility/alpha/colour/texture-pattern/texture-SRT curves ✅;
   part property overrides: picture material from the enclosing layout (course-dot numbers,
@@ -1241,7 +1246,8 @@ Specs are private (`research/specs/`, gitignored): behaviour in prose/tables, no
   now keeps them) ✅; "influenced alpha" fades the whole subtree incl. parts ✅; children without
   anchor bits sit on the parent's origin point [inf] ✅; caller visibility, pane query, message
   templates with value placeholders (FFI `mmk_ui_set_visible/pane/message`) ✅;
-  per-character transforms (GAME OVER letters), alpha compare, indirect textures ⬜
+  per-character transforms ✅ (2026-10-25: `Text::per_char`, FLCC / FLCT; GAME OVER's letters),
+  alpha compare, indirect textures ⬜
 - ✅ Mode logic (`core/crates/modes`): run lengths 8/16/16/6 (10 Mario 8), 100 lives = cap, ≤3
   banked extra lives paid on clear (+1 refund in 100 Mario), death retries from the course-start
   state, free skip (100 Mario only), Save & Quit, game over, completion; course pools by
@@ -1281,9 +1287,25 @@ Specs are private (`research/specs/`, gitignored): behaviour in prose/tables, no
     jump / walk, the wipe, democancel on a skip), the card's 100 Marios (walk sound by the lives),
     pause In / Out by the course style, the buttons' cursor and decide sounds, course clear, the
     skip countdown and SlidePass; key ↔ animation [inf] where the data names only the key
-  - 🔄 timings between screens, the rescue scene (not a layout), Mii/flag/Star/comment areas
-    (hidden: no data), per-character GAME OVER letters
-- ⬜ SMM1 → SMM2 course import design + documented losses
+  - ✅ (2026-10-25, branch `hundred3`) timings from Block.rpx v208: the map demos state by state
+    (New Game 1128 frames on Easy, Continue, after a clear), SMM1's scene fader (`smm1_fade`: type 1
+    at 4.0 for every scene request, blocks at 1.0 to the map, the circle on Mario at 2.0 from it),
+    the course card over the course for every course (the course waits), a death / Start Over
+    fading to the card, the input locks (select 48 / tab slides 64, clear buttons after In 180,
+    skip after 112), no early exits; "clear shown" kept as `hundred.clear_shown`
+  - ✅ the rescue scene (`smm1_ending`): SMM1's stage, Peach / Toad and the demo Mario in his goal
+    form (SMB1 / SMB3 / SMW; NSMBU and 3D World use SMW's) on the scene's own timers and camera,
+    the balloon's line by difficulty and costume, then the credits with no input; the menus' music
+    (`CueKind::Music` / `MusicTrack` / `StopMusic`, shell mixer + Swift); GAME OVER letter by letter
+  - ✅ the maker group centred as SMM1 does, the pause's stars and players from the course data;
+    the flag (no country), the Star button and comments (no service) stay out [departure]
+  - ⬜ left: the costume window after the credits (a toast now), the shoe / Yoshi demo Mario, the
+    clear colour behind the SMB3 / SMW stages [?], the beat bounces synced to the music, Save &
+    Quit's confirmation window, the NSMBU 3D demo Mario
+- 🔄 SMM1 → SMM2 course import design + documented losses: design ✅ (private
+  research/specs/smm1-course-import.md: header / start / goal / object / id mapping, losses);
+  converter ⬜ (waits on the goal position, pipes' bit 0x80, tracks and sound effects from the
+  SMM1 binary)
 - ⬜ App screens drawn with the SMM1 layouts (world map walk, intro card, clear, game over, ending)
 
 ### Phase 7 — Expansion ⬜
