@@ -200,6 +200,15 @@ fn owner_a_death_fades_to_the_card_and_a_clear_to_the_map() {
 #[test]
 fn owner_game_over_letters_drop_in() {
     let Some(smm1) = smm1() else { return };
+    let version = smm1
+        .cache_mut()
+        .json_file("manifest.json")
+        .and_then(|m| m["importer_version"].as_u64())
+        .unwrap_or(0);
+    if version < 5 {
+        eprintln!("SMM1 import without per-character transforms (importer < 5); skipping");
+        return;
+    }
     let Some(mut s) = crate::smm1::GameOverScene::new(&smm1) else {
         return;
     };
@@ -220,10 +229,6 @@ fn owner_game_over_letters_drop_in() {
         s.step(&UiInput::default());
     }
     let before = above(&mut s);
-    if before == 0 {
-        eprintln!("SMM1 import without per-character transforms (importer < 5); skipping");
-        return;
-    }
     // the eight letters and their shadows wait above the screen (Mario too, from 360)…
     assert!(before >= 16, "{before}");
     for _ in 50..74 {
