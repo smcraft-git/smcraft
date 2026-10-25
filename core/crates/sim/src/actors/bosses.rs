@@ -456,12 +456,18 @@ impl Actor {
                 } else if self.target.0 <= self.x && !self.in_view() {
                     // waits off screen (mode 3) until it scrolls into view
                     self.bowser_set_mode(3, st);
-                } else if !self.on_ground {
+                } else if !self.on_ground && !level.cell_at(self.x, self.y - 0.5).is_solid() {
                     self.bowser_enter(bw::FALL, st);
                 } else if self.bowser_player_ahead_right(st) {
                     self.bowser_chase_dispatch(level, st);
                 } else {
+                    // placed on the ground: its first update already walks (LandOn decides at
+                    // once) [obs: Ryujinx whole trace X_bowser_M1: −0.3 from frame 0]
+                    self.on_ground = true;
                     self.bowser_enter(bw::LAND_ON, st);
+                    if self.timer == 0 {
+                        self.bowser_decide(level, st);
+                    }
                 }
             }
             Kind::BoomBoom { clown, pom, .. } => {
