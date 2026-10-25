@@ -34,8 +34,8 @@
 //! `3W_Enemy_bros`: JumpStart 15, JumpEnd 14, Attack 60), played at rate 1 (EnemyModelParams
 //! `mAnmAssignParams`; slots 0x19 JumpSt, 0x1b JumpEd, 0x2b Throw of the enemy animation enum).
 //!
-//! [inf] home x stays where it last landed from a jump (the exe re-latches it on BG bit 8, not
-//! decoded); the side-contact flags (+0x658 bits 2 / 3) and the wall-hit flag (bit 14) are both
+//! Home x stays the placement's through the Bros' jumps [obs: Ryujinx trace X_wbros_M1] [inf:
+//! the exe's re-latch on BG bit 8 is not decoded]; the side-contact flags (+0x658 bits 2 / 3) and the wall-hit flag (bit 14) are both
 //! the engine's wall hit of the last frame; the ledge probe is cell-based, 0.1 px past the body;
 //! the multiplayer off-screen wait (helper +0x49 bit 0: the `Wait2` 30 frames) is left
 //! out. The Sledge Bro (MegaBros) never enters WingWalk: its slots 0x128 / 0x130 send Fall's
@@ -136,8 +136,10 @@ impl Actor {
         if self.hops != 0 {
             // the Bros' jump; its landing enters WingWalk again
             self.vy = (self.vy + ENEMY_GRAVITY).max(MAX_FALL);
+            // (home x stays the placement's: the hops after the landing still turn back
+            // toward it [obs: Ryujinx whole trace X_wbros_M1, the hop at frame 298 turns home
+            // to x 296 from 317, 10.5 px from the landing])
             if self.bro_ghost_move(level, ENEMY_GRAVITY) {
-                self.home_x = self.x;
                 w.on = false;
             }
             self.bro_wing = w;
@@ -146,6 +148,11 @@ impl Actor {
         // placed on the ground, it starts in WingWalk and its first update runs it (Bros1st:
         // the hop at once) [obs: Ryujinx whole trace X_wbros_M1: vy 2.0 − 0.1875 and 0.5 across
         // on the first update]
+        if self.age == 1 {
+            // the throw helper's init draws its timer (0x7101098080), idle in the Wing
+            // context [obs v3.0.3; Ryujinx trace X_wbros_M1, the draw before WingWalk's]
+            let _ = self.rand_word();
+        }
         if !w.on && self.age == 1 && level.cell_at(self.x, self.y - 0.5).is_solid() {
             self.on_ground = true;
             self.bro_wing_enter(&mut w);
@@ -257,7 +264,12 @@ impl Actor {
     /// clear of walls it stops and waits for the hop, else it is airborne.
     fn bro_wing_enter(&mut self, w: &mut BroWing) {
         self.pause = JUMP_CYCLES;
-        self.phase = self.rand(2) as u8;
+        // the facing is the word's low bit; then the helper's two chance draws, r(100) each
+        // (0x71010931f0, from the enter and its caller), which the engine does not use [obs
+        // v3.0.3 0x71010961c0; Ryujinx trace X_wbros_M1: three draws per entry]
+        self.phase = (self.rand_word() & 1) as u8;
+        let _ = self.rand(100);
+        let _ = self.rand(100);
         *w = BroWing {
             on: true,
             wall: w.wall,

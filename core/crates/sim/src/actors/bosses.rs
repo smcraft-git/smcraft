@@ -228,7 +228,11 @@ const JR_HOVER_AT: f32 = 0.4;
 /// frames, NSMBU `bl_quake_st` / `bl_jump_st` 25, all at play rate 1.0 (EnemyModelParams).
 const JR_WINDUP: [i32; 4] = [0, 4, 4, 25];
 /// `jr_sub` value while a wind-up plays.
+/// A Bowser flame's carried speed fades this much a frame [obs: Ryujinx trace X_bowser_M3].
+const FLAME_FADE: f32 = 0.04;
 const JR_WINDING: u8 = 2;
+/// A hop's sub-phases after its touch-down (7 the touch-down frame, 8 the one after).
+const JR_TOUCHED: u8 = 7;
 const JR_HIP_GRAVITY: f32 = -0.75;
 const JR_HIP_CAP: f32 = -8.0;
 const JR_HIP_LAND: i32 = 50;
@@ -504,6 +508,11 @@ impl Actor {
                     self.set_byte(2, 0);
                     self.phase = jr::CLOWN;
                 } else {
+                    // placed on the ground he waits from his first update [obs: Ryujinx whole
+                    // trace X_bowserjr_M1, Wait's draws on frame 19]
+                    if !self.on_ground && level.cell_at(self.x, self.y - 0.5).is_solid() {
+                        self.on_ground = true;
+                    }
                     self.jr_enter_wait_or_fall();
                 }
             }
@@ -736,6 +745,16 @@ impl Actor {
         if self.kind == Kind::BowserFire && self.koopa_flame_step(level) {
             return;
         }
+        // a flame is gone at its update once more than 32 px past the view's side [obs: Ryujinx
+        // whole trace X_bowser_M1: each flame's last move is to x −32.4 / −32.7 (a view at 0),
+        // the next would be −33.9] [inf: the threshold, the right side as the left]
+        if self.kind == Kind::BowserFire
+            && (self.x < self.camera.0 - 32.0
+                || self.x > self.camera.0 + crate::world::VIEW_W + 32.0)
+        {
+            self.mode = Mode::Dead;
+            return;
+        }
         if self.kind == Kind::Shuriken {
             // BulletPunpunShuriken Move (0x71003b9490): while the target (home) is still ahead
             // it turns toward it by at most 2° a frame, staying within 45° of level; speed 1.0
@@ -750,11 +769,17 @@ impl Actor {
             self.vx = cs * self.speed * d;
             self.vy = sn * self.speed;
         }
-        if self.kind == Kind::BowserFire
-            && !self.home_y.is_nan()
-            && (self.y - self.home_y).abs() <= (self.vy * 0.5).abs()
-        {
-            self.vy = 0.0;
+        if self.kind == Kind::BowserFire && !self.home_y.is_nan() {
+            // a Bowser flame's carried speed fades by 0.04 a frame to its own 1.5 (the lane's
+            // climb stays) [obs: Ryujinx whole trace X_bowser_M3: vx −1.80, −1.76, −1.72 …
+            // −1.5]
+            let base = BOWSER_FIRE_SPEED;
+            if self.vx.abs() > base {
+                self.vx = (self.vx.abs() - FLAME_FADE).max(base) * self.vx.signum();
+            }
+            if (self.y - self.home_y).abs() <= (self.vy * 0.5).abs() {
+                self.vy = 0.0;
+            }
         }
         self.x += self.vx;
         self.y += self.vy;
@@ -820,11 +845,19 @@ impl Actor {
     /// Fire interval: 40 + random(0…39) frames; chase mode 60 + random(0…39); off-screen
     /// mode 40 + random(0…239).
     fn bowser_fire_interval(&mut self) -> i32 {
-        match self.bowser_mode() {
-            3 => 40 + self.rand(240) as i32,
-            2 => 60 + self.rand(40) as i32,
-            _ => 40 + self.rand(40) as i32,
-        }
+        let (base, span) = match self.bowser_mode() {
+            3 => (40, 240),
+            2 => (60, 40),
+            _ => (40, 40),
+        };
+        // the base ×1.5 under the water-speed rule (+0x658 bit 31) [obs v3.0.3 0x7101158800 /
+        // 0x710114b200 / 0x710115a9a0]
+        let base = if self.wet() {
+            (base as f32 * 1.5) as i32
+        } else {
+            base
+        };
+        base + self.rand(span) as i32
     }
 
     /// Re-arms the fire timer and forgets any breath (helper +0x8 / +0x10 / +0x12).
@@ -1054,11 +1087,13 @@ impl Actor {
     /// player on his left he waits in place. The fire timer runs alongside in the ground and
     /// jump states: every 40–79 frames a breath (35 frames in SMB1), then a flame.
     pub(super) fn step_bowser(&mut self, level: &Level) -> Option<Actor> {
+        let st = style_index(level);
+        // his first update sets the state up after the frame's countdown: the first walk's
+        // 20 + r(20) frames all count [obs: Ryujinx trace X_bowser_M1, the second walk's draw
+        // 24 frames after the first's]
         if self.phase == 0 {
             self.boss_setup(level);
-        }
-        let st = style_index(level);
-        if self.timer > 0 {
+        } else if self.timer > 0 {
             self.timer -= 1;
         }
         // the fire animation plays on whatever the state does
@@ -1071,7 +1106,22 @@ impl Actor {
             self.bowser_record_step();
             return self.bowser_fire(st);
         }
-        let state = self.phase;
+        // the fire helper runs in Fall, LandOn, Walk, LittleJump, MiddleJump and a Fly that
+        // came from a middle jump (0x71006b1de0), ahead of the state's own step: the walk
+        // stops on the frame the breath starts and moves again on the frame the flame leaves
+        // [obs v3.0.3 Walk exe 0x7101158ec0 reads the helper's +0x12 of this frame
+        // (0x710114b200); Ryujinx trace X_bowser_M1 frames 47 and 82]
+        let fire_state = match self.phase {
+            bw::FALL | bw::LAND_ON | bw::WALK | bw::LITTLE_JUMP | bw::MIDDLE_JUMP => true,
+            bw::FLY => !self.bowser_flag(bwf::FROM_BIG),
+            _ => false,
+        };
+        let mut flame = if fire_state {
+            self.bowser_fire(st)
+        } else {
+            self.bowser_set_flag(bwf::BREATHING, false);
+            None
+        };
         self.spring_over = self.bowser_height_search(level);
         if st < 2 || !self.koopa_move(level, st) {
             self.bowser_move(level, st);
@@ -1080,19 +1130,12 @@ impl Actor {
             self.koopa_rain();
         }
         self.bowser_record_step();
-        // the fire helper runs in Fall, LandOn, Walk, LittleJump, MiddleJump and a Fly that
-        // came from a middle jump (0x71006b1de0)
-        let fire_state = match state {
-            bw::FALL | bw::LAND_ON | bw::WALK | bw::LITTLE_JUMP | bw::MIDDLE_JUMP => true,
-            bw::FLY => !self.bowser_flag(bwf::FROM_BIG),
-            _ => false,
-        };
-        if fire_state {
-            self.bowser_fire(st)
-        } else {
-            self.bowser_set_flag(bwf::BREATHING, false);
-            None
+        if let Some(f) = flame.as_mut()
+            && st != 0
+        {
+            self.bowser_flame_place(f, st);
         }
+        flame
     }
 
     /// Leaving a ground state when the floor is gone (walked off a ledge).
@@ -1105,18 +1148,11 @@ impl Actor {
         true
     }
 
-    fn bowser_move(&mut self, level: &Level, st: usize) {
-        let m1 = st == 0;
-        let m3 = st == 1;
+    /// The ground and jump states' own step (see `bowser_move`): transitions and speeds.
+    fn bowser_exe(&mut self, level: &Level, st: usize) {
         let breathing = self.bowser_flag(bwf::BREATHING);
         match self.phase {
             bw::FALL => {
-                self.fall_capped(level, G, CAP);
-                if self.bowser_flag(bwf::FELL_OFF) && self.timer == 0 && self.wall {
-                    self.heading = -self.heading;
-                    self.vx = self.vx.abs() * self.heading;
-                    self.timer = 8;
-                }
                 if self.on_ground {
                     self.bowser_set_flag(bwf::FELL_OFF, false);
                     self.home_x = self.x;
@@ -1128,41 +1164,123 @@ impl Actor {
                 }
             }
             bw::LAND_ON => {
-                self.fall(level, BOWSER_GRAVITY);
                 if !self.bowser_ground_lost(st) && self.timer == 0 {
                     self.bowser_decide(level, st);
                 }
             }
             bw::WALK => {
+                if self.bowser_ground_lost(st) {
+                    return;
+                }
+                // a walk that runs out walks again from its enter's speed on the same frame,
+                // even while breathing (the enter keeps the fire animation; the exe zeroes the
+                // speed from the next frame) [obs v3.0.3 Walk enter 0x7101158db0; Ryujinx
+                // trace X_bowser_M1 frame 51]
                 self.bowser_walk_speed(st);
                 if breathing {
                     self.vx = 0.0;
                 }
-                self.fall(level, BOWSER_GRAVITY);
-                if !self.bowser_ground_lost(st) && self.timer == 0 {
+                if self.timer == 0 {
                     self.bowser_decide(level, st);
                 }
             }
             bw::LITTLE_JUMP => {
-                self.fall(level, -0.07);
                 if self.timer == 0 && self.on_ground {
                     self.bowser_enter(bw::LAND_ON, st);
                 }
             }
             bw::MIDDLE_JUMP => {
-                if m1 && !self.gap_jump {
+                if st == 0 && !self.gap_jump {
                     self.bowser_walk_speed(st);
                     if breathing {
                         self.vx = 0.0;
                     }
                 }
-                self.fall(level, BOWSER_GRAVITY);
                 if self.wings {
                     self.bowser_set_flag(bwf::FROM_BIG, false);
                     self.bowser_enter(bw::FLY, st);
                 } else if self.timer == 0 && self.on_ground {
                     self.bowser_enter(bw::LAND_ON, st);
                 }
+            }
+            bw::LOOK_AROUND => {
+                self.vx = 0.0;
+                if self.bowser_ground_lost(st) {
+                    return;
+                }
+                if self.timer == 1 {
+                    self.dir = if self.target.0 <= self.x { -1 } else { 1 };
+                    self.speed = 0.0;
+                } else if self.speed >= 0.0 {
+                    // the turn animation; 10 frames in he moves on
+                    self.speed += 1.0;
+                    if self.speed >= 10.0 {
+                        if self.bowser_player_ahead_right(st) {
+                            self.bowser_chase_dispatch(level, st);
+                        } else {
+                            self.bowser_enter(bw::LAND_ON, st);
+                        }
+                    }
+                }
+            }
+            bw::TURN => {
+                self.speed += 1.0;
+                if self.speed < self.bowser_turn_frames(st) {
+                    return;
+                }
+                self.dir = -self.dir;
+                if self.bowser_ground_lost(st) {
+                    return;
+                }
+                if self.bowser_player_ahead_right(st) {
+                    self.bowser_chase_dispatch(level, st);
+                } else {
+                    self.bowser_decide(level, st);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// The frame's move after `bowser_exe`, by the state it left.
+    fn bowser_physics(&mut self, level: &Level) {
+        match self.phase {
+            bw::FALL => {
+                self.fall_capped(level, G, CAP);
+                if self.bowser_flag(bwf::FELL_OFF) && self.timer == 0 && self.wall {
+                    self.heading = -self.heading;
+                    self.vx = self.vx.abs() * self.heading;
+                    self.timer = 8;
+                }
+            }
+            bw::LITTLE_JUMP => self.fall(level, -0.07),
+            bw::BIG_JUMP | bw::HIT_BLOCK => self.fall_capped(level, G, CAP),
+            bw::HIP_DROP => self.fall_capped(level, -0.4, -8.0),
+            bw::LOOK_AROUND => {
+                self.vx = 0.0;
+                self.fall(level, BOWSER_GRAVITY);
+            }
+            _ => self.fall(level, BOWSER_GRAVITY),
+        }
+    }
+
+    fn bowser_move(&mut self, level: &Level, st: usize) {
+        let m3 = st == 1;
+        match self.phase {
+            bw::FALL
+            | bw::LAND_ON
+            | bw::WALK
+            | bw::LITTLE_JUMP
+            | bw::MIDDLE_JUMP
+            | bw::LOOK_AROUND
+            | bw::TURN => {
+                // the state's step runs on the last frame's move (its ground flag, timers);
+                // the frame's move then uses the speeds it, or the state it entered, left: a
+                // landing is seen a frame after the touch-down, a decision moves on the frame
+                // it is made [obs v3.0.3 Walk exe 0x7101158ec0; Ryujinx trace X_bowser_M1
+                // frames 85 (a middle jump), 143–146 (landing, LandOn, Walk)]
+                self.bowser_exe(level, st);
+                self.bowser_physics(level);
             }
             bw::BIG_JUMP => {
                 self.fall_capped(level, G, CAP);
@@ -1215,43 +1333,6 @@ impl Actor {
                     self.fall_capped(level, BOWSER_GRAVITY, CAP);
                 }
             }
-            bw::LOOK_AROUND => {
-                self.vx = 0.0;
-                self.fall(level, BOWSER_GRAVITY);
-                if self.bowser_ground_lost(st) {
-                    return;
-                }
-                if self.timer == 1 {
-                    self.dir = if self.target.0 <= self.x { -1 } else { 1 };
-                    self.speed = 0.0;
-                } else if self.speed >= 0.0 {
-                    // the turn animation; 10 frames in he moves on
-                    self.speed += 1.0;
-                    if self.speed >= 10.0 {
-                        if self.bowser_player_ahead_right(st) {
-                            self.bowser_chase_dispatch(level, st);
-                        } else {
-                            self.bowser_enter(bw::LAND_ON, st);
-                        }
-                    }
-                }
-            }
-            bw::TURN => {
-                self.fall(level, BOWSER_GRAVITY);
-                self.speed += 1.0;
-                if self.speed < self.bowser_turn_frames(st) {
-                    return;
-                }
-                self.dir = -self.dir;
-                if self.bowser_ground_lost(st) {
-                    return;
-                }
-                if self.bowser_player_ahead_right(st) {
-                    self.bowser_chase_dispatch(level, st);
-                } else {
-                    self.bowser_decide(level, st);
-                }
-            }
             bw::FLY => self.bowser_fly(level, st),
             bw::HIT_BLOCK => {
                 self.fall_capped(level, G, CAP);
@@ -1274,8 +1355,9 @@ impl Actor {
         } else if st == 1 {
             self.bowser_aim_big_jump(base)
         } else {
+            // [inf: a unit draw, as the SMB3 aim's (0x7101155610)]
             let span = if self.wings { 3.0 } else { 4.0 };
-            span * self.rand(1 << 16) as f32 / 65536.0 - base
+            span * self.rand_unit() - base
         };
     }
 
@@ -1283,9 +1365,14 @@ impl Actor {
     /// time a random [−2, 2); otherwise the speed that reaches the player at the apex,
     /// |dx|·0.1875 / 5.9, at most 5 (halved with wings), toward the player.
     fn bowser_aim_big_jump(&mut self, base: f32) -> f32 {
+        // within 128 px a word is drawn whatever the side; its sign bit picks the random
+        // speed, 2·base·unit − base [obs v3.0.3 0x7101155610]
         let dx = self.target.0 - self.x;
-        if dx.abs() < 128.0 && dx <= 0.0 && self.rand(2) == 0 {
-            return 2.0 * base * self.rand(1 << 16) as f32 / 65536.0 - base;
+        if dx.abs() < 128.0 {
+            let pick = self.rand(2) == 1;
+            if dx <= 0.0 && pick {
+                return 2.0 * base * self.rand_unit() - base;
+            }
         }
         let mut v = (dx.abs() * -G / 5.9).min(5.0);
         if self.wings {
@@ -1844,24 +1931,36 @@ impl Actor {
     /// way he faces — one of three lanes at random. (The game's ring leaves out the motion of a
     /// platform carrying him; the engine's position history includes it.)
     fn bowser_flame(&mut self, st: usize) -> Actor {
+        let mut f = Actor::new(Kind::BowserFire, self.x, self.y);
+        f.chain = self.rand(3);
+        f.timer = 600;
+        self.bowser_flame_place(&mut f, st);
+        f
+    }
+
+    /// The flame's place and speeds from his mouth and speed history now, by its lane
+    /// (`chain`). The helper creates it (the lane's draw) ahead of his step; outside SMB1 (the
+    /// flame at the breath's fire frame) it leaves from where he is after the frame's move, in
+    /// SMB1 (at the breath's end) from where he was [obs: Ryujinx whole traces X_bowser_M3,
+    /// flames born in a jump 0.3 px further along; X_bowser_M1, a flame born as he walks on]
+    /// [inf: why the two differ].
+    fn bowser_flame_place(&self, f: &mut Actor, st: usize) {
         let s = self.scale();
         let d = self.dir as f32;
         let (mx, my) = BOWSER_MOUTH[st];
-        let mut f = Actor::new(Kind::BowserFire, self.x + d * mx * s, self.y + my * s);
+        (f.x, f.y) = (self.x + d * mx * s, self.y + my * s);
         f.dir = self.dir;
         let mean = self.bowser_mean_speed();
         let carry = if mean * d >= 0.0 { mean } else { 0.0 };
         f.vx = BOWSER_FIRE_SPEED * d + carry;
         let lane = FIRE_LANE * s;
-        let (ty, vy) = match self.rand(3) {
+        let (ty, vy) = match f.chain {
             0 => (f.y, 0.0),
             1 => (f.y - lane, -f.vx.abs() * 0.5),
             _ => (f.y + lane, f.vx.abs() * 0.5),
         };
         f.home_y = ty;
         f.vy = vy;
-        f.timer = 600;
-        f
     }
 
     // ------------------------------------------------------------ Boom Boom
@@ -2487,8 +2586,9 @@ impl Actor {
     /// the view at that spot, and for the first 90 frames 12 px (big 24) from where she was.
     fn pom_try_spot(&mut self, level: &Level) {
         let (cx, cy) = self.view_centre();
-        let x = cx - 192.0 + 384.0 * self.rand(1 << 16) as f32 / 65536.0;
-        let top = cy - 192.0 + 300.0 * self.rand(1 << 16) as f32 / 65536.0;
+        // [inf: unit draws, x then y, as the game's float draws elsewhere]
+        let x = cx - 192.0 + 384.0 * self.rand_unit();
+        let top = cy - 192.0 + 300.0 * self.rand_unit();
         let s = self.scale();
         let mut y = top;
         let ground = loop {
@@ -2594,10 +2694,24 @@ impl Actor {
                     self.vx = 0.0;
                     self.fall_capped(level, G, CAP);
                 } else {
+                    // the hop moves on along the floor the frame after it touches down and
+                    // ends (speed 0) at the next one's start [obs: Ryujinx whole trace
+                    // X_bowserjr_M1: down at frame 46, a 1.154 step at 47, vx 0 at 48]
+                    if self.jr_sub() == JR_TOUCHED + 1 {
+                        self.vx = 0.0;
+                        self.jr_set_sub(0);
+                        self.jr_enter_wait();
+                        self.fall_capped(level, G, CAP);
+                        return None;
+                    }
                     self.fall_capped(level, G, CAP);
                     if self.on_ground && self.vy <= 0.0 {
-                        self.vx = 0.0;
-                        self.jr_enter_wait();
+                        let t = if self.jr_sub() == JR_TOUCHED {
+                            JR_TOUCHED + 1
+                        } else {
+                            JR_TOUCHED
+                        };
+                        self.jr_set_sub(t);
                     }
                 }
             }
@@ -3867,7 +3981,8 @@ mod tests {
             let _ = a.step_spawning(&level);
             if a.phase == bw::MIDDLE_JUMP && was != a.phase {
                 jumps += 1;
-                assert!((a.vy - 3.0).abs() < 1e-6);
+                // (it moves on the frame it is decided: 3.0 − 0.1)
+                assert!((a.vy - 2.9).abs() < 1e-5, "{}", a.vy);
             }
             assert!(!matches!(a.phase, bw::BIG_JUMP | bw::LITTLE_JUMP));
         }
@@ -3893,7 +4008,8 @@ mod tests {
             let _ = a.step_spawning(&level);
             if a.phase == bw::LITTLE_JUMP && was != a.phase {
                 hops += 1;
-                low += i32::from((a.vy - 0.7).abs() < 1e-6);
+                // (the hop moves on the frame it is decided: vy − 0.07)
+                low += i32::from((a.vy + 0.07 - 0.7).abs() < 1e-5);
             }
             assert!(!matches!(a.phase, bw::BIG_JUMP | bw::MIDDLE_JUMP));
         }
@@ -3905,7 +4021,7 @@ mod tests {
             let was = a.phase;
             let _ = a.step_spawning(&level);
             if a.phase == bw::LITTLE_JUMP && was != a.phase {
-                assert!((a.vy - 1.1).abs() < 1e-6, "vy {}", a.vy);
+                assert!((a.vy + 0.07 - 1.1).abs() < 1e-5, "vy {}", a.vy);
             }
             middle += i32::from(a.phase == bw::MIDDLE_JUMP && was != a.phase);
         }

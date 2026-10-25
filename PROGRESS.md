@@ -256,6 +256,17 @@ sway, importer and pack 12, the dev cache already at v12).
   budget can't be reached in an editor-made course (100 enemies an area).
   Coverage 548 / 550
   + 272 / 273 (as main); simulate 0 crashes.
+- 🔄 **Physics pass 11** (2026-10-25, branch `physics11`, research specs/random.md, fidelity-log.md
+  "physics11"): the game's random numbers. ✅ the generator (sead::Random, xorshift128, v3.0.3
+  0x710029a150) is the play scene's, seeded init(0) at every course start (0x7100e489c0): no clock
+  in it; ported as `sim/src/random.rs`, lent to the whole tick, part of `World` (snapshots,
+  checksum; SIM_VERSION 3). ✅ every draw site of the Bowser / Bowser Jr / winged Bro traces
+  logged in the game (a getU32 hook, `rcap2.py`) and matched one by one (`mmk trace --draws`):
+  creation draws (the shared map-object init's three words for SMB1 … NSMBU actors, Bowser's
+  150 + r(60), the SMW / NSMBU Bowser's decision objects), the player's Walk entry and moving
+  frames, Bowser's fire helper ahead of his step, low-bit draws (the Bros' facing / jump).
+  **679 / 683 traces exact** (was 675; X_bowser_M1, _MW, _3W and X_wbros_M1 now exact, Bowser and
+  all six flames over 601 frames in X_bowser_M1).
 - 🔄 **Inferred-behaviour pass 6** (2026-10-25, branch `infres6`, research specs/inf-inventory.md
   "Pass 6"): ✅ the Propeller Mushroom's own Move (#38, ItemPropeller 0x710134ca70 / 0x710134c3c0 /
   limits 0x710134c880; the Block context's enter 0x710134d550 skips the slow rise): out of a

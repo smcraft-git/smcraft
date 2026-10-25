@@ -87,14 +87,28 @@ pub struct Start {
 /// Run the script; one CSV row per frame (the state after that frame's step).
 #[cfg(test)]
 pub fn run(course: &[u8], script: &[Input], start: &Start) -> Result<String, String> {
-    run_all(course, script, start).map(|(csv, _)| csv)
+    run_all(course, script, start).map(|(csv, _, _)| csv)
 }
 
 /// `run`, plus every actor's state after each frame (a second CSV: frame, id, kind / mode, x,
-/// y, vx, vy, dir), for traces that follow more objects than the first actor.
-pub fn run_all(course: &[u8], script: &[Input], start: &Start) -> Result<(String, String), String> {
+/// y, vx, vy, dir), for traces that follow more objects than the first actor, and a third: the
+/// course generator's draws (frame, the count after the draw, the engine's caller; frame −1 is
+/// the course start).
+pub fn run_all(
+    course: &[u8],
+    script: &[Input],
+    start: &Start,
+) -> Result<(String, String, String), String> {
     let c = mmk_formats::smm2::Course::parse(course).map_err(|e| e.to_string())?;
+    mmk_sim::random::log_draws(true);
     let mut w = mmk_sim::World::from_course(&c);
+    let mut draws = String::from("frame,draws,at\n");
+    let log = |frame: i64, draws: &mut String| {
+        for (n, at) in mmk_sim::random::take_log() {
+            draws.push_str(&format!("{frame},{n},{}:{}\n", at.file(), at.line()));
+        }
+    };
+    log(-1, &mut draws);
     if let Some((x, y)) = start.pos {
         w.player.x = x;
         w.player.y = y;
@@ -120,11 +134,12 @@ pub fn run_all(course: &[u8], script: &[Input], start: &Start) -> Result<(String
     w.reset_camera();
     let mut csv = String::from(
         "frame,x,y,vx,vy,facing,ground,pose,form,input,ax,ay,avx,avy,adir,akind,camx,camy,meter,\
-         flight\n",
+         flight,draws\n",
     );
     let mut all = String::from("frame,id,kind,x,y,vx,vy,dir\n");
     for (i, inp) in script.iter().enumerate() {
         w.step(*inp);
+        log(i as i64, &mut draws);
         for a in &w.actors {
             all.push_str(&format!(
                 "{i},{},{},{},{},{},{},{}\n",
@@ -156,11 +171,16 @@ pub fn run_all(course: &[u8], script: &[Input], start: &Start) -> Result<(String
             None => csv.push_str(",,,,,,"),
         }
         csv.push_str(&format!(
-            ",{},{},{},{}\n",
-            w.camera_x, w.camera_y, w.player.p_meter, w.player.flight
+            ",{},{},{},{},{}\n",
+            w.camera_x,
+            w.camera_y,
+            w.player.p_meter,
+            w.player.flight,
+            w.random.draws()
         ));
     }
-    Ok((csv, all))
+    mmk_sim::random::log_draws(false);
+    Ok((csv, all, draws))
 }
 
 // ---------------------------------------------------------------------------------------------

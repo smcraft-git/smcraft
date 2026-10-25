@@ -8,6 +8,12 @@ SMCraft never needs them again.
 
 SMCraft is back in development (it was archived in October 2026).
 
+- **SMM2's own random numbers**: enemies now draw from the game's generator, seeded as the game
+  seeds it at the start of every course, in the game's order — so Bowser's fire and jumps, Bowser
+  Jr.'s attacks and the winged Hammer Bro's hops come out exactly as in SMM2 for the same course
+  and inputs (and the same on every machine, for replays and online play). Bowser stops on the
+  frame his breath starts, his flames fade to their own speed and leave from where he is after
+  his step; Bowser Jr.'s hop runs a step along the floor after it lands.
 - **Sound effects as in SMM2**: the shouts, crowds, stingers, animations and music changes
   makers put in their courses now play — on touching their spot, when the part they are on is
   defeated, taken, hit, bounced on or entered, and on Mario at the start and when he does the

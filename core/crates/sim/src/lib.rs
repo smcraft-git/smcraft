@@ -21,6 +21,7 @@ pub mod liquid;
 pub mod options;
 pub mod otoasobi;
 pub mod player;
+pub mod random;
 pub mod render;
 pub mod snake;
 pub mod track;

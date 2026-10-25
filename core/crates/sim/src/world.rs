@@ -369,9 +369,9 @@ pub struct World {
     /// Particle effect cues of this tick (cleared with `events`).
     pub fx: Vec<crate::fx::Fx>,
     rng: u32,
-    /// The course's shared random generator (scene +0xf8 → +8): a 4-word xorshift
-    /// (0x71014e43e0) that every actor draws from; the game seeds it per play, here it is fixed.
-    course_rng: [u32; 4],
+    /// The course's shared random generator (the area scene's +0x100 → +8, random.rs): every
+    /// actor draws from it in update order; lent to the actors for each tick.
+    pub random: crate::random::Random,
     /// Escort Toads knocked out: (actor id, frames until he is back).
     escort_down: Vec<(u32, i32)>,
     field_model: &'static str,
@@ -803,7 +803,7 @@ impl World {
             events: Vec::new(),
             fx: Vec::new(),
             rng: 0x2545_f491,
-            course_rng: [0x075b_cd15, 0x159a_55e5, 0x1f12_3bb5, 0x0549_1333],
+            random: crate::random::Random::course(),
             escort_down: Vec::new(),
             field_model: "",
             area_initial: areas,
@@ -891,8 +891,26 @@ impl World {
         w
     }
 
+    /// Runs `f` with the course generator lent to the actors (random.rs), unless it already is
+    /// (inside a tick).
+    fn lent<T>(&mut self, f: impl FnOnce(&mut Self) -> T) -> T {
+        if crate::random::lent() {
+            return f(self);
+        }
+        let mut random = self.random;
+        let out = crate::random::lend(&mut random, || f(self));
+        self.random = random;
+        out
+    }
+
     /// (Re)build the course state from the loaded course; keeps lives.
     fn reset_course(&mut self) {
+        self.lent(Self::reset_course_lent);
+    }
+
+    fn reset_course_lent(&mut self) {
+        // the play scene's area init seeds the course generator with 0 [obs v3.0.3 0x7100e489c0]
+        crate::random::reset(&mut self.random, crate::random::Random::course());
         self.area = 0;
         self.stash = None;
         self.transit = None;
@@ -1129,15 +1147,10 @@ impl World {
         (x >> 8) as f32 / (1u32 << 24) as f32
     }
 
-    /// A draw 0 ≤ r < n from the course generator: the next xorshift word scaled by n, as the
-    /// game's callers do ((word × n) >> 32).
+    /// A draw 0 ≤ r < n from the course generator ((word × n) >> 32, as the game's callers).
+    #[track_caller]
     fn course_rand(&mut self, n: u32) -> u32 {
-        let s = &mut self.course_rng;
-        let t = s[0] ^ (s[0] << 11);
-        let w = s[3];
-        let next = t ^ (t >> 8) ^ w ^ (w >> 19);
-        *s = [s[1], s[2], w, next];
-        ((next as u64 * n as u64) >> 32) as u32
+        crate::random::with(&mut self.random, |r| r.below(n))
     }
 
     fn add_score(&mut self, points: u32, x: f32, y: f32) {
@@ -2121,7 +2134,12 @@ impl World {
         SCORE_TABLE.get(n as usize + 1).copied().unwrap_or(ONE_UP)
     }
 
+    /// One frame. The course generator is lent to everything that runs in it (random.rs).
     pub fn step(&mut self, input: Input) {
+        self.lent(|w| w.step_tick(input));
+    }
+
+    fn step_tick(&mut self, input: Input) {
         let input = if self.upside_down() {
             // swap Up and Down
             let b = input.buttons & !(input::UP | input::DOWN);
@@ -4662,6 +4680,7 @@ impl World {
             if walks && (below.is_solid() || below == Cell::SemiTop) {
                 a.on_ground = true;
             }
+            a.creation_draws(self.style);
             if s.kind == Kind::Blooper && s.alt {
                 let id = self.next_id;
                 self.add_actor(a.clone());
@@ -11803,13 +11822,12 @@ mod tests {
         lvl.spawns.push(spawn(Kind::Lakitu, 200.0, 160.0));
         let mut w = World::with_level(lvl);
         w.player.x = 150.0;
+        // (out of the eggs' harm: which throw lands on him depends on the course's draws)
+        w.player.invuln = i32::MAX;
         let mut spinies = 0;
         for _ in 0..400 {
             w.step(Input::default());
             spinies = spinies.max(w.actors.iter().filter(|a| a.kind == Kind::Spiny).count());
-            if !w.player.alive() {
-                break;
-            }
         }
         assert!(spinies >= 1);
     }
