@@ -2806,7 +2806,8 @@ impl Actor {
     /// px, or none: if the floor is within 4 px of his feet at the front edge he slides on,
     /// else he looks 16 px further: solid at his feet + 4 there wakes him, floor within 4 px
     /// there lets him slide on, anything else (a drop, a pit, lava) wakes him (ShellWakeup).
-    /// [inf: slopes under the front edge are not followed]
+    /// [inf: a slope's surface counts as floor for every ray (`jr_floor`); the game tilts the
+    /// ±4 ray by the floor's angle]
     fn jr_shell_ledge_wakes(&self, level: &Level) -> bool {
         let f = self.dir as f32;
         let front = self.x + 6.0 * self.scale() * f;
@@ -2815,22 +2816,24 @@ impl Actor {
         let mut k = -0.5_f32;
         while k >= -8.0 {
             let p = self.y + 16.0 * k + 2.0;
-            if floor_in(level, front, self.y, p).is_some() {
+            if jr_floor(level, front, self.y, p, floor_in).is_some() {
                 break;
             }
-            if ground_ray(level, front, p, p - 16.0).is_some_and(|hit| !(lava && hit < surface)) {
+            if jr_floor(level, front, p, p - 16.0, ground_ray)
+                .is_some_and(|hit| !(lava && hit < surface))
+            {
                 return false;
             }
             k -= 0.5;
         }
-        if ground_ray(level, front, self.y + 4.0, self.y - 4.0).is_some() {
+        if jr_floor(level, front, self.y + 4.0, self.y - 4.0, ground_ray).is_some() {
             return false;
         }
         let ahead = front + 16.0 * f;
         if level.cell_at(ahead, self.y + 4.0).is_solid() {
             return true;
         }
-        !ground_ray(level, ahead, self.y + 4.0, self.y - 4.0)
+        !jr_floor(level, ahead, self.y + 4.0, self.y - 4.0, ground_ray)
             .is_some_and(|hit| (hit - self.y).abs() < 16.0)
     }
 
@@ -2862,7 +2865,7 @@ impl Actor {
             return false;
         }
         if wall_in(level, top, front + 16.0 * f, front + (16.0 + 2.0 * h) * f)
-            .is_some_and(|face| ground_ray(level, face - 8.0 * f, top, top - h).is_some())
+            .is_some_and(|face| jr_floor(level, face - 8.0 * f, top, top - h, ground_ray).is_some())
         {
             return true;
         }
@@ -2882,7 +2885,7 @@ impl Actor {
             if solid(x, y) {
                 return false;
             }
-            if ground_ray(level, x, y, y - 16.0).is_some() {
+            if jr_floor(level, x, y, y - 16.0, ground_ray).is_some() {
                 return true;
             }
             k -= 0.5;
@@ -3364,6 +3367,25 @@ fn jr_arc_frames(slow: bool, done: impl Fn(f32, f32) -> bool) -> i32 {
         if n > 10_000 {
             return n;
         }
+    }
+}
+
+/// A downward ray for ShellSlide's looks: `ray` over the cells, or a slope's surface in the span
+/// when that is higher.
+fn jr_floor(
+    level: &Level,
+    x: f32,
+    y_hi: f32,
+    y_lo: f32,
+    ray: fn(&Level, f32, f32, f32) -> Option<f32>,
+) -> Option<f32> {
+    let slope = level
+        .slope_at(x)
+        .map(|(y, _)| y)
+        .filter(|&y| (y_lo..=y_hi).contains(&y));
+    match (ray(level, x, y_hi, y_lo), slope) {
+        (Some(a), Some(b)) => Some(a.max(b)),
+        (a, b) => a.or(b),
     }
 }
 
@@ -4432,6 +4454,29 @@ mod tests {
         jr_run(&level, &mut a, |a| a.y < 20.0);
         assert_eq!(a.phase, jr::SHELL);
         assert!(a.y < 20.0);
+    }
+
+    #[test]
+    fn bowser_jr_in_his_shell_slides_down_a_slope() {
+        // a plateau 4 tiles high from tile 16 with a "/" slope down to the floor at tile 10
+        let mut level = Level::flat(80);
+        level.add_test_slope(
+            crate::level::Slope {
+                left: 10,
+                bottom: 1,
+                width: 6,
+                height: 3,
+                rising: true,
+                steep: false,
+            },
+            16,
+            4,
+        );
+        let (level, mut a) = jr_sliding(level, 24.0 * TILE);
+        a.y = 64.0;
+        jr_run(&level, &mut a, |a| a.x < 8.0 * TILE);
+        assert_eq!(a.phase, jr::SHELL, "{} {}", a.x, a.y);
+        assert!(a.x < 8.0 * TILE && a.y < 40.0, "{} {}", a.x, a.y);
     }
 
     #[test]
