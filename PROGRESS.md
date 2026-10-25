@@ -233,7 +233,11 @@ sway, importer and pack 12, the dev cache already at v12).
   the tunnel, `3W_tunnel_items`); a move ending flush on a wall's right face zeroes the speed.
   ✅ the Cat's rolling attack (ClimbRollingAttack 34): unreachable in v3.0.3 — its only way in is
   the action delegate +0x2700 (0x71015e6f80), slot 60, which no state's action list (0x71015e76c0,
-  161 callers) names. Coverage 548 / 550 + 272 / 273 (as main); simulate 0 crashes.
+  161 callers) names. ✅ the view's side hold: 8.0 inside last frame's view in every style (not
+  v1.0.0's 8.1) — the slow autoscroll in SMB1 … 3D World (new whole traces X_ascroll_<style>,
+  `trace-courses` kind `autoscroll`) pushes the standing player 7.5 inside this frame's view;
+  the autoscroll starts at 0.5 on the first update (a reset doesn't move it). Coverage 548 / 550
+  + 272 / 273 (as main); simulate 0 crashes.
 - 🔄 **Inferred-behaviour pass 6** (2026-10-25, branch `infres6`, research specs/inf-inventory.md
   "Pass 6"): ✅ the Propeller Mushroom's own Move (#38, ItemPropeller 0x710134ca70 / 0x710134c3c0 /
   limits 0x710134c880; the Block context's enter 0x710134d550 skips the slow rise): out of a

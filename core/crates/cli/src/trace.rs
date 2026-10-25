@@ -167,7 +167,7 @@ pub fn run_all(course: &[u8], script: &[Input], start: &Start) -> Result<(String
 // Physics test courses
 
 pub const STYLES: [&str; 5] = ["M1", "M3", "MW", "WU", "3W"];
-pub const KINDS: [&str; 42] = [
+pub const KINDS: [&str; 49] = [
     "flat",
     "wall",
     "slope",
@@ -210,8 +210,17 @@ pub const KINDS: [&str; 42] = [
     "tunnel_items",
     "tunnel_form",
     "autoscroll",
+    "wbros",
+    "boo",
+    "lavab",
+    "pbeetle",
+    "stop",
+    "bowser",
+    "bowserjr",
 ];
 
+/// Kinds not made in 3D World (no winged Buzzy Beetle, Spike Top or Bowser Jr there).
+const NOT_W3: [&str; 3] = ["pbeetle", "stop", "bowserjr"];
 /// Kinds made in SMB1 only (the terrain they test is the same in every style).
 const M1_ONLY: [&str; 5] = ["slopejoin", "mushstart", "slopejoins", "sword", "sball"];
 /// Kinds made in NSMBU only (a ground pound in the air needs a style that has one in the
@@ -250,6 +259,7 @@ pub fn course_names() -> Vec<String> {
             if s == "3W" && k == "note"
                 || s != "M1" && M1_ONLY.contains(&k)
                 || s != "3W" && W3_ONLY.contains(&k)
+                || s == "3W" && NOT_W3.contains(&k)
                 || s != "WU" && WU_ONLY.contains(&k)
                 || !matches!(s, "M3" | "MW" | "WU") && LEAF_ONLY.contains(&k)
                 || s != "MW" && MW_ONLY.contains(&k)
@@ -725,6 +735,38 @@ pub fn build_course(name: &str) -> Result<Vec<u8>, String> {
             let (_, sh) = mmk_editor::default_size(91);
             e.place_sized(91, 18, up(3), 5, sh, mmk_editor::DEFAULT_FLAGS)
                 .map_err(err)?;
+        }
+        // whole-course enemy tests (recorded with the player standing at the start): one enemy
+        // or two in the first screen
+        "wbros" | "boo" | "lavab" | "pbeetle" | "stop" | "bowser" | "bowserjr" => {
+            floor(&mut e, 0, len - 1)?;
+            let wings = mmk_editor::DEFAULT_FLAGS | 0x2;
+            let put = |e: &mut Editor, part: i16, x: i32, y: i32, flags: u32| {
+                let (w, h) = mmk_editor::default_size(part);
+                e.place_sized(part, x, y, w, h, flags)
+                    .map(|_| ())
+                    .map_err(err)
+            };
+            match kind {
+                // a winged Hammer Bro (it hops and flies, throwing)
+                "wbros" => put(&mut e, 3, 18, up(1), wings)?,
+                // a Boo (the script turns the player away from it)
+                "boo" => put(&mut e, 41, 18, up(4), mmk_editor::DEFAULT_FLAGS)?,
+                // a Lava Bubble on the floor (it leaps from where it is placed)
+                "lavab" => put(&mut e, 60, 18, up(1), mmk_editor::DEFAULT_FLAGS)?,
+                // a Para-Beetle (winged Buzzy Beetle) in the air
+                "pbeetle" => put(&mut e, 28, 20, up(4), wings)?,
+                // a Spike Top on a 2×2 block (it walks round its corners) and a winged one
+                "stop" => {
+                    for (x, y) in [(16, 1), (17, 1), (16, 2), (17, 2)] {
+                        e.paint_ground(x, up(y)).map_err(err)?;
+                    }
+                    put(&mut e, 40, 16, up(3), mmk_editor::DEFAULT_FLAGS)?;
+                    put(&mut e, 40, 22, up(5), wings)?;
+                }
+                "bowser" => put(&mut e, 62, 18, up(1), mmk_editor::DEFAULT_FLAGS)?,
+                _ => put(&mut e, 98, 18, up(1), mmk_editor::DEFAULT_FLAGS)?,
+            }
         }
         "autoscroll" => {
             // a flat course with the slow autoscroll: the view's left side pushes a player who

@@ -29,6 +29,8 @@ SMCraft is back in development (it was archived in October 2026).
   Super Hammer's swing.
 - Placed Super Leaves, Cape Feathers and Propeller Mushrooms sway down through the floor as in
   the game and are gone once they leave the screen.
+- Autoscrolling courses start and push Mario as in SMM2 (the view's edge holds him 8 px in, in
+  every style).
 - Cat Mario on the ground has the game's lower body: he walks and runs through one-block-high
   gaps, as in SMM2, and only the Cat has the wide reach to walls.
 - Goombas and other walkers ride Seesaws and tip them, hold on past a tilted plank's end as

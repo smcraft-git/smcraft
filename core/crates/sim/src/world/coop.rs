@@ -304,7 +304,7 @@ impl World {
         self.camera.reset_players(&area, centre, &feet, |tx, ty| {
             level.cell(tx, ty) == Cell::Solid
         });
-        self.sync_camera();
+        self.sync_camera(false);
     }
 
     // ------------------------------------------------------------ slots and positions
@@ -1594,7 +1594,7 @@ impl World {
             self.camera
                 .update_players(&area, &targets, |x, y| level.cell(x, y) == Cell::Solid);
         }
-        self.sync_camera();
+        self.sync_camera(true);
     }
 
     /// The bubbles' sprites (drawn over their players).

@@ -898,7 +898,7 @@ impl World {
         } else {
             v.left
         };
-        self.sync_camera();
+        self.sync_camera(false);
         self.activate();
     }
 
@@ -2082,12 +2082,11 @@ impl World {
         } else {
             self.camera_y + VIEW_H + if self.player.in_water { 80.0 } else { 96.0 }
         };
-        // the sides: 8.1 inside (8.0 in 3D World [obs: 3W_formw cat_climb_cam]; v1.0.0 8.1)
-        let m = if self.style == crate::player::Style::W3 {
-            8.0
-        } else {
-            8.1
-        };
+        // the sides: 8.0 inside last frame's view, in every style [obs: Ryujinx traces 3W_formw
+        // cat_climb_cam (a still view: 8.0); X_ascroll_M1 … _3W (the slow autoscroll: the
+        // centre 7.5 inside this frame's view, 8.0 inside last frame's, SMB1 to 3D World alike;
+        // v1.0.0's 8.1 would leave 7.6)]
+        let m = 8.0;
         self.player.view_x = if alone {
             (self.camera_x + m, self.camera_x + VIEW_W - m)
         } else {
@@ -6992,7 +6991,7 @@ impl World {
         let level = &self.level;
         self.camera
             .update(&area, &target, |x, y| level.cell(x, y) == Cell::Solid);
-        self.sync_camera();
+        self.sync_camera(true);
     }
 
     /// Re-centre the camera on the player, as the game does after a respawn or a pipe exit (also
@@ -7015,7 +7014,7 @@ impl World {
         } else {
             v.left
         };
-        self.sync_camera();
+        self.sync_camera(false);
     }
 
     fn camera_area(&self) -> camera::Area {
@@ -7028,7 +7027,10 @@ impl World {
         }
     }
 
-    fn sync_camera(&mut self) {
+    /// The view from the camera; `advance`: a frame's update moves an autoscroll on (a reset
+    /// doesn't: the view's left is 0.5 at the course's first update in the slow autoscroll
+    /// [obs: Ryujinx traces X_ascroll_<style>, the view rect 0x2132267be4]).
+    pub(crate) fn sync_camera(&mut self, advance: bool) {
         let v = self.camera.view(&self.camera_area());
         self.camera_x = v.left;
         self.camera_y = v.bottom;
@@ -7038,13 +7040,13 @@ impl World {
             let s = (self.level.autoscroll - 1) as usize;
             if self.level.vertical {
                 let max_y = (self.level.top - VIEW_H).max(self.level.bottom);
-                if self.player.alive() && self.goal_phase == GoalPhase::None {
+                if advance && self.player.alive() && self.goal_phase == GoalPhase::None {
                     self.autoscroll_pos = (self.autoscroll_pos + [0.28, 0.53, 1.12][s]).min(max_y);
                 }
                 self.camera_y = self.autoscroll_pos;
             } else {
                 let max_x = (self.level.right - VIEW_W).max(self.level.left);
-                if self.player.alive() && self.goal_phase == GoalPhase::None {
+                if advance && self.player.alive() && self.goal_phase == GoalPhase::None {
                     self.autoscroll_pos = (self.autoscroll_pos + [0.5, 1.0, 2.0][s]).min(max_x);
                 }
                 self.camera_x = self.autoscroll_pos;
@@ -7121,7 +7123,9 @@ impl World {
         {
             return;
         }
-        let (l, r) = (self.camera_x + 8.0, self.camera_x + VIEW_W - 8.0);
+        // the view's left pushes the centre 7.5 in, in every style [obs: Ryujinx traces
+        // X_ascroll_M1 … _3W: x = the view's left + 7.5 from the first push (frame 129) on]
+        let (l, r) = (self.camera_x + 7.5, self.camera_x + VIEW_W - 8.0);
         if self.player.x < l {
             self.player.x = l;
             let s = self.player.sensors();
@@ -12529,7 +12533,7 @@ mod tests {
             "1 px/frame: {}",
             w.camera_x - c0
         );
-        assert!(w.player.x >= w.camera_x + 8.0 - 0.01, "pushed along");
+        assert!(w.player.x >= w.camera_x + 7.5 - 0.01, "pushed along");
         assert!(w.player.alive());
     }
 
