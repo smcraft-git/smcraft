@@ -2359,6 +2359,19 @@ impl MakerFlow {
         if self.se.on {
             self.layout_sound_slots();
         }
+        // the sound button's balloon names the palette it switches to: "Sound Effects" from
+        // the parts', "Parts" from the effects' (`Mode_Disp_<Parts|Sound>`, 0x71018e2fe0)
+        // [obs v3.0.3]
+        let label = if self.se.on {
+            "Mode_Disp_Parts"
+        } else {
+            "Mode_Disp_Sound"
+        };
+        if let Some(t) = self.ui.message(PAGE, label)
+            && let Some(p) = &mut self.page
+        {
+            p.text("L_PaletteSet_00/L_SoundBtn_00/T_Balloon_00", &t);
+        }
         self.update_mode_buttons();
         let Some(p) = &mut self.page else { return };
         // the Undodog comes in once there is something to undo [inf]
@@ -4456,7 +4469,8 @@ impl MakerFlow {
         }
         if any {
             self.update_page();
-            if self.mode == Mode::Ring {
+            // (the sound window is a ring too: the parts ring mustn't be laid over it)
+            if self.mode == Mode::Ring && !self.se.on {
                 self.layout_ring(false);
             }
             if self.mode == Mode::Attr {
