@@ -15,6 +15,9 @@ use crate::fmath::DetMath;
 use crate::level::{Cell, Level, TILE};
 use crate::world::{VIEW_H, VIEW_W};
 
+mod styles;
+pub use styles::BowserStyle;
+
 /// The attacks the engine can deliver to a boss.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BossAttack {
@@ -106,6 +109,16 @@ mod bw {
     pub const FLY: u8 = 10;
     pub const HIT_BLOCK: u8 = 11;
     pub const CLOWN: u8 = 12;
+    /// SMW's and NSMBU's own states (actors/bosses/styles.rs).
+    pub const BEFORE_JUMP: u8 = 13;
+    pub const JUMP: u8 = 14;
+    pub const FIRE: u8 = 15;
+    pub const JUMP_FIRE: u8 = 16;
+    pub const FIRE_FALLING: u8 = 17;
+    pub const BEFORE_BIG_JUMP: u8 = 18;
+    pub const SPREAD_FIRE: u8 = 19;
+    pub const WAIT: u8 = 20;
+    pub const IN_AIR: u8 = 21;
 }
 
 /// Bowser's `chain` byte 3 flags.
@@ -701,7 +714,10 @@ impl Actor {
     /// Flames and shuriken: straight flight through terrain. A Bowser flame with a lane
     /// (`home_y`) climbs or dives at half its forward speed until it is within half a step of
     /// the lane, then flies level (BulletKoopaFire ThreeWayFire 0x71003b2380).
-    pub(super) fn step_boss_shot(&mut self) {
+    pub(super) fn step_boss_shot(&mut self, level: &Level) {
+        if self.kind == Kind::BowserFire && self.koopa_flame_step(level) {
+            return;
+        }
         if self.kind == Kind::Shuriken {
             // BulletPunpunShuriken Move (0x71003b9490): while the target (home) is still ahead
             // it turns toward it by at most 2° a frame, staying within 45° of level; speed 1.0
@@ -848,6 +864,9 @@ impl Actor {
     /// The walk-speed setter (0x71006b1d20): 0.3 px/f along `heading`; chase mode 0.7 (SMB1)
     /// / 0.9; off-screen mode 0.
     fn bowser_walk_speed(&mut self, st: usize) {
+        if st >= 2 {
+            return self.koopa_walk_speed(st);
+        }
         self.vx = match self.bowser_mode() {
             2 => BOWSER_CHASE[(st != 0) as usize] * self.heading,
             3 => 0.0,
@@ -877,6 +896,14 @@ impl Actor {
     }
 
     fn bowser_enter(&mut self, state: u8, st: usize) {
+        if st >= 2
+            && matches!(
+                state,
+                bw::WALK | bw::LAND_ON | bw::LITTLE_JUMP | bw::MIDDLE_JUMP | bw::BIG_JUMP
+            )
+        {
+            return self.koopa_enter(state, st, false);
+        }
         let m1 = st == 0;
         self.phase = state;
         match state {
@@ -1028,7 +1055,12 @@ impl Actor {
         }
         let state = self.phase;
         self.spring_over = self.bowser_height_search(level);
-        self.bowser_move(level, st);
+        if st < 2 || !self.koopa_move(level, st) {
+            self.bowser_move(level, st);
+        }
+        if st == 2 {
+            self.koopa_rain();
+        }
         self.bowser_record_step();
         // the fire helper runs in Fall, LandOn, Walk, LittleJump, MiddleJump and a Fly that
         // came from a middle jump (0x71006b1de0)
@@ -1322,17 +1354,27 @@ impl Actor {
     /// little hop. No big jump with a Trampoline over him within its reach
     /// (`bowser_height_search`) [obs v3.0.3 0x7101153750]; in SMB1 / SMB3 no middle jump
     /// either with one within the middle jump's reach (the decision 0x7101152520's slot 0x368,
-    /// 0x710115ab40) [obs v3.0.3]. SMW and NSMBU have their own branch slots: SMW's middle
-    /// branch (0x7101157dd0) picks MiddleJump, LittleJump, MiddleJump (with +0xc1) or Fire at
-    /// random (Fire with such a Trampoline), its big branch (0x7101157c70) BigJump or
-    /// FireFalling; NSMBU's (0x7101152ab0) BeforeJump, Fire or JumpFire (Fire with a Trampoline),
-    /// its big one (0x7101152970) BeforeBigJump or SpreadFire [obs v3.0.3; not ported: the
-    /// engine has none of those states and runs the SMB1 / SMB3 decision for both].
+    /// 0x710115ab40) [obs v3.0.3]. SMW and NSMBU have their own branch slots (SMW 0x7101157dd0
+    /// / 0x7101157c70, NSMBU 0x7101152ab0 / 0x7101152970) and states: actors/bosses/styles.rs.
     fn bowser_counters(&mut self, st: usize) {
         let j = self.byte(0).saturating_sub(1);
         let b = self.byte(1).saturating_sub(1);
         self.set_byte(0, j);
         self.set_byte(1, b);
+        if st >= 2 {
+            // SMW / NSMBU: the big jump is always allowed (slot 0x360 0x7101152aa0); their
+            // own branches (actors/bosses/styles.rs)
+            if b == 0 {
+                self.bowser_reset_big(st);
+                self.koopa_big_branch(st);
+            } else if j == 0 {
+                self.bowser_reset_jump(st);
+                self.koopa_middle_branch(st);
+            } else {
+                self.bowser_walk(st);
+            }
+            return;
+        }
         // (the big jump's allowed test 0x7101153750: no Trampoline over him within its reach)
         let big_ok = st != 0
             && !self.bowser_flag(bwf::BREATHING)
@@ -1355,11 +1397,13 @@ impl Actor {
         }
     }
 
+    /// The decision's walk (slot 0x308): SMB1 Walk, SMB3 LittleJump (0x710115a810), SMW and
+    /// NSMBU Walk (0x71011524d0) [obs v3.0.3].
     fn bowser_walk(&mut self, st: usize) {
-        if st == 0 {
-            self.bowser_enter(bw::WALK, st);
-        } else {
+        if st == 1 {
             self.bowser_enter(bw::LITTLE_JUMP, st);
+        } else {
+            self.bowser_enter(bw::WALK, st);
         }
     }
 
@@ -1380,6 +1424,11 @@ impl Actor {
             }
         }
         self.bowser_reset_jump(st);
+        if st >= 2 {
+            // SMW / NSMBU: their middle branch (the off-screen decision 0x7101152800 runs
+            // slot 0x368)
+            return self.koopa_middle_branch(st);
+        }
         self.bowser_enter(bw::MIDDLE_JUMP, st);
     }
 
@@ -1456,6 +1505,10 @@ impl Actor {
                 .spring_over
                 .is_some_and(|h| h <= self.bowser_reach(level, kind == 2));
         let wall = self.touching_wall(level, 1);
+        if wall && can && st >= 2 {
+            self.koopa_chase_jump(st, kind == 2, None);
+            return true;
+        }
         if wall && can {
             self.bowser_enter(
                 if kind == 2 {
@@ -1469,6 +1522,13 @@ impl Actor {
         }
         let (gap, landing) = self.bowser_gap_ahead(level);
         if gap {
+            if can && !wall && st >= 2 {
+                // SMW / NSMBU: the big jump at the landing speed (slot 0x310)
+                self.bowser_reset_jump(st);
+                self.bowser_reset_big(st);
+                self.koopa_chase_jump(st, true, Some(landing));
+                return true;
+            }
             if can && !wall {
                 self.bowser_reset_jump(st);
                 self.bowser_reset_big(st);
@@ -1612,6 +1672,8 @@ impl Actor {
         self.spring_reach_little = reach(1.1, -0.07);
         self.spring_reach_mid = reach(if wings { 3.4 } else { 3.0 }, BOWSER_GRAVITY);
         self.spring_reach_big = reach(if wings { 6.4 } else { 5.9 }, -0.1875);
+        // the third (+0xac / +0xb0), NSMBU's JumpFire: 3.2 (winged 3.4) at −0.1
+        self.spring_reach_third = reach(if wings { 3.4 } else { 3.2 }, BOWSER_GRAVITY);
         self.spring_reach_body = top + 16.0;
         if self.overhead_units.is_empty() {
             return None;
@@ -1700,7 +1762,12 @@ impl Actor {
     /// jump's time, |d| / 2 · |g| / vy, at most 1.8 (in water × 0.6); with no landing found
     /// 1.8.
     fn bowser_gap_speed(&self, level: &Level, from: (f32, f32)) -> f32 {
-        const MAX: f32 = 1.8;
+        self.bowser_gap_speed_with(level, from, 1.8, BOWSER_GRAVITY)
+    }
+
+    /// The landing speed for a jump of gravity `g` (vy already set), at most `max` (the SMW /
+    /// NSMBU big jump's 2.6, 0x7102318bd4).
+    fn bowser_gap_speed_with(&self, level: &Level, from: (f32, f32), max: f32, g: f32) -> f32 {
         let mut x = ((from.0 - 4.0) * (1.0 / 16.0)).floor() * 16.0 + 40.0;
         let top = ((from.1 + 4.0) * (1.0 / 16.0)).floor() * 16.0 + 2.0;
         let mut land = None;
@@ -1712,11 +1779,11 @@ impl Actor {
             x += 32.0;
         }
         let Some(lx) = land.filter(|&lx| lx.abs() > f32::EPSILON) else {
-            return MAX;
+            return max;
         };
         let d = lx - self.x;
         let half = (d * 0.5).abs();
-        let mut v = (half * BOWSER_GRAVITY / self.vy).abs().min(MAX);
+        let mut v = (half * g / self.vy).abs().min(max);
         if self.wet() {
             v *= 0.6;
         }
@@ -2751,19 +2818,19 @@ impl Actor {
             if floor_in(level, front, self.y, p).is_some() {
                 break;
             }
-            if floor_in(level, front, p, p - 16.0).is_some_and(|hit| !(lava && hit < surface)) {
+            if ground_ray(level, front, p, p - 16.0).is_some_and(|hit| !(lava && hit < surface)) {
                 return false;
             }
             k -= 0.5;
         }
-        if floor_in(level, front, self.y + 4.0, self.y - 4.0).is_some() {
+        if ground_ray(level, front, self.y + 4.0, self.y - 4.0).is_some() {
             return false;
         }
         let ahead = front + 16.0 * f;
         if level.cell_at(ahead, self.y + 4.0).is_solid() {
             return true;
         }
-        !floor_in(level, ahead, self.y + 4.0, self.y - 4.0)
+        !ground_ray(level, ahead, self.y + 4.0, self.y - 4.0)
             .is_some_and(|hit| (hit - self.y).abs() < 16.0)
     }
 
@@ -2795,7 +2862,7 @@ impl Actor {
             return false;
         }
         if wall_in(level, top, front + 16.0 * f, front + (16.0 + 2.0 * h) * f)
-            .is_some_and(|face| floor_in(level, face - 8.0 * f, top, top - h).is_some())
+            .is_some_and(|face| ground_ray(level, face - 8.0 * f, top, top - h).is_some())
         {
             return true;
         }
@@ -2815,7 +2882,7 @@ impl Actor {
             if solid(x, y) {
                 return false;
             }
-            if floor_in(level, x, y, y - 16.0).is_some() {
+            if ground_ray(level, x, y, y - 16.0).is_some() {
                 return true;
             }
             k -= 0.5;
@@ -3300,8 +3367,9 @@ fn jr_arc_frames(slow: bool, done: impl Fn(f32, f32) -> bool) -> i32 {
     }
 }
 
-/// A downward ray at column `x` from `y_hi` to `y_lo`: the top of the first solid it meets
-/// (`y_hi` itself when it starts inside).
+/// A ray at column `x` between `y_hi` and `y_lo` meeting solid terrain from any side: the top
+/// of the first solid going down (`y_hi` itself when it starts inside). Rays that look for
+/// floors only (the game's flag 8) are `ground_ray`, which also stops on one-way tops.
 fn floor_in(level: &Level, x: f32, y_hi: f32, y_lo: f32) -> Option<f32> {
     let mut y = y_hi;
     loop {
@@ -3401,7 +3469,11 @@ impl Actor {
         let face = self.dir > 0;
         Some(match self.kind {
             Kind::Bowser { .. } => {
-                let tex = if self.boss_breathing() {
+                let firing = matches!(
+                    self.phase,
+                    bw::FIRE | bw::JUMP_FIRE | bw::SPREAD_FIRE | bw::FIRE_FALLING
+                );
+                let tex = if self.boss_breathing() || firing {
                     "fire.0"
                 } else if !self.on_ground && self.phase != bw::CLOWN {
                     cycle(&["fall.0", "fall.1"], 5)
@@ -3569,10 +3641,17 @@ mod tests {
         a.vy = 3.0;
         let v = a.bowser_gap_speed(&level, from);
         assert!(v > 0.0 && v <= 1.8, "{v}");
-        // in the chase it middle-jumps across
-        assert!(a.bowser_chase_jumps(&level, 2));
+        // in the chase it middle-jumps across (SMB1 / SMB3)
+        let mut b = a.clone();
+        assert!(a.bowser_chase_jumps(&level, 1));
         assert_eq!(a.phase, bw::MIDDLE_JUMP);
         assert!(a.gap_jump && a.vx > 0.0);
+        // SMW big-jumps it at the landing speed (slot 0x310), NSMBU after BeforeBigJump
+        let mut c = b.clone();
+        assert!(b.bowser_chase_jumps(&level, 2));
+        assert_eq!(b.phase, bw::BIG_JUMP);
+        assert!(c.bowser_chase_jumps(&level, 3));
+        assert_eq!(c.phase, bw::BEFORE_BIG_JUMP);
     }
 
     #[test]
@@ -3730,8 +3809,9 @@ mod tests {
         f.vy = 0.75;
         f.home_y = 69.0;
         f.timer = 600;
+        let level = Level::flat(20);
         for _ in 0..40 {
-            f.step_boss_shot();
+            f.step_boss_shot(&level);
         }
         assert!((f.y - 69.25).abs() < 1e-3, "{}", f.y);
         assert_eq!(f.vy, 0.0);
@@ -4145,8 +4225,9 @@ mod tests {
         let mut s = shots.remove(0);
         assert_eq!(s.dir, -1);
         let mut climb: f32 = 0.0;
+        let flat = Level::flat(20);
         for _ in 0..60 {
-            s.step_boss_shot();
+            s.step_boss_shot(&flat);
             climb = climb.max(s.heading);
             assert!((s.vx.dhypot(s.vy) - 1.0).abs() < 1e-4);
         }

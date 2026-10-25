@@ -2494,6 +2494,7 @@ impl World {
             if let Some(n) = a.take_clown_shot() {
                 born.push(n);
             }
+            born.extend(a.koopa_take_spawns());
             if let Some((x, y, dir)) = rider {
                 (a.x, a.y, a.dir, a.vx, a.vy) = (x, y, dir, 0.0, 0.0);
             }

@@ -14,6 +14,7 @@ mod bosses;
 mod bros;
 pub use bros::BroWing;
 mod budget;
+pub use bosses::BowserStyle;
 pub use budget::{Hold as BudgetHold, Reserve, ThrowBudget};
 mod ceiling;
 mod chute;
@@ -888,11 +889,14 @@ pub struct Actor {
     pub spring_reach_little: f32,
     pub spring_reach_mid: f32,
     pub spring_reach_big: f32,
+    pub spring_reach_third: f32,
     pub spring_reach_body: f32,
     /// Bowser under the water-speed rule: the reaches above are the water ones.
     pub spring_slow: bool,
     /// A thrower's reservation in the area's projectile budget (actors/budget.rs).
     pub budget: Reserve,
+    /// SMW / NSMBU Bowser's own states and falling-fire rain (actors/bosses/styles.rs).
+    pub koopa: BowserStyle,
 }
 
 impl Actor {
@@ -983,9 +987,11 @@ impl Actor {
             spring_reach_little: 0.0,
             spring_reach_mid: 0.0,
             spring_reach_big: 0.0,
+            spring_reach_third: 0.0,
             spring_reach_body: 0.0,
             spring_slow: false,
             budget: Reserve::default(),
+            koopa: BowserStyle::default(),
         }
     }
 
@@ -2417,7 +2423,7 @@ impl Actor {
             | Kind::LinkBomb
             | Kind::CannonShot
             | Kind::RedPowRing => self.step_pu(level),
-            Kind::BowserFire | Kind::Shuriken => self.step_boss_shot(),
+            Kind::BowserFire | Kind::Shuriken => self.step_boss_shot(level),
             Kind::ChainChomp { chained } => self.step_chomp(level, chained),
             Kind::LavaBubble => self.step_lava_bubble(),
             Kind::FishBone => self.step_fish_bone(level),
