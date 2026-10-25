@@ -16,7 +16,7 @@ use crate::liquid::Liquid;
 use crate::snake::Snake;
 
 /// Moving-solid owner ids for snake segments: base + snake × 32 + segment.
-const SNAKE_OWNER: u32 = 0x8000_0000;
+pub(crate) const SNAKE_OWNER: u32 = 0x8000_0000;
 /// Solid owner ids of ! blocks: base + block × 64 + piece.
 const EXCL_OWNER: u32 = 0x9000_0000;
 /// Solid owner ids of tree canopies: base + tree.
@@ -319,7 +319,7 @@ pub struct World {
     stash: Option<AreaStash>,
     /// Vines grown out of blocks (in the current area).
     ivy: Vec<contents::Ivy>,
-    transit: Option<Transit>,
+    pub(crate) transit: Option<Transit>,
     side_hold: SideHold,
     prev_up: bool,
     /// Screen fade for area changes (0 clear … 1 black).
@@ -361,7 +361,7 @@ pub struct World {
     /// The current area's liquid level, if any.
     pub liquid: Option<Liquid>,
     /// Cannon countdowns (current area).
-    cannon_timers: Vec<i32>,
+    pub(crate) cannon_timers: Vec<i32>,
     /// Keys held, and how many of them are Cursed Keys (the SMB1 Key's 0x4 form: Phanto chases
     /// whoever holds one, world/phanto.rs).
     pub keys: u32,
@@ -442,7 +442,7 @@ pub struct World {
     /// ! blocks in the current area.
     pub exclamations: Vec<crate::exclamation::ExclamationBlock>,
     /// Swinging claw holding the player (actor id).
-    held_by: Option<u32>,
+    pub(crate) held_by: Option<u32>,
     /// Desert-night wind: level, frame counter.
     pub wind: f32,
     wind_n: i32,

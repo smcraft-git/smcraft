@@ -226,20 +226,20 @@ fn shared_voices_start_once_a_frame_and_own_voices_hold() {
 
 #[test]
 fn coverage_counts_what_is_not_modelled() {
+    // the filters, a lift, a Bill Blaster and a POW are played (the POW never sets off); a
+    // Seesaw's effect isn't modelled yet
     let c = course(
-        vec![spot(46, 3, 1)],
-        vec![object(8, 3, 3, 23), object(11, 9, 3, 5)],
+        vec![spot(46, 3, 1), spot(47, 4, 1)],
+        vec![
+            object(8, 3, 3, 23),
+            object(11, 9, 3, 5),
+            object(13, 12, 1, 5),
+            object(19, 14, 1, 5),
+            object(91, 20, 4, 5),
+        ],
     );
     let u = unsupported(&c);
-    assert!(
-        u.contains(&"sound effect 46 (audio filter)".to_string()),
-        "{u:?}"
-    );
-    assert!(
-        u.contains(&"sound effect on part 11".to_string()),
-        "a lift: {u:?}"
-    );
-    assert!(!u.iter().any(|m| m.ends_with("part 8")), "{u:?}");
+    assert_eq!(u, vec!["sound effect on part 91".to_string()], "{u:?}");
 }
 
 #[test]
@@ -291,5 +291,217 @@ fn an_enemy_plays_when_defeated() {
     assert_eq!(
         s.cues.iter().map(|c| (c.id, c.source)).collect::<Vec<_>>(),
         vec![(6, Source::Part(PartTrigger::Defeated))]
+    );
+}
+
+#[test]
+fn trigger_kinds_and_their_ranges() {
+    // 0x7101537ab0 / 0x7100e443c0: start within, end beyond
+    let r = |t: Trigger| (t.kind(), t.start_range(), t.end_range());
+    assert_eq!(r(Trigger::Enemy), (1, 200.0, 304.0));
+    assert_eq!(r(Trigger::Held), (4, 200.0, 304.0));
+    assert_eq!(r(Trigger::Object), (5, 160.0, 180.0));
+    assert_eq!(r(Trigger::Ridden), (6, 200.0, 304.0));
+    assert_eq!(Trigger::Spot.end_range(), 160.0);
+    assert!(Trigger::Spot.start_range().is_infinite());
+    let k = |t: PartTrigger| Source::Part(t).trigger().kind();
+    // pipes go through the warp sequence (kind 5), lifts are stood on (6)
+    assert_eq!(k(PartTrigger::Entered), 5);
+    assert_eq!(k(PartTrigger::Out), 5);
+    assert_eq!(k(PartTrigger::Ridden), 6);
+    assert_eq!(k(PartTrigger::Collected), 4);
+    assert_eq!(k(PartTrigger::Caught), 4);
+    assert_eq!(k(PartTrigger::Shot), 1);
+}
+
+#[test]
+fn a_filter_lasts_sixteen_beats_of_the_course_music() {
+    assert_eq!(filter_frames(120.0), 480);
+    assert_eq!(filter_frames(100.0), 576);
+    assert_eq!(filter_frames(112.5), 512);
+    assert_eq!(filter_frames(0.0), 480, "the 120 bpm default");
+    let c = course(vec![spot(46, 8, 1)], vec![]);
+    let mut w = World::from_course(&c);
+    let mut s = SoundParts::new(&c);
+    s.set_tempo(0, [150.0, 200.0]);
+    let mut start = None;
+    let mut end = None;
+    for _ in 0..800 {
+        w.step(Input {
+            buttons: if start.is_none() { input::RIGHT } else { 0 },
+        });
+        s.step(&w);
+        if s.cues.iter().any(|c| c.id == 46) {
+            assert!(start.is_none(), "one start");
+            start = Some(w.tick);
+            assert_eq!(
+                s.filters,
+                vec![Filter {
+                    id: 46,
+                    left: 384,
+                    age: 0
+                }]
+            );
+        }
+        if s.filters_ended.contains(&46) {
+            end = Some(w.tick);
+            assert!(s.filters.is_empty());
+        }
+    }
+    let (start, end) = (start.expect("set off"), end.expect("ran out"));
+    assert_eq!(end - start, 384, "16 beats at 150 bpm");
+}
+
+#[test]
+fn a_lift_plays_once_a_landing() {
+    let c = course(vec![], vec![object(11, 12, 3, 0)]);
+    let mut w = World::from_course(&c);
+    let mut s = SoundParts::new(&c);
+    run(&mut w, &mut s, 0, 2);
+    let lift = w
+        .actors
+        .iter()
+        .find(|a| matches!(a.kind, Kind::Lift { .. }))
+        .map(|a| a.id)
+        .expect("the lift");
+    let tick = |w: &mut World, s: &mut SoundParts, on: bool| {
+        w.player.ride = on.then_some(lift);
+        w.player.on_ground = true;
+        w.tick += 1;
+        s.step(w);
+        s.cues.iter().map(|c| (c.id, c.source)).collect::<Vec<_>>()
+    };
+    assert_eq!(
+        tick(&mut w, &mut s, true),
+        vec![(0, Source::Part(PartTrigger::Ridden))]
+    );
+    assert!(tick(&mut w, &mut s, true).is_empty(), "standing on");
+    // off and on again inside the 8 frames: nothing; after them: again
+    tick(&mut w, &mut s, false);
+    assert!(tick(&mut w, &mut s, true).is_empty());
+    for _ in 0..8 {
+        tick(&mut w, &mut s, false);
+    }
+    assert_eq!(tick(&mut w, &mut s, true).len(), 1);
+}
+
+#[test]
+fn a_key_and_a_bill_blaster() {
+    let c = course(vec![], vec![object(95, 8, 3, 2), object(13, 12, 1, 6)]);
+    let mut w = World::from_course(&c);
+    let mut s = SoundParts::new(&c);
+    run(&mut w, &mut s, 0, 2);
+    let key = w.actors.iter().position(|a| a.kind == Kind::Key).unwrap();
+    w.actors[key].mode = crate::actors::Mode::Dead;
+    w.tick += 1;
+    s.step(&w);
+    assert_eq!(
+        s.cues.iter().map(|c| (c.id, c.source)).collect::<Vec<_>>(),
+        vec![(2, Source::Part(PartTrigger::Collected))]
+    );
+    // a shot leaves the blaster: Laughter at its muzzle (2 tiles tall: 8 px under its top)
+    let b = w.level.blasters[0];
+    let mut shot = crate::actors::Actor::new(Kind::Goomba, b.x, b.y + 16.0);
+    shot.id = 9999;
+    shot.blaster = Some(0);
+    w.actors.push(shot);
+    w.tick += 1;
+    s.step(&w);
+    let cue = s
+        .cues
+        .iter()
+        .find(|c| c.id == 6)
+        .expect("the shot's effect");
+    assert_eq!(cue.source, Source::Part(PartTrigger::Shot));
+    assert_eq!((cue.x, cue.y), (b.x, b.y + b.h as f32 * 16.0 - 8.0));
+    w.tick += 1;
+    s.step(&w);
+    assert!(s.cues.is_empty(), "one effect a shot");
+}
+
+#[test]
+fn an_enemy_s_music_plays_while_it_is_near_and_follows_it() {
+    // a Goomba with Boss Music 5 tiles from the start
+    let c = course(vec![], vec![object(0, 6, 1, 9)]);
+    let mut w = World::from_course(&c);
+    let mut s = SoundParts::new(&c);
+    run(&mut w, &mut s, 0, 2);
+    let m = s
+        .music
+        .expect("within 200 px: the source registry starts it");
+    assert_eq!((m.id, m.trigger), (9, Trigger::Enemy));
+    let g = w
+        .actors
+        .iter()
+        .position(|a| a.kind == Kind::Goomba)
+        .unwrap();
+    assert_eq!(m.actor, Some(w.actors[g].id));
+    w.actors[g].x += 50.0;
+    w.tick += 1;
+    s.step(&w);
+    assert_eq!(s.music.map(|m| m.x), Some(w.actors[g].x), "follows");
+    // defeated, its music stays where it was; 304 px from there it is over
+    w.actors[g].mode = crate::actors::Mode::Dead;
+    w.tick += 1;
+    s.step(&w);
+    assert!(s.music.is_some());
+    w.player.x += 400.0;
+    w.tick += 1;
+    s.step(&w);
+    assert!(s.music.is_none());
+}
+
+#[test]
+fn a_moving_block_and_a_clown_car() {
+    // a winged brick (actor flags 0x2) and a Koopa Clown Car
+    let mut brick = object(4, 10, 4, 3);
+    brick.flags |= 0x2;
+    let c = course(vec![], vec![brick, object(42, 16, 3, 14)]);
+    let mut w = World::from_course(&c);
+    let mut s = SoundParts::new(&c);
+    run(&mut w, &mut s, 0, 2);
+    let block = w
+        .actors
+        .iter()
+        .find(|a| matches!(a.kind, Kind::MovingBlock { .. }))
+        .map(|a| a.id)
+        .expect("the moving block");
+    let car = w
+        .actors
+        .iter()
+        .find(|a| matches!(a.kind, Kind::ClownCar { .. }))
+        .map(|a| a.id)
+        .expect("the car");
+    let cues = |w: &mut World, s: &mut SoundParts| {
+        w.tick += 1;
+        s.step(w);
+        s.cues.iter().map(|c| (c.id, c.source)).collect::<Vec<_>>()
+    };
+    w.player.head_solid = Some(block);
+    assert_eq!(
+        cues(&mut w, &mut s),
+        vec![(3, Source::Part(PartTrigger::Hit))]
+    );
+    assert!(cues(&mut w, &mut s).is_empty(), "one hit");
+    w.player.head_solid = None;
+    w.player.clown = Some(car);
+    assert_eq!(
+        cues(&mut w, &mut s),
+        vec![(14, Source::Part(PartTrigger::Boarded))]
+    );
+    assert_eq!(Source::Part(PartTrigger::Boarded).trigger().kind(), 1);
+}
+
+#[test]
+fn a_pow_sets_off_only_a_music_effect_while_it_is_there() {
+    // a POW with Shock and one with Boss Music, near the start
+    let c = course(vec![], vec![object(19, 5, 1, 0), object(19, 7, 1, 9)]);
+    let mut w = World::from_course(&c);
+    let mut s = SoundParts::new(&c);
+    let cues = run(&mut w, &mut s, 0, 3);
+    assert!(cues.iter().all(|c| c.id == 9), "{cues:?}");
+    assert_eq!(
+        s.music.map(|m| (m.id, m.trigger)),
+        Some((9, Trigger::Enemy))
     );
 }
