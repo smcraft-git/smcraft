@@ -49,7 +49,32 @@ struct Shape {
     material: String,
     texture: Option<String>,
     wrap: [u8; 2],
+    /// The bone it hangs on (it moves with it in a skeletal animation).
+    bone: Option<String>,
     tris: Vec<[f32; 5]>,
+}
+
+/// A skeletal animation as the bones' origins per frame (importer 6).
+#[derive(Clone, Debug, Default)]
+struct Skeletal {
+    frames: f32,
+    looping: bool,
+    bones: HashMap<String, Vec<[f32; 3]>>,
+}
+
+impl Skeletal {
+    /// Bone `b`'s origin at `frame` (the nearest whole frame), if the animation has it.
+    fn at(&self, b: &str, frame: f32) -> Option<[f32; 3]> {
+        let f = if self.looping && self.frames > 0.0 {
+            frame.rem_euclid(self.frames)
+        } else {
+            frame.clamp(0.0, self.frames.max(0.0))
+        };
+        let track = self.bones.get(b)?;
+        track
+            .get((f as usize).min(track.len().checked_sub(1)?))
+            .copied()
+    }
 }
 
 #[derive(Clone, Debug, Default)]
@@ -82,6 +107,9 @@ impl Pattern {
 struct Archive {
     models: HashMap<String, Vec<Shape>>,
     patterns: HashMap<String, Pattern>,
+    /// Each model's bones' rest origins.
+    bones: HashMap<String, HashMap<String, [f32; 3]>>,
+    skeletal: HashMap<String, Skeletal>,
 }
 
 /// `ui/ending/ending.json` of the SMM1 import, parsed.
@@ -113,6 +141,7 @@ impl EndingModels {
                             s["wrap"][0].as_u64().unwrap_or(2) as u8,
                             s["wrap"][1].as_u64().unwrap_or(2) as u8,
                         ],
+                        bone: s["bone"].as_str().map(str::to_string),
                         tris: s["v"]
                             .as_array()
                             .into_iter()
@@ -158,9 +187,50 @@ impl EndingModels {
                     },
                 );
             }
+            let point = |v: &Value| -> [f32; 3] {
+                std::array::from_fn(|k| v[k].as_f64().unwrap_or(0.0) as f32)
+            };
+            for (m, bones) in a["bones"].as_object().into_iter().flatten() {
+                let bones = bones
+                    .as_object()
+                    .into_iter()
+                    .flatten()
+                    .map(|(b, p)| (b.clone(), point(p)))
+                    .collect();
+                arch.bones.insert(m.clone(), bones);
+            }
+            for (n, v) in a["skeletal"].as_object().into_iter().flatten() {
+                let bones = v["bones"]
+                    .as_object()
+                    .into_iter()
+                    .flatten()
+                    .map(|(b, fr)| {
+                        let fr = fr.as_array().into_iter().flatten().map(point).collect();
+                        (b.clone(), fr)
+                    })
+                    .collect();
+                arch.skeletal.insert(
+                    n.clone(),
+                    Skeletal {
+                        frames: v["frames"].as_f64().unwrap_or(0.0) as f32,
+                        looping: v["loop"].as_bool().unwrap_or(false),
+                        bones,
+                    },
+                );
+            }
             out.archives.insert(name.clone(), arch);
         }
         Some(out)
+    }
+
+    /// Bone `bone`'s rest origin in model `model` of `archive`.
+    fn bone(&self, archive: &str, model: &str, bone: &str) -> Option<[f32; 3]> {
+        self.archives
+            .get(archive)?
+            .bones
+            .get(model)?
+            .get(bone)
+            .copied()
     }
 
     fn has(&self, archive: &str) -> bool {
@@ -231,6 +301,12 @@ pub struct RescueInfo {
     pub form: u8,
     /// His Mystery Mushroom costume (SMM1 costume id), if he wore one.
     pub costume: Option<u16>,
+    /// In a Kuribo's Shoe (Some(stiletto)) at the goal.
+    pub shoe: Option<bool>,
+    /// On Yoshi at the goal.
+    pub yoshi: bool,
+    /// Wearing a shell helmet (1 Buzzy, 2 Spiny).
+    pub helmet: Option<u8>,
 }
 
 /// The balloon's line (0x024e8c84, tables 0x10099aec / 0x10099af0): row by difficulty (Easy 1,
@@ -262,6 +338,35 @@ pub enum RescueState {
     Done,
 }
 
+/// The Kuribo's Shoe's hop (0x025eefbc, 0x025eed54): its start speed, gravity and fastest fall
+/// (0x100ba7b0, 0x100ba7f8, 0x100ba7fc) [obs].
+pub const HOP_SPEED: f32 = 2.5;
+pub const HOP_GRAVITY: f32 = -0.34;
+pub const HOP_MAX_FALL: f32 = -4.0;
+/// The animation rate standing on Yoshi (0x025eef40: 1.2, else 1.0) [obs].
+pub const YOSHI_WAIT_RATE: f32 = 1.2;
+/// Small Mario sits this much higher in a shoe than the big forms: his shoe poses stand 8 lower
+/// in their quad, the big ones' head starts on the shoe's top [inf: from the art].
+const SHOE_SMALL_RAISE: f32 = 8.0;
+
+/// What carries the demo Mario: SMB1 and SMB3 draw the Kuribo's Shoe; SMW (and the styles that
+/// take its scene) Yoshi, also for a shoe (0x025ee86c: in MW / WU the shoe is cleared and Yoshi
+/// used) [obs].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Mount {
+    None,
+    Shoe { stiletto: bool },
+    Yoshi,
+}
+
+pub fn mount(style: &str, info: &RescueInfo) -> Mount {
+    match (style, info.shoe, info.yoshi) {
+        ("MW", Some(_), _) | ("MW", _, true) => Mount::Yoshi,
+        ("M1" | "M3", Some(stiletto), _) => Mount::Shoe { stiletto },
+        _ => Mount::None,
+    }
+}
+
 /// `NetEndingDemoScene`: the demo Mario's state machine (class 0x025ed9c4, timer +0x1460) with
 /// the stage, Peach / Toad, the camera and the balloon.
 pub struct RescueScene {
@@ -276,8 +381,16 @@ pub struct RescueScene {
     pub state: RescueState,
     timer: i32,
     x: f32,
-    /// The walk animation's frame (it runs at 1.125 a tick while he walks).
-    run_frame: f32,
+    /// Height above the ground (the shoe's hop).
+    y: f32,
+    vy: f32,
+    /// The shoe stopped hopping (+0x1473).
+    hop_done: bool,
+    /// The fall's `shoes_jump` was set (+0x1471).
+    falling: bool,
+    pub mount: Mount,
+    /// Mario's texture pattern, the tick it started and its rate.
+    anim: (&'static str, i32, f32),
     balloon_out: bool,
     /// SMW's cape form: the cape model too.
     cape: bool,
@@ -314,11 +427,23 @@ impl RescueScene {
             state: RescueState::StartWait,
             timer: START_WAIT,
             x: MARIO_START[0],
-            run_frame: 0.0,
+            y: 0.0,
+            vy: 0.0,
+            hop_done: false,
+            falling: false,
+            mount: mount(style, &info),
+            anim: ("run", 0, RUN_RATE),
             balloon_out: false,
             cape: style == "MW" && info.form == 4,
             stopped_at: 0,
         }
+    }
+
+    /// Tests: the scene with these models.
+    #[cfg(test)]
+    pub(crate) fn with_models(mut self, m: EndingModels) -> Self {
+        self.models = Some(m);
+        self
     }
 
     /// The scene has its models (an SMM1 import from importer 5 on).
@@ -331,6 +456,46 @@ impl RescueScene {
         self.x
     }
 
+    /// Mario's height above the ground (a shoe's hop).
+    pub fn mario_y(&self) -> f32 {
+        self.y
+    }
+
+    /// Mario's texture pattern now.
+    pub fn mario_anim(&self) -> &'static str {
+        self.anim.0
+    }
+
+    fn set_anim(&mut self, name: &'static str, rate: f32) {
+        self.anim = (name, self.tick, rate);
+    }
+
+    /// The shoe's hop, every tick of the walk and the stop (0x025eed54): gravity, the fall's
+    /// `shoes_jump`, and on landing another hop while walking (`shoes_jumpup`), else
+    /// `shoes_wait` and no more [obs].
+    fn hop(&mut self) {
+        if self.hop_done || !matches!(self.mount, Mount::Shoe { .. }) {
+            return;
+        }
+        self.vy = (self.vy + HOP_GRAVITY).max(HOP_MAX_FALL);
+        self.y += self.vy;
+        if !self.falling && self.vy < 0.0 {
+            self.falling = true;
+            self.set_anim("shoes_jump", 1.0);
+        }
+        if self.y < 0.0 {
+            self.y = 0.0;
+            self.falling = false;
+            if self.state == RescueState::Walk {
+                self.vy = HOP_SPEED;
+                self.set_anim("shoes_jumpup", 1.0);
+            } else {
+                self.set_anim("shoes_wait", 1.0);
+                self.hop_done = true;
+            }
+        }
+    }
+
     /// One tick; true when the scene asks for the credits (`NetEndingScene`, 0x02768ba4).
     pub fn step(&mut self) -> bool {
         self.tick += 1;
@@ -340,20 +505,37 @@ impl RescueScene {
                 self.timer -= 1;
                 if self.timer <= 0 {
                     self.state = RescueState::Walk;
+                    // PlayerWalk's enter: a shoe starts hopping (0x025eefbc) [obs]
+                    if matches!(self.mount, Mount::Shoe { .. }) {
+                        self.vy = HOP_SPEED;
+                        self.falling = false;
+                        self.set_anim("shoes_jump", 1.0);
+                    }
                 }
             }
             RescueState::Walk => {
-                self.run_frame += RUN_RATE;
-                if self.x + WALK_SPEED >= MARIO_STOP {
-                    self.x = MARIO_STOP;
+                let stop = self.x + WALK_SPEED >= MARIO_STOP;
+                self.x = if stop {
+                    MARIO_STOP
+                } else {
+                    self.x + WALK_SPEED
+                };
+                self.hop();
+                if stop {
                     self.stopped_at = t;
                     self.state = RescueState::TextInWait;
                     self.timer = TEXT_IN_WAIT;
-                } else {
-                    self.x += WALK_SPEED;
+                    // TextInWait's enter: `wait`, at 1.2 on Yoshi (0x025ef1c8, 0x025eef40)
+                    let rate = if self.mount == Mount::Yoshi {
+                        YOSHI_WAIT_RATE
+                    } else {
+                        1.0
+                    };
+                    self.set_anim("wait", rate);
                 }
             }
             RescueState::TextInWait => {
+                self.hop();
                 self.timer -= 1;
                 if self.timer <= 0 {
                     // the balloon's In (24), then its Wait loop [obs 0x024e8c84 / 0x024e8e68]
@@ -368,6 +550,7 @@ impl RescueScene {
                 }
             }
             RescueState::Stop => {
+                self.hop();
                 self.timer -= 1;
                 if self.timer == STOP_OUT_AT && !self.balloon_out {
                     self.balloon_out = true;
@@ -421,11 +604,16 @@ impl RescueScene {
             })
     }
 
+    /// Model `model` of `archive` (its first without a name) at `at`, with texture pattern
+    /// `pattern` at its frame and skeletal animation `skeletal` at its frame (its shapes move
+    /// with their bones); back faces left out (the rigs' second quads face away).
+    #[allow(clippy::too_many_arguments)]
     fn quads_of(
         &self,
         archive: &str,
         model: Option<&str>,
         pattern: Option<(&str, f32)>,
+        skeletal: Option<(&str, f32)>,
         at: [f32; 2],
         out: &mut Vec<Quad>,
     ) {
@@ -434,16 +622,20 @@ impl RescueScene {
             return;
         };
         // a player archive holds one model
-        let shapes = match model {
-            Some(name) => a.models.get(name),
-            None => a.models.values().next(),
+        let (name, shapes) = match model {
+            Some(name) => match a.models.get_key_value(name) {
+                Some(e) => e,
+                None => return,
+            },
+            None => match a.models.iter().next() {
+                Some(e) => e,
+                None => return,
+            },
         };
-        let Some(shapes) = shapes else {
-            return;
-        };
+        let skel = skeletal.and_then(|(n, f)| a.skeletal.get(n).map(|s| (s, f)));
+        let rest = a.bones.get(name);
         let cam = self.camera();
         let s = 720.0 / VIEW[1];
-        let place = |v: &[f32; 5]| [(v[0] + at[0] - cam[0]) * s, (v[1] + at[1] - cam[1]) * s];
         let pat = pattern.and_then(|(p, f)| self.pattern(archive, p).map(|p| (p, f)));
         let mut drawn: Vec<(f32, Quad)> = Vec::new();
         for sh in shapes {
@@ -453,6 +645,23 @@ impl RescueScene {
             let Some(tex) = tex else { continue };
             let Some(t) = self.ui.cache_mut().texture_file(archive, tex) else {
                 continue;
+            };
+            // the bone's move from its rest origin
+            let d = sh
+                .bone
+                .as_deref()
+                .and_then(|b| {
+                    let (sk, f) = skel?;
+                    let now = sk.at(b, f)?;
+                    let was = rest?.get(b)?;
+                    Some([now[0] - was[0], now[1] - was[1]])
+                })
+                .unwrap_or([0.0, 0.0]);
+            let place = |v: &[f32; 5]| {
+                [
+                    (v[0] + d[0] + at[0] - cam[0]) * s,
+                    (v[1] + d[1] + at[1] - cam[1]) * s,
+                ]
             };
             let wrap = |w: u8| match w {
                 0 => 1,
@@ -466,11 +675,17 @@ impl RescueScene {
                 | (wrap(sh.wrap[1]) << mmk_ui::SHIFT_WRAP_T0);
             for tri in sh.tris.as_chunks::<3>().0 {
                 let (a, b, c) = (&tri[0], &tri[1], &tri[2]);
+                let (pa, pb, pc) = (place(a), place(b), place(c));
+                // counter-clockwise faces the camera (y up)
+                let area = (pb[0] - pa[0]) * (pc[1] - pa[1]) - (pc[0] - pa[0]) * (pb[1] - pa[1]);
+                if area <= 0.0 {
+                    continue;
+                }
                 let z = a[2].max(b[2]).max(c[2]);
                 drawn.push((
                     z,
                     Quad {
-                        pos: [place(a), place(b), place(c), place(c)],
+                        pos: [pa, pb, pc, pc],
                         uv0: [[a[3], a[4]], [b[3], b[4]], [c[3], c[4]], [c[3], c[4]]],
                         color: [[255; 4]; 4],
                         black: [0, 0, 0, 0],
@@ -488,6 +703,11 @@ impl RescueScene {
         out.extend(drawn.into_iter().map(|d| d.1));
     }
 
+    /// The frame of Mario's pattern now.
+    fn anim_frame(&self) -> f32 {
+        (self.tick - self.anim.1) as f32 * self.anim.2
+    }
+
     pub fn draw(&mut self, out: &mut Vec<DrawItem>) {
         let mut quads = Vec::new();
         // the clear colour behind the stage [inf: black; SMB1's stage has its own sky]
@@ -503,7 +723,14 @@ impl RescueScene {
             ..Default::default()
         });
         let stage = format!("{}_Object_peach", self.style);
-        self.quads_of(&stage, Some("field_model"), None, FIELD_AT, &mut quads);
+        self.quads_of(
+            &stage,
+            Some("field_model"),
+            None,
+            None,
+            FIELD_AT,
+            &mut quads,
+        );
         // Peach / Toad: their wait patterns only in SMW and NSMBU (0x025ec70c) [obs]
         let (model, anim) = if self.peach {
             ("peach_model", "wait_peach")
@@ -512,32 +739,116 @@ impl RescueScene {
         };
         let animated = self.style == "MW";
         let pat = animated.then_some((anim, self.tick as f32));
-        self.quads_of(&stage, Some(model), pat, PEACH_AT, &mut quads);
+        self.quads_of(&stage, Some(model), pat, None, PEACH_AT, &mut quads);
         let walking = matches!(self.state, RescueState::StartWait | RescueState::Walk);
-        let at = [self.x, MARIO_START[1]];
+        let mut at = [self.x, MARIO_START[1] + self.y];
+        let frame = self.anim_frame();
+        let mut anim = self.anim.0.to_string();
+        if self.mount == Mount::Yoshi {
+            // Yoshi plays the move by its own names (`run_body`, `wait_body`, the head's
+            // `wait_head`) and carries Mario on his `mario` bone, who plays the rider's
+            // (`yoshi_run`, `yoshi_wait`) [inf: the names; 0x026e8368 hands the move to Yoshi]
+            let body = if walking { "run_body" } else { "wait_body" };
+            let models = self.models.as_ref();
+            let bone = |b: &str| {
+                models
+                    .and_then(|m| m.archives.get(YOSHI))
+                    .and_then(|a| a.skeletal.get(body))
+                    .and_then(|s| s.at(b, frame))
+                    .or_else(|| models.and_then(|m| m.bone(YOSHI, YOSHI_BODY, b)))
+                    .unwrap_or([0.0; 3])
+            };
+            let (head, rider) = (bone("head"), bone("mario"));
+            self.quads_of(
+                YOSHI,
+                Some(YOSHI_BODY),
+                Some((body, frame)),
+                Some((body, frame)),
+                at,
+                &mut quads,
+            );
+            self.quads_of(
+                YOSHI,
+                Some(YOSHI_HEAD),
+                Some(("wait_head", frame)),
+                None,
+                [at[0] + head[0], at[1] + head[1]],
+                &mut quads,
+            );
+            at = [at[0] + rider[0], at[1] + rider[1]];
+            anim = if walking { "yoshi_run" } else { "yoshi_wait" }.to_string();
+        }
+        if let Mount::Shoe { .. } = self.mount
+            && self.info.form == 0
+        {
+            at[1] += SHOE_SMALL_RAISE;
+        }
         if self.cape {
             // the cape over Super Mario: `mt_walk` while he walks, `mt_down` when he stops,
-            // then `mt_wait` (0x025ef1c8, 0x025eeebc) [obs]; drawn behind him at his feet [inf]
+            // then `mt_wait` / on Yoshi `mt_yoshi_wait` (0x025ef1c8, 0x025eeebc) [obs]; drawn
+            // behind him at his feet [inf]
             let cape = if walking {
-                ("mt_walk", self.run_frame)
+                ("mt_walk", frame)
             } else {
                 let since = (self.tick - self.stopped_at) as f32;
                 let down = self.pattern(CAPE, "mt_down").map_or(0.0, |p| p.frames);
                 if since < down {
                     ("mt_down", since)
+                } else if self.mount == Mount::Yoshi {
+                    ("mt_yoshi_wait", 0.0)
                 } else {
                     ("mt_wait", 0.0)
                 }
             };
-            self.quads_of(CAPE, None, Some(cape), at, &mut quads);
+            self.quads_of(CAPE, None, Some(cape), None, at, &mut quads);
         }
-        let anim = if walking {
-            ("run", self.run_frame)
-        } else {
-            ("wait", 0.0)
-        };
         let player = self.player.clone();
-        self.quads_of(&player, None, Some(anim), at, &mut quads);
+        self.quads_of(&player, None, Some((&anim, frame)), None, at, &mut quads);
+        let feet = [self.x, MARIO_START[1] + self.y];
+        if let Mount::Shoe { stiletto } = self.mount {
+            // the shoe over his legs, its wait blinking [inf: drawn in front]
+            let (arch, model) = if stiletto {
+                (
+                    format!("{}_Enemy_kutsu_kuriboB", self.style),
+                    "kutsu_kuriboB_model",
+                )
+            } else {
+                (
+                    format!("{}_Enemy_kutsu_kuriboA", self.style),
+                    "kutsu_kuriboA_model",
+                )
+            };
+            let blink = (!self.hop_done).then_some(("wait", self.tick as f32));
+            let blink = blink.or(Some(("wait", 0.0)));
+            self.quads_of(&arch, Some(model), blink, None, feet, &mut quads);
+        }
+        if let Some(h) = self.info.helmet {
+            // the shell on his head bone (`met` / `togezo`), the large one on the big forms
+            // [inf: L / M by size]; its wobble (0x025eec94) is under a unit, left out
+            let (kind, bone) = if h == 2 {
+                ("Togezo", "togezo")
+            } else {
+                ("Met", "met")
+            };
+            let arch = format!("{}_Player_{kind}_model", self.style);
+            let pm = self.models.as_ref().and_then(|m| {
+                let a = m.archives.get(&self.player)?;
+                let (name, _) = a.models.iter().next()?;
+                m.bone(&self.player, name, bone)
+            });
+            if let Some(p) = pm {
+                let size = if self.info.form == 0 { "M" } else { "L" };
+                let model = format!("Player_{kind}{size}_model");
+                self.quads_of(
+                    &arch,
+                    Some(&model),
+                    None,
+                    None,
+                    [at[0] + p[0], at[1] + p[1]],
+                    &mut quads,
+                );
+            }
+        }
         out.push(DrawItem::Layout {
             ui: self.ui.kind(),
             size: [1280.0, 720.0],
@@ -548,6 +859,11 @@ impl RescueScene {
         }
     }
 }
+
+/// SMW's Yoshi and his two models.
+const YOSHI: &str = "MW_Player_Yoshi";
+const YOSHI_BODY: &str = "Player_Yoshi_Body_model";
+const YOSHI_HEAD: &str = "Player_Yoshi_Head_model";
 
 /// SMW's cape (drawn over Super Mario for the cape form).
 const CAPE: &str = "MW_Player_Mant";
@@ -843,6 +1159,137 @@ mod tests {
         let n = (1..2000).find(|_| s.step()).unwrap();
         assert_eq!(n, 30 + 278 + 30 + 360 + 300);
         assert_eq!(s.camera()[0], 384.0);
+    }
+
+    #[test]
+    fn what_carries_him_goes_by_style() {
+        let shoe = RescueInfo {
+            shoe: Some(true),
+            ..Default::default()
+        };
+        assert_eq!(mount("M1", &shoe), Mount::Shoe { stiletto: true });
+        assert_eq!(mount("MW", &shoe), Mount::Yoshi, "SMW's shoe is Yoshi");
+        let yoshi = RescueInfo {
+            yoshi: true,
+            ..Default::default()
+        };
+        assert_eq!(mount("MW", &yoshi), Mount::Yoshi);
+        assert_eq!(mount("M3", &yoshi), Mount::None);
+        assert_eq!(mount("M1", &RescueInfo::default()), Mount::None);
+    }
+
+    /// In a shoe he hops all the way (2.5 up, −0.34 a tick, −4 at most), each landing on the
+    /// walk hops again (`shoes_jumpup`), the one after it stays (`shoes_wait`); the walk and its
+    /// timers don't change [obs 0x025eed54].
+    #[test]
+    fn the_shoe_hops_to_peach() {
+        let ui = Ui::new(crate::UiKind::Smm1, mmk_ui::UiCache::in_memory(), None);
+        let mut s = RescueScene::new(
+            &ui,
+            RescueInfo {
+                difficulty: 1,
+                shoe: Some(false),
+                ..Default::default()
+            },
+        );
+        let (mut hops, mut top, mut done) = (0, 0.0f32, None);
+        let mut last = s.mario_anim();
+        for t in 1..2000 {
+            let end = s.step();
+            if s.mario_anim() == "shoes_jumpup" && last != "shoes_jumpup" {
+                hops += 1;
+            }
+            last = s.mario_anim();
+            top = top.max(s.mario_y());
+            if end {
+                done = Some(t);
+                break;
+            }
+        }
+        // one hop: 2.16, 1.82, … up (gravity first: 8 high, 15 ticks); 278 ticks of walk
+        assert!((7.9..8.0).contains(&top), "{top}");
+        assert!((15..=20).contains(&hops), "{hops}");
+        assert_eq!(s.mario_anim(), "shoes_wait");
+        assert_eq!(s.mario_y(), 0.0);
+        assert_eq!(done, Some(30 + 278 + 30 + 360 + 120));
+    }
+
+    /// A synthetic Yoshi (importer 6's form): his body and head, and Mario on his `mario` bone
+    /// as his run moves it.
+    #[test]
+    fn mario_rides_on_yoshis_bone() {
+        let quad = |w: f32, h: f32, z: f32| {
+            serde_json::json!([
+                [-w, 0.0, z, 0.0, 1.0],
+                [w, 0.0, z, 1.0, 1.0],
+                [-w, h, z, 0.0, 0.0],
+                [w, 0.0, z, 1.0, 1.0],
+                [w, h, z, 1.0, 0.0],
+                [-w, h, z, 0.0, 0.0]
+            ])
+        };
+        let doc = serde_json::json!({ "archives": {
+            "MW_Player_Yoshi": {
+                "models": {
+                    "Player_Yoshi_Body_model": [{ "material": "m", "texture": "body", "bone": "body", "v": quad(16.0, 32.0, 0.0) }],
+                    "Player_Yoshi_Head_model": [{ "material": "m", "texture": "head", "bone": "texL", "v": quad(16.0, 32.0, 0.6) }],
+                },
+                "bones": { "Player_Yoshi_Body_model": { "body": [5.0, 0.0, 0.0], "head": [5.0, 0.0, 0.0], "mario": [5.0, 0.0, 0.0] } },
+                "skeletal": { "run_body": { "frames": 12, "loop": true, "bones": {
+                    "body": vec![[5.0, 0.0, 0.0]; 13], "head": vec![[5.0, -1.0, 0.0]; 13],
+                    "mario": vec![[-2.0, 9.0, 1.0]; 13] } } },
+            },
+            "MW_Player_SpMarioMdl": {
+                "models": { "Su_mario_model": [{ "material": "m", "texture": "yoshi_run.0", "bone": "body", "v": quad(16.0, 32.0, 0.0) }] },
+            },
+        }});
+        let models = EndingModels::from_json(&doc).unwrap();
+        let mut cache = mmk_ui::UiCache::in_memory();
+        let tex = || mmk_assets::Mtex {
+            format: mmk_assets::MtexFormat::Rgba8,
+            variant: mmk_assets::MtexVariant::Srgb,
+            width: 1,
+            height: 1,
+            channel_select: [2, 3, 4, 5],
+            data: vec![255; 4],
+        };
+        for (g, t) in [
+            ("MW_Player_Yoshi", "body"),
+            ("MW_Player_Yoshi", "head"),
+            ("MW_Player_SpMarioMdl", "yoshi_run.0"),
+        ] {
+            cache.add_texture_file(g, t, tex());
+        }
+        let ui = Ui::new(crate::UiKind::Smm1, cache, None);
+        let mut s = RescueScene::new(
+            &ui,
+            RescueInfo {
+                style: 2,
+                form: 1,
+                yoshi: true,
+                difficulty: 1,
+                ..Default::default()
+            },
+        )
+        .with_models(models);
+        assert_eq!(s.mount, Mount::Yoshi);
+        for _ in 0..200 {
+            s.step();
+        }
+        let mut out = Vec::new();
+        s.draw(&mut out);
+        let DrawItem::Layout { quads, .. } = &out[0] else {
+            panic!("a layout draw");
+        };
+        // the clear colour, Yoshi's body and head, Mario: 2 triangles each
+        assert_eq!(quads.len(), 1 + 2 + 2 + 2, "{}", quads.len());
+        let bottom = |q: &Quad| q.pos.iter().map(|p| p[1]).fold(f32::MAX, f32::min);
+        let px = 720.0 / VIEW[1];
+        let feet = (MARIO_START[1] - s.camera()[1]) * px;
+        // the body on the ground, the head 1 down, Mario 9 up on the saddle
+        assert!((bottom(&quads[1]) - feet).abs() < 0.01);
+        assert!((bottom(&quads[3]) - (feet - px)).abs() < 0.01);
+        assert!((bottom(&quads[5]) - (feet + 9.0 * px)).abs() < 0.01);
     }
 
     /// The owner's import from importer 5 on (skipped without): the stage, Peach and Mario are

@@ -33,8 +33,9 @@ use crate::{ImportError, Progress, Result, read, write};
 
 /// 2: costume stage (`costumes/`, module `smm1_costumes`). 4: UI sounds (`ui/sound/`, module
 /// `smm1_ui_sound`). 5: the ending's models (`ui/ending/`, module `smm1_ending`) and the menus'
-/// music (`ui/sound/bgm/`).
-pub const SMM1_IMPORTER_VERSION: u32 = 5;
+/// music (`ui/sound/bgm/`). 6: the ending's Kuribo's Shoes, Yoshi (with his skeletal
+/// animations) and shell helmets.
+pub const SMM1_IMPORTER_VERSION: u32 = 6;
 
 #[derive(Clone, Debug)]
 pub struct Smm1Config {

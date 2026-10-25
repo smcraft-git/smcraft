@@ -1036,7 +1036,8 @@ impl Front {
     /// Endless Challenge), courseworld, courseworld-list, the online screens (account,
     /// courseworld-leaderboards, courseworld-course-page / -comments / -post / -maker / -play /
     /// -pause / -clear of the list's first server course), challenge, challenge-map,
-    /// challenge-walk, challenge-gameover, challenge-ending[-smb3|-smw|-nsmbu] (the rescue scene),
+    /// challenge-walk, challenge-gameover, challenge-ending[-smb3|-smw|-nsmbu] (the rescue scene;
+    /// -shoe, -yoshi, -helmet: with what Mario brings),
     /// challenge-credits, challenge-costume[-last] (the costume window after the credits, then
     /// the "try another level" window), challenge-pause / -quit (Save & Quit's question) / -clear
     /// / -skip / -card (`difficulty`, `cleared` for the walk), superworld, superworld-title / -map / -walk / -play / -enemy / -retreat / -pipe /
@@ -1303,18 +1304,28 @@ impl Front {
                     "challenge-walk" => f.debug_map(difficulty, false, cleared),
                     "challenge-gameover" => f.debug_game_over(),
                     // the rescue scene in a course of SMB1 (plain), SMB3, SMW, NSMBU
+                    // and with what he may bring: a Kuribo's Shoe (SMB1), Yoshi (SMW), a
+                    // Buzzy shell (SMB3, Super Mario)
                     "challenge-ending"
                     | "challenge-ending-smb3"
                     | "challenge-ending-smw"
-                    | "challenge-ending-nsmbu" => {
+                    | "challenge-ending-nsmbu"
+                    | "challenge-ending-shoe"
+                    | "challenge-ending-yoshi"
+                    | "challenge-ending-helmet" => {
                         let style = match s {
-                            "challenge-ending-smb3" => 1,
-                            "challenge-ending-smw" => 2,
+                            "challenge-ending-smb3" | "challenge-ending-helmet" => 1,
+                            "challenge-ending-smw" | "challenge-ending-yoshi" => 2,
                             "challenge-ending-nsmbu" => 3,
                             _ => 0,
                         };
                         let lib = cx.host.library();
                         f.debug_ending(difficulty, style, &lib);
+                        f.debug_ending_carry(
+                            (s == "challenge-ending-shoe").then_some(false),
+                            s == "challenge-ending-yoshi",
+                            (s == "challenge-ending-helmet").then_some(1),
+                        );
                     }
                     "challenge-credits" => {
                         let lib = cx.host.library();

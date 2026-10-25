@@ -636,6 +636,9 @@ impl ChallengeFlow {
                     difficulty: self.run.difficulty,
                     form: st.form,
                     costume: st.costume,
+                    shoe: st.shoe,
+                    yoshi: st.yoshi,
+                    helmet: st.helmet,
                 };
                 self.scene = Scene::Rescue(Box::new(RescueScene::new(&self.ui, info)));
             }
@@ -896,6 +899,21 @@ impl ChallengeFlow {
             ..Default::default()
         };
         self.scene = Scene::Rescue(Box::new(RescueScene::new(&self.ui, info)));
+    }
+
+    /// Captures: the rescue scene again with Mario in a shoe, on Yoshi, in a helmet (Super
+    /// Mario with one).
+    pub fn debug_ending_carry(&mut self, shoe: Option<bool>, yoshi: bool, helmet: Option<u8>) {
+        if let Scene::Rescue(r) = &self.scene {
+            let mut info = r.info;
+            info.shoe = shoe;
+            info.yoshi = yoshi;
+            info.helmet = helmet;
+            if helmet.is_some() || yoshi {
+                info.form = 1;
+            }
+            self.scene = Scene::Rescue(Box::new(RescueScene::new(&self.ui, info)));
+        }
     }
 
     /// The staff credits of a finished run on difficulty `d` (captures).

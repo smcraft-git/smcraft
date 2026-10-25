@@ -371,6 +371,11 @@ pub struct CourseStatus {
     /// SMM1 costume (with the Costume form): the 100 Mario ending's rescue scene shows him so.
     pub form: u8,
     pub costume: Option<u16>,
+    /// In a Kuribo's Shoe (Some(stiletto)), on Yoshi, a shell helmet (1 Buzzy, 2 Spiny): the
+    /// rescue scene carries them over too.
+    pub shoe: Option<bool>,
+    pub yoshi: bool,
+    pub helmet: Option<u8>,
 }
 
 /// My Courses slots of the Coursebot (SMM2 has 120, research/specs/coursebot.md A.3).

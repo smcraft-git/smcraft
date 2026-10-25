@@ -1,8 +1,8 @@
 //! Wii U BFRES (FRES version 3, big-endian): the embedded textures (FTEX), and — for SMM1's
 //! flat 2D models (the ending's stage, Peach and Toad, the 2D styles' player models, all quads
 //! facing the camera) — the models' bones, shapes (positions, first UV set, triangles) with
-//! their material's texture, texture SRT and wrap modes, and the texture-pattern animations
-//! (FTXP).
+//! their material's texture, texture SRT and wrap modes, the texture-pattern animations
+//! (FTXP) and the skeletal ones (FSKA: the rigs move their quads' bones).
 //!
 //! Layout (from the public Wii U BFRES descriptions): the header holds 12 relative offsets to
 //! index groups (`0x20 + 4·i`) and their entry counts (u16 at `0x50 + 2·i`); group 1 lists the
@@ -506,6 +506,182 @@ pub fn tex_patterns(file: &[u8]) -> Result<Vec<TexPattern>> {
         out.push(p);
     }
     Ok(out)
+}
+
+/// A skeletal animation (FSKA): per animated bone, its base scale / rotation / translation and
+/// curves over some of their components.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct SkelAnim {
+    pub name: String,
+    pub frames: i32,
+    pub looping: bool,
+    pub bones: Vec<BoneAnim>,
+}
+
+/// One bone's channels: `base` holds scale (0–2), rotation (3–6) and translation (7–9) where the
+/// animation stores them (`None` elsewhere: the bone's rest pose), `curves` the animated ones by
+/// that component index.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct BoneAnim {
+    pub name: String,
+    pub base: [Option<f32>; 10],
+    pub curves: Vec<(usize, AnimCurve)>,
+}
+
+/// An animation curve: keys at `frames`, each segment's coefficients (cubic: 4, linear: 2,
+/// step / baked: 1) already scaled and offset.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct AnimCurve {
+    /// 0 cubic, 1 linear, 2 baked float, 4 step int, 5 baked int, 6 step bool, 7 baked bool.
+    pub kind: u8,
+    pub frames: Vec<f32>,
+    pub keys: Vec<Vec<f32>>,
+}
+
+impl AnimCurve {
+    /// The value at `frame` (held before the first key and after the last).
+    pub fn at(&self, frame: f32) -> f32 {
+        let n = self.frames.len().min(self.keys.len());
+        if n == 0 {
+            return 0.0;
+        }
+        let i = self.frames[..n]
+            .iter()
+            .rposition(|&f| f <= frame)
+            .unwrap_or(0);
+        let k = &self.keys[i];
+        let c0 = k.first().copied().unwrap_or(0.0);
+        let (f0, f1) = (
+            self.frames[i],
+            self.frames.get(i + 1).copied().unwrap_or(f32::MAX),
+        );
+        let t = if f1 > f0 && f1 < f32::MAX {
+            ((frame - f0) / (f1 - f0)).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        match self.kind {
+            0 if k.len() >= 4 => ((k[3] * t + k[2]) * t + k[1]) * t + c0,
+            1 if k.len() >= 2 => c0 + k[1] * t,
+            _ => c0,
+        }
+    }
+}
+
+impl BoneAnim {
+    /// Component `c` (as [`BoneAnim::base`]) at `frame`, else `rest`.
+    pub fn component(&self, c: usize, frame: f32, rest: f32) -> f32 {
+        match self.curves.iter().find(|(k, _)| *k == c) {
+            Some((_, curve)) => curve.at(frame),
+            None => self.base[c].unwrap_or(rest),
+        }
+    }
+}
+
+/// The skeletal animations (FSKA) of a Wii U BFRES (header group 2; FSKA `+0x0C` flags (bit 2
+/// loop), `+0x10` frames, `+0x14` bone animation count, `+0x20` bone animations (0x18 bytes:
+/// flags (base scale / rotation / translation bits 3–5), name `+0x04`, curve count `+0x0A`,
+/// curves `+0x10`, base data `+0x14`); curves (0x24 bytes: flags (frame type bits 0–1, key type
+/// bits 2–3, curve type bits 4–6), key count, target (byte offset of the component: scale
+/// `0x04…`, translation `0x10…`, rotation `0x20…`), start / end, scale, offset, delta, frames
+/// `+0x1C`, keys `+0x20`)) [obs: the SMM1 2D rigs decode this way; the public v3 descriptions].
+pub fn skeletal_anims(file: &[u8]) -> Result<Vec<SkelAnim>> {
+    check_fres(file)?;
+    let r = R(file);
+    let mut out = Vec::new();
+    for (name, ao) in r.header_group(2)? {
+        if file.get(ao..ao + 4) != Some(b"FSKA") {
+            return Err(bad(format!("{name}: not an FSKA")));
+        }
+        let mut a = SkelAnim {
+            name,
+            frames: r.u32(ao + 0x10)? as i32,
+            looping: r.u32(ao + 0x0C)? & 4 != 0,
+            ..Default::default()
+        };
+        let nb = r.u16(ao + 0x14)? as usize;
+        let bones = r.to(ao + 0x20, "bone animations")?;
+        for b in 0..nb {
+            let bo = bones + 0x18 * b;
+            let flags = r.u32(bo)?;
+            let mut ba = BoneAnim {
+                name: r.name(bo + 4)?,
+                ..Default::default()
+            };
+            if let Some(mut d) = r.rel(bo + 0x14)? {
+                for (bit, first, n) in [(0x08, 0, 3), (0x10, 3, 4), (0x20, 7, 3)] {
+                    if flags & bit != 0 {
+                        for k in 0..n {
+                            ba.base[first + k] = Some(r.f32(d + 4 * k)?);
+                        }
+                        d += 4 * n;
+                    }
+                }
+            }
+            let nc = r.u8(bo + 0x0A)? as usize;
+            if nc > 0 {
+                let cs = r.to(bo + 0x10, "curves")?;
+                for c in 0..nc {
+                    let co = cs + 0x24 * c;
+                    let component = match r.u32(co + 4)? {
+                        t @ 0x04..=0x0C => (t as usize - 4) / 4,
+                        t @ 0x10..=0x18 => 7 + (t as usize - 0x10) / 4,
+                        t @ 0x20..=0x2C => 3 + (t as usize - 0x20) / 4,
+                        t => return Err(bad(format!("{}: curve target {t:#x}", ba.name))),
+                    };
+                    ba.curves.push((component, curve(&r, co)?));
+                }
+            }
+            a.bones.push(ba);
+        }
+        out.push(a);
+    }
+    Ok(out)
+}
+
+fn curve(r: &R<'_>, co: usize) -> Result<AnimCurve> {
+    let flags = r.u16(co)?;
+    let nk = r.u16(co + 2)? as usize;
+    let (mut scale, offset) = (r.f32(co + 0x10)?, r.f32(co + 0x14)?);
+    if (flags >> 2) & 3 == 0 && scale == 0.0 {
+        // float keys need no scale
+        scale = 1.0;
+    }
+    let kind = ((flags >> 4) & 7) as u8;
+    let per = match kind {
+        0 => 4,
+        1 => 2,
+        _ => 1,
+    };
+    let (fa, ka) = (r.to(co + 0x1C, "frames")?, r.to(co + 0x20, "keys")?);
+    let mut c = AnimCurve {
+        kind,
+        ..Default::default()
+    };
+    for k in 0..nk {
+        c.frames.push(match flags & 3 {
+            0 => r.f32(fa + 4 * k)?,
+            1 => r.u16(fa + 2 * k)? as i16 as f32 / 32.0,
+            _ => r.u8(fa + k)? as f32,
+        });
+        let mut seg = Vec::with_capacity(per);
+        for j in 0..per {
+            let i = k * per + j;
+            let raw = match (flags >> 2) & 3 {
+                0 => r.f32(ka + 4 * i)?,
+                1 => r.u16(ka + 2 * i)? as i16 as f32,
+                _ => r.u8(ka + i)? as i8 as f32,
+            };
+            // the constant term carries the offset; every coefficient the scale
+            seg.push(if j == 0 {
+                raw * scale + offset
+            } else {
+                raw * scale
+            });
+        }
+        c.keys.push(seg);
+    }
+    Ok(c)
 }
 
 /// The textures of a Wii U BFRES, in index-group order.

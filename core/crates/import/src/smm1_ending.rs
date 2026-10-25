@@ -1,22 +1,31 @@
-//! SMM1 ending import (importer 5): what the 100 Mario rescue scene (`NetEndingDemoScene`,
-//! research/specs/smm1-ending.md §2) draws in the 2D styles — the stage (`field_model`), Peach
-//! and Toad from `Model/<S>_Object_peach.szs`, and the demo Mario's player models with the
-//! texture patterns he uses there (`run`, `wait`, the shoe's and the cape's) — baked into the UI
-//! import as flat triangles, the way the Super World map is (DECISIONS.md "Super World map: flat
-//! quads in the UI pack"): every model of these archives is camera-facing quads [obs data].
+//! SMM1 ending import (importer 5; 6: the shoes, Yoshi, the helmets): what the 100 Mario rescue
+//! scene (`NetEndingDemoScene`, research/specs/smm1-ending.md §2) draws in the 2D styles — the
+//! stage (`field_model`), Peach and Toad from `Model/<S>_Object_peach.szs`, the demo Mario's
+//! player models with the texture patterns he uses there (`run`, `wait`, the shoe's, the cape's,
+//! Yoshi's) and what he may bring from the goal: a Kuribo's Shoe (`<S>_Enemy_kutsu_kuriboA` /
+//! `B`, SMB1 and SMB3), Yoshi (`MW_Player_Yoshi`, SMW) or a shell helmet (`<S>_Player_Met_model`
+//! / `Togezo_model`) — baked into the UI import as flat triangles, the way the Super World map
+//! is (DECISIONS.md "Super World map: flat quads in the UI pack"): every model of these archives
+//! is camera-facing quads [obs data].
 //!
 //! Output (UI import):
 //!
 //! ```text
 //! ui/ending/ending.json   { "version", "archives": { "<archive>": {
 //!                             "models": { "<model>": [ { "material", "texture", "wrap": [s, t],
-//!                                         "v": [[x, y, z, u, v] × 3 per triangle] } ] },
+//!                                         "bone", "v": [[x, y, z, u, v] × 3 per triangle] } ] },
+//!                             "bones": { "<model>": { "<bone>": [x, y, z] } },
+//!                             "skeletal": { "<anim>": { "frames", "loop",
+//!                                           "bones": { "<bone>": [[x, y, z] per frame 0…frames] } } },
 //!                             "patterns": { "<anim>": { "frames", "loop", "textures": [...],
 //!                                         "tracks": { "<material>": { "base", "keys": [[f, i]] } } } } } } }
 //! ui/textures/<archive>/<texture>.mtex
 //! ```
 //! Vertices are model space with the shapes' bones applied (scale, rotation, translation down
-//! the parent chain) and UVs through the material's `tex_srt0` (the Maya-mode matrix).
+//! the parent chain) and UVs through the material's `tex_srt0` (the Maya-mode matrix). `bones`
+//! are the bones' origins in that space at rest, `skeletal` (the archives that move their quads'
+//! bones: Yoshi) the origins over each skeletal animation's frames: a shape moves with its bone
+//! by the difference [obs data: these rigs only translate their bones].
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
@@ -28,8 +37,8 @@ use serde_json::{Map, Value, json};
 use crate::smm1::{Overlay, to_mtex};
 use crate::{Progress, Result, write};
 
-/// Version of `ending.json`.
-pub const ENDING_VERSION: u32 = 1;
+/// Version of `ending.json` (2: the bones, skeletal animations and the new archives).
+pub const ENDING_VERSION: u32 = 2;
 
 /// The archives of `Pack/StaticSkin.pack` the scene uses, by style: the stage with Peach and
 /// Toad, then the player models of the forms SMM1 has in that style (`M1`: small, Super, Fire,
@@ -49,6 +58,10 @@ pub const ARCHIVES: [(&str, &[&str]); 3] = [
             "M1_Player_SlimMarioMdl",
             "M1_Player_CharaMdl",
             "M1_Player_CommonAnm",
+            "M1_Enemy_kutsu_kuriboA",
+            "M1_Enemy_kutsu_kuriboB",
+            "M1_Player_Met_model",
+            "M1_Player_Togezo_model",
         ],
     ),
     (
@@ -60,6 +73,10 @@ pub const ARCHIVES: [(&str, &[&str]); 3] = [
             "M3_Player_FireMarioMdl",
             "M3_Player_TnkMarioMdl",
             "M3_Player_CommonAnm",
+            "M3_Enemy_kutsu_kuriboA",
+            "M3_Enemy_kutsu_kuriboB",
+            "M3_Player_Met_model",
+            "M3_Player_Togezo_model",
         ],
     ),
     (
@@ -71,13 +88,18 @@ pub const ARCHIVES: [(&str, &[&str]); 3] = [
             "MW_Player_FireMarioMdl",
             "MW_Player_Mant",
             "MW_Player_CommonAnm",
+            "MW_Player_Yoshi",
+            "MW_Player_Met_model",
+            "MW_Player_Togezo_model",
         ],
     ),
 ];
 
 /// The demo Mario's texture patterns (0x025ee7e8, 0x025eed54, 0x025eeebc): the walk (`run`),
-/// standing (`wait`), the Kuribo's Shoe hops, the cape's [obs]. The stage archives keep all.
-const PLAYER_PATTERNS: [&str; 8] = [
+/// standing (`wait`), the Kuribo's Shoe hops, the cape's (`mt_yoshi_wait` on Yoshi) [obs], and on
+/// Yoshi the rider's (`yoshi_run`, `yoshi_wait` [inf: Yoshi's rider names]). The other archives
+/// keep all.
+const PLAYER_PATTERNS: [&str; 11] = [
     "run",
     "wait",
     "shoes_jump",
@@ -86,7 +108,18 @@ const PLAYER_PATTERNS: [&str; 8] = [
     "mt_walk",
     "mt_down",
     "mt_wait",
+    "mt_yoshi_wait",
+    "yoshi_run",
+    "yoshi_wait",
 ];
+
+/// Archives whose skeletal animations are baked (the others' quads stay at rest).
+const SKELETAL: [&str; 1] = ["MW_Player_Yoshi"];
+
+/// A player archive (its patterns filtered to the demo Mario's).
+fn player_archive(name: &str) -> bool {
+    name.ends_with("Mdl") || name.ends_with("_CommonAnm") || name.ends_with("_Mant")
+}
 
 #[derive(Clone, Debug, Default)]
 pub struct EndingReport {
@@ -156,6 +189,68 @@ fn tex_srt(m: &Material, uv: [f32; 2]) -> [f32; 2] {
     ]
 }
 
+/// The bones' rest pose with `anim`'s channels at `frame` applied.
+fn pose(bones: &[Bone], anim: &bfres_wiiu::SkelAnim, frame: f32) -> Vec<Bone> {
+    let mut out = bones.to_vec();
+    for b in &mut out {
+        let Some(a) = anim.bones.iter().find(|a| a.name == b.name) else {
+            continue;
+        };
+        let c = |i: usize, rest: f32| a.component(i, frame, rest);
+        b.scale = [c(0, b.scale[0]), c(1, b.scale[1]), c(2, b.scale[2])];
+        b.rotate = [
+            c(3, b.rotate[0]),
+            c(4, b.rotate[1]),
+            c(5, b.rotate[2]),
+            c(6, b.rotate[3]),
+        ];
+        b.translate = [
+            c(7, b.translate[0]),
+            c(8, b.translate[1]),
+            c(9, b.translate[2]),
+        ];
+    }
+    out
+}
+
+/// The bones' origins in model space (rest pose, or posed).
+fn origins(bones: &[Bone]) -> Map<String, Value> {
+    bones
+        .iter()
+        .enumerate()
+        .map(|(i, b)| (b.name.clone(), json!(to_model(bones, i, [0.0; 3]))))
+        .collect()
+}
+
+/// A model's skeletal animations as its bones' origins per frame.
+fn bake_skeletal(m: &Model, anims: &[bfres_wiiu::SkelAnim]) -> Map<String, Value> {
+    let mut out = Map::new();
+    for a in anims {
+        if !a
+            .bones
+            .iter()
+            .any(|b| m.bones.iter().any(|mb| mb.name == b.name))
+        {
+            continue;
+        }
+        let mut bones: BTreeMap<String, Vec<Value>> = BTreeMap::new();
+        for f in 0..=a.frames.max(0) {
+            let posed = pose(&m.bones, a, f as f32);
+            for (i, b) in posed.iter().enumerate() {
+                bones
+                    .entry(b.name.clone())
+                    .or_default()
+                    .push(json!(to_model(&posed, i, [0.0; 3])));
+            }
+        }
+        out.insert(
+            a.name.clone(),
+            json!({ "frames": a.frames, "loop": a.looping, "bones": bones }),
+        );
+    }
+    out
+}
+
 /// One model's shapes as triangles.
 pub fn bake_model(m: &Model) -> Value {
     let mut shapes = Vec::new();
@@ -174,6 +269,7 @@ pub fn bake_model(m: &Model) -> Value {
             "material": s.material.name,
             "texture": s.material.texture,
             "wrap": s.material.wrap,
+            "bone": m.bones.get(s.bone as usize).map(|b| b.name.clone()),
             "v": v,
         }));
     }
@@ -239,13 +335,26 @@ pub(crate) fn import_ending(ov: &Overlay, ui: &Path, progress: Progress) -> Resu
                     continue;
                 }
             };
-            let stage = name.ends_with("_Object_peach");
-            let mut wanted: BTreeSet<String> = if stage {
-                BTreeSet::new()
-            } else {
+            let player = player_archive(name);
+            let mut wanted: BTreeSet<String> = if player {
                 common.get(style).cloned().unwrap_or_default()
+            } else {
+                BTreeSet::new()
+            };
+            let skeletal = if SKELETAL.contains(name) {
+                match bfres_wiiu::skeletal_anims(&fres) {
+                    Ok(a) => a,
+                    Err(e) => {
+                        report.skipped.push(format!("{name}: {e}"));
+                        Vec::new()
+                    }
+                }
+            } else {
+                Vec::new()
             };
             let mut out_models = Map::new();
+            let mut out_bones = Map::new();
+            let mut out_skeletal = Map::new();
             for m in &models {
                 for s in &m.shapes {
                     if let Some(t) = &s.material.texture {
@@ -253,10 +362,28 @@ pub(crate) fn import_ending(ov: &Overlay, ui: &Path, progress: Progress) -> Resu
                     }
                 }
                 out_models.insert(m.name.clone(), bake_model(m));
+                out_bones.insert(m.name.clone(), Value::Object(origins(&m.bones)));
+                // the archive's models share the animations: their bones merge
+                for (anim, v) in bake_skeletal(m, &skeletal) {
+                    match out_skeletal.get_mut(&anim) {
+                        Some(Value::Object(e)) => {
+                            if let (Some(Value::Object(have)), Value::Object(new)) =
+                                (e.get_mut("bones"), &v["bones"])
+                            {
+                                for (b, f) in new {
+                                    have.entry(b.clone()).or_insert_with(|| f.clone());
+                                }
+                            }
+                        }
+                        _ => {
+                            out_skeletal.insert(anim, v);
+                        }
+                    }
+                }
             }
             let mut out_patterns = Map::new();
             for p in &patterns {
-                if !stage && !PLAYER_PATTERNS.contains(&p.name.as_str()) {
+                if player && !PLAYER_PATTERNS.contains(&p.name.as_str()) {
                     continue;
                 }
                 wanted.extend(p.textures.iter().cloned());
@@ -295,7 +422,10 @@ pub(crate) fn import_ending(ov: &Overlay, ui: &Path, progress: Progress) -> Resu
             }
             archives.insert(
                 name.to_string(),
-                json!({ "models": out_models, "patterns": out_patterns }),
+                json!({
+                    "models": out_models, "patterns": out_patterns, "bones": out_bones,
+                    "skeletal": out_skeletal,
+                }),
             );
             report.archives += 1;
         }
@@ -336,7 +466,7 @@ mod tests {
         let tmp = std::env::temp_dir().join(format!("mmk-ending-{}", std::process::id()));
         let r = import_ending(&ov, &tmp, &mut |_, _, _| {}).unwrap();
         assert!(r.skipped.is_empty(), "{:?}", r.skipped);
-        assert_eq!(r.archives, 20);
+        assert_eq!(r.archives, 31);
         let doc: Value =
             serde_json::from_slice(&std::fs::read(tmp.join("ending/ending.json")).unwrap())
                 .unwrap();
@@ -377,6 +507,24 @@ mod tests {
             tmp.join("textures/M1_Object_peach/M1_DV_sky.mtex")
                 .is_file()
         );
+        // the shoe: one 16 × 16 quad on its body bone, its wait pattern blinking two textures
+        let shoe = &doc["archives"]["M1_Enemy_kutsu_kuriboA"];
+        let body = &shoe["models"]["kutsu_kuriboA_model"];
+        assert!(body.as_array().unwrap().iter().any(|s| s["bone"] == "body"));
+        assert_eq!(
+            shoe["patterns"]["wait"]["textures"],
+            json!(["wait.0", "wait.1"])
+        );
+        // the helmets sit on Super Mario's `met` bone, 30 up in SMB1
+        let met = &doc["archives"]["M1_Player_SpMarioMdl"]["bones"]["Su_mario_model"]["met"];
+        assert_eq!(met, &json!([0.0, 30.0, 0.0]));
+        // Yoshi's run bobs his head and his rider: the `mario` bone at (−2, 9), then 8 from
+        // frame 4 (run_body's linear steps) [obs data]
+        let yoshi = &doc["archives"]["MW_Player_Yoshi"];
+        let rider = &yoshi["skeletal"]["run_body"]["bones"]["mario"];
+        assert_eq!(rider[0], json!([-2.0, 9.0, 1.0]));
+        assert_eq!(rider[6], json!([-2.0, 8.0, 1.0]));
+        assert!(yoshi["patterns"]["run_body"]["frames"] == 12);
         let _ = std::fs::remove_dir_all(&tmp);
     }
 
