@@ -204,6 +204,9 @@ pub fn change_shows_old(timer: i32) -> bool {
 // Death (DownPose 0x71009e13e0 / DownFall 0x71009e1ea0): 45-frame pose, then a hop at 3.2 with
 // gravity −0.16; the restart request comes 140 frames into the fall.
 pub const DOWN_POSE_FRAMES: i32 = 45;
+/// HammerAttack (state 111): 27 frames on the counter's 27 … 1 (the swing's frames 0 … 26) [obs:
+/// Ryujinx trace 3W_hammer hammer_swing, standing, in the air and walking].
+pub const HAMMER_FRAMES: i32 = 28;
 /// The propeller's spin speed after a Spin press in PropellerFall (0x71015e62a0) [obs].
 const PROP_SPIN_FAST: i32 = 0x1388_0000;
 /// The raccoon's TailSlowFall wag cycle (frames).
@@ -1175,6 +1178,12 @@ impl Player {
             self.pose = Pose::Crouch;
             return;
         }
+        if self.form == Form::Builder && self.attack > 0 {
+            // HammerAttack on the ground: no control, braking to a stop at 0.15 [obs: Ryujinx
+            // trace 3W_hammer hammer_swing: 1.32 → 1.17 → … → 0]
+            self.vx = approach(self.vx, 0.0, 0.15);
+            return;
+        }
         if self.dive_land > 0 {
             self.dive_land -= 1;
             self.vx = 0.0;
@@ -1543,7 +1552,7 @@ impl Player {
                 Form::Raccoon => 18,
                 Form::Cat => CAT_SCRATCH_FRAMES,
                 Form::Cape => 20,
-                _ => 16,
+                _ => HAMMER_FRAMES,
             };
             // (in the air too the scratch is ClimbAttackAir, state 32, with the normal air
             // movement and gravity: no rise [obs: Ryujinx trace 3W_form form_attack])
@@ -2016,8 +2025,8 @@ impl Player {
             self.slow_fall = 0;
         }
         if self.form == Form::Builder && self.attack > 0 && !self.on_ground {
-            // HammerAttack in the air: falls no faster than 1.5, |speed| ≤ 1.125
-            self.vy = self.vy.max(-1.5);
+            // HammerAttack in the air: |speed| ≤ 1.125 [inf]; no fall cap (the normal −4 [obs:
+            // Ryujinx trace 3W_hammer hammer_swing, a swing at a jump's top falling to −3.68])
             self.vx = self.vx.clamp(-1.125, 1.125);
         }
         self.pu_after(inp, jump, vy_before, vx_before, level);

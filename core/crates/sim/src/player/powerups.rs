@@ -285,6 +285,8 @@ pub struct PowerUps {
     prop_first: bool,
     spin_once: bool,
     spin_lock: i32,
+    /// Super Acorn: the twirl of a Spin press in the glide once the boost is used.
+    twirl: bool,
     pub killer_time: i32,
     pub killer: bool,
     pub killer_lock: i32,
@@ -348,6 +350,7 @@ impl Default for PowerUps {
             prop_first: false,
             spin_once: false,
             spin_lock: 0,
+            twirl: false,
             killer_time: KILLER_TIME,
             killer: false,
             killer_lock: 0,
@@ -514,6 +517,7 @@ impl Player {
             self.pu.killer_time = KILLER_TIME;
             self.pu.recling = false;
             self.pu.spin_once = false;
+            self.pu.twirl = false;
         }
         for t in [
             &mut self.pu.crouch_lock,
@@ -1337,8 +1341,9 @@ impl Player {
                 self.pu_finish(inp, level);
                 self.vx = 0.0;
                 return None;
-            } else if self.vy < 0.0 && free && self.wall_slide == 0 {
-                // glide / flutter (0x71015c2f60) from Fall / Jump
+            } else if self.vy < 0.0 && free && self.wall_slide == 0 && !self.spinning {
+                // glide / flutter (0x71015c2f60) from Fall / Jump (not from a spin jump: it
+                // falls on as SpinJump [obs: Ryujinx trace WU_form2 acorn_glide])
                 if self.pu.boost && jump {
                     self.pu.sq = Squirrel::Glide { mode: 0 };
                 } else if !self.pu.boost {
@@ -1435,6 +1440,9 @@ impl Player {
     /// the base, then a coast at gravity −0.12 into the flutter.
     fn squirrel_fly(&mut self, inp: Input, phase: u8, t: i32, level: &Level) {
         let f = self.facing as f32;
+        // (the coast starts the frame after the count has run out [obs: Ryujinx trace WU_form2
+        // acorn_glide: the rise held to the 21st frame, gravity −0.12 from the 22nd])
+        let out = t == 0;
         let t = (t - 1).max(0);
         if phase == 0 {
             let k = if self.low_gravity { 2.94 } else { 4.2 };
@@ -1449,7 +1457,7 @@ impl Player {
             } else {
                 vy_t
             };
-            self.pu.sq = if t == 0 && (self.pu.ang - 67.5).abs() <= 5.625 {
+            self.pu.sq = if out && (self.pu.ang - 67.5).abs() <= 5.625 {
                 Squirrel::Flying { phase: 1, t: 0 }
             } else {
                 Squirrel::Flying { phase: 0, t }
@@ -1499,8 +1507,22 @@ impl Player {
             k * -0.65 + (1.0 - k) * -2.0
         };
         self.pu.glide_cap = approach(self.pu.glide_cap, want, 0.1);
-        let g = self.band_gravity(inp.held(input::JUMP));
-        self.vy = (self.vy + g).max(self.pu.glide_cap);
+        // a Spin press once the boost is used: the twirl eases the fall toward 0 by 15 % of the
+        // speed a frame (at least 0.1) with no gravity, until it starts a frame above −0.1 [obs:
+        // Ryujinx trace WU_form2 acorn_glide: −1.5 → −1.275 … −0.566, then +0.1 a frame to −0.066]
+        // [inf: the end; seen once]
+        if self.pu.spin_edge && !self.pu.boost && self.vy < -0.1 {
+            self.pu.twirl = true;
+        }
+        if self.pu.twirl && self.vy >= -0.1 {
+            self.pu.twirl = false;
+        }
+        if self.pu.twirl {
+            self.vy = approach(self.vy, 0.0, (-0.15 * self.vy).max(0.1));
+        } else {
+            let g = self.band_gravity(inp.held(input::JUMP));
+            self.vy = (self.vy + g).max(self.pu.glide_cap);
+        }
         self.pose = Pose::Jump;
         self.pu_finish(inp, level);
         if self.on_ground {

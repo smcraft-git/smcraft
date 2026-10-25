@@ -5234,7 +5234,8 @@ impl World {
                 crate::player::CAT_SCRATCH_FRAMES - 11..=crate::player::CAT_SCRATCH_FRAMES - 1
             }
             Form::Cape => 1..=19,
-            _ => 1..=4,
+            // (the hammer's frames 11–17 of its 27, counter 27 → 1 [obs: 3W_hammer trace])
+            _ => crate::player::HAMMER_FRAMES - 18..=crate::player::HAMMER_FRAMES - 12,
         };
         let cat_slide = p.form == Form::Cat && p.cat_slide > 0;
         if !(window.contains(&p.attack) || cat_slide)
@@ -5249,7 +5250,11 @@ impl World {
         // 15–17 (TailAttack exec 0x7100a034e0) [obs]
         let frame = 17 - p.attack;
         // cape / hammer animation frame (0 on the swing's first frame)
-        let swing = if p.form == Form::Cape { 19 } else { 15 } - p.attack;
+        let swing = if p.form == Form::Cape {
+            19
+        } else {
+            crate::player::HAMMER_FRAMES - 1
+        } - p.attack;
         let side = match p.form {
             Form::Raccoon if !(4..=14).contains(&frame) => -p.facing,
             // the cape box flips sides every 2 animation frames, starting behind

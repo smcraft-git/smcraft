@@ -163,7 +163,7 @@ pub fn run_all(course: &[u8], script: &[Input], start: &Start) -> Result<(String
 // Physics test courses
 
 pub const STYLES: [&str; 5] = ["M1", "M3", "MW", "WU", "3W"];
-pub const KINDS: [&str; 36] = [
+pub const KINDS: [&str; 37] = [
     "flat",
     "wall",
     "slope",
@@ -200,13 +200,14 @@ pub const KINDS: [&str; 36] = [
     "sword",
     "sball",
     "hammer",
+    "seesaw2",
 ];
 
 /// Kinds made in SMB1 only (the terrain they test is the same in every style).
 const M1_ONLY: [&str; 5] = ["slopejoin", "mushstart", "slopejoins", "sword", "sball"];
 /// Kinds made in NSMBU only (a ground pound in the air needs a style that has one in the
 /// engine).
-const WU_ONLY: [&str; 2] = ["seesaw", "seesawp"];
+const WU_ONLY: [&str; 3] = ["seesaw", "seesawp", "seesaw2"];
 /// Kinds made in SMB3, SMW and NSMBU only (their style power-up is a Leaf, Feather or Propeller).
 const LEAF_ONLY: [&str; 1] = ["itemplace"];
 /// Kinds made in 3D World only (clear pipes are a 3D World part).
@@ -456,7 +457,9 @@ pub fn build_course(name: &str) -> Result<Vec<u8>, String> {
             // 81: SMB2 Mushroom, Frog Suit, Power Balloon, Super Acorn, Boomerang Flower), sword
             // the Master Sword (SMB1: Super Mushroom with flag 0x4), sball the Superball Flower
             // (SMB1: Fire Flower with flag 0x4), hammer the Super Hammer (3D World); in 3D World
-            // on the pen's floor (items there stay put), else in the ? block
+            // and for the SMB1 variants, the Frog Suit and the Power Balloon on the pen's floor
+            // (the pen keeps them; out of a block those never reached the player [obs:
+            // emulator]), else in the ? block
             floor(&mut e, 0, len - 1)?;
             let (bx, by) = (POWER_BLOCK.0, up(POWER_BLOCK.1));
             let (item, flags) = match kind {
@@ -465,7 +468,11 @@ pub fn build_course(name: &str) -> Result<Vec<u8>, String> {
                 "sball" => (34, mmk_editor::DEFAULT_FLAGS | 0x4),
                 _ => (116, mmk_editor::DEFAULT_FLAGS),
             };
-            if style == "3W" {
+            if style == "3W"
+                || kind == "sword"
+                || kind == "sball"
+                || (kind == "form2" && matches!(style, "M3" | "MW"))
+            {
                 let (w, h) = mmk_editor::default_size(item);
                 e.place_sized(item, bx, up(1), w, h, flags).map_err(err)?;
             } else {
@@ -678,6 +685,14 @@ pub fn build_course(name: &str) -> Result<Vec<u8>, String> {
             let (_, sh) = mmk_editor::default_size(91);
             e.place_sized(91, 18, up(3), 5, sh, mmk_editor::DEFAULT_FLAGS)
                 .map_err(err)?;
+        }
+        "seesaw2" => {
+            // the `seesaw` Seesaw with a Goomba placed on its right half (two riders)
+            floor(&mut e, 0, len - 1)?;
+            let (_, sh) = mmk_editor::default_size(91);
+            e.place_sized(91, 18, up(3), 5, sh, mmk_editor::DEFAULT_FLAGS)
+                .map_err(err)?;
+            e.place(0, 21, up(4)).map_err(err)?;
         }
         "seesawp" => {
             // a 5-tile Seesaw pivoting 3 tiles over the floor at x 12 (its plank x 152..232) right
