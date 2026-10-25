@@ -4242,7 +4242,8 @@ impl MakerFlow {
     /// Captures: open a window ("parts", "menu", "save", "style", "theme", "play", "subarea";
     /// "trash": the trash can eating at the centre;
     /// "inparts", "inparts-big": the contents balloon over a ? block;
-    /// "vertical": a vertical sub-area; "water", "water-rising", "water-both", "water-speed",
+    /// "vertical": a vertical sub-area; "hidden", "hidden-play": Hidden Blocks and Spike Traps
+    /// in the course view, in a test play; "water", "water-rising", "water-both", "water-speed",
     /// "water-tip": the Water Level mode in the forest; "scroll", "scroll-nodes", "scroll-tip":
     /// Custom Scroll; "coop": the co-op window, "coop-on", "coop-menu", "coop-carry": co-op
     /// making's two cursors, player 2's part menu, player 2 holding a Goomba).
@@ -4294,6 +4295,25 @@ impl MakerFlow {
                     self.dirty = true;
                 }
                 self.fill_coop_menu();
+            }
+            // a ? Block, three Hidden Blocks and Spike Traps (a row on the ground, two in the air)
+            // on the first screen: the maker's see-through Hidden Blocks; "hidden-play" the same
+            // in a test play (the Spike Traps only)
+            "hidden" | "hidden-play" => {
+                let mut placed = self.editor.place(5, 8, 5).is_ok();
+                for x in 10..13 {
+                    placed &= self.editor.place(29, x, 5).is_ok();
+                }
+                for (x, y) in [(15, 1), (16, 1), (17, 1), (19, 4), (20, 4)] {
+                    placed &= self.editor.place(43, x, y).is_ok();
+                }
+                if !placed {
+                    return false;
+                }
+                self.dirty = true;
+                if what == "hidden-play" {
+                    self.start_test(cx, Some(None));
+                }
             }
             "vertical" => {
                 self.editor.set_area(1);

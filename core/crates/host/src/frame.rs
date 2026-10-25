@@ -24,6 +24,8 @@ pub struct DrawSprite {
     pub layer: u32,
     /// Mirror the image horizontally (swap u0/u1 when drawing).
     pub flip_x: bool,
+    /// Drawn at `mmk_sim::render::SEE_THROUGH_ALPHA` (the sim sprite's `see_through`).
+    pub see_through: bool,
 }
 
 /// Screen rectangle and texture coordinates of a sim sprite: [x, y, w, h, u0, v0, u1, v1].
@@ -177,6 +179,7 @@ impl SpriteResolver {
                 v1: 1.0,
                 layer: s.layer,
                 flip_x: false,
+                see_through: false,
             });
         }
     }
@@ -307,6 +310,7 @@ impl SpriteResolver {
             v1: p[7],
             layer: s.layer,
             flip_x: s.flip_x,
+            see_through: s.see_through,
         }
     }
 }
@@ -395,6 +399,7 @@ mod tests {
             flip_y: false,
             layer: 0,
             roll: 0.0,
+            see_through: false,
         }
     }
 

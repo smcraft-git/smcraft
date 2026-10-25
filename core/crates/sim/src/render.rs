@@ -32,4 +32,14 @@ pub struct Sprite {
     /// A turn about the sprite's middle (x + w/2, y + h/2), degrees counter-clockwise: a rider
     /// in a clear pipe (world/clear_pipe.rs); 0 for everything else.
     pub roll: f32,
+    /// Drawn at [`SEE_THROUGH_ALPHA`]: the Course Maker's Hidden Blocks (`World::edit_view`).
+    pub see_through: bool,
 }
+
+/// The opacity of a see-through sprite: the Hidden Block as the Course Maker shows it. 3D
+/// World's `3W_Object_block_tomei` is the ? Block's texture (`BlockQuestion00_Alb`) blended with
+/// `const_color0` alpha 0.75 (`material_alpha` from it, `gsys_render_state_mode` custom / blend)
+/// where `3W_Object_block_hatena` is opaque [obs data, the models' materials]; the 2D styles'
+/// `<S>_Object_block_tomei` carry the ? Block's material and a placeholder texture the game
+/// swaps at run time [obs data], and take the same look [inf].
+pub const SEE_THROUGH_ALPHA: f32 = 0.75;

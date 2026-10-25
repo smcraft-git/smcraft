@@ -336,6 +336,9 @@ pub struct World {
     pub camera: Camera,
     pub blocks: Blocks,
     pub actors: Vec<Actor>,
+    /// Drawn as the Course Maker's course view, not play: Hidden Blocks show as see-through ?
+    /// Blocks (`sprites`).
+    pub edit_view: bool,
     /// The area's projectile budget (actors/budget.rs).
     budget: crate::actors::ThrowBudget,
     /// Stacked parts in play (world/tower.rs).
@@ -610,6 +613,10 @@ fn field_model(style: &str, theme: u8, night: bool) -> String {
 /// shimmer, coins spin]. The atlas tiles stay for NSMBU and 3D World (meshes by atlas index).
 pub const FIELD_ANIME_PREFIX: &str = "M1_Field_anime_";
 const FIELD_ANIME_COIN: &str = "M1_Field_anime_coin";
+const FIELD_ANIME_TOGE: &str = "M1_Field_anime_toge";
+/// The Course Maker's Hidden Block model (`<S>_Object_block_tomei`, v3.0.3 `_INIT_289`
+/// 0x71008dc060 names it among the parts' models) [obs].
+const HIDDEN_BLOCK_MODEL: &str = "M1_Object_block_tomei";
 
 fn field_anime(style: crate::player::Style, kind: BlockKind, on: bool) -> Option<&'static str> {
     if matches!(style, crate::player::Style::WU | crate::player::Style::W3) {
@@ -777,6 +784,7 @@ impl World {
             initial: level.clone(),
             player: Player::new(level.start.0, level.start.1),
             level,
+            edit_view: false,
             camera_x: 0.0,
             camera_y: 0.0,
             camera: Camera::default(),
@@ -7448,6 +7456,7 @@ impl World {
             flip_y: false,
             layer,
             roll: 0.0,
+            see_through: false,
         };
         self.background_sprites(&mut out);
         // tracks: each rail cell's template code is its field-atlas tile (59-track.md); a
@@ -7474,6 +7483,7 @@ impl World {
             flip_y: false,
             layer: 9,
             roll: 0.0,
+            see_through: false,
         };
         let bare = |px: f32, py: f32| {
             !tracks.has_art((px / TILE).floor() as i32, (py / TILE).floor() as i32)
@@ -7538,18 +7548,46 @@ impl World {
         }
         for (&(bx, by), b) in &self.blocks.map {
             let (px, py) = (bx as f32 * TILE, by as f32 * TILE + b.offset());
-            if b.kind == BlockKind::Hidden || !visible(px, py) {
+            let hidden = b.kind == BlockKind::Hidden;
+            if (hidden && !self.edit_view) || !visible(px, py) {
                 continue;
             }
-            let mut s = match field_anime(self.style, b.kind, self.on_off) {
-                Some(model) => Self::model_sprite(model, "wait.0", px, py, TILE, TILE, false, 12),
-                None => tile(px, py, switch_atlas(b.kind, self.on_off), 12),
+            let mut s = if hidden {
+                self.hidden_block_sprite(px, py, 12)
+            } else {
+                match field_anime(self.style, b.kind, self.on_off) {
+                    Some(model) => {
+                        Self::model_sprite(model, "wait.0", px, py, TILE, TILE, false, 12)
+                    }
+                    None => tile(px, py, switch_atlas(b.kind, self.on_off), 12),
+                }
             };
             if let Some(&(_, t, _)) = self.donut_timers.iter().find(|e| e.0 == (bx, by)) {
                 let n = 48 - t;
                 s.x += [1.0, 2.0, 1.0, 0.0, -1.0, -2.0, -1.0, 0.0][(n as usize) % 8];
             }
             out.push(s);
+        }
+        // Spike Traps: the field animation `<S>_Field_anime_toge_<set>` on each tile, in play and
+        // in the maker. The field loads its animations as `%s_Field_anime_%s_%c` from the 18
+        // parts of the table at 0x7102853b58 ("toge" its 12th) for styles 0–3 only (v3.0.3
+        // 0x7100d9add0) [obs]: 3D World has no Spike Trap.
+        if self.style != crate::player::Style::W3 {
+            for &(x, y) in &self.level.spike_traps {
+                let (px, py) = (x as f32 * TILE, y as f32 * TILE);
+                if visible(px, py) {
+                    out.push(Self::model_sprite(
+                        FIELD_ANIME_TOGE,
+                        "wait.0",
+                        px,
+                        py,
+                        TILE,
+                        TILE,
+                        false,
+                        12,
+                    ));
+                }
+            }
         }
         let two_d = !matches!(
             self.style,
@@ -8340,6 +8378,33 @@ impl World {
         ]
     }
 
+    /// The Course Maker's Hidden Block at tile corner (px, py): the ? Block's look, see-through
+    /// (`SEE_THROUGH_ALPHA`); in 3D World its own model, whose material is the see-through one.
+    fn hidden_block_sprite(&self, px: f32, py: f32, layer: u32) -> Sprite {
+        let mut s = match field_anime(self.style, BlockKind::Question, self.on_off) {
+            _ if self.style == crate::player::Style::W3 => Self::model_sprite(
+                HIDDEN_BLOCK_MODEL,
+                "wait.0",
+                px,
+                py,
+                TILE,
+                TILE,
+                false,
+                layer,
+            ),
+            Some(model) => Self::model_sprite(model, "wait.0", px, py, TILE, TILE, false, layer),
+            None => {
+                let i = switch_atlas(BlockKind::Question, self.on_off);
+                let field = self.field_model;
+                let mut s = Self::model_sprite(field, field, px, py, TILE, TILE, false, layer);
+                s.image.rect = Some(((i % 16) as f32 * TILE, (i / 16) as f32 * TILE, TILE, TILE));
+                s
+            }
+        };
+        s.see_through = true;
+        s
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn model_sprite(
         model: &'static str,
@@ -8365,6 +8430,7 @@ impl World {
             flip_y: false,
             layer,
             roll: 0.0,
+            see_through: false,
         }
     }
 
@@ -8813,7 +8879,11 @@ impl World {
             Kind::MovingBlock {
                 block: BlockKind::Hidden,
                 ..
-            } => return None,
+            } => {
+                return self
+                    .edit_view
+                    .then(|| self.hidden_block_sprite(a.x - 8.0, a.y, 25));
+            }
             Kind::MovingBlock { block, .. } => {
                 let i = crate::level::block_atlas(block);
                 let field = self.field_model;
@@ -9285,6 +9355,7 @@ impl World {
             // behind terrain while sliding through a pipe
             layer,
             roll: 0.0,
+            see_through: false,
         })
     }
 
@@ -9392,6 +9463,48 @@ mod tests {
         assert_eq!(w.coins, 1);
         assert_eq!(w.score, 100);
         assert!(w.level.coins.is_empty());
+    }
+
+    #[test]
+    fn the_maker_shows_hidden_blocks_see_through_and_spike_traps_always_draw() {
+        let at = |w: &World, x: f32, y: f32| -> Vec<Sprite> {
+            w.sprites()
+                .into_iter()
+                .filter(|s| s.x == x && s.y == y)
+                .collect()
+        };
+        for style in ["M1", "WU", "3W"] {
+            let mut lvl = Level::flat(40);
+            lvl.style = style.into();
+            lvl.blocks.push(BlockPlacement {
+                x: 6,
+                y: 5,
+                kind: BlockKind::Hidden,
+                contents: None,
+            });
+            lvl.set(8, 2, Cell::Spike);
+            lvl.spike_traps.push((8, 2));
+            let mut w = World::with_level(lvl);
+            assert!(at(&w, 96.0, 80.0).is_empty(), "{style}: hidden in play");
+            let toge = at(&w, 128.0, 32.0);
+            if style == "3W" {
+                assert!(toge.is_empty(), "3D World has no Spike Trap");
+            } else {
+                assert_eq!(toge.len(), 1, "{style}");
+                assert_eq!(toge[0].image.model, FIELD_ANIME_TOGE);
+            }
+            w.edit_view = true;
+            let hidden = at(&w, 96.0, 80.0);
+            assert_eq!(hidden.len(), 1, "{style}");
+            assert!(hidden[0].see_through);
+            match style {
+                // the ? Block's field animation / atlas tile; 3D World's own model
+                "M1" => assert_eq!(hidden[0].image.model, "M1_Field_anime_block_hatena"),
+                "3W" => assert_eq!(hidden[0].image.model, HIDDEN_BLOCK_MODEL),
+                _ => assert!(hidden[0].image.rect.is_some()),
+            }
+            assert!(w.sprites().iter().filter(|s| s.see_through).count() == 1);
+        }
     }
 
     #[test]
@@ -12315,6 +12428,65 @@ mod tests {
                 .iter()
                 .any(|b| (b.x0 + 8.0 - x1).abs() < 0.01 && !b.top_only),
             "the pivot block moves with it"
+        );
+    }
+
+    #[test]
+    fn a_donut_on_a_track_drops_off_it_and_comes_back_to_its_placement() {
+        let mut lvl = Level::flat(60);
+        lvl.tracks = crate::track::Tracks::new((0..12).map(|k| (9 + 2 * k, 3, 0)));
+        let donut = Kind::MovingBlock {
+            block: BlockKind::Donut,
+            contents: None,
+        };
+        let mut s = spawn(donut, 168.0, 64.0);
+        s.rail = Some(0);
+        lvl.spawns.push(s);
+        let mut w = World::with_level(lvl);
+        run(&mut w, 0, 2);
+        let find = |w: &World| w.actors.iter().position(|a| a.spawn == Some(0)).unwrap();
+        let i = find(&w);
+        let (id, x0) = (w.actors[i].id, w.actors[i].x);
+        run(&mut w, 0, 4);
+        assert!(
+            (w.actors[find(&w)].x - x0 - 3.0).abs() < 0.01,
+            "0.75 a frame"
+        );
+        // the player lands on it: its 48-frame timer runs while it carries him
+        let a = &w.actors[find(&w)];
+        (w.player.x, w.player.y, w.player.vy) = (a.x, a.y + 17.0, 0.0);
+        let mut ridden = 0;
+        for _ in 0..80 {
+            run(&mut w, 0, 1);
+            if w.actors[find(&w)].kind == Kind::Donut {
+                break;
+            }
+            ridden += (w.player.ride == Some(id)) as i32;
+        }
+        let a = &w.actors[find(&w)];
+        assert_eq!((a.kind, a.id, a.rail.is_some()), (Kind::Donut, id, false));
+        assert!((47..=49).contains(&ridden), "dropped after {ridden} frames");
+        // out of the area, hidden for 120 frames, then back where it was placed, growing there
+        let mut gone = 0;
+        let back = (0..400).find(|_| {
+            run(&mut w, 0, 1);
+            gone += w.actors.iter().all(|a| a.spawn != Some(0)) as i32;
+            w.actors
+                .iter()
+                .any(|a| a.spawn == Some(0) && a.kind == donut)
+        });
+        assert!(back.is_some());
+        assert_eq!(gone, 120);
+        let a = &w.actors[find(&w)];
+        assert_eq!((a.x, a.y, a.phase), (168.0, 64.0, 1));
+        assert!(a.solid_box().is_some(), "solid while it grows");
+        run(&mut w, 0, 20);
+        let a = &w.actors[find(&w)];
+        assert_eq!((a.x, a.phase, a.rail.is_some()), (168.0, 0, true));
+        run(&mut w, 0, 4);
+        assert!(
+            (w.actors[find(&w)].x - 171.0).abs() < 0.01,
+            "on its track again"
         );
     }
 

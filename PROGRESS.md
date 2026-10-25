@@ -652,9 +652,11 @@ sway, importer and pack 12, the dev cache already at v12).
     maker spec C17: the ring reads the 2P menu's tables 0x7101922b20 / 0x71019228e0, a page's
     category by its first page), each page keeps its selection (+0x16b8); the effect window's
     eight pages (0x71019227b0), a new selection sounds its effect (0x71018e0c40) · ✅ the Spike
-    Trap's, Hidden Block's and Clear Pipe's pictures (were blank) · ⬜ hidden blocks and spike
-    traps aren't drawn in the maker's course view (nor spike traps in play: the sim draws no art
-    for them)
+    Trap's, Hidden Block's and Clear Pipe's pictures (were blank) · ✅ the course view draws
+    Hidden Blocks as see-through ? Blocks (`World::edit_view`, `Sprite::see_through` at 0.75;
+    3D World its `3W_Object_block_tomei` mesh) and Spike Traps in play and in the maker
+    (`<S>_Field_anime_toge_<set>`, the field's animation tiles [obs v3.0.3 0x7100d9add0]) ·
+    ⬜ captures to compare (smm1lib's report)
   - ✅ left column windows: Game Style, Course Theme, Timer (selector, OK), Autoscroll (none /
     slow / normal / fast), Clear Condition (`Edit_MissionWindow_00`: tabs, condition and amount
     selectors with the HUD's icons and sentences, Remove)
@@ -1433,10 +1435,14 @@ Specs are private (`research/specs/`, gitignored): behaviour in prose/tables, no
   pipes' 0x80 = "holds a part", tracks = SMM2's end words, the effects by their waves);
   converter ✅ (`hundred4`: `mmk import-smm1-course`, `mmk_import::smm1_course`; `<stem>.course`
   + `<stem>.losses.json`): the 76 built-ins all convert, load and simulate (0 crashes, 6 cleared by
-  the scripted run), 71 fully playable — Bowser Jr. (4) and a Donut Block on a track (1) wait on
-  the engine; losses: 23 effects (samba / disco, bird whistle, telephone), 20 Mystery Mushrooms
-  (as Super Mushrooms), 30 start areas widened · ⬜ the SMM1 import offering the built-ins to the
-  library
+  the scripted run), **76 / 76 fully playable** (`smm1lib`, 2026-10-25: Bowser's 0x4 is SMM1's
+  Bowser Jr. → part 98 [obs v208 resolver 0x020ac8ac]; Donut Blocks on tracks / with wings
+  [obs v3.0.3 0x7101389df0 …]); losses: 23 effects (samba / disco, bird whistle, telephone), 20
+  Mystery Mushrooms (as Super Mushrooms), 30 start areas widened · ✅ the SMM1 import (importer 7)
+  converts the 60 sample courses into `<smm1 import>/courses/` with their names from the game's
+  text; the library lists them as built-in courses, collection "SMM1 Sample" (DECISIONS
+  2026-10-25) · ⬜ a front-end place for them (SMM1's Coursebot Sample Courses tab / the 10
+  Mario Challenge pool)
 - ⬜ App screens drawn with the SMM1 layouts (world map walk, intro card, clear, game over, ending)
 
 ### Phase 7 — Expansion ⬜

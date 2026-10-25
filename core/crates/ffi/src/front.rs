@@ -870,6 +870,7 @@ impl Host for FfiHost {
         e.world.show_area(area);
         e.editing = true;
         e.world.player.hidden = area != 0;
+        e.world.edit_view = true;
         e.course = Some(c);
         e.resolver.reset();
         e.planner.reset();

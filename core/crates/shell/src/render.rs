@@ -177,6 +177,16 @@ fn fs_ghost(i: VOut) -> @location(0) vec4<f32> {
     return vec4<f32>(c.rgb, c.a * 0.5);
 }
 
+// the Course Maker's see-through sprites (Hidden Blocks): mmk_sim::render::SEE_THROUGH_ALPHA
+@fragment
+fn fs_see(i: VOut) -> @location(0) vec4<f32> {
+    let c = textureSample(tex, samp, i.uv);
+    if (c.a < 0.01) {
+        discard;
+    }
+    return vec4<f32>(c.rgb, c.a * 0.75);
+}
+
 // texture checks: the texel as is, no blending or discard
 @fragment
 fn fs_copy(i: VOut) -> @location(0) vec4<f32> {
@@ -190,6 +200,8 @@ enum Bind {
     Texture(u32),
     /// A ghost sprite (the replay's player), half transparent.
     Ghost(u32),
+    /// A see-through sprite (`DrawSprite::see_through`).
+    SeeThrough(u32),
     Missing(usize),
     Sky,
     Hud,
@@ -627,6 +639,7 @@ pub fn viewport(w: u32, h: u32, integer: bool) -> (f32, f32, f32, f32, f32) {
 pub struct Renderer {
     pipeline: wgpu::RenderPipeline,
     ghost_pipeline: wgpu::RenderPipeline,
+    see_pipeline: wgpu::RenderPipeline,
     layout: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
     /// Cache texture index → bind group (None: not uploadable, e.g. BC6H without GPU support).
@@ -785,6 +798,14 @@ impl Renderer {
             &layout,
             format,
             "fs_ghost",
+            true,
+            Some(Self::depth_state(false)),
+        );
+        let see_pipeline = Self::pipeline(
+            device,
+            &layout,
+            format,
+            "fs_see",
             true,
             Some(Self::depth_state(false)),
         );
@@ -973,6 +994,7 @@ impl Renderer {
             depth: None,
             pipeline,
             ghost_pipeline,
+            see_pipeline,
             layout,
             sampler,
             textures,
@@ -1536,6 +1558,9 @@ impl Renderer {
                 next_group += 1;
             }
             let bind = match s.texture {
+                Some(t) if self.texture(t as usize).is_some() && s.see_through => {
+                    Bind::SeeThrough(t)
+                }
                 Some(t) if self.texture(t as usize).is_some() => Bind::Texture(t),
                 Some(_) => continue,
                 None if self.draw_missing => Bind::Missing(missing_bucket(s.layer)),
@@ -1554,7 +1579,7 @@ impl Renderer {
                     self.batches.push((0, 0, Bind::Shadow));
                     shadow_placed = true;
                 }
-                if let Bind::Texture(t) = bind {
+                if let Bind::Texture(t) | Bind::SeeThrough(t) = bind {
                     let (ax, ay, bx, by) = (
                         ax + shadow_dx,
                         ay + shadow_dy,
@@ -1795,15 +1820,18 @@ impl Renderer {
                 pass.set_vertex_buffer(0, self.vbuf.slice(..));
                 continue;
             }
-            if let Bind::Ghost(t) = bind {
-                pass.set_pipeline(&self.ghost_pipeline);
+            if let Bind::Ghost(t) | Bind::SeeThrough(t) = bind {
+                pass.set_pipeline(match bind {
+                    Bind::Ghost(_) => &self.ghost_pipeline,
+                    _ => &self.see_pipeline,
+                });
                 pass.set_bind_group(0, self.texture(t as usize).expect("checked above"), &[]);
                 pass.draw(start..start + n, 0..1);
                 pass.set_pipeline(&self.pipeline);
                 continue;
             }
             let group = match bind {
-                Bind::Ghost(_) | Bind::Mesh(_) => continue,
+                Bind::Ghost(_) | Bind::SeeThrough(_) | Bind::Mesh(_) => continue,
                 Bind::Texture(t) => self.texture(t as usize).expect("ensured above"),
                 Bind::Missing(i) => &self.missing[i],
                 Bind::Sky => &self.sky.1,
@@ -1829,6 +1857,12 @@ impl Renderer {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_see_through_shader_draws_at_the_sims_opacity() {
+        let alpha = format!("c.a * {:?}", mmk_sim::render::SEE_THROUGH_ALPHA);
+        assert!(SHADER.contains(&alpha), "fs_see: {alpha}");
+    }
 
     #[test]
     fn viewport_letterboxes_at_whole_scales() {

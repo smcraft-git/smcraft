@@ -1232,6 +1232,22 @@ fn the_clear_pipe_capture_draws_two_pipes_in_3d_world() {
 }
 
 #[test]
+fn the_hidden_block_capture_places_hidden_blocks_and_spike_traps() {
+    let (mut host, mut saves) = (MockHost::default(), Saves::default());
+    let mut m = maker(&mut host, &mut saves, MakerStart::New("M1".into()));
+    assert!(with(&mut host, &mut saves, |cx| m.debug_open(cx, "hidden")));
+    let count = |m: &MakerFlow, id: i16| {
+        m.editor
+            .area()
+            .objects
+            .iter()
+            .filter(|o| o.id == id)
+            .count()
+    };
+    assert_eq!((count(&m, 5), count(&m, 29), count(&m, 43)), (1, 3, 5));
+}
+
+#[test]
 fn a_track_is_drawn_by_dragging_and_a_lift_put_on_it_rides_it() {
     let (mut host, mut saves) = (MockHost::default(), Saves::default());
     let mut m = maker(&mut host, &mut saves, MakerStart::New("M1".into()));

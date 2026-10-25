@@ -728,6 +728,7 @@ impl Maker {
             self.world = preview.unwrap_or_else(|| Self::build(&self.editor));
             // nothing moves while editing: the player waits at the start
             self.world.player.hidden = self.editor.area != 0;
+            self.world.edit_view = true;
         }
         self.world.camera_x = self.cam.0;
         self.world.camera_y = self.cam.1;

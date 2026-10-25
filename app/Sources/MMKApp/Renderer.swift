@@ -53,6 +53,8 @@ final class Renderer: NSObject, MTKViewDelegate {
     let device = MTLCreateSystemDefaultDevice()!
     private lazy var queue = device.makeCommandQueue()!
     private var pipeline: MTLRenderPipelineState?
+    /// Sprites drawn see-through (`MmkSprite.flags` bit 1: the Course Maker's Hidden Blocks).
+    private var seeThroughPipeline: MTLRenderPipelineState?
     private var maskPipeline: MTLRenderPipelineState?
     private var shadePipeline: MTLRenderPipelineState?
     private var shadowMask: MTLTexture?
@@ -107,6 +109,7 @@ final class Renderer: NSObject, MTKViewDelegate {
 
     private static let shaderSource = """
     #include <metal_stdlib>
+    #define SEE_THROUGH_ALPHA \(MMK_SEE_THROUGH_ALPHA)
     using namespace metal;
     struct V { float2 pos; float2 uv; };
     struct O { float4 pos [[position]]; float2 uv; };
@@ -117,6 +120,11 @@ final class Renderer: NSObject, MTKViewDelegate {
         float4 c = t.sample(s, in.uv);
         if (c.a < 0.01) discard_fragment();
         return c;
+    }
+    fragment float4 fsee(O in [[stage_in]], texture2d<float> t [[texture(0)]], sampler s [[sampler(0)]]) {
+        float4 c = t.sample(s, in.uv);
+        if (c.a < 0.01) discard_fragment();
+        return float4(c.rgb, c.a * SEE_THROUGH_ALPHA);
     }
     // the 2D drop shadow: the play field's coverage (most opaque texel wins), then laid over the
     // backdrop in the shadow colour (as the portable shell's `shadow.rs`)
@@ -153,6 +161,8 @@ final class Renderer: NSObject, MTKViewDelegate {
         ca.sourceAlphaBlendFactor = .one
         ca.destinationAlphaBlendFactor = .oneMinusSourceAlpha
         pipeline = try device.makeRenderPipelineState(descriptor: desc)
+        desc.fragmentFunction = lib.makeFunction(name: "fsee")
+        seeThroughPipeline = try device.makeRenderPipelineState(descriptor: desc)
         let mask = MTLRenderPipelineDescriptor()
         mask.vertexFunction = lib.makeFunction(name: "vmain")
         mask.fragmentFunction = lib.makeFunction(name: "fmask")
@@ -326,6 +336,7 @@ final class Renderer: NSObject, MTKViewDelegate {
         verts.reserveCapacity(sprites.count * 6)
         var batchStart = 0
         var batchTexture: UInt32 = .max
+        var batchSeeThrough = false
 
         func flush() {
             let n = verts.count - batchStart
@@ -361,6 +372,7 @@ final class Renderer: NSObject, MTKViewDelegate {
             enc.setDepthStencilState(spriteDepth)
             enc.setVertexBytes(&xform, length: MemoryLayout<SIMD4<Float>>.size, index: 1)
             batchTexture = .max
+            batchSeeThrough = false
         }
 
         for (index, s) in sprites.enumerated() {
@@ -377,9 +389,18 @@ final class Renderer: NSObject, MTKViewDelegate {
                 enc.setRenderPipelineState(pipeline)
                 enc.setVertexBytes(&xform, length: MemoryLayout<SIMD4<Float>>.size, index: 1)
                 batchTexture = .max
+                batchSeeThrough = false
             }
             let key = s.texture == MMK_TEXTURE_NONE ? (drawMissing ? Self.fallbackKey | min(s.layer, 0xFFFF) : MMK_TEXTURE_NONE) : s.texture
-            if key != batchTexture { flush(); batchTexture = key }
+            let seeThrough = s.flags & 2 != 0
+            if key != batchTexture || seeThrough != batchSeeThrough {
+                flush()
+                batchTexture = key
+                if seeThrough != batchSeeThrough, let p = seeThrough ? seeThroughPipeline : pipeline as MTLRenderPipelineState? {
+                    enc.setRenderPipelineState(p)
+                    batchSeeThrough = seeThrough
+                }
+            }
             var (u0, u1) = (s.u0, s.u1)
             if s.flags & 1 != 0 { swap(&u0, &u1) }
             var x0 = s.x.rounded(), y0 = s.y.rounded(), x1 = x0 + s.w, y1 = y0 + s.h
@@ -396,6 +417,7 @@ final class Renderer: NSObject, MTKViewDelegate {
                       SIMD4(x0, y0, u0, s.v1), SIMD4(x1, y1, u1, s.v0), SIMD4(x0, y1, u0, s.v0)]
         }
         flush()
+        if batchSeeThrough { enc.setRenderPipelineState(pipeline) }
         drawMeshes(before: Int.max)
         // the night darkness over the field
         if darkLevel > 0, let shadePipeline, let mask = darkMask {

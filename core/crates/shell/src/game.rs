@@ -148,6 +148,7 @@ impl Game {
         let w = &mut self.session.world;
         w.show_area(area);
         w.player.hidden = area != 0;
+        w.edit_view = true;
     }
 
     /// The front end's maker test play: `course` from its start, or with the player at `start`

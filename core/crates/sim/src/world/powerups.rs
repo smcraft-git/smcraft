@@ -1206,6 +1206,7 @@ impl World {
             flip_y: false,
             layer: 51,
             roll: 0.0,
+            see_through: false,
         });
     }
 }

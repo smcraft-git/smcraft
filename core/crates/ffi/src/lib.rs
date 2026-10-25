@@ -281,6 +281,9 @@ pub struct MmkInput {
 /// `MmkSprite::texture` value for a sprite whose art is not in the asset cache.
 pub const MMK_TEXTURE_NONE: u32 = u32::MAX;
 
+/// The opacity of a see-through sprite (`MmkSprite::flags` bit 1; `mmk_sim::render`).
+pub const MMK_SEE_THROUGH_ALPHA: f32 = mmk_sim::render::SEE_THROUGH_ALPHA;
+
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
 pub struct MmkSprite {
@@ -297,7 +300,8 @@ pub struct MmkSprite {
     pub u1: f32,
     pub v1: f32,
     pub layer: u32,
-    /// bit 0: flip horizontally
+    /// bit 0: flip horizontally; bit 1: see-through, drawn at `MMK_SEE_THROUGH_ALPHA` (the
+    /// Course Maker's Hidden Blocks)
     pub flags: u32,
 }
 
@@ -545,7 +549,7 @@ pub unsafe extern "C" fn mmk_engine_snapshot(engine: *mut MmkEngine, out: *mut M
             u1: d.u1,
             v1: d.v1,
             layer: d.layer,
-            flags: d.flip_x as u32,
+            flags: d.flip_x as u32 | (d.see_through as u32) << 1,
         }));
         *out = MmkSnapshot {
             sprites: e.sprites.as_ptr(),

@@ -179,13 +179,10 @@ const CLEAR_PIPE: i16 = 93;
 /// The Hidden Block's object id.
 const HIDDEN_BLOCK: i16 = 29;
 
-/// The Hidden Block's picture is the ? Block's at this opacity: 3D World's
-/// `3W_Object_block_tomei` is the ? Block's texture (`BlockQuestion00_Alb`) blended with
-/// `const_color0` alpha 0.75 (`material_alpha` from it, `gsys_render_state_mode` custom / blend)
-/// where `3W_Object_block_hatena` is opaque [obs data, the models' materials]. The 2D styles'
-/// `<S>_Object_block_tomei` carry the ? Block's material and a placeholder texture the game
-/// swaps at run time [obs data]; they take the same look [inf].
-pub const HIDDEN_BLOCK_ALPHA: f32 = 0.75;
+/// The Hidden Block's picture is the ? Block's at this opacity, as the Course Maker's course
+/// view draws it (`mmk_sim::render::SEE_THROUGH_ALPHA`: 3D World's `3W_Object_block_tomei`
+/// material [obs data]; the 2D styles' [inf]).
+pub const HIDDEN_BLOCK_ALPHA: f32 = mmk_sim::render::SEE_THROUGH_ALPHA;
 
 /// Art standing in for part `part` (in tile rectangle `r`) where the world draws none: the
 /// Spike Trap (43) is its field animation's first frame (`<S>_Field_anime_toge_<set>`, the
@@ -217,6 +214,7 @@ fn stand_ins(cache: &Cache, style: &str, part: i16, r: mmk_editor::Rect) -> Vec<
                 v1: 1.0,
                 layer: 12,
                 flip_x: false,
+                see_through: false,
             });
         }
     }

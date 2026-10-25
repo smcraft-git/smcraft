@@ -31,6 +31,13 @@ SMCraft is back in development (it was archived in October 2026).
   window has the game's eight pages too, and plays each effect as you move onto it.
 - The Spike Trap, the Hidden Block and the Clear Pipe have their pictures in the part window, the
   palette and player 2's menu (they were blank).
+- The Course Maker's course view shows Hidden Blocks, as see-through ? Blocks, and Spike Traps
+  are drawn in the course and in play (they were invisible).
+- **SMM1's sample courses in the library**: importing SMM1 again converts its built-in sample
+  courses (60 in the latest update) from your own copy into SMM2 courses with their SMM1 names;
+  they are listed with the built-in courses ("SMM1 Sample"). All of SMM1's built-in courses
+  now play in full: Bowser's shaken form is Bowser Jr. (as SMM1 has him), and Donut Blocks ride
+  tracks and fly with wings, drop off when stood on and come back to where they were placed.
 - **The power-ups move as in SMM2**, checked frame by frame against the game: the Super Leaf's
   flight (the P-meter, the flaps, the climb to the top of the view and the drift after), the Cape
   Feather's glide and dives, the Propeller Mushroom's fall spin and drill, the Super Bell's wall

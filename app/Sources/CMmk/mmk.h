@@ -35,8 +35,9 @@ typedef struct {
     float x, y, w, h;           // bottom-left in world px (y up), size px
     float u0, v0, u1, v1;       // texture coords, (0,0) top-left
     uint32_t layer;
-    uint32_t flags;             // bit 0: flip x
+    uint32_t flags;             // bit 0: flip x; bit 1: see-through (MMK_SEE_THROUGH_ALPHA)
 } MmkSprite;                                                           // 44 bytes
+#define MMK_SEE_THROUGH_ALPHA 0.75f    // the Course Maker's Hidden Blocks
 
 typedef struct {
     const MmkSprite *sprites;

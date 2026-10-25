@@ -404,6 +404,8 @@ pub struct Level {
     pub scroll_nodes: Vec<(u8, f32, f32, u8)>,
     /// Blinking blocks (108): tile and phase group (flag 0x4: the opposite group).
     pub blink_blocks: Vec<(i32, i32, bool)>,
+    /// Spike Traps (43): their tiles (each also `Cell::Spike`), for drawing.
+    pub spike_traps: Vec<(i32, i32)>,
     /// Spike blocks (110): bottom-left tile of the 2×2 block and mode (0 timer, 1 out while ON,
     /// 2 out while OFF; see `spike_block_mode`).
     pub spike_blocks: Vec<(i32, i32, u8)>,
@@ -974,6 +976,7 @@ impl Level {
             trees: Vec::new(),
             track_paths: Vec::new(),
             blink_blocks: Vec::new(),
+            spike_traps: Vec::new(),
             spike_blocks: Vec::new(),
             scroll_nodes: Vec::new(),
             pink_coins: Vec::new(),
@@ -1548,6 +1551,7 @@ impl Level {
                 for dx in 0..w {
                     for dy in 0..hgt {
                         lvl.set(tx + dx, ty + dy, Cell::Spike);
+                        lvl.spike_traps.push((tx + dx, ty + dy));
                     }
                 }
                 continue;
@@ -2142,6 +2146,7 @@ impl Level {
             trees: Vec::new(),
             track_paths: Vec::new(),
             blink_blocks: Vec::new(),
+            spike_traps: Vec::new(),
             spike_blocks: Vec::new(),
             scroll_nodes: Vec::new(),
             pink_coins: Vec::new(),
