@@ -56,6 +56,7 @@ pub mod sprites;
 ///     `_Link` / `_USA` versions) and their waves and music streams.
 pub const IMPORTER_VERSION: u32 = 17;
 pub mod smm1;
+pub mod smm1_bgm;
 pub mod smm1_costumes;
 pub mod smm1_ending;
 pub mod smm1_ui_sound;

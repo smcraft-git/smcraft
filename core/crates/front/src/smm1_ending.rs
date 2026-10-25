@@ -192,6 +192,30 @@ pub fn player_model(style: &str, form: u8) -> String {
     format!("{style}_Player_{name}")
 }
 
+/// The rescue scene's music (0x02703680: SLink `EndingPeachBGM` for Normal and up, else
+/// `EndingKinopioBGM`, by the course's style) [obs data]; 3D World takes SMW's [departure].
+pub fn rescue_music(style: u32, peach: bool) -> &'static str {
+    match (style, peach) {
+        (0, _) => "M1_BGM_Ending",
+        (1, true) => "M3_BGM_EndingDemo2",
+        (1, false) => "M3_BGM_EndingDemo1",
+        (3, true) => "WU_STRM_BGM_LAST_BOSS2_HARP",
+        (3, false) => "WU_STRM_BGM_LAST_BOSS_HARP_Dummy",
+        (_, true) => "MW_BGM_Ending2",
+        (_, false) => "SuperMarioWorld_21_RescueEgg",
+    }
+}
+
+/// The staff roll's music (0x027053e0: Normal and Expert `_normal`, Easy and Super Expert
+/// `_easy`) [obs].
+pub fn credits_music(d: usize) -> &'static str {
+    if matches!(d, 1 | 2) {
+        "BGM_100mario_staffroll_normal"
+    } else {
+        "BGM_100mario_staffroll_easy"
+    }
+}
+
 /// What the rescue scene shows, from the run's end.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct RescueInfo {
@@ -265,6 +289,7 @@ impl RescueScene {
         if models.as_ref().is_some_and(|m| !m.has(&player)) {
             player = format!("{style}_Player_MarioMdl");
         }
+        crate::smm1::play_music(ui, rescue_music(info.style, info.difficulty != 0));
         let mut text = ui.layout("Play_EndingText_00");
         if let Some(t) = &mut text {
             t.text_from(
@@ -580,6 +605,7 @@ impl CreditsScene {
             }
             c.play("InOut", 0);
         }
+        crate::smm1::play_music(ui, credits_music(d));
         Self {
             ui: ui.clone(),
             layout,
@@ -649,6 +675,18 @@ mod tests {
         assert_eq!(thank_you_label(2, Some(6)), "T_ThankYou_32");
         assert_eq!(thank_you_label(3, Some(3)), "T_ThankYou_33");
         assert_eq!(thank_you_label(3, Some(42)), "T_ThankYou_34");
+    }
+
+    #[test]
+    fn the_ending_music_by_style_and_difficulty() {
+        assert_eq!(rescue_music(0, false), "M1_BGM_Ending");
+        assert_eq!(rescue_music(1, false), "M3_BGM_EndingDemo1");
+        assert_eq!(rescue_music(2, false), "SuperMarioWorld_21_RescueEgg");
+        assert_eq!(rescue_music(3, true), "WU_STRM_BGM_LAST_BOSS2_HARP");
+        assert_eq!(rescue_music(4, true), "MW_BGM_Ending2");
+        assert_eq!(credits_music(0), "BGM_100mario_staffroll_easy");
+        assert_eq!(credits_music(2), "BGM_100mario_staffroll_normal");
+        assert_eq!(credits_music(3), "BGM_100mario_staffroll_easy");
     }
 
     #[test]

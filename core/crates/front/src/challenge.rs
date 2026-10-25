@@ -663,6 +663,12 @@ impl ChallengeFlow {
     /// SMM1: cover the screen with `kind` and do `then` once covered (at once without the
     /// fade layout).
     fn cover(&mut self, cx: &mut Cx, kind: Smm1FadeKind, center: [f32; 2], then: AfterCover) {
+        // the scene's music goes with it, over the cover [inf: the fade-out's length]
+        let ticks = self.fade.as_mut().map_or(0, |f| f.cover_ticks(kind));
+        self.ui.push_cues(vec![crate::sound::SoundCue::stop_music(
+            ticks as f32,
+            self.ui.kind(),
+        )]);
         let started = self.fade.as_mut().is_some_and(|f| f.cover(kind, center));
         if started {
             self.after_cover = Some(then);
@@ -765,6 +771,11 @@ impl ChallengeFlow {
             Scene::Smm1Menu(s) => match s.step(ui, &self.run)? {
                 Smm1Event::Exit => {
                     self.run.challenge.end();
+                    // leaving for Course World: the select's music fades with the screen [inf]
+                    self.ui.push_cues(vec![crate::sound::SoundCue::stop_music(
+                        30.0,
+                        self.ui.kind(),
+                    )]);
                     return Some(ChallengeEvent::Exit);
                 }
                 Smm1Event::Locked(d) => cx.toast(endless::locked_message(d)),

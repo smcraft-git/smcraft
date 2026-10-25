@@ -11,6 +11,7 @@
 //! ui/fonts/<Font>/sheet_<n>.mtex        glyph sheets
 //! ui/messages/<Archive>/<Group>/<File>.json   MSBT tables (see mmk_formats::msbt)
 //! ui/sound/sounds.json, ui/sound/<sound>.wav  the layouts' sounds (see `smm1_ui_sound`)
+//! ui/sound/<stream>.wav                 the menus' music (see `smm1_bgm`)
 //! ui/ending/ending.json, ui/textures/<archive>/  the rescue scene's models (see `smm1_ending`)
 //! ```
 //! Layout archives are found as loose `Layout/*.szs` files and as `Layout/*.szs` members of
@@ -66,6 +67,8 @@ pub struct Smm1Report {
     pub ui_sound_streams: usize,
     /// The rescue scene's textures (`ui/textures/<archive>/`).
     pub ending_textures: usize,
+    /// The menus' music (`ui/sound/BGM_*.wav` …).
+    pub music: usize,
     /// Files that could not be converted (path: reason).
     pub skipped: Vec<String>,
 }
@@ -451,6 +454,13 @@ pub fn run_smm1(cfg: &Smm1Config, progress: Progress) -> Result<Smm1Report> {
         .skipped
         .extend(c.skipped.into_iter().map(|s| format!("costumes: {s}")));
 
+    // --- the menus' music
+    let b = crate::smm1_bgm::import_bgm(&ov, &ui, progress)?;
+    report.music = b.tracks;
+    report
+        .skipped
+        .extend(b.skipped.into_iter().map(|s| format!("music: {s}")));
+
     // --- the rescue scene's models
     let e = crate::smm1_ending::import_ending(&ov, &ui, progress)?;
     report.ending_textures = e.textures;
@@ -466,7 +476,7 @@ pub fn run_smm1(cfg: &Smm1Config, progress: Progress) -> Result<Smm1Report> {
         "base_title_version": base_version,
         "update_title_version": update_version,
         "language": cfg.language,
-        "stages": ["identify", "layouts", "fonts", "messages", "ui sounds", "costumes", "ending"],
+        "stages": ["identify", "layouts", "fonts", "messages", "ui sounds", "costumes", "music", "ending"],
         "costumes": report.costumes,
         "ui_sounds": report.ui_sounds,
         "layouts": layout_names,

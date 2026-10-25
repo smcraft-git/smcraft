@@ -8,7 +8,7 @@ use crate::menu::{Buttons, UiInput};
 use crate::play::tests::{MockHost, with};
 use crate::play::{Phase, PlayInput};
 use crate::testing::{press, smm1};
-use crate::{Ui, UiKind};
+use crate::{CueKind, Ui, UiKind};
 
 fn library(n: usize) -> Vec<CourseEntry> {
     (0..n)
@@ -171,6 +171,7 @@ fn owner_a_death_fades_to_the_card_and_a_clear_to_the_map() {
             f.step(&input(Buttons::CONFIRM), cx)
         });
     }
+    smm1.take_cues();
     let map = until(&mut f, &mut host, &mut saves, 200, |f, _| {
         f.playing.is_none()
     })
@@ -178,4 +179,18 @@ fn owner_a_death_fades_to_the_card_and_a_clear_to_the_map() {
     // Next's Decide, the layout's Out (16), then the blocks (56)
     assert!(map > 56, "{map}");
     assert_eq!(f.run.status().course_number, 2);
+    // the music: the blocks' fade-out, then the between-course map's tune
+    let music: Vec<(String, CueKind, f32)> = smm1
+        .take_cues()
+        .into_iter()
+        .filter(|c| c.kind != CueKind::Sound)
+        .map(|c| (c.name, c.kind, c.delay))
+        .collect();
+    assert_eq!(
+        music,
+        [
+            (String::new(), CueKind::StopMusic, 56.0),
+            ("BGM_100MarioMap".into(), CueKind::Music, 0.0)
+        ]
+    );
 }

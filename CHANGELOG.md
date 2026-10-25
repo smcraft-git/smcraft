@@ -178,6 +178,11 @@ SMCraft is back in development (it was archived in October 2026).
   own models, in the form he reached the goal with (cape and all) — and her line appears in the
   balloon (it changes with his costume); then the credits roll. NSMBU and 3D World courses end in
   SMW's scene. Import SMM1 again for it (`mmk import-smm1`, importer 5).
+- **SMM1's music on the SMM1-look 100 Mario screens**: Course World's tune on the difficulty
+  select (its track changes with the tab, in time), the map's tune between courses, game over's,
+  the rescue scene's by style (Peach's or Toad's) and the staff roll's, looping where SMM1's
+  streams loop and fading with the screen (imported with SMM1, importer 5; the Swift app and the
+  desktop / web players play it).
 - **Koopalings in Koopa Clown Cars**: the car chases you while the Koopaling fires volleys of
   his magic (Lemmy his balls, Wendy her rings) from it; a stomp stops the car while he ducks in,
   then he spins in his shell for a while (stomps bounce off) before he comes out; the third stomp

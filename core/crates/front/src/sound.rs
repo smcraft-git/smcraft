@@ -19,13 +19,55 @@ use serde_json::Value;
 use crate::layout::UiKind;
 
 /// One sound to start: `ui/sound/<name>.wav` of import `ui` (the SMM2 UI's, or the SMM1 one's:
-/// [`crate::smm1_sound`]), at `volume`, `delay` frames (60 Hz) from now.
+/// [`crate::smm1_sound`]), at `volume`, `delay` frames (60 Hz) from now. `kind` makes it the
+/// menu music instead (or stops that).
 #[derive(Clone, Debug, PartialEq)]
 pub struct SoundCue {
     pub name: String,
     pub volume: f32,
     pub delay: f32,
     pub ui: UiKind,
+    pub kind: CueKind,
+}
+
+/// What a [`SoundCue`] does.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum CueKind {
+    /// A one-shot sound.
+    #[default]
+    Sound,
+    /// Start `name` as the menu music (one at a time: it replaces the music playing), looping
+    /// between its WAV's `smpl` loop points if it has them, else playing once.
+    Music,
+    /// Switch the music to `name` at the position the music playing has reached (another
+    /// track of the same stream: SMM1's Course World tracks).
+    MusicTrack,
+    /// Fade the music out over `delay` frames (`name` empty).
+    StopMusic,
+}
+
+impl SoundCue {
+    /// The menu music `name` of import `ui`.
+    pub fn music(name: &str, ui: UiKind) -> Self {
+        Self {
+            name: name.to_string(),
+            volume: 1.0,
+            delay: 0.0,
+            ui,
+            kind: CueKind::Music,
+        }
+    }
+
+    /// Stop the menu music, fading over `frames`.
+    pub fn stop_music(frames: f32, ui: UiKind) -> Self {
+        Self {
+            name: String::new(),
+            volume: 1.0,
+            delay: frames,
+            ui,
+            kind: CueKind::StopMusic,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -194,6 +236,7 @@ impl UiSounds {
                     volume: node.get("volume").and_then(Value::as_f64).unwrap_or(1.0) as f32,
                     delay: d,
                     ui: UiKind::Smm2,
+                    kind: CueKind::Sound,
                 });
             }
             return;

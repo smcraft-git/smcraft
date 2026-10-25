@@ -553,6 +553,30 @@ impl WorldMap {
     }
 }
 
+// MARK: - music
+
+/// The select's music: Course World's stream with the difficulty's track (Easy and Normal 2,
+/// Expert 3, Super Expert 6; mask 1 << (value − 1)) [obs 0x02580cb0, 0x02581200].
+pub fn select_music(d: usize) -> String {
+    let t = [2, 2, 3, 6][d.min(3)];
+    format!("BGM_NetworkMainScene_{t}")
+}
+
+/// The between-course map's music by difficulty (0x0270864c) [obs].
+pub fn map_music(d: usize) -> &'static str {
+    [
+        "BGM_100MarioMap",
+        "BGM_100MarioMap",
+        "BGM_100MarioMapExpert",
+        "BGM_100MarioMapSuperExpert",
+    ][d.min(3)]
+}
+
+/// Start the menu music `name` of the SMM1 import.
+pub fn play_music(ui: &Ui, name: &str) {
+    ui.push_cues(vec![SoundCue::music(name, ui.kind())]);
+}
+
 /// What the run's data says about a difficulty (asked by the select screen).
 pub trait RunQuery {
     fn unlocked(&self, d: usize) -> bool;
@@ -653,6 +677,7 @@ impl ChallengeMenuScene {
         }
         s.ready_at = s.ready_at.max(s.title.ticks("In", 0));
         s.update_tabs(q);
+        play_music(ui, &select_music(difficulty));
         Some(s)
     }
 
@@ -861,6 +886,10 @@ impl ChallengeMenuScene {
             self.ready_at = tick + n.layout.ticks(a, 0);
         }
         self.update_tabs(q);
+        // the stream's other track, at once [obs 0x02581200]
+        let mut cue = SoundCue::music(&select_music(d), self.ui.kind());
+        cue.kind = crate::sound::CueKind::MusicTrack;
+        self.ui.push_cues(vec![cue]);
     }
 
     /// A click: a difficulty tab (its map slides in), Continue / New Game (focuses and
@@ -1065,6 +1094,8 @@ impl MapIntroScene {
                 s.demo = true;
                 s.show_select_pose(cleared);
                 s.set(MapState::FadeWait);
+                // the scene's Wait starts the map's music (0x0270864c) [obs]
+                play_music(ui, map_music(difficulty));
             }
         }
         Some(s)
@@ -1484,6 +1515,8 @@ impl GameOverScene {
     pub fn new(ui: &Ui) -> Option<Self> {
         let mut l = ui.layout("Cmn_GameOver_00")?;
         l.play("OneTime", 0);
+        // GameOverScene's bank: M1_GameOver [obs data]
+        play_music(ui, "M1_GameOver");
         Some(Self {
             layout: l,
             tick: 0,

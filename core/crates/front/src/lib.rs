@@ -57,7 +57,7 @@ pub use host::{CourseEntry, CourseStatus, Host, Icon, Saves, Source, WorldCourse
 pub use layout::{Layout, Ui, UiKind};
 pub use menu::{Buttons, UiInput};
 pub use smm1_sound::Smm1Sounds;
-pub use sound::{SoundCue, UiSounds};
+pub use sound::{CueKind, SoundCue, UiSounds};
 
 use challenge::{ChallengeEvent, ChallengeFlow, ChallengeGo, Presentation};
 use fade::{FadeKind, FadeStart, SceneFade};

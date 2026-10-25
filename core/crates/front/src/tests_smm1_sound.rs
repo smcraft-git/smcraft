@@ -14,7 +14,7 @@ use crate::smm1::{
 };
 use crate::smm1_sound::Smm1Sounds;
 use crate::testing::{press, smm1};
-use crate::{Ui, UiKind};
+use crate::{CueKind, Ui, UiKind};
 
 const SOUNDS: &str = r#"{"game": "SMM1", "users": {
   "UI_Cmn_PauseMenu_00": {"keys": {
@@ -337,9 +337,17 @@ fn owner_difficulty_select_sounds() {
     ui.take_cues();
     // a tab: SE_NetworkLeft and the curtain (closing, opening 40 frames later)
     m.step(&press(Buttons::RIGHT), &AllOpen);
-    let cues: Vec<(String, f32)> = ui
-        .take_cues()
+    let all = ui.take_cues();
+    // the music: Course World's stream switches to the tab's track where it is
+    let music: Vec<(&str, CueKind)> = all
+        .iter()
+        .filter(|c| c.kind != CueKind::Sound)
+        .map(|c| (c.name.as_str(), c.kind))
+        .collect();
+    assert_eq!(music, [("BGM_NetworkMainScene_2", CueKind::MusicTrack)]);
+    let cues: Vec<(String, f32)> = all
         .into_iter()
+        .filter(|c| c.kind == CueKind::Sound)
         .map(|c| (c.name, c.delay))
         .collect();
     let names: Vec<&str> = cues.iter().map(|c| c.0.as_str()).collect();
