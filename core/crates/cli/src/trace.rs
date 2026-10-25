@@ -167,7 +167,7 @@ pub fn run_all(course: &[u8], script: &[Input], start: &Start) -> Result<(String
 // Physics test courses
 
 pub const STYLES: [&str; 5] = ["M1", "M3", "MW", "WU", "3W"];
-pub const KINDS: [&str; 37] = [
+pub const KINDS: [&str; 38] = [
     "flat",
     "wall",
     "slope",
@@ -205,13 +205,14 @@ pub const KINDS: [&str; 37] = [
     "sball",
     "hammer",
     "seesaw2",
+    "seesaw3",
 ];
 
 /// Kinds made in SMB1 only (the terrain they test is the same in every style).
 const M1_ONLY: [&str; 5] = ["slopejoin", "mushstart", "slopejoins", "sword", "sball"];
 /// Kinds made in NSMBU only (a ground pound in the air needs a style that has one in the
 /// engine).
-const WU_ONLY: [&str; 3] = ["seesaw", "seesawp", "seesaw2"];
+const WU_ONLY: [&str; 4] = ["seesaw", "seesawp", "seesaw2", "seesaw3"];
 /// Kinds made in SMB3, SMW and NSMBU only (their style power-up is a Leaf, Feather or Propeller).
 const LEAF_ONLY: [&str; 1] = ["itemplace"];
 /// Kinds made in 3D World only (clear pipes are a 3D World part).
@@ -690,13 +691,17 @@ pub fn build_course(name: &str) -> Result<Vec<u8>, String> {
             e.place_sized(91, 18, up(3), 5, sh, mmk_editor::DEFAULT_FLAGS)
                 .map_err(err)?;
         }
-        "seesaw2" => {
-            // the `seesaw` Seesaw with a Goomba placed on its right half (two riders)
+        "seesaw2" | "seesaw3" => {
+            // the `seesaw` Seesaw with a Goomba placed on its right half (seesaw3: and another
+            // on its left half: two riders)
             floor(&mut e, 0, len - 1)?;
             let (_, sh) = mmk_editor::default_size(91);
             e.place_sized(91, 18, up(3), 5, sh, mmk_editor::DEFAULT_FLAGS)
                 .map_err(err)?;
             e.place(0, 21, up(4)).map_err(err)?;
+            if kind == "seesaw3" {
+                e.place(0, 19, up(4)).map_err(err)?;
+            }
         }
         "seesawp" => {
             // a 5-tile Seesaw pivoting 3 tiles over the floor at x 12 (its plank x 152..232) right

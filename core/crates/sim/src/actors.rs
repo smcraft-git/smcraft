@@ -857,8 +857,13 @@ pub struct Actor {
     pub fly: Fly,
     /// A Swinging Claw's rope; the actor's own position is the rope's end (actors/claw.rs).
     pub claw: Option<ClawRope>,
-    /// A Seesaw's plank (actors/seesaw.rs).
+    /// A Seesaw's plank (actors/seesaw.rs); the torque of its other riders this frame (set by
+    /// the world); the Seesaw a walker stands on.
     pub plank: Option<seesaw::Plank>,
+    pub riders_tau: f32,
+    pub seesaw: Option<u32>,
+    /// A plank walker's ground angle: this frame's and last frame's.
+    pub plank_angle: (u32, u32),
     /// Bowser's middle jump is a gap jump (its speed set to land past the gap; MiddleJump's
     /// enter 0x71006b0370 flag +0x90).
     pub gap_jump: bool,
@@ -963,6 +968,9 @@ impl Actor {
             fly: Fly::default(),
             claw: None,
             plank: None,
+            riders_tau: 0.0,
+            seesaw: None,
+            plank_angle: (0, 0),
             gap_jump: false,
             wing_rate: 1.0,
             bro_wing: BroWing::default(),
@@ -1191,12 +1199,17 @@ impl Actor {
             let (sin, _) = crate::fmath::table_sin_cos(plank.theta as u32);
             plank.slam(width, self.target.0 >= self.x + sin * -8.0);
         }
-        let tau = if self.hops >= 3 && !plank.slammed {
+        let mut tau = if self.hops >= 3 && !plank.slammed {
             let (rx, ry) = self.target;
             seesaw::torque(plank.theta, self.x, self.y + 8.0, rx, ry, 2.0)
         } else {
             0.0
         };
+        // the walkers standing on it weigh 2 too, where they stand before their move [obs:
+        // Ryujinx trace X_seesaw2, a Goomba alone: +0x84c matched to 1e-4]
+        if !plank.slammed {
+            tau += std::mem::take(&mut self.riders_tau);
+        }
         plank.step(width, tau);
         self.speed = plank.omega;
         self.heading = (plank.theta as f64 * (360.0 / 4_294_967_296.0)) as f32;

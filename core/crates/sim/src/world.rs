@@ -2512,6 +2512,7 @@ impl World {
                 (a.x, a.y, a.dir, a.vx, a.vy) = (x, y, dir, 0.0, 0.0);
             }
         }
+        self.seesaw_walkers();
         self.step_towers();
         self.clear_pipe_actors();
         self.explosions();
@@ -5836,10 +5837,25 @@ impl World {
         let (px, py) = (self.player.x, self.player.y);
         let ride = self.player.ride;
         let mut angle = 0;
+        // walkers on a plank: their place before this frame's move (they move after it)
+        let walkers: Vec<(u32, f32, f32)> = self
+            .actors
+            .iter()
+            .filter_map(|a| a.seesaw.map(|s| (s, a.x, a.y)))
+            .collect();
         for i in 0..self.actors.len() {
             let a = &mut self.actors[i];
             if !matches!(a.kind, Kind::Seesaw { .. }) {
                 continue;
+            }
+            if let Some(p) = a.plank {
+                a.riders_tau = walkers
+                    .iter()
+                    .filter(|w| w.0 == a.id)
+                    .map(|&(_, rx, ry)| {
+                        crate::actors::seesaw::torque(p.theta, a.x, a.y + 8.0, rx, ry, 2.0)
+                    })
+                    .sum();
             }
             a.target = (px, py);
             a.ridden = ride == Some(a.id);
@@ -5863,6 +5879,127 @@ impl World {
             }
         }
         self.player.solid_angle = angle;
+        // a walker placed on a plank stands there from its first frame (it walks at once)
+        let tops: Vec<(u32, crate::level::Solid)> = self
+            .level
+            .solids
+            .iter()
+            .filter(|s| {
+                self.actors
+                    .iter()
+                    .any(|a| a.id == s.owner && matches!(a.kind, Kind::Seesaw { .. }))
+            })
+            .map(|s| (s.owner, *s))
+            .collect();
+        for a in &mut self.actors {
+            if a.seesaw.is_some() || a.age > 0 || !Self::seesaw_walker(a) {
+                continue;
+            }
+            if let Some((id, _)) = tops
+                .iter()
+                .find(|(_, s)| a.x >= s.x0 && a.x <= s.x1 && (a.y - s.top_at(a.x)).abs() <= 0.01)
+            {
+                a.seesaw = Some(*id);
+                a.on_ground = true;
+            }
+        }
+        // the plank's turn carries its walkers as it does the player
+        for i in 0..self.actors.len() {
+            let Some(id) = self.actors[i].seesaw else {
+                continue;
+            };
+            let Some((sx, plank)) = self
+                .actors
+                .iter()
+                .find(|s| s.id == id)
+                .and_then(|s| s.plank.map(|p| (s.x, p)))
+            else {
+                self.actors[i].seesaw = None;
+                continue;
+            };
+            let a = &mut self.actors[i];
+            let (dx, dy) = plank.carry(a.x - sx);
+            a.x += dx;
+            a.y += dy;
+            a.plank_angle = (plank.prev_angle(), a.plank_angle.0);
+        }
+    }
+
+    /// The actors that stand on Seesaw planks [inf: the ground walkers].
+    fn seesaw_walker(a: &Actor) -> bool {
+        matches!(
+            a.kind,
+            Kind::Goomba
+                | Kind::Goombrat
+                | Kind::Koopa { .. }
+                | Kind::Spiny
+                | Kind::Buzzy
+                | Kind::BobOmb
+                | Kind::DryBones
+                | Kind::Mushroom
+                | Kind::OneUp
+        ) && a.mode == Mode::Normal
+            && !a.held
+    }
+
+    /// After the actors' moves: a walker over a Seesaw's plank stands on its top line (on it
+    /// already, or falling onto it) [obs: Ryujinx trace X_seesaw2, a Goomba walking left along
+    /// a tilting plank exactly on the line through its ends] [inf: the walkers this applies to;
+    /// a rider's step along the plank is its plain vx].
+    fn seesaw_walkers(&mut self) {
+        let planks: Vec<(u32, crate::level::Solid)> = self
+            .level
+            .solids
+            .iter()
+            .filter(|s| {
+                self.actors
+                    .iter()
+                    .any(|a| a.id == s.owner && matches!(a.kind, Kind::Seesaw { .. }))
+            })
+            .map(|s| (s.owner, *s))
+            .collect();
+        if planks.is_empty() {
+            return;
+        }
+        for a in &mut self.actors {
+            if !Self::seesaw_walker(a) {
+                a.seesaw = None;
+                continue;
+            }
+            let mut on = None;
+            for (id, s) in &planks {
+                if a.x < s.x0 || a.x > s.x1 {
+                    continue;
+                }
+                let top = s.top_at(a.x);
+                let landing = a.vy <= 0.0 && a.pre.1 >= top - 0.01 && a.y <= top;
+                if a.seesaw == Some(*id) || landing {
+                    on = Some((*id, top));
+                    break;
+                }
+            }
+            match on {
+                Some((id, _)) if a.seesaw == Some(id) => {
+                    // its step along the plank: vx · cos of the angle it had two frames before,
+                    // as the player's [obs: X_seesaw2]
+                    let (_, cos) = crate::fmath::table_sin_cos(a.plank_angle.0);
+                    a.x = a.pre.0 + (a.x - a.pre.0) * cos;
+                    let s = planks.iter().find(|p| p.0 == id).map(|p| p.1);
+                    if let Some(s) = s {
+                        a.y = s.top_at(a.x);
+                    }
+                    a.vy = 0.0;
+                    a.on_ground = true;
+                }
+                Some((id, top)) => {
+                    a.y = top;
+                    a.vy = 0.0;
+                    a.on_ground = true;
+                    a.seesaw = Some(id);
+                }
+                None => a.seesaw = None,
+            }
+        }
     }
 
     /// Moving solids step before the player; riders are carried by their movement. A spring
