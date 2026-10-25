@@ -1,7 +1,10 @@
 //! Part pictures for the Course Maker, from the engine's own art: the game renders its palette
 //! icons from the parts' models at run time (research/specs/maker.md C2, private), so the
 //! hosts draw the part alone in a small course with the sprite resolver and copy its pixels out
-//! of the textures on the CPU.
+//! of the textures on the CPU. Parts the play world doesn't draw get their models' art here
+//! (the Spike Trap: [`stand_ins`]; the Hidden Block: the ? Block's, see-through); the Clear Pipe,
+//! which has only 3D models, is drawn from its meshes by a small rasteriser
+//! ([`clear_pipe_pixels`]).
 
 use mmk_assets::Cache;
 
@@ -21,6 +24,14 @@ pub struct Icon {
 /// course, its sprites copied out of the textures (RGBA, 3 px per world px, trimmed). None for
 /// parts without 2D art or that can't be placed.
 pub fn part_icon(cache: &Cache, style: &str, part: i16, flags: u32) -> Option<Icon> {
+    if part == HIDDEN_BLOCK {
+        // play doesn't show it: the ? Block's picture, see-through
+        let (mut rgba, w, h) = part_pixels(cache, style, 5, flags, 4.0)?;
+        for px in rgba.as_chunks_mut::<4>().0 {
+            px[3] = (px[3] as f32 * HIDDEN_BLOCK_ALPHA).round() as u8;
+        }
+        return trim(&rgba, w, h);
+    }
     let (rgba, w, h) = part_pixels(cache, style, part, flags, 4.0)?;
     trim(&rgba, w, h)
 }
@@ -59,6 +70,9 @@ fn part_pixels(
     flags: u32,
     margin: f32,
 ) -> Option<(Vec<u8>, u32, u32)> {
+    if part == CLEAR_PIPE {
+        return clear_pipe_pixels(cache);
+    }
     let mut e = mmk_editor::Editor::new(style);
     let (tx, ty) = (20, 6);
     let placed = match part {
@@ -127,10 +141,14 @@ fn part_pixels(
         .iter()
         .map(key)
         .collect();
-    let sprites: Vec<DrawSprite> = draw(&e.course)
+    let mut sprites: Vec<DrawSprite> = draw(&e.course)
         .into_iter()
         .filter(|s| !scenery.contains(&key(s)))
         .collect();
+    // a part the world draws nothing for: its model's art
+    if sprites.is_empty() {
+        sprites = stand_ins(cache, style, part, r);
+    }
     // the part's rectangle (world px), a little margin for what sticks out (the Koopa's head;
     // wings at its sides and a parachute above take more)
     let m = if flags & 0x8002 != 0 { 20.0 } else { margin };
@@ -153,6 +171,160 @@ fn part_pixels(
         return None;
     }
     Some((rgba, w, h))
+}
+
+/// The Clear Pipe's object id (3D World; drawn only from its meshes).
+const CLEAR_PIPE: i16 = 93;
+
+/// The Hidden Block's object id.
+const HIDDEN_BLOCK: i16 = 29;
+
+/// The Hidden Block's picture is the ? Block's at this opacity: 3D World's
+/// `3W_Object_block_tomei` is the ? Block's texture (`BlockQuestion00_Alb`) blended with
+/// `const_color0` alpha 0.75 (`material_alpha` from it, `gsys_render_state_mode` custom / blend)
+/// where `3W_Object_block_hatena` is opaque [obs data, the models' materials]. The 2D styles'
+/// `<S>_Object_block_tomei` carry the ? Block's material and a placeholder texture the game
+/// swaps at run time [obs data]; they take the same look [inf].
+pub const HIDDEN_BLOCK_ALPHA: f32 = 0.75;
+
+/// Art standing in for part `part` (in tile rectangle `r`) where the world draws none: the
+/// Spike Trap (43) is its field animation's first frame (`<S>_Field_anime_toge_<set>`, the
+/// `%s_Field_anime_%s_%c` models the game's 2D styles draw their field parts with [obs data])
+/// on each tile, in the plain theme's set (3D World has no Spike Trap).
+fn stand_ins(cache: &Cache, style: &str, part: i16, r: mmk_editor::Rect) -> Vec<DrawSprite> {
+    if part != 43 {
+        return Vec::new();
+    }
+    let Some(set) = crate::frame::field_anime_set(cache, style, 0, false) else {
+        return Vec::new();
+    };
+    let Some(texture) = cache.texture_index(&format!("{style}_Field_anime_toge_{set}"), "wait.0")
+    else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for dx in 0..r.w {
+        for dy in 0..r.h {
+            out.push(DrawSprite {
+                texture: Some(texture as u32),
+                x: (r.x + dx) as f32 * 16.0,
+                y: (r.y + dy) as f32 * 16.0,
+                w: 16.0,
+                h: 16.0,
+                u0: 0.0,
+                v0: 0.0,
+                u1: 1.0,
+                v1: 1.0,
+                layer: 12,
+                flip_x: false,
+            });
+        }
+    }
+    out
+}
+
+/// The Clear Pipe's picture (it has no 2D art): `3W_Object_dokan_tomei`'s meshes drawn on the CPU
+/// as the 3D World view shows them — a two-tile pipe standing up, a `dokan_tomei_unit_model`
+/// under its mouth `dokan_tomei_top_model` [inf: the game's icon camera and piece count weren't
+/// read], seen straight on (the maker's flat view), the glass as the hosts draw it
+/// (`mesh::CLEAR_PIPE_TINT`, the vertex alpha raised by its facing): RGBA, 3 px per world px
+/// with the parts' margin. None without the imported meshes.
+fn clear_pipe_pixels(cache: &Cache) -> Option<(Vec<u8>, u32, u32)> {
+    let mut store = crate::mesh::MeshStore::new(cache.root.clone());
+    let id = store.find(mmk_sim::level::CLEAR_PIPE_MESH);
+    let file = &store.mesh(id)?.file;
+    let model = |n: &str| file.models.iter().find(|m| m.name == n);
+    let pieces = [
+        (model("dokan_tomei_unit_model")?, 0.0),
+        (model("dokan_tomei_top_model")?, 16.0),
+    ];
+    let (margin, scale) = (4.0, 3.0);
+    let (x0, y0, x1, y1) = (-16.0 - margin, -margin, 16.0 + margin, 32.0 + margin);
+    let (w, h) = (((x1 - x0) * scale) as u32, ((y1 - y0) * scale) as u32);
+    // the triangles in canvas px, with each corner's depth, alpha and facing
+    type Corner = ([f32; 2], f32, f32, f32);
+    let mut tris: Vec<[Corner; 3]> = Vec::new();
+    for (m, base) in pieces {
+        let b = m.bounds;
+        // centred across, its bottom on `base`
+        let (ox, oy) = (-(b[0] + b[3]) / 2.0, base - b[1]);
+        for sh in &m.shapes {
+            let range = sh.first_index as usize..(sh.first_index + sh.index_count) as usize;
+            let idx = m.indices.get(range).unwrap_or(&[]);
+            for t in idx.as_chunks::<3>().0 {
+                let corner = |i: u32| -> Option<Corner> {
+                    let v = m.vertices.get(i as usize)?;
+                    let a = m.colors.get(i as usize).map_or(255, |c| c[3]);
+                    let (wx, wy) = (v.position[0] + ox, v.position[1] + oy);
+                    Some((
+                        [(wx - x0) * scale, (y1 - wy) * scale],
+                        v.position[2],
+                        a as f32 / 255.0,
+                        v.normal[2].abs().min(1.0),
+                    ))
+                };
+                tris.push([corner(t[0])?, corner(t[1])?, corner(t[2])?]);
+            }
+        }
+    }
+    // back to front, each blended over what is behind
+    tris.sort_by(|a, b| {
+        let z = |t: &[Corner; 3]| t.iter().map(|c| c.1).sum::<f32>();
+        z(a).total_cmp(&z(b))
+    });
+    let tint = crate::mesh::CLEAR_PIPE_TINT;
+    let mut rgba = vec![0f32; (w * h * 4) as usize];
+    for t in &tris {
+        let [p0, p1, p2] = [t[0].0, t[1].0, t[2].0];
+        let area = (p1[0] - p0[0]) * (p2[1] - p0[1]) - (p2[0] - p0[0]) * (p1[1] - p0[1]);
+        if area.abs() < 1e-6 {
+            continue;
+        }
+        let xs = [p0[0], p1[0], p2[0]];
+        let ys = [p0[1], p1[1], p2[1]];
+        let lo = |v: [f32; 3], n: u32| {
+            (v.iter().copied().fold(f32::MAX, f32::min).floor().max(0.0) as u32).min(n)
+        };
+        let hi = |v: [f32; 3], n: u32| {
+            (v.iter().copied().fold(f32::MIN, f32::max).ceil().max(0.0) as u32).min(n)
+        };
+        for py in lo(ys, h)..hi(ys, h) {
+            for px in lo(xs, w)..hi(xs, w) {
+                let (x, y) = (px as f32 + 0.5, py as f32 + 0.5);
+                let w0 = ((p1[0] - x) * (p2[1] - y) - (p2[0] - x) * (p1[1] - y)) / area;
+                let w1 = ((p2[0] - x) * (p0[1] - y) - (p0[0] - x) * (p2[1] - y)) / area;
+                let w2 = 1.0 - w0 - w1;
+                if w0 < 0.0 || w1 < 0.0 || w2 < 0.0 {
+                    continue;
+                }
+                let a = (w0 * t[0].2 + w1 * t[1].2 + w2 * t[2].2).clamp(0.0, 1.0);
+                // lit from the front: brighter where the glass faces the view
+                let facing = w0 * t[0].3 + w1 * t[1].3 + w2 * t[2].3;
+                let light = 0.7 + 0.3 * facing;
+                let di = ((py * w + px) * 4) as usize;
+                let da = rgba[di + 3];
+                let out_a = a + da * (1.0 - a);
+                if out_a <= 0.0 {
+                    continue;
+                }
+                for c in 0..3 {
+                    let src = tint[c] * light;
+                    rgba[di + c] = (src * a + rgba[di + c] * da * (1.0 - a)) / out_a;
+                }
+                rgba[di + 3] = out_a;
+            }
+        }
+    }
+    if rgba.as_chunks::<4>().0.iter().all(|p| p[3] <= 0.0) {
+        return None;
+    }
+    Some((
+        rgba.iter()
+            .map(|&v| (v * 255.0).round().clamp(0.0, 255.0) as u8)
+            .collect(),
+        w,
+        h,
+    ))
 }
 
 /// `rgba` (`w` × `h`) cut to what was drawn (None: nothing).
@@ -328,5 +500,67 @@ pub fn course_view(cache: &Cache, course: &mmk_formats::smm2::Course) -> Icon {
         width: w,
         height: h,
         rgba,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The imported cache (`MMK_ASSETS`, else ~/smm-work/cache/smm2-3.0.3); None without it, as
+    /// in CI.
+    fn cache() -> Option<Cache> {
+        let root = std::env::var_os("MMK_ASSETS")
+            .map(std::path::PathBuf::from)
+            .or_else(|| {
+                std::env::var_os("HOME")
+                    .map(|h| std::path::PathBuf::from(h).join("smm-work/cache/smm2-3.0.3"))
+            })?;
+        root.join("sprites.json")
+            .exists()
+            .then(|| Cache::open(&root).ok())
+            .flatten()
+    }
+
+    /// The Spike Trap and the Hidden Block have pictures in every style that has them (the
+    /// hidden one see-through at 0.75), the Clear Pipe in 3D World from its meshes.
+    #[test]
+    fn parts_without_play_art_have_pictures() {
+        let Some(cache) = cache() else {
+            eprintln!("no imported cache: skipped");
+            return;
+        };
+        for style in ["M1", "M3", "MW", "WU", "3W"] {
+            if style != "3W" {
+                assert!(
+                    part_icon(&cache, style, 43, 0).is_some(),
+                    "{style} spike trap"
+                );
+            }
+            let hidden = part_icon(&cache, style, 29, 0).expect("hidden block");
+            let max_a = hidden
+                .rgba
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .map(|p| p[3])
+                .max()
+                .unwrap();
+            assert_eq!(max_a, (255.0 * HIDDEN_BLOCK_ALPHA).round() as u8, "{style}");
+        }
+        let Some(pipe) = part_icon(&cache, "3W", CLEAR_PIPE, 0) else {
+            eprintln!("no imported meshes: clear pipe skipped");
+            return;
+        };
+        // two tiles wide, two tall (3 px a world px), translucent
+        assert!((90..=110).contains(&pipe.width), "{}", pipe.width);
+        assert!((90..=100).contains(&pipe.height), "{}", pipe.height);
+        assert!(
+            pipe.rgba
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .any(|p| p[3] > 0 && p[3] < 255)
+        );
     }
 }
