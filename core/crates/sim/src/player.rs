@@ -3271,13 +3271,14 @@ impl Player {
                 } else {
                     ((wx / TILE).floor() + 1.0) * TILE
                 };
-                // flush with the tile edge, as the game resolves walls [obs: Ryujinx trace]; a
-                // deeper overlap than this frame's move into it (the Cat's ground probes widening
-                // next to a wall) is undone 2 px a frame [obs: Ryujinx trace 3W_formt
+                // flush with the tile edge, as the game resolves walls [obs: Ryujinx trace]; the
+                // Cat's ground probes widening next to a wall undo a deeper overlap than this
+                // frame's move into it 2 px a frame (only seen there: other deep pushes, e.g.
+                // W_3006094 frame 55, are flush at once) [obs: Ryujinx trace 3W_formt
                 // cat_climb_top: 536.1 → 534.1 → 532.1 → 530.1]
                 let flush = tile_edge - dir * s.wall_x;
                 let most = (self.vx * cos * dir).max(0.0) + 2.0;
-                self.x = if (self.x - flush) * dir > most {
+                self.x = if s.wall_x > CAT_RUN.wall_x - 0.01 && (self.x - flush) * dir > most {
                     self.x - dir * most
                 } else {
                     flush
