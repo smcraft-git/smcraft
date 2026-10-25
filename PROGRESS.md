@@ -1,5 +1,44 @@
 # Progress
 
+## ⏸ Paused 2026-10-25 (owner: save credits) — where to resume
+The owner tried app build 474: "a long way from being the same as smm2recomp, but it's on its way".
+SMCraft is paused. Everything gated is on `main` (7186031) and pushed; nothing is running.
+- **Where it stands:** physics traces 682 / 683 exact (the game's own random numbers ported; the one
+  left is 3D World's Bowser, who uses the clock-seeded global generator); coverage 550 / 550 and
+  273 / 273 (placed sound effects included); asset packs: game 18, UI 10, SMM1 7 (re-import once).
+- **Two unfinished branches**. Both stopped because the gate's release build ran out of disk (below
+  3.5 GB, with another project writing). Neither is merged. Resume each with ≥ 4 GB free:
+  - `physics12`: the walking Hammer Bro (SMB1 / SMB3 / SMW) and Lakitu on the game's draws, exact
+    in new traces X_hbro_M1 / X_lakitu_M1 (683 / 685 on a private run). Code: `git stash pop` on
+    the branch (stash@{0}), or research/tools/ryujinx-trace/physics12/physics12-wip.patch; run the
+    gate and the full trace comparison, then commit. Next:
+    - enemies updated before the killer still move on the death frame (world update order);
+    - Magikoopa, Rocky Wrench, Fire Piranha, Chain Chomp, Boom Boom, Fire Clown Car (recorded in
+      /private/tmp/claude-501/smcraft-physics12/rec, draw sites in fidelity-log.md "physics11");
+    - 3D World's Bowser; re-seeding on a sub-area change / retry.
+  - `online2`: the server and client side of uploading from the Course Maker:
+    - the clear time fixed to the clearing attempt;
+    - the clear-check fields in the header;
+    - `--verified-uploads` and upload limits;
+    - tags.
+    Code: research/decomp/online2/online2-wip.patch on top of 7186031 (workspace tests passed). Next:
+    - the front end's clear-check run and upload windows (research specs/coursebot.md A.4b);
+    - comments from the pause / clear screens;
+    - SMMDB import.
+- **Other next steps:**
+  - 3D visuals: the diffuse light-map cube (replaces the 0.65 light scale), NSMBU sky / airship /
+    water, 3D lava and water, bloom, NSMBU Mario's facing and height, the SMB3 forest water tint;
+  - NSMBU's 3D demo Mario in the 100 Mario rescue scene;
+  - the trash can's trigger;
+  - a small red ball under Yoshi in the SMW rescue scene, to check against SMM1;
+  - the SMM1 samples in the app's library (unchecked).
+- **Rules that held:**
+  - one game / Ryujinx instance at a time, muted, in the background;
+  - ≥ 3.5 GB free, one target dir per helper;
+  - addresses in old specs are often v1.0.0's (the Ghidra project is v3.0.3);
+  - no live Nextendo until the owner's go;
+  - releases and iPad installs only with the owner's OK.
+
 ## Goal (owner, 2026-10-21) — SMCraft revived
 SMCraft is back in development (it was archived on 2026-10-19 in favour of the recomp; both now go on).
 The goal: **Super Mario Maker 2 rebuilt from scratch**, every style as close to pixel-, physics- and
