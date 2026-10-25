@@ -882,6 +882,8 @@ pub struct Actor {
     /// frame it leaves through its landing frame].
     pub plank_carry: f32,
     pub plat_vx: f32,
+    /// Whether the player looked at this Boo last frame (1 / −1; it reacts a frame late).
+    pub boo_facing: i32,
     /// Bowser's middle jump is a gap jump (its speed set to land past the gap; MiddleJump's
     /// enter 0x71006b0370 flag +0x90).
     pub gap_jump: bool,
@@ -994,6 +996,7 @@ impl Actor {
             plank_angle: (0, 0),
             plank_carry: 0.0,
             plat_vx: 0.0,
+            boo_facing: 0,
             gap_jump: false,
             wing_rate: 1.0,
             bro_wing: BroWing::default(),
@@ -2401,6 +2404,13 @@ impl Actor {
             Kind::BobOmb if self.phase > 0 => self.step_lit_bobomb(level),
             Kind::HammerBro => return self.step_hammer_bro(level),
             Kind::Hammer => {
+                // gone at its update once under the view's bottom by more than 32 [obs: Ryujinx
+                // whole trace X_wbros_M1: each hammer's last move is to y −34 (a view at 0), at
+                // −29 it goes on] [inf: the threshold between the two]
+                if self.y < self.camera.1 - 32.0 {
+                    self.mode = Mode::Dead;
+                    return None;
+                }
                 self.vy = (self.vy - 0.125).max(-6.0);
                 self.x += self.vx;
                 self.y += self.vy;
@@ -3373,6 +3383,18 @@ impl Actor {
             self.x = cx;
             self.y = cy - h;
             self.spike_top_begin(false);
+            // the turn starts turning a frame later (its first frame idles: 32 frames still,
+            // the walk from the 33rd) [obs: Ryujinx whole trace X_stop_M1 frames 102–133,
+            // down a wall onto the floor]
+            let rate = if self.slow_rule(level) {
+                SPIKE_TOP_TURN_SLOW
+            } else {
+                SPIKE_TOP_TURN
+            };
+            self.timer = QUARTER_TURN + rate;
+            // (that frame's speed is still the crawl's [obs: X_stop_M1 frame 101])
+            self.vx = speed * t.0 + 0.49 * f.0;
+            self.vy = speed * t.1 + 0.49 * f.1;
             return;
         }
         self.x = cx;
@@ -3384,6 +3406,10 @@ impl Actor {
             )
         };
         if surface(0.0) || surface(h - 0.01) {
+            // its speed: the crawl along the surface and 0.49 pressed into it [obs: Ryujinx
+            // whole trace X_stop_M1, down a block's left face: vx 0.49, vy −0.5]
+            self.vx = speed * t.0 + 0.49 * f.0;
+            self.vy = speed * t.1 + 0.49 * f.1;
             return;
         }
         let (bx, by) = (
@@ -3481,19 +3507,28 @@ impl Actor {
         let done = left <= rate;
         self.timer = if done { 0 } else { left - rate };
         self.heading = (angle(self.timer) as f64 * (360.0 / 4_294_967_296.0)) as f32;
-        if cliff {
+        // round an outside corner the move's speed is its velocity (+0x23c / +0x240); the
+        // frame the turn ends it doesn't move [obs: Ryujinx whole trace X_stop_M1 frames
+        // 18–48: vx / vy the frame's step, frame 48 y unchanged with x on the face]
+        if cliff && !done {
             let m = if slow { 0.5 } else { 1.0 };
             self.x += self.vx * m;
             self.y += self.vy * m;
+        } else {
+            self.vx = 0.0;
+            self.vy = 0.0;
         }
-        self.vx = 0.0;
-        self.vy = 0.0;
         if done {
             self.dir = s;
             self.spike_top_settle();
             if cliff {
-                // the BG's push-out onto the new face
+                // the BG's push-out onto the new face (and 0.1 toward it as its speed [inf:
+                // seen once, X_stop_M1 frame 48])
                 let (_, f) = crawl_axes(self.pause);
+                if self.pause != 0 {
+                    self.vx = 0.1 * f.0;
+                    self.vy = 0.1 * f.1;
+                }
                 let snap = |v: f32| (v / TILE).round() * TILE - v;
                 if f.0 != 0.0 {
                     let d = snap(self.x + h * f.0);
@@ -4360,41 +4395,67 @@ impl Actor {
     /// falls under gravity −0.1875 (≥ −6), upside down, until it is below the hide depth again.
     /// Phases: 0 hidden, 1 rising, 2 falling. θ (degrees) in `heading`.
     fn step_lava_bubble(&mut self) {
+        // v3.0.3 Bubble (Fall 0x71010a0570, Fly enter 0x71010a07b0 / exe 0x71010a08b0, the leap's
+        // set-up 0x71010a0ee0) [obs; Ryujinx whole trace X_lavab_M1: placed on the floor it
+        // falls from its spot, hides 120 frames at the reference level − 32, leaps to 2.4 px
+        // over the height it fell from, every 169 frames]:
+        // - the reference level L: an area's lava (or poison) surface − 12, else the area's
+        //   bottom (world.rs `floor_ref`);
+        // - it is placed falling (Fall: gravity −0.1875, cap −6); the frame its turn upside down
+        //   completes (the third falling frame, 0x7fffff80 a frame) the height before that
+        //   frame's move is its home; once a frame starts under L − 16 (big − 32) it is put
+        //   there and hides (Fly's enter: 16 lower, its timer 120, out of play);
+        // - the frame the timer runs out it leaps: H = (home − L + 16) / 16 tiles (≥ 1), the
+        //   speed A = min(H · 4/7, 8) + 1 (≤ H + 1, ≥ 1), an angle θ from −90° (binary) that,
+        //   once a frame starts above L, eases toward −90°/H × the tiles left to home + 16 by at
+        //   most 10° a frame; vy = −A · sin θ (the sine table); within 20 px of home + 16 after
+        //   the frame's step its gravity comes on (that frame's move already has it) and it
+        //   falls as from its placement.
         let s = if self.big { 2.0 } else { 1.0 };
-        let hide = self.floor_ref - 16.0 * s;
+        let l = self.floor_ref;
+        let hide = l - 16.0 * s;
+        let park = |a: &mut Actor| {
+            a.y = l - 16.0 * s - 16.0;
+            a.vx = 0.0;
+            a.vy = 0.0;
+            a.phase = 0;
+            a.timer = 120;
+        };
+        if self.age <= 1 && self.phase == 0 && self.chain == 0 {
+            // placed: it starts falling from its spot (`chain` 1: placed, 2: home taken)
+            self.phase = 2;
+            self.chain = 1;
+            self.hops = 0;
+        }
         match self.phase {
             0 => {
-                if self.age <= 1 {
-                    self.timer = 120;
-                }
-                self.y = hide;
-                self.vy = 0.0;
                 self.timer -= 1;
                 if self.timer <= 0 {
+                    // the leap's set-up (0x71010a0ee0)
                     self.phase = 1;
-                    self.heading = 0.0;
+                    self.pause = -0x4000_0000;
                 }
-            }
-            1 => {
-                let h_tiles = ((self.home_y - self.floor_ref + 16.0) / 16.0).max(1.0);
-                let a = ((h_tiles * 4.0 / 7.0).min(8.0) + 1.0)
-                    .min(h_tiles + 1.0)
-                    .max(1.0);
-                let want = 90.0 * ((self.y - hide) / (h_tiles * 16.0)).clamp(0.0, 1.0);
-                self.heading += (want - self.heading).clamp(-10.0, 10.0);
-                self.vy = (a * self.heading.to_radians().dcos()).max(0.25);
-                self.y += self.vy;
-                if self.home_y - self.y < 20.0 {
-                    self.phase = 2;
+                if self.phase == 0 {
+                    return;
                 }
+                self.lava_bubble_rise(l);
             }
+            1 => self.lava_bubble_rise(l),
             2 => {
+                // the turn upside down: the frame it completes, the height is the home
+                if self.vy < 0.0 && self.chain == 1 {
+                    self.hops += 1;
+                    if self.hops >= 2 {
+                        self.home_y = self.y;
+                        self.chain = 2;
+                    }
+                }
+                if self.y < hide {
+                    park(self);
+                    return;
+                }
                 self.vy = (self.vy - 0.1875).max(-6.0);
                 self.y += self.vy;
-                if self.y < hide {
-                    self.phase = 0;
-                    self.timer = 120;
-                }
             }
             _ => {
                 // launched from a pipe (actors/dokan.rs): flies on, falling, until it is
@@ -4409,6 +4470,36 @@ impl Actor {
                 }
             }
         }
+    }
+
+    /// One frame of a Lava Bubble's leap (see `step_lava_bubble`).
+    fn lava_bubble_rise(&mut self, l: f32) {
+        let top = self.home_y - l + 16.0;
+        let h = (top / 16.0).max(1.0);
+        let a = ((h * f32::from_bits(0x3f12_4925)).min(8.0) + 1.0)
+            .min(h + 1.0)
+            .max(1.0);
+        let step = (-1_073_741_824.0f32 / h) as i32;
+        if self.y > l {
+            let left = (((top + l) - self.y) * 0.0625).max(0.0);
+            let want = (left * step as f32) as i32 as u32 as i32;
+            let d = want.wrapping_sub(self.pause);
+            self.pause = if d >= 0x071c_71c1 {
+                self.pause.wrapping_add(0x071c_71c0)
+            } else if d > -0x071c_71c1 {
+                want
+            } else {
+                self.pause.wrapping_sub(0x071c_71c0)
+            };
+        }
+        let (sin, _) = crate::fmath::table_sin_cos(self.pause as u32);
+        self.vy = -(a * sin);
+        if ((top + l) - (self.y + self.vy)).abs() < 20.0 {
+            // its gravity on: this frame's move already falls
+            self.vy -= 0.1875;
+            self.phase = 2;
+        }
+        self.y += self.vy;
     }
 
     /// Monty Mole (102-monty-mole.md). Buried (phase 0) until the player is within 96 × 64 px,
@@ -5459,7 +5550,7 @@ mod tests {
 
     #[test]
     fn spike_top_rounds_a_ledge_on_the_binarys_quarter_circle() {
-        for (big, h, drop) in [(false, 8.0, 6.056), (true, 16.0, 12.825)] {
+        for (big, h, drop) in [(false, 8.0, 5.717), (true, 16.0, 12.107)] {
             let (level, mut a) = spike_top_at_a_ledge(big);
             while a.phase != 3 {
                 a.step(&level, 0.0);
@@ -5482,9 +5573,10 @@ mod tests {
             }
             assert_eq!(frames, 31);
             assert_eq!((a.phase, a.heading), (1, 270.0));
-            // flush with the face, 6.06 px (big 12.8) below where it started, not h
+            // flush with the face, 5.72 px (big 12.1) below where it started, not h (the
+            // turn's last frame doesn't move)
             assert_eq!(a.x, 336.0 + h);
-            assert!((a.y - (112.0 - drop)).abs() < 0.01, "{}", a.y);
+            assert!((a.y - (112.0 - drop)).abs() < 0.01, "big {big}: {}", a.y);
             // and it walks down the face
             for _ in 0..20 {
                 a.step(&level, 0.0);
@@ -5532,7 +5624,7 @@ mod tests {
         }
         assert_eq!(frames, 61);
         assert_eq!((a.phase, a.x), (1, 344.0));
-        assert!((a.y - (112.0 - 5.98)).abs() < 0.01, "{}", a.y);
+        assert!((a.y - (112.0 - 5.81)).abs() < 0.01, "{}", a.y);
     }
 
     #[test]

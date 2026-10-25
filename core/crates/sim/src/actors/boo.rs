@@ -80,7 +80,15 @@ impl Actor {
                 }
             }
         }
-        let looking = (px < self.x) == (self.target_facing > 0);
+        // whether the player looks at it is taken a frame late [obs: Ryujinx whole trace
+        // X_boo_M1: the player turns away on frame 62, the Boo sets off on 63] [inf: the whole
+        // test lags, not only the facing]
+        let now = (px < self.x) == (self.target_facing > 0);
+        let looking = match self.boo_facing {
+            0 => now,
+            k => k > 0,
+        };
+        self.boo_facing = if now { 1 } else { -1 };
         if self.wings && self.phase >= BOO_CHARGE {
             self.step_boo_charge(looking);
             return;
@@ -267,7 +275,8 @@ mod tests {
         assert_eq!(a.phase, super::BOO_STOP);
         assert!(a.wing_rate < 0.26, "{}", a.wing_rate);
         a.target_facing = -1;
-        run(&mut a, 1);
+        // (seen a frame late)
+        run(&mut a, 2);
         assert_eq!(a.phase, super::BOO_CHARGE);
         let x = a.x;
         run(&mut a, 30);

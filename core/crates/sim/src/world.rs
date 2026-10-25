@@ -2483,7 +2483,13 @@ impl World {
             a.target_h = self.player.query_height();
             powerups::mask_target(a, masked);
             a.camera = (self.camera_x, self.camera_y);
-            a.floor_ref = self.liquid.map(|l| l.y).unwrap_or(self.level.bottom - 12.0);
+            // the Lava Bubble's reference level: lava (or poison) − 12, else the area's bottom
+            // [obs v3.0.3 0x71010a0570 / 0x71010a08b0; Ryujinx whole trace X_lavab_M1]
+            a.floor_ref = self
+                .liquid
+                .filter(|l| !l.water())
+                .map(|l| l.y - 12.0)
+                .unwrap_or(self.level.bottom);
             if a.kind == Kind::Lakitu {
                 a.speed = self.player.vx;
             }
@@ -10517,8 +10523,9 @@ mod tests {
     fn lava_bubble_hides_then_leaps_to_its_height() {
         let mut lvl = Level::flat(40);
         lvl.bottom = 0.0;
-        // placed 5 tiles above the reference level (bottom − 12)
-        let home = -12.0 + 5.0 * TILE;
+        // placed 5 tiles above the reference level (the area's bottom): it falls from there
+        // first, its home 0.5625 lower (taken on its third falling frame)
+        let home = 5.0 * TILE;
         lvl.spawns.push(spawn(Kind::LavaBubble, 200.0, home));
         let mut w = World::with_level(lvl);
         w.player.x = 40.0;
@@ -10534,8 +10541,8 @@ mod tests {
             }
             top = top.max(a.y);
         }
-        // H = 6 tiles: A = 6·4/7 + 1 = 4.43
-        assert!((first_vy - 4.43).abs() < 0.05, "{first_vy}");
+        // H = 5.96 tiles: A = 5.96·4/7 + 1 = 4.41
+        assert!((first_vy - 4.41).abs() < 0.02, "{first_vy}");
         assert!(
             top <= home + 4.0 && top > home - 24.0,
             "top {top} home {home}"

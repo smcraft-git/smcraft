@@ -167,7 +167,7 @@ pub fn run_all(course: &[u8], script: &[Input], start: &Start) -> Result<(String
 // Physics test courses
 
 pub const STYLES: [&str; 5] = ["M1", "M3", "MW", "WU", "3W"];
-pub const KINDS: [&str; 49] = [
+pub const KINDS: [&str; 50] = [
     "flat",
     "wall",
     "slope",
@@ -217,6 +217,7 @@ pub const KINDS: [&str; 49] = [
     "stop",
     "bowser",
     "bowserjr",
+    "walkin",
 ];
 
 /// Kinds not made in 3D World (no winged Buzzy Beetle, Spike Top or Bowser Jr there).
@@ -738,7 +739,7 @@ pub fn build_course(name: &str) -> Result<Vec<u8>, String> {
         }
         // whole-course enemy tests (recorded with the player standing at the start): one enemy
         // or two in the first screen
-        "wbros" | "boo" | "lavab" | "pbeetle" | "stop" | "bowser" | "bowserjr" => {
+        "wbros" | "boo" | "lavab" | "pbeetle" | "stop" | "bowser" | "bowserjr" | "walkin" => {
             floor(&mut e, 0, len - 1)?;
             let wings = mmk_editor::DEFAULT_FLAGS | 0x2;
             let put = |e: &mut Editor, part: i16, x: i32, y: i32, flags: u32| {
@@ -765,6 +766,8 @@ pub fn build_course(name: &str) -> Result<Vec<u8>, String> {
                     put(&mut e, 40, 22, up(5), wings)?;
                 }
                 "bowser" => put(&mut e, 62, 18, up(1), mmk_editor::DEFAULT_FLAGS)?,
+                // a Goomba walking left into the standing player (the touch distance)
+                "walkin" => put(&mut e, 0, 12, up(1), mmk_editor::DEFAULT_FLAGS)?,
                 _ => put(&mut e, 98, 18, up(1), mmk_editor::DEFAULT_FLAGS)?,
             }
         }

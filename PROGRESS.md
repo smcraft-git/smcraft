@@ -236,7 +236,19 @@ sway, importer and pack 12, the dev cache already at v12).
   161 callers) names. ✅ the view's side hold: 8.0 inside last frame's view in every style (not
   v1.0.0's 8.1) — the slow autoscroll in SMB1 … 3D World (new whole traces X_ascroll_<style>,
   `trace-courses` kind `autoscroll`) pushes the standing player 7.5 inside this frame's view;
-  the autoscroll starts at 0.5 on the first update (a reset doesn't move it). Coverage 548 / 550
+  the autoscroll starts at 0.5 on the first update (a reset doesn't move it). ✅ enemy whole
+  traces (`trace-courses` kinds wbros, boo, lavab, pbeetle, stop, bowser, bowserjr, walkin): the
+  Lava Bubble rebuilt from v3.0.3 (0x71010a0570 / 0x71010a08b0 / 0x71010a0ee0: placed falling,
+  home from its third falling frame, L = lava − 12 or the area's bottom, hidden at L − 32, the
+  sine leap) — X_lavab_M1 exact 600 frames; the Boo sees the player a frame late (X_boo_M1
+  exact); the Para-Beetle exact as it was (X_pbeetle_M1 / _WU); Spike Top corners: the outside
+  turn's last frame doesn't move, its speeds are the step / 0.49 into the surface, an inside turn
+  off a wall idles a frame first (X_stop exact to the player's death, 462); the winged Hammer Bro
+  placed on the ground hops on its first update and its jump moves on the frame it's decided,
+  hammers go 32 under the view (X_wbros_M1 exact to frame 242, then its random facing). Left: the
+  game's random draws; Bowser / Bowser Jr / 3D World enemies aren't in the recorded pool slots (to
+  record with scans); a Spike Top touches the player at 10.5 px, not 11+ (the engine 12).
+  Coverage 548 / 550
   + 272 / 273 (as main); simulate 0 crashes.
 - 🔄 **Inferred-behaviour pass 6** (2026-10-25, branch `infres6`, research specs/inf-inventory.md
   "Pass 6"): ✅ the Propeller Mushroom's own Move (#38, ItemPropeller 0x710134ca70 / 0x710134c3c0 /
