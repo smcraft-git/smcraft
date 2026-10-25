@@ -40,6 +40,11 @@ pub fn playable(c: &Course) -> bool {
         && mmk_sim::level::unsupported_features(c).is_empty()
 }
 
+/// SMM1's sample courses (the SMM1 import's `courses/`, `mmk_import::smm1_samples::FILE_PREFIX`)
+/// and their collection.
+pub const SMM1_SAMPLE_PREFIX: &str = "smm1_sample_";
+pub const SMM1_SAMPLE: &str = "SMM1 Sample";
+
 /// The library entry of course `c` (file `id`, named `stem` without its extension); built-in
 /// courses (the owner's game data) get their collection and, without a name of their own, one
 /// from it ("Story Mode 3").
@@ -58,6 +63,8 @@ pub fn entry(
             "Lesson"
         } else if stem.starts_with("title") {
             "Title"
+        } else if stem.starts_with(SMM1_SAMPLE_PREFIX) {
+            SMM1_SAMPLE
         } else {
             "Built-in"
         }

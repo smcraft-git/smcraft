@@ -1434,7 +1434,7 @@ fn main() -> ExitCode {
                         eprintln!("skipped: {s}");
                     }
                     println!(
-                        "imported SMM1 {} UI: {} layouts, {} animations, {} textures, {} fonts, {} message files, {} UI sounds of {} SLink users ({} streams); {} costumes ({} frames, {} sounds) ({} skipped) into {}",
+                        "imported SMM1 {} UI: {} layouts, {} animations, {} textures, {} fonts, {} message files, {} UI sounds of {} SLink users ({} streams); {} costumes ({} frames, {} sounds); {} sample courses ({} skipped) into {}",
                         r.build,
                         r.layouts,
                         r.animations,
@@ -1447,6 +1447,7 @@ fn main() -> ExitCode {
                         r.costumes,
                         r.costume_textures,
                         r.costume_sounds,
+                        r.sample_courses,
                         r.skipped.len(),
                         r.out_dir.display()
                     );

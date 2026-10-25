@@ -63,6 +63,7 @@ pub mod smm1_bgm;
 pub mod smm1_costumes;
 pub mod smm1_course;
 pub mod smm1_ending;
+pub mod smm1_samples;
 pub mod smm1_ui_sound;
 pub use smm1::{Smm1Config, Smm1Report, run_smm1};
 pub mod smm2_font;

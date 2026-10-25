@@ -75,16 +75,19 @@ struct CourseEntry: Identifiable, Hashable {
     let url: URL
     let info: CourseInfo
     var meta = CourseMeta()
-    /// From the owner's game data (Story Mode, lessons, title courses), not the library folder.
+    /// From the owner's game data (Story Mode, lessons, title courses; SMM1's sample courses),
+    /// not the library folder.
     var builtIn = false
 
-    /// "Story Mode", "Lesson", "Title" for built-in courses (from the archive name).
+    /// "Story Mode", "Lesson", "Title", "SMM1 Sample" for built-in courses (from the file name;
+    /// as the front end's `front_course::entry`).
     var collection: String? {
         guard builtIn else { return nil }
         let n = url.deletingPathExtension().lastPathComponent
         if n.hasPrefix("quest") { return "Story Mode" }
         if n.hasPrefix("lesson") { return "Lesson" }
         if n.hasPrefix("title") { return "Title" }
+        if n.hasPrefix("smm1_sample_") { return "SMM1 Sample" }
         return "Built-in"
     }
 
@@ -146,11 +149,14 @@ final class CourseLibrary: ObservableObject {
             var found: [CourseEntry] = []
             var bad: [(String, String)] = []
             let meta = CourseMeta.scan(under: folder)
-            // the library folder, then the built-in courses the importer exported from the
-            // owner's game (<asset cache>/courses)
+            // the library folder, then the built-in courses the importers exported from the
+            // owner's games (<asset cache>/courses; SMM1's sample courses, <SMM1 import>/courses)
             var sources = Self.files(under: folder).map { ($0, false) }
             if let root = assets?.url?.appendingPathComponent("courses", isDirectory: true) {
                 sources += Self.files(under: root).map { ($0, true) }
+            }
+            if let smm1 = AppPaths.findSMM1Cache()?.appendingPathComponent("courses", isDirectory: true) {
+                sources += Self.files(under: smm1).map { ($0, true) }
             }
             for (url, builtIn) in sources {
                 guard let data = try? Data(contentsOf: url) else { continue }
@@ -231,7 +237,7 @@ struct LibraryView: View {
 
     enum Filter: String, CaseIterable, Identifiable {
         case all = "All", playable = "Playable", notCleared = "Not cleared", cleared = "Cleared"
-        case builtIn = "Built-in (Story Mode, lessons)"
+        case builtIn = "Built-in (Story Mode, lessons, SMM1 samples)"
         var id: String { rawValue }
     }
 

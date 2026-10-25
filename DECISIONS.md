@@ -2,6 +2,27 @@
 
 Newest first. Each entry: what was decided, why, and what would change it.
 
+## 2026-10-25 — SMM1's sample courses: built-in library courses from the SMM1 import
+**Decision:** `mmk import-smm1` (importer 7) converts the sample courses SMM1 itself offers
+(`Mush/SampleCourseDB` rows found in the owner's `Course/`, 60 in v208) into
+`<smm1 import>/courses/smm1_sample_NN.course` (SMM2 course data via `mmk_import::smm1_course`,
+named from `Lcl_SampleCourseName`), with `courses/samples.json` (list order, type, scene, skin).
+The library scan treats that folder as it treats the asset cache's `courses/`: its files are
+built-in courses (`CourseEntry::built_in`), collection "SMM1 Sample" from the file prefix — in
+the portable shell (`HostData::built_in_dirs`, next to `library_dirs`) and in the Apple app's
+library (`AppPaths.findSMM1Cache()/courses`). The tutorial, title and blank courses are not
+offered (SMM1 doesn't list them as samples).
+**Why:** the courses are the owner's data, so they are made at import like every other built-in
+and never shipped; converting at import (not at launch) needs no SMM1 dump after the import and
+no work at start. Built-ins already have a home in the library (Story Mode, lessons, title
+courses: a collection each, the Built-in filter); Course World's local list and the Coursebot's
+Downloaded Courses take only non-built-in courses (and the Coursebot's 60 slots are the
+library's other courses already), so neither fits a fixed set of 60 the player can't delete.
+**What would change it:** a front-end screen of their own — SMM1 puts them in the Coursebot's
+Sample Courses tab and the 10 Mario Challenge; when the front end gets either, it lists the
+"SMM1 Sample" collection there. An import made by importer 6 has no `courses/`: the library
+simply lacks them until SMM1 is imported again (`SMM1_PACK_VERSION` 7 flags it outdated).
+
 ## 2026-10-25 — The web build at parity: the course server from the page, the runs' pool, co-op, a lost device
 **Decision:**
 - **The course server's client takes a transport.** `mmk_online::Client` sends every request

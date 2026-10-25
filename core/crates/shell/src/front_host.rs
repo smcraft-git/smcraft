@@ -202,9 +202,21 @@ impl HostData {
         decode(self.src(), bytes)
     }
 
+    /// The built-in courses' folders: the asset cache's (Story Mode, lessons, title courses) and
+    /// the SMM1 import's (its sample courses, `mmk_import::smm1_samples`).
+    fn built_in_dirs(&self) -> Vec<PathBuf> {
+        let root = self.source.as_ref().and_then(|s| s.dir());
+        [root, self.smm1_dir.as_deref()]
+            .into_iter()
+            .flatten()
+            .map(|d| d.join("courses"))
+            .collect()
+    }
+
     /// Scan the library on a thread (`library` waits for it).
     pub fn start_scan(&mut self) {
         let dirs = self.scan_dirs();
+        let built_in = self.built_in_dirs();
         let root = self
             .source
             .as_ref()
@@ -212,7 +224,7 @@ impl HostData {
             .map(Path::to_path_buf);
         let (tx, rx) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
-            let _ = tx.send(scan(&dirs, root.as_deref()));
+            let _ = tx.send(scan(&dirs, &built_in, root.as_deref()));
         });
         self.scanning = Some(rx);
     }
@@ -340,7 +352,13 @@ fn meta_of_pool(m: &mmk_server::Meta) -> CourseMeta {
     }
 }
 
-fn scan(library_dirs: &[PathBuf], asset_root: Option<&Path>) -> Vec<CourseEntry> {
+/// The library folders' courses and the built-in folders' (`built_in`), sorted by name; the
+/// asset cache at `asset_root` decrypts `.bcd` files.
+fn scan(
+    library_dirs: &[PathBuf],
+    built_in: &[PathBuf],
+    asset_root: Option<&Path>,
+) -> Vec<CourseEntry> {
     let source = asset_root.map(DirSource::new);
     let src = source.as_ref().map(|s| s as &dyn AssetSource);
     let mut out = Vec::new();
@@ -363,9 +381,9 @@ fn scan(library_dirs: &[PathBuf], asset_root: Option<&Path>) -> Vec<CourseEntry>
             }
         }
     }
-    if let Some(root) = asset_root {
+    for dir in built_in {
         sources.extend(
-            files(&root.join("courses"))
+            files(dir)
                 .into_iter()
                 .filter(|f| candidate(f))
                 .map(|f| (f, true)),
@@ -465,7 +483,7 @@ impl Host for ShellHost<'_> {
                 Some(rx) => rx.recv().unwrap_or_default(),
                 None => {
                     let root = self.data.source.as_ref().and_then(|s| s.dir());
-                    scan(&self.data.scan_dirs(), root)
+                    scan(&self.data.scan_dirs(), &self.data.built_in_dirs(), root)
                 }
             };
             let mut found = found;
@@ -1234,6 +1252,41 @@ mod tests {
         assert!(host.coursebot_slots()[5].is_none());
         let pic = host.course_thumbnail(&bytes).unwrap();
         assert_eq!((pic.width, pic.height), (384, 216));
+    }
+
+    #[test]
+    fn smm1_sample_courses_are_built_in_library_courses() {
+        let dir = std::env::temp_dir().join(format!("mmk-shell-smm1lib-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("smm1/courses")).unwrap();
+        std::fs::create_dir_all(dir.join("library")).unwrap();
+        let mut e = mmk_front::maker::new_course("M3");
+        e.set_name("A sample course");
+        let bytes = e.save().unwrap();
+        std::fs::write(dir.join("smm1/courses/smm1_sample_01.course"), &bytes).unwrap();
+        std::fs::write(dir.join("library/mine.course"), &bytes).unwrap();
+        let mut game = Game::load(None, None).unwrap();
+        let mut data = HostData::new(None);
+        data.library_dirs = vec![dir.join("library")];
+        data.smm1_dir = Some(dir.join("smm1"));
+        let mut host = ShellHost {
+            game: &mut game,
+            data: &mut data,
+        };
+        let lib = host.library();
+        let sample = lib
+            .iter()
+            .find(|c| c.id.ends_with("smm1_sample_01.course"))
+            .expect("listed");
+        assert_eq!(sample.name, "A sample course");
+        assert!(sample.built_in && sample.playable);
+        assert_eq!(
+            sample.collection.as_deref(),
+            Some(front_course::SMM1_SAMPLE)
+        );
+        let mine = lib.iter().find(|c| c.id.ends_with("mine.course")).unwrap();
+        assert!(!mine.built_in && mine.collection.is_none());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

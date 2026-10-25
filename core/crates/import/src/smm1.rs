@@ -13,6 +13,8 @@
 //! ui/sound/sounds.json, ui/sound/<sound>.wav  the layouts' sounds (see `smm1_ui_sound`)
 //! ui/sound/<stream>.wav                 the menus' music (see `smm1_bgm`)
 //! ui/ending/ending.json, ui/textures/<archive>/  the rescue scene's models (see `smm1_ending`)
+//! courses/smm1_sample_NN.course, courses/samples.json  the sample courses as SMM2 course data
+//!                                       (see `smm1_samples`)
 //! ```
 //! Layout archives are found as loose `Layout/*.szs` files and as `Layout/*.szs` members of
 //! `Pack/*.pack`. A file in the update replaces the base file with the same path.
@@ -34,8 +36,9 @@ use crate::{ImportError, Progress, Result, read, write};
 /// 2: costume stage (`costumes/`, module `smm1_costumes`). 4: UI sounds (`ui/sound/`, module
 /// `smm1_ui_sound`). 5: the ending's models (`ui/ending/`, module `smm1_ending`) and the menus'
 /// music (`ui/sound/bgm/`). 6: the ending's Kuribo's Shoes, Yoshi (with his skeletal
-/// animations) and shell helmets.
-pub const SMM1_IMPORTER_VERSION: u32 = 6;
+/// animations) and shell helmets. 7: the built-in sample courses converted for the library
+/// (`courses/`, module `smm1_samples`).
+pub const SMM1_IMPORTER_VERSION: u32 = 7;
 
 #[derive(Clone, Debug)]
 pub struct Smm1Config {
@@ -70,6 +73,8 @@ pub struct Smm1Report {
     pub ending_textures: usize,
     /// The menus' music (`ui/sound/BGM_*.wav` …).
     pub music: usize,
+    /// The sample courses converted for the library (`courses/`).
+    pub sample_courses: usize,
     /// Files that could not be converted (path: reason).
     pub skipped: Vec<String>,
 }
@@ -469,6 +474,15 @@ pub fn run_smm1(cfg: &Smm1Config, progress: Progress) -> Result<Smm1Report> {
         .skipped
         .extend(e.skipped.into_iter().map(|s| format!("ending: {s}")));
 
+    // --- the sample courses, for the library
+    let c = crate::smm1_samples::import_samples(&ov, &out, &cfg.language, progress)?;
+    report.sample_courses = c.courses;
+    report.skipped.extend(
+        c.skipped
+            .into_iter()
+            .map(|s| format!("sample courses: {s}")),
+    );
+
     // --- manifest
     let manifest = json!({
         "importer_version": SMM1_IMPORTER_VERSION,
@@ -477,8 +491,9 @@ pub fn run_smm1(cfg: &Smm1Config, progress: Progress) -> Result<Smm1Report> {
         "base_title_version": base_version,
         "update_title_version": update_version,
         "language": cfg.language,
-        "stages": ["identify", "layouts", "fonts", "messages", "ui sounds", "costumes", "music", "ending"],
+        "stages": ["identify", "layouts", "fonts", "messages", "ui sounds", "costumes", "music", "ending", "sample courses"],
         "costumes": report.costumes,
+        "sample_courses": report.sample_courses,
         "ui_sounds": report.ui_sounds,
         "layouts": layout_names,
         "animations": report.animations,
