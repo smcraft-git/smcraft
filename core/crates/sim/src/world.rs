@@ -379,9 +379,11 @@ pub struct World {
     pub others: Vec<Player>,
     /// Which character each extra player is (index into Mario, Luigi, Toad, Toadette).
     pub other_chars: Vec<usize>,
-    /// Yoshi's mouth: what he holds to spit (an enemy kind; fire), tongue frames left, the Red
-    /// Yoshi fire cooldown, and Run last frame (tongue presses).
+    /// Yoshi's mouth: what he holds to spit (an enemy kind; fire; a power-up, with its SMM1
+    /// subtype), tongue frames left, the Red Yoshi fire cooldown, and Run last frame (tongue
+    /// presses).
     pub yoshi_mouth: Option<Kind>,
+    pub yoshi_mouth_sub: u8,
     pub tongue: i32,
     yoshi_fire_cd: i32,
     yoshi_prev_run: bool,
@@ -783,6 +785,7 @@ impl World {
             sound_parts: Default::default(),
             main_char: 0,
             yoshi_mouth: None,
+            yoshi_mouth_sub: 0,
             tongue: 0,
             yoshi_fire_cd: 0,
             yoshi_prev_run: false,
@@ -1726,6 +1729,19 @@ impl World {
                     a.phase = hit as u8;
                 }
             }
+            // a held power-up is put down where he is (actors/eat_out.rs)
+            if let Some(k) = self.yoshi_mouth.filter(|k| Self::yoshi_holds_item(*k)) {
+                let mut a = Actor::spat_out(
+                    &self.level,
+                    k,
+                    (px, py),
+                    facing,
+                    0.0,
+                    crate::actors::eat_out::Release::PutDown,
+                );
+                a.smm1_item = self.yoshi_mouth_sub;
+                self.add_actor(a);
+            }
             self.yoshi_mouth = None;
             self.tongue = 0;
             return;
@@ -1778,11 +1794,10 @@ impl World {
     }
 
     /// Yoshi's tongue caught actor `j` (yoshi.md §5.3 eat reactions, simplified): eaten
-    /// (GulpDown; a coin counts), held to spit (SpitOut enemies, fire, bones), or a power-up
-    /// for the rider [inf: EnemyDB marks power-ups SpitOut, but the mouth acts on the caught
-    /// actor's own eat handler (actor +0x338: type +0x24, swallow +0x30, replace +0x08;
-    /// catch 0x7100a24920), and the item handlers weren't found, so whether an item is held
-    /// and spat or swallowed into the rider is open]; Invalid things are left alone.
+    /// (GulpDown; a coin counts), held to spit (SpitOut enemies, fire, bones, and the power-ups:
+    /// held, never swallowed — their eat handler's type is SpitOut's, and the catch 0x71015fdc10
+    /// swallows only GulpDown's; actors/eat_out.rs) [obs v3.0.3]; Invalid things are left
+    /// alone.
     fn eat(&mut self, j: usize) {
         let a = &self.actors[j];
         if a.big {
@@ -1831,24 +1846,45 @@ impl World {
                 self.actors[j].mode = Mode::Dead;
                 self.yoshi_mouth = Some(Kind::Hammer);
             }
-            Kind::Mushroom
-            | Kind::FireFlower
-            | Kind::Star
-            | Kind::OneUp
-            | Kind::StyleItem
-            | Kind::SuperHammer => {
+            k if Self::yoshi_holds_item(k) => {
                 self.actors[j].mode = Mode::Dead;
-                let sub = self.actors[j].smm1_item;
-                self.collect_item(kind, ax, ay, sub);
+                self.actors[j].tallied = true;
+                self.yoshi_mouth = Some(kind);
+                self.yoshi_mouth_sub = self.actors[j].smm1_item;
             }
             _ => {}
         }
+    }
+
+    /// The power-ups Yoshi's tongue takes (to hold, then spit).
+    fn yoshi_holds_item(k: Kind) -> bool {
+        matches!(
+            k,
+            Kind::Mushroom
+                | Kind::FireFlower
+                | Kind::Star
+                | Kind::OneUp
+                | Kind::StyleItem
+                | Kind::SuperHammer
+        )
     }
 
     /// Spit what Yoshi holds: a shell kicked forward, or 3 fireballs / bones (yoshi.md §5.5:
     /// speed |v|·0.35 + 3.25 (bones + 2.0) at 0 and ±15°).
     fn spit(&mut self, k: Kind, px: f32, py: f32, facing: i32, pvx: f32) {
         match k {
+            k if Self::yoshi_holds_item(k) => {
+                let mut a = Actor::spat_out(
+                    &self.level,
+                    k,
+                    (px + facing as f32 * 16.0, py + 2.0),
+                    facing,
+                    pvx,
+                    crate::actors::eat_out::Release::Spit,
+                );
+                a.smm1_item = self.yoshi_mouth_sub;
+                self.add_actor(a);
+            }
             Kind::EnemyFire => self.spit_fire(px, py, facing, pvx, 3),
             Kind::Hammer => {
                 for dy in [-0.54f32, 0.0, 0.54] {
@@ -3656,7 +3692,7 @@ impl World {
                 };
                 let ab = (ab.0 + dx, ab.1 + dy, ab.2 + dx, ab.3 + dy);
                 let ib = item_touch_box(self.style, a.kind, ab);
-                if a.taken == 0 && overlap(contact, ib) {
+                if a.taken == 0 && a.eat_lock == 0 && overlap(contact, ib) {
                     self.actors[i].taken = 1;
                 } else if a.taken == 2 {
                     let kind = a.kind;
@@ -11308,6 +11344,66 @@ mod tests {
         assert_eq!(w.actors[yi].phase, 1);
         run(&mut w, 0, 30);
         assert!(w.actors[yi].vx.abs() > 1.5, "running away");
+    }
+
+    #[test]
+    fn yoshi_holds_a_power_up_and_spits_it_out_bouncing() {
+        let mut lvl = Level::flat(60);
+        lvl.spawns
+            .push(spawn(Kind::YoshiEgg { red: false }, 100.0, 32.0));
+        let mut w = World::with_level(lvl);
+        w.style = crate::player::Style::MW;
+        w.player.x = 40.0;
+        run(&mut w, 0, 40);
+        let yi = w
+            .actors
+            .iter()
+            .position(|a| matches!(a.kind, Kind::Yoshi { .. }))
+            .unwrap();
+        let (yx, yy) = (w.actors[yi].x, w.actors[yi].y);
+        (w.player.x, w.player.y, w.player.vy) = (yx, yy + 14.0, -1.0);
+        w.player.on_ground = false;
+        w.player_interactions(false);
+        assert!(w.player.yoshi.is_some());
+        run(&mut w, 0, 10);
+        let form = w.player.form;
+        let mut m = Actor::new(Kind::Mushroom, w.player.x + 24.0, w.player.y);
+        m.dir = -1;
+        w.add_actor(m);
+        run(&mut w, 0, 1);
+        run(&mut w, input::RUN, 8);
+        // held, not given to the rider
+        assert_eq!(w.yoshi_mouth, Some(Kind::Mushroom));
+        assert!(
+            w.actors
+                .iter()
+                .all(|a| a.kind != Kind::Mushroom || !a.alive())
+        );
+        run(&mut w, 0, 30);
+        assert_eq!(w.player.form, form);
+        // spat out: 2.5 px/f ahead, bouncing up at 1.5 on its first two landings
+        run(&mut w, input::RUN, 1);
+        assert_eq!(w.yoshi_mouth, None);
+        let i = w
+            .actors
+            .iter()
+            .position(|a| a.kind == Kind::Mushroom && a.alive())
+            .expect("spat out");
+        assert_eq!(w.actors[i].eat_out, 3);
+        assert!(w.actors[i].vx >= 2.5 && w.actors[i].vy > 0.0);
+        let mut ups = 0;
+        for _ in 0..200 {
+            let was = w.actors[i].eat_out;
+            run(&mut w, 0, 1);
+            if w.actors[i].eat_out < was && w.actors[i].eat_out > 0 {
+                assert_eq!(w.actors[i].vy, 1.5);
+                ups += 1;
+            }
+            if w.actors[i].eat_out == 0 {
+                break;
+            }
+        }
+        assert_eq!((ups, w.actors[i].eat_out), (2, 0));
     }
 
     #[test]
