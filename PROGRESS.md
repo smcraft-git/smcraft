@@ -272,11 +272,17 @@ sway, importer and pack 12, the dev cache already at v12).
   never arm the breath helper; NSMBU's Fire state runs two frames longer, its flame (0.9 px/f,
   level on its birth frame) leaves from the mouth joint and aims from there; Bowser Jr's
   GoStraight fireballs (and the SMW / NSMBU straight flames) meet the player within 5 + 4 px and
-  hurt a frame later, like an enemy's touch; a boss whose own move kills freezes the actors
-  after him; NSMBU Bowser Jr's fireball (hand joint, a frame later, 62-frame cycle, table aim)
-  and his wind-up a frame past the clip. Left: X_bowser_3W (3D World's Bowser draws from the
-  game's clock-seeded global generator and isn't modelled from the game; the engine runs
-  NSMBU's rules on its own stream).
+  hurt a frame later, like an enemy's touch (a boss's body too); the big jump's take-off and
+  SMW's jump out of LandOn; NSMBU Bowser Jr's fireball (hand joint, a frame later, 62-frame
+  cycle, table aim) and his wind-up a frame past the clip; no re-seed on a restart; creation
+  draws by kind (none for the Angry Sun, two for a Chain Chomp). ⬜ Left: X_bowser_3W (3D
+  World's Bowser draws from the game's clock-seeded global generator and isn't modelled from the
+  game; the engine runs NSMBU's rules on its own stream). ⬜ The audit (fidelity-log "physics11"):
+  the game's draw sites for the walking Hammer Bro, Lakitu, Magikoopa, Rocky Wrench, Fire Piranha,
+  Chain Chomp, Boom Boom, the Fire Clown Car are logged (new SMB1 `trace-courses` kinds), not yet
+  ported; Wiggler / Angry Sun / Monty Mole agree; Koopalings, Pom Pom, the 3D World enemies,
+  tower sway, block debris not traced. Coverage 550 / 550 + 273 / 273 (as main); simulate 0
+  crashes on both.
 - 🔄 **Inferred-behaviour pass 6** (2026-10-25, branch `infres6`, research specs/inf-inventory.md
   "Pass 6"): ✅ the Propeller Mushroom's own Move (#38, ItemPropeller 0x710134ca70 / 0x710134c3c0 /
   limits 0x710134c880; the Block context's enter 0x710134d550 skips the slow rise): out of a
