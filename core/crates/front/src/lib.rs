@@ -35,9 +35,11 @@ pub mod play;
 pub mod screens;
 pub mod search;
 pub mod smm1;
+pub mod smm1_costume;
 pub mod smm1_ending;
 pub mod smm1_fade;
 pub mod smm1_sound;
+pub mod smm1_window;
 pub mod sound;
 pub mod superworld;
 pub mod swmap;
@@ -1035,7 +1037,9 @@ impl Front {
     /// courseworld-leaderboards, courseworld-course-page / -comments / -post / -maker / -play /
     /// -pause / -clear of the list's first server course), challenge, challenge-map,
     /// challenge-walk, challenge-gameover, challenge-ending[-smb3|-smw|-nsmbu] (the rescue scene),
-    /// challenge-credits (`difficulty`, `cleared` for the walk), superworld, superworld-title / -map / -walk / -play / -enemy / -retreat / -pipe /
+    /// challenge-credits, challenge-costume[-last] (the costume window after the credits, then
+    /// the "try another level" window), challenge-pause / -quit (Save & Quit's question) / -clear
+    /// / -skip / -card (`difficulty`, `cleared` for the walk), superworld, superworld-title / -map / -walk / -play / -enemy / -retreat / -pipe /
     /// -ending (the library's test world; `cleared` for the map). Returns false for an unknown
     /// name.
     pub fn capture(
@@ -1316,7 +1320,15 @@ impl Front {
                         let lib = cx.host.library();
                         f.debug_credits(difficulty, &lib);
                     }
-                    "challenge-pause" | "challenge-clear" | "challenge-skip" | "challenge-card" => {
+                    // the costume window after the credits (Peach), and with the "try another
+                    // level" notice after it
+                    "challenge-costume" | "challenge-costume-last" => {
+                        let note = (s == "challenge-costume-last")
+                            .then_some(mmk_modes::hundred::RewardNote::TryAnotherLevel);
+                        f.debug_costume(difficulty, 1, note);
+                    }
+                    "challenge-pause" | "challenge-clear" | "challenge-skip" | "challenge-card"
+                    | "challenge-quit" => {
                         f.start(&mut cx, difficulty, false);
                         f.play(&mut cx);
                         let what = &s["challenge-".len()..];

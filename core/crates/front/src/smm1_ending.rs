@@ -7,12 +7,16 @@
 //! his costume, and the hold before the credits. Every timer and position is the binary's
 //! (v208 addresses below); what is not is marked [inf].
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 
+use mmk_modes::hundred::RewardNote;
 use mmk_ui::Quad;
 use serde_json::Value;
 
 use crate::layout::{Layout, Ui};
+use crate::menu::UiInput;
+use crate::smm1_costume::CostumeWindow;
+use crate::smm1_window::{MessageWindow, WindowEvent, WindowKind};
 use crate::{DrawItem, push_layout};
 
 /// The view (world units) [inf: the projection size is a runtime global, 0x102569f8; the
@@ -551,24 +555,45 @@ const CAPE: &str = "MW_Player_Mant";
 /// The pause after the credits before the costume window (`cCharaMarioDemoIn`, 0x0259f4c4).
 pub const REWARD_WAIT: i32 = 180;
 
+/// The run's Mystery Mushroom reward, for the credits' end (the costume picker 0x021f2428).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct CreditsReward {
+    /// The costume won (SMM1 id), shown in the costume window.
+    pub costume: Option<u16>,
+    /// The costumes owned with it (the window's list).
+    pub owned: BTreeSet<u16>,
+    /// The picker's "pool exhausted" note (credits manager +0x111): the system window after.
+    pub note: Option<RewardNote>,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CreditsState {
     Rolling,
+    /// cCharaMarioDemoIn: the 180 frames before the costume window.
     Reward,
+    /// cCharaMarioDemoWait: the costume window is up.
+    Costume,
+    /// cCharaMarioComplete: the "every costume" system window.
+    Complete,
     Done,
 }
 
 /// `NetEndingScene` (research/specs/smm1-ending.md §4): the staff credits listing the run's
 /// courses (Easy `Nwk_StaffCredit_01`, 8 rows; Normal and Expert `_00`, 16; Super Expert `_03`, 6
 /// [obs 0x02598328]), their `InOut` played once at 1.0 with no input [obs 0x02517774]; then the
-/// layout is reset (hidden) and 180 frames later the Mystery Mushroom costume comes (the window
-/// is the host's notice here [inf]).
+/// layout is reset (hidden) and, with a costume won, 180 frames later the costume window opens
+/// (0x0259f4c4, [`crate::smm1_costume`]) until the player closes it (0x0259f548); when the pool
+/// is exhausted the system window says so — `Msg_0052` when nothing is left at any level, else
+/// `Msg_0051` (0x0259f5ac) — and is closed with OK; then Course World (0x0259f40c → state 6).
 pub struct CreditsScene {
     ui: Ui,
     layout: Option<Layout>,
     pub tick: i32,
     pub state: CreditsState,
     timer: i32,
+    reward: CreditsReward,
+    costume: Option<CostumeWindow>,
+    message: Option<MessageWindow>,
 }
 
 /// The credits layout of difficulty `d`.
@@ -580,9 +605,18 @@ pub fn credits_layout(d: usize) -> &'static str {
     }
 }
 
+/// The system message after the costume window (message ids 0x34 / 0x33 → `Nwk_Message`
+/// `Msg_0052` / `Msg_0051`, table 0x10224e54) [obs].
+pub fn complete_message(note: RewardNote) -> &'static str {
+    match note {
+        RewardNote::AllOwned => "0052",
+        RewardNote::TryAnotherLevel => "0051",
+    }
+}
+
 impl CreditsScene {
-    /// `list`: the cleared courses (name, maker).
-    pub fn new(ui: &Ui, d: usize, list: &[(String, String)]) -> Self {
+    /// `list`: the cleared courses (name, maker); `reward`: what the run won.
+    pub fn new(ui: &Ui, d: usize, list: &[(String, String)], reward: CreditsReward) -> Self {
         let mut layout = ui.layout(credits_layout(d));
         if let Some(c) = &mut layout {
             for i in 0..16 {
@@ -612,30 +646,84 @@ impl CreditsScene {
             tick: 0,
             state: CreditsState::Rolling,
             timer: 0,
+            reward,
+            costume: None,
+            message: None,
         }
     }
 
-    /// One tick; true when the scene is over (the costume came; Course World next).
-    pub fn step(&mut self) -> bool {
+    /// Captures: the credits' end at once (the costume window opens on the next tick).
+    pub fn skip_to_reward(&mut self) {
+        self.state = CreditsState::Reward;
+        self.timer = 1;
+    }
+
+    /// cCharaMarioComplete when the pool ran out, else the end.
+    fn after_costume(&mut self) {
+        let window = self.reward.note.and_then(|n| {
+            let id = complete_message(n);
+            let text = self.ui.message("Nwk_Message", &format!("Msg_{id}"))?;
+            let ok = self
+                .ui
+                .message("Nwk_Message", &format!("BtnC_{id}"))
+                .unwrap_or_else(|| "OK".into());
+            MessageWindow::open(&self.ui, WindowKind::Ok, &text, &[&ok], false)
+        });
+        match window {
+            Some(w) => {
+                self.message = Some(w);
+                self.state = CreditsState::Complete;
+            }
+            None => self.state = CreditsState::Done,
+        }
+    }
+
+    /// One tick; true when the scene is over (Course World next).
+    pub fn step(&mut self, input: &UiInput) -> bool {
         self.tick += 1;
         match self.state {
             CreditsState::Rolling => {
                 let end = self.layout.as_mut().map_or(0, |l| l.ticks("InOut", 1));
                 if self.tick >= end {
-                    self.state = CreditsState::Reward;
-                    self.timer = REWARD_WAIT;
+                    // the credit layout is reset; a costume waits 180 frames, none goes to the
+                    // message (0x0259f40c) [obs]
+                    if self.reward.costume.is_some() {
+                        self.state = CreditsState::Reward;
+                        self.timer = REWARD_WAIT;
+                    } else {
+                        self.after_costume();
+                    }
                 }
             }
             CreditsState::Reward => {
                 self.timer -= 1;
                 if self.timer <= 0 {
+                    let id = self.reward.costume.unwrap_or_default();
+                    self.costume = CostumeWindow::open(&self.ui, id, &self.reward.owned);
+                    if self.costume.is_some() {
+                        self.state = CreditsState::Costume;
+                    } else {
+                        self.after_costume();
+                    }
+                }
+            }
+            CreditsState::Costume => {
+                if self.costume.as_mut().is_none_or(|w| w.step(input)) {
+                    self.costume = None;
+                    self.after_costume();
+                }
+            }
+            CreditsState::Complete => {
+                if let Some(w) = &mut self.message
+                    && w.step(input) == Some(WindowEvent::Closed)
+                {
+                    self.message = None;
                     self.state = CreditsState::Done;
-                    return true;
                 }
             }
             CreditsState::Done => {}
         }
-        false
+        self.state == CreditsState::Done
     }
 
     pub fn draw(&mut self, out: &mut Vec<DrawItem>) {
@@ -658,6 +746,12 @@ impl CreditsScene {
             && let Some(l) = &mut self.layout
         {
             push_layout(out, l, self.tick);
+        }
+        if let Some(w) = &mut self.costume {
+            w.draw(out);
+        }
+        if let Some(w) = &mut self.message {
+            w.draw(out);
         }
     }
 }

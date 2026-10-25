@@ -13,6 +13,7 @@
 use crate::layout::{Layout, Ui};
 use crate::menu::{Buttons, UiInput, hit};
 use crate::smm1_sound::Ctx;
+use crate::smm1_window::{MessageWindow, WindowEvent, WindowKind};
 use crate::sound::SoundCue;
 use crate::{DrawItem, push_layout};
 
@@ -52,6 +53,11 @@ impl Pending {
 fn key(l: &Layout, part: Option<&str>, key: &str, ctx: &[Ctx]) {
     let ui = l.ui();
     ui.push_cues(ui.smm1_key(&l.name, part, key, ctx));
+}
+
+/// Fire SMM1 key `key` (no switch values) on layout `l` (its part `part`) now.
+pub(crate) fn fire_key(l: &Layout, part: Option<&str>, name: &str) {
+    key(l, part, name, &[]);
 }
 
 /// The game style's enum value in the pause menu's switch (`CourseStatus::style` 0–3; the 3D
@@ -1627,6 +1633,8 @@ pub struct RunOverlay {
     pub counts: (Option<i64>, Option<i64>),
     /// The course clear is leaving: its Out and the button's Decide play until this tick.
     pub clear_leave_at: Option<i32>,
+    /// Save & Quit's question over the pause menu.
+    quit: Option<MessageWindow>,
 }
 
 pub const PAUSE_PARTS: [&str; 3] = ["L_CloseBtn_00", "L_RetryBtn_00", "L_ExitBtn_00"];
@@ -1656,6 +1664,7 @@ impl RunOverlay {
             fade: crate::smm1_fade::Smm1Fade::new(ui),
             counts: (None, None),
             clear_leave_at: None,
+            quit: None,
         }
     }
 
@@ -1706,7 +1715,46 @@ impl RunOverlay {
         if let Some(l) = l {
             push_layout(out, l, t);
         }
+        if let Some(q) = &mut self.quit {
+            q.draw(out);
+        }
         self.fade.draw(out);
+    }
+
+    /// The pause's Save & Quit asks first (0x02413274): the message window with the pause
+    /// menu's `Msg_0006` ("Exit game? (Your progress will be saved.)", message 0xb) and No / Yes,
+    /// kept up after a Yes (window +0x285 := 1). False without the window layout.
+    pub fn ask_quit(&mut self) -> bool {
+        let msg = |l: &str| self.ui.message("Cmn_PauseMenu", l);
+        let (Some(text), no, yes) = (
+            msg("Msg_0006"),
+            msg("BtnL_0006").unwrap_or_else(|| "No".into()),
+            msg("BtnR_0006").unwrap_or_else(|| "Yes".into()),
+        ) else {
+            return false;
+        };
+        self.quit = MessageWindow::open(&self.ui, WindowKind::YesNo, &text, &[&no, &yes], true);
+        self.quit.is_some()
+    }
+
+    /// The question is up.
+    pub fn asking_quit(&self) -> bool {
+        self.quit.is_some()
+    }
+
+    /// One tick of the question: Some(true) on Yes (result 4: the pause leaves at once, the
+    /// window staying until the fade covers it, 0x024132f0 → state 0x26), Some(false) once a
+    /// No has closed it (back to the pause menu, state 0x2c) [obs].
+    pub fn quit_step(&mut self, input: &UiInput) -> Option<bool> {
+        let q = self.quit.as_mut()?;
+        match q.step(input) {
+            Some(WindowEvent::Decided(true)) => Some(true),
+            Some(WindowEvent::Closed) => {
+                self.quit = None;
+                Some(false)
+            }
+            _ => None,
+        }
     }
 
     pub fn show_pause(&mut self, mode_line: &str, course: &str, maker: &str, selection: usize) {

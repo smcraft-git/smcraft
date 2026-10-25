@@ -414,6 +414,15 @@ impl Layout {
         }
     }
 
+    /// Draw picture `pane` with frame `frame` of the sprite cache's model `model` filling it
+    /// (see [`mmk_ui::UiCache::sprite_texture`]); false when either is missing.
+    pub fn sprite_image(&mut self, pane: &str, model: &str, frame: &str) -> bool {
+        match self.ui.cache_mut().sprite_texture(model, frame) {
+            Some(t) => self.player.set_picture_image(pane, Some(t)),
+            None => false,
+        }
+    }
+
     /// Force a pane shown / hidden (`None`: back to its animations).
     pub fn visible(&mut self, pane: &str, v: Option<bool>) {
         self.player.set_visible(pane, v);

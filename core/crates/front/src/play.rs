@@ -354,6 +354,18 @@ impl CoursePlay {
             }
             _ if self.screens.is_some() => {}
             Phase::Paused => {
+                if let Some(o) = &mut self.overlay
+                    && o.asking_quit()
+                {
+                    // Save & Quit's question: Yes is result 4, No goes back to the menu
+                    if o.quit_step(&input.ui) == Some(true) {
+                        if let Some(r) = run {
+                            r.save_and_quit();
+                        }
+                        return Some(PlayEvent::Exit);
+                    }
+                    return None;
+                }
                 let items = self.pause_items(run.as_deref());
                 let n = items.len();
                 if pressed.has(Buttons::UP) {
@@ -1110,6 +1122,12 @@ impl CoursePlay {
                 return Some(PlayEvent::Exit);
             }
             PauseItem::SaveQuit => {
+                // SMM1's pause asks first (0x02413274) [obs]
+                if let Some(o) = &mut self.overlay
+                    && o.ask_quit()
+                {
+                    return None;
+                }
                 if let Some(r) = run {
                     r.save_and_quit();
                 }
@@ -1164,6 +1182,13 @@ impl CoursePlay {
                 self.choose(PauseItem::Settings, cx, run);
             }
             "course-pause" | "pause" => self.pause(run.as_deref()),
+            // the pause's Save & Quit question (SMM1 screens)
+            "quit" => {
+                self.pause(run.as_deref());
+                if let Some(o) = &mut self.overlay {
+                    o.ask_quit();
+                }
+            }
             "course-death" | "card" => {
                 if let Some(s) = &mut self.screens {
                     s.show_intro(lives.saturating_sub(1));

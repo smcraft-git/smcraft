@@ -280,3 +280,129 @@ fn owner_pause_shows_the_course_counts() {
     assert!(shown(&mut o, "P_YeahCountIcon_00"));
     assert!(!shown(&mut o, "P_PlayerCountIcon_00"));
 }
+
+/// Pause → Save & Quit asks first (0x02413274): No goes back to the pause, Yes leaves the course
+/// with the run saved.
+#[test]
+fn owner_save_and_quit_asks_first() {
+    let Some(smm1) = smm1() else { return };
+    if smm1.layout(crate::smm1_window::LAYOUT).is_none() {
+        return;
+    }
+    let smm2 = Ui::new(UiKind::Smm2, mmk_ui::UiCache::in_memory(), None);
+    let lib = library(12);
+    let mut host = MockHost::default();
+    host.status.lives = 100;
+    let mut saves = Saves::default();
+    let mut f = with(&mut host, &mut saves, |cx| {
+        let mut f = ChallengeFlow::new(cx, &smm2, Some(&smm1), &lib, Presentation::Smm1);
+        f.start(cx, 0, false);
+        f
+    });
+    with(&mut host, &mut saves, |cx| {
+        f.step(&input(Buttons::CONFIRM), cx)
+    });
+    until(&mut f, &mut host, &mut saves, 400, |_, h| {
+        !h.loaded.is_empty()
+    })
+    .unwrap();
+    for _ in 0..30 {
+        with(&mut host, &mut saves, |cx| {
+            f.step(&input(Buttons::NONE), cx)
+        });
+    }
+    with(&mut host, &mut saves, |cx| {
+        f.step(&input(Buttons::CONFIRM), cx)
+    });
+    until(&mut f, &mut host, &mut saves, 5, |f, _| {
+        f.playing
+            .as_ref()
+            .is_some_and(|p| p.phase == Phase::Playing)
+    })
+    .unwrap();
+    let step = |f: &mut ChallengeFlow, host: &mut MockHost, saves: &mut Saves, b, start| {
+        let mut i = input(b);
+        i.start = start;
+        with(host, saves, |cx| f.step(&i, cx));
+    };
+    let paused = |f: &ChallengeFlow| f.playing.as_ref().is_some_and(|p| p.phase == Phase::Paused);
+    step(&mut f, &mut host, &mut saves, Buttons::NONE, true);
+    assert!(paused(&f));
+    // Save & Quit (the third button), decided: the question, not the exit
+    step(&mut f, &mut host, &mut saves, Buttons::DOWN, false);
+    step(&mut f, &mut host, &mut saves, Buttons::DOWN, false);
+    step(&mut f, &mut host, &mut saves, Buttons::CONFIRM, false);
+    let asking = |f: &ChallengeFlow| {
+        f.playing
+            .as_ref()
+            .and_then(|p| p.overlay.as_ref())
+            .is_some_and(|o| o.asking_quit())
+    };
+    assert!(asking(&f) && paused(&f));
+    // its In (20) reads nothing; No (the cursor's start) closes it after its Out (10)
+    for _ in 0..20 {
+        step(&mut f, &mut host, &mut saves, Buttons::NONE, false);
+    }
+    step(&mut f, &mut host, &mut saves, Buttons::CONFIRM, false);
+    for _ in 0..10 {
+        step(&mut f, &mut host, &mut saves, Buttons::NONE, false);
+    }
+    assert!(!asking(&f) && paused(&f), "back to the pause");
+    // again, Yes: the course is left behind the scene fade
+    step(&mut f, &mut host, &mut saves, Buttons::CONFIRM, false);
+    assert!(asking(&f));
+    for _ in 0..20 {
+        step(&mut f, &mut host, &mut saves, Buttons::NONE, false);
+    }
+    step(&mut f, &mut host, &mut saves, Buttons::RIGHT, false);
+    step(&mut f, &mut host, &mut saves, Buttons::CONFIRM, false);
+    let left = until(&mut f, &mut host, &mut saves, 200, |f, _| {
+        f.playing.is_none()
+    });
+    assert!(left.is_some_and(|t| t <= 30), "{left:?}");
+}
+
+/// The credits' end with a costume won: 180 frames, the costume window (closed with A once its
+/// A icon came), then the "try another level" window (OK), then the scene ends.
+#[test]
+fn owner_credits_end_with_the_costume_window() {
+    use crate::smm1_ending::{CreditsReward, CreditsScene, CreditsState, REWARD_WAIT};
+    let Some(smm1) = smm1() else { return };
+    let list = crate::smm1_costume::costume_list(&smm1);
+    let Some(peach) = list.iter().find(|c| c.res == "Peach") else {
+        return;
+    };
+    let reward = CreditsReward {
+        costume: Some(peach.id),
+        owned: [0, peach.id].into(),
+        note: Some(mmk_modes::hundred::RewardNote::TryAnotherLevel),
+    };
+    let mut s = CreditsScene::new(&smm1, 0, &[("A".into(), "B".into())], reward);
+    let a = press(Buttons::CONFIRM);
+    let mut t = 0;
+    while s.state == CreditsState::Rolling {
+        s.step(&a);
+        t += 1;
+    }
+    // Easy's InOut: 1020 frames
+    assert!((1000..=1040).contains(&t), "{t}");
+    for _ in 0..REWARD_WAIT {
+        s.step(&a);
+    }
+    assert_eq!(s.state, CreditsState::Costume);
+    let mut n = 0;
+    while s.state == CreditsState::Costume {
+        s.step(&a);
+        n += 1;
+        assert!(n < 400);
+    }
+    // In 10, the reveal 11, cWait 180, the A icon's In 3, its Decide 17, the Outs 10
+    assert!(n > 10 + 11 + 180, "{n}");
+    assert_eq!(s.state, CreditsState::Complete);
+    let mut n = 0;
+    while !s.step(&a) {
+        n += 1;
+        assert!(n < 100);
+    }
+    assert_eq!(s.state, CreditsState::Done);
+}
