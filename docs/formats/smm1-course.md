@@ -30,7 +30,7 @@ of game v16 and the 4 replaced in update v208, with byte-exact round trips.
 | 0x6F | u8 | clear-check status | |
 | 0x70 | u16 | timer | |
 | 0x72 | u8 | autoscroll | 0 none, 1 slow, 2 medium, 3 fast |
-| 0x74 | u32 | width | 1/16-tile units |
+| 0x74 | u32 | width | **pixels** (16 per tile; the game takes `width >> 4` columns): the same unit as SMM2's area right boundary |
 | 0x78 | 0x60 | Mii data | preserved raw |
 | 0xD8 | s32 | Mii country | |
 | 0xEC | u32 | object count | |
@@ -59,15 +59,34 @@ of game v16 and the 4 replaced in update v208, with byte-exact round trips.
 
 Flags: 0x2 wings, 0x4 alternate form, 0x100 Boo → Stretch; pipe direction `flags & 0x60` as in SMM2.
 
-## 3. SMM1 → SMM2 differences (input to the Phase 6 import design)
+## 3. SMM1 → SMM2 (`mmk import-smm1-course`, `mmk_import::smm1_course`)
 
-- Object ids 0–31, 33–43, 45–49, 52–64, 66–69 mean the same thing in both games.
-- Different: 32 (SMM1 unused vine block / SMM2 Banzai Bill), 44 (weird mushroom / style power-up),
-  50 (Mystery Mushroom / Hop-Chops), 51 (Big Mushroom / Skipsqueak), 65 (costume Mario / Stingby).
-- No sub-area theme list beyond 6 themes; no slopes, clear pipes, tracks-as-arrays, snake paths, etc.
-- Default object flags differ (0x06000840 vs 0x06000040).
-- Mystery Mushroom costumes, the weird mushroom and Big Mushroom have no SMM2 equivalent: lossy.
-- Positions use the same 1/160-tile units, but SMM1 y is s16 and SMM1 has an explicit z layer.
+SMM2's encoding is SMM1's, extended, so a converter mostly copies (checked on the 76 built-ins
+against the SMM1 game and a sample of SMM2 courses):
+
+- Header: name (byte order), style, timer, date copy; each area's theme, autoscroll (0–3) and
+  width (→ the area's right boundary, both in pixels). SMM1's goal stands where SMM2's own rule
+  puts it (goal ground 152 px left of the right edge): `goal_x = 5·W/8 − 95`, `goal_y` and
+  `start_y` are the heights of the goal ground (26) and the start ground (37).
+- Objects 26 / 27 (goal), 49 (the castle bridge SMM1 stores before every goal), 37 / 38 (start)
+  and 69 (the player placeholder; its sound effect → SMM2 header 0xF0) aren't written.
+- Ground (object 7, 1 × 1 each) → SMM2's ground array; tracks (59, 3 × 3) → its track array:
+  x, y = the template's bottom-left tile, type `(flags >> 22) & 7`, link + 1, ends = the extended
+  data (`k1 << 16 | k0`, 0xFF → 0x104).
+- Flags: clear 0x800 (the SMM1 editor sets it on everything); everything else (wings, form,
+  pipe direction, 0x80 "pipe holds a part", warp and door ids, carriers, riders, track riders)
+  means the same. 0x4 on mushroom platforms, semisolids, conveyors and the Rocky Wrench is
+  cleared (SMM2 reads it as another look / form).
+- Ids: same 0–31, 33–43, 45–49, 52–64, 66–69. 44 is the style power-up slot (Mystery Mushroom
+  in SMB1: converted to a Super Mushroom); the Weird Mushroom is SMB1's 20 + 0x4 (SMM2's Master
+  Sword there: 0x4 cleared). 32, 50, 51, 65 are dropped.
+- Sound effects: an 8-byte record (type 0–13, 0xFF, variation 0 / 1 = shaken, tile x, y); an
+  object's effect index is a slot. Most map onto SMM2 effects with the same sounds; the samba /
+  disco, bird whistle and telephone have none.
+- SMM2's start ground is two columns wider (−3…6): SMM1 ground there is dropped, a pit or parts
+  there are reported.
+- Lost: Mystery Mushroom costumes, the Weird / Big Mushroom (without SMCraft's SMM1 extras), the
+  maker's Mii and country, the draw layer z, header 0x16 / 0x73.
 
 ## 4. Course codes
 

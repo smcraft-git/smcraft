@@ -23,7 +23,7 @@ use crate::smm1::{
     CardStart, ChallengeMenuScene, Entry, GameOverScene, MapIntroScene, RUN_LENGTHS, RunCardInfo,
     RunOverlay, RunQuery, Smm1Event, WorldMap,
 };
-use crate::smm1_ending::{CreditsScene, RescueInfo, RescueScene};
+use crate::smm1_ending::{CreditsReward, CreditsScene, RescueInfo, RescueScene};
 use crate::smm1_fade::{Smm1Fade, Smm1FadeKind};
 use crate::{Cx, DrawItem, Go};
 
@@ -109,8 +109,8 @@ pub struct ChallengeFlow {
     pub intro: bool,
     /// The SMM2 menu's header instead of "100 Mario Challenge" (Challenge Modes' ZL / ZR hint).
     pub header: Option<String>,
-    /// The finished run's costume reward, announced after the ending.
-    reward: Option<String>,
+    /// The finished run's costume reward: shown at the credits' end (SMM1), announced (SMM2).
+    reward: Option<Award>,
     /// Co-op: the run's players (one shared life counter), and the question before a run.
     pub players: u32,
     asking: Option<PlayersAsk>,
@@ -485,7 +485,9 @@ impl ChallengeFlow {
             let entry = self.run.entry;
             self.run.entry = Entry::Direct;
             if entry == Entry::Direct {
-                // after a skip the next course comes without the map [inf]
+                // after a skip the next course comes without the map: the result handler only
+                // books it (0x0277117c, result 5) and the play scene's result state asks for
+                // CourseInScene, through the plain scene fade (0x02379580 → 0x02766e1c) [obs]
                 self.handoff = None;
                 self.run.card = CardStart::Next;
                 self.play(cx);
@@ -574,10 +576,9 @@ impl ChallengeFlow {
     }
 
     fn ending_finished(&mut self, cx: &mut Cx) {
+        // the costume had its window at the credits' end
+        self.reward = None;
         let mut news = Vec::new();
-        if let Some(r) = self.reward.take() {
-            news.push(r);
-        }
         if let Some(u) = self.run.unlocked {
             news.push(format!("{} is now open!", DIFFICULTIES[u]));
         }
@@ -623,7 +624,7 @@ impl ChallengeFlow {
                         msg += &format!(" {} is now open!", DIFFICULTIES[u]);
                     }
                     if let Some(r) = self.reward.take() {
-                        msg += &format!(" {r}");
+                        msg += &format!(" {}", r.words);
                     }
                     cx.toast(&msg);
                     self.back_to_select(cx);
@@ -637,6 +638,9 @@ impl ChallengeFlow {
                     difficulty: self.run.difficulty,
                     form: st.form,
                     costume: st.costume,
+                    shoe: st.shoe,
+                    yoshi: st.yoshi,
+                    helmet: st.helmet,
                 };
                 self.scene = Scene::Rescue(Box::new(RescueScene::new(&self.ui, info)));
             }
@@ -690,10 +694,12 @@ impl ChallengeFlow {
             AfterCover::Session => self.session_ended(cx),
             AfterCover::Select => self.back_to_select(cx),
             AfterCover::Credits => {
+                let reward = self.reward.as_ref().map(|a| a.reward.clone());
                 self.scene = Scene::Credits(CreditsScene::new(
                     &self.ui,
                     self.run.difficulty,
                     &self.run.credits,
+                    reward.unwrap_or_default(),
                 ));
             }
             AfterCover::EndingDone => self.ending_finished(cx),
@@ -813,7 +819,7 @@ impl ChallengeFlow {
             }
             Scene::Credits(s) => {
                 // → NetworkMainScene2 (0x02767f18) [obs]
-                if s.step() {
+                if s.step(ui) {
                     self.cover(cx, Smm1FadeKind::SCENE, [0.0, 0.0], AfterCover::EndingDone);
                 }
             }
@@ -897,13 +903,54 @@ impl ChallengeFlow {
         self.scene = Scene::Rescue(Box::new(RescueScene::new(&self.ui, info)));
     }
 
+    /// Captures: the rescue scene again with Mario in a shoe, on Yoshi, in a helmet (Super
+    /// Mario with one).
+    pub fn debug_ending_carry(&mut self, shoe: Option<bool>, yoshi: bool, helmet: Option<u8>) {
+        if let Scene::Rescue(r) = &self.scene {
+            let mut info = r.info;
+            info.shoe = shoe;
+            info.yoshi = yoshi;
+            info.helmet = helmet;
+            if helmet.is_some() || yoshi {
+                info.form = 1;
+            }
+            self.scene = Scene::Rescue(Box::new(RescueScene::new(&self.ui, info)));
+        }
+    }
+
     /// The staff credits of a finished run on difficulty `d` (captures).
     pub fn debug_credits(&mut self, d: usize, library: &[CourseEntry]) {
         if self.smm2() {
             return;
         }
         self.debug_ending(d, 0, library);
-        self.scene = Scene::Credits(CreditsScene::new(&self.ui, d.min(3), &self.run.credits));
+        self.scene = Scene::Credits(CreditsScene::new(
+            &self.ui,
+            d.min(3),
+            &self.run.credits,
+            CreditsReward::default(),
+        ));
+    }
+
+    /// The costume window after the credits, for costume `id` (captures): the credits' end
+    /// with the list as owned so far plus it, and `note` after.
+    pub fn debug_costume(
+        &mut self,
+        d: usize,
+        id: u16,
+        note: Option<mmk_modes::hundred::RewardNote>,
+    ) {
+        if self.smm2() {
+            return;
+        }
+        let reward = CreditsReward {
+            costume: Some(id),
+            owned: [0, id].into(),
+            note,
+        };
+        let mut s = CreditsScene::new(&self.ui, d.min(3), &[], reward);
+        s.skip_to_reward();
+        self.scene = Scene::Credits(s);
     }
 
     /// The current course's play with its screens (captures).
@@ -917,10 +964,16 @@ impl ChallengeFlow {
 /// The setting with the costumes won in 100 Mario runs (ids, comma-separated).
 pub const OWNED_COSTUMES_KEY: &str = "costumes.owned";
 
+/// A finished run's reward: what the credits show (SMM1) and the words announcing it (SMM2).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Award {
+    pub reward: CreditsReward,
+    pub words: String,
+}
+
 /// SMM1's Mystery Mushroom reward for a finished 100 Mario run (`difficulty` 0–3): the costume
-/// joins the owned set, and the words announcing it come back (None without the SMM1 import's
-/// costume table).
-fn award_costume(cx: &mut Cx, difficulty: usize) -> Option<String> {
+/// joins the owned set (None without the SMM1 import's costume table).
+fn award_costume(cx: &mut Cx, difficulty: usize) -> Option<Award> {
     use mmk_modes::hundred::{Difficulty, RewardNote, costume_reward};
     let table = cx.host.costume_categories();
     if table.is_empty() {
@@ -956,7 +1009,14 @@ fn award_costume(cx: &mut Cx, difficulty: usize) -> Option<String> {
         }
         None => {}
     }
-    (!words.is_empty()).then(|| words.join(" "))
+    Some(Award {
+        reward: CreditsReward {
+            costume: r.costume,
+            owned,
+            note: r.note,
+        },
+        words: words.join(" "),
+    })
 }
 
 #[cfg(test)]
@@ -976,18 +1036,26 @@ mod tests {
         };
         let mut saves = crate::host::Saves::default();
         // Easy: Mario, the only category-1 costume; Normal still has Peach
-        let words = with(&mut host, &mut saves, |cx| award_costume(cx, 0)).unwrap();
+        let words = with(&mut host, &mut saves, |cx| award_costume(cx, 0))
+            .unwrap()
+            .words;
         assert!(words.contains("Mario"), "{words}");
         assert!(words.contains("try another"), "{words}");
         assert_eq!(host.values[OWNED_COSTUMES_KEY], "0");
-        let words = with(&mut host, &mut saves, |cx| award_costume(cx, 1)).unwrap();
+        let a = with(&mut host, &mut saves, |cx| award_costume(cx, 1)).unwrap();
+        assert_eq!(a.reward.costume, Some(7));
+        assert_eq!(a.reward.owned, [0, 7].into());
+        let words = a.words;
         assert!(
             words.contains("Peach") && words.contains("every costume"),
             "{words}"
         );
         assert_eq!(host.values[OWNED_COSTUMES_KEY], "0,7");
         // nothing left (Bowser is amiibo-only)
-        let words = with(&mut host, &mut saves, |cx| award_costume(cx, 3)).unwrap();
+        let a = with(&mut host, &mut saves, |cx| award_costume(cx, 3)).unwrap();
+        assert_eq!(a.reward.costume, None);
+        assert!(a.reward.note.is_some());
+        let words = a.words;
         assert!(!words.contains("You got"), "{words}");
         // without the SMM1 import: no reward at all
         let mut bare = MockHost::default();

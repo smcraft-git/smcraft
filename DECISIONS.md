@@ -1702,11 +1702,48 @@ under `recomp/private|generated|build/`, and text that looks like disassembly or
   a run saved at the course clear walks Mario on when continued. Kept as the setting
   `hundred.clear_shown` (the clears shown per difficulty) beside the run's save.
 - **After a skip** the next course's card comes straight away behind a scene fade: the result
-  handler requests no scene for a skip [obs]; what the game shows then was not traced [inf].
+  handler requests no scene for a skip, and the play scene's result state asks for CourseInScene
+  through the plain fade (0x02379580, read 2026-10-25) [obs].
 - **The rescue scene is drawn as flat quads from the UI import** (`ui/ending/ending.json`, SMM1
   importer 5), like the Super World map: SMM1's stage, Peach / Toad and the 2D styles' player
   models are all camera-facing quads with texture patterns, placed by the scene's constants
   (stage (0, 48), Peach (416, 48), Mario −32 → 384 at 1.5, camera 384 × 216 inside x 0–1152).
   **NSMBU's demo Mario is a 3D model and 3D World has no SMM1 scene: both use SMW's scene**
   (Mario, stage and Peach), keeping their own timing (NSMBU with Peach holds 300). The clear colour
-  behind the SMB3 / SMW stages is black [inf]. Forms SMM1 lacks draw Super Mario's model.
+  behind the SMB3 / SMW stages is black [obs since 2026-10-25: the scene clears with black].
+  Forms SMM1 lacks draw Super Mario's model.
+
+## 2026-10-25 — 100 Mario (SMM1 look): the costume window, what Mario brings, the beats, SMM1 courses
+- **The costume window is SMM1's own list in its get form** (`Cmn_CMListWindow_00` over
+  `Cmn_CMListContents_00`, research smm1-ending.md §4.7), not a notice: the list shows 200
+  places, a costume at its list number − 1; **amiibo costumes (ids 100 +) at their id** [inf: the
+  list lookup past 100 wasn't traced]. Owned costumes show their art's `wait.0` from the SMM1
+  sprite cache next to the UI import (`UiCache::sprite_texture`), as SMM1 does. After its reveal
+  the new costume's button takes the list's selection [inf]. The "every costume" notices use
+  SMM1's message window with the game's texts.
+- **The message window** (`Cmn_CmnWindow_00`, one class for OK and No / Yes) is shared by the
+  ending's notices and the pause's Save & Quit question; B answers No with the window's Cancel
+  exit [inf: the B path wasn't traced]; the course clear's Save & Quit doesn't ask (SMM1 doesn't).
+- **What Mario brings to the rescue scene**: the shoe, Yoshi and the helmets are SMM1's flat
+  rigs, imported like the rest (importer 6). Yoshi's skeletal animations only move his quads'
+  bones (no rotation in these rigs), so they are baked as the bones' origins per frame and a
+  shape moves with its bone. Yoshi's mapping of the demo's `run` / `wait` onto his own and the
+  rider's animations isn't traced: `run_body` / `wait_body` with the head's `wait_head`, and the
+  rider's `yoshi_run` / `yoshi_wait` [inf from the names]. In a shoe small Mario sits 8 higher
+  than the big forms [inf from the art: their shoe poses differ by that]; the shoe is drawn in
+  front. The rigs' back-facing second quads are culled. The helmet's wobble (under a unit) is
+  left out.
+- **NSMBU's 3D demo Mario stays SMW's scene.** SMM1's NSMBU Mario is a skinned 3D model with
+  139 skeletal animations under a perspective camera whose parameters (camera object 8) aren't
+  read yet; the front end draws layouts only. Plan: import `WU_Player_MarioMdl`'s mesh and
+  skeleton (Wii U FMDL / FSKL; FSKA is read now), add a mesh draw item the hosts' mesh renderers
+  draw (they draw NSMBU Mario in courses already), and read the WU camera.
+- **Beat bounces**: the front end counts the music's half-beats from the tick it started the
+  tune (the host plays it at once) [inf]; the half-beat mode stays the maps' [inf].
+- **SMM1 courses as SMM2 data** (`mmk import-smm1-course`, docs/formats/smm1-course.md §3): x
+  is kept as it is, so SMM2's start ground (two columns wider than SMM1's) covers columns 5–6 —
+  their SMM1 ground is dropped and a pit or parts there are reported (30 of the 76 built-ins);
+  SMB1's Mystery Mushroom (the style power-up slot) becomes a Super Mushroom (SMCraft's
+  `smb1_mushroom=mystery` extra plays it as one again); SMM1's castle bridge (object 49, stored
+  before every goal) isn't written, SMM2 lays out its own goal; 0x4 on the Rocky Wrench is
+  cleared (SMM2 has no other form of it) [inf]; converted built-ins are not committed.

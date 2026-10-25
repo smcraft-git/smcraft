@@ -819,7 +819,8 @@ fn characters_the_sheets_lack_are_drawn_at_run_time() {
 }
 
 /// A per-character transform (SMM1's GAME OVER): each letter takes the curve at its own time,
-/// the pane's time offset (animated by `FLCT`) plus its share of the width.
+/// the pane's time offset (animated by `FLCT`) plus its share of the width (width / (n − 1)
+/// apart, 0x02892384).
 #[test]
 fn per_character_transforms_move_each_letter_at_its_own_time() {
     use mmk_formats::lyt::{
@@ -907,15 +908,15 @@ fn per_character_transforms_move_each_letter_at_its_own_time() {
             .map(|q| q.pos[0][1])
             .collect()
     };
-    // unanimated: the pane's own offset −100: both letters landed (time −100, −90)
+    // unanimated: the pane's own offset −100: both letters landed (time −100, −80)
     let rest = tops(&p);
     assert_eq!(rest.len(), 2);
-    // frame 0: offset 0, both above (times 0 and 10)
+    // frame 0: offset 0, both above (times 0 and 20)
     p.play("OneTime", 0.0);
     let up = tops(&p);
     assert!((up[0] - rest[0] - 100.0).abs() < 1e-3, "{up:?} {rest:?}");
     assert!((up[1] - rest[1] - 100.0).abs() < 1e-3);
-    // frame 12: offset −12: "A" (time −12) has landed, "B" (time −2) not yet
+    // frame 12: offset −12: "A" (time −12) has landed, "B" (time 8) not yet
     p.play("OneTime", 12.0);
     let mid = tops(&p);
     assert!((mid[0] - rest[0]).abs() < 1e-3, "{mid:?}");

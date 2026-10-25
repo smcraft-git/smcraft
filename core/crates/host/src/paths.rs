@@ -118,8 +118,9 @@ pub fn outdated_import() -> bool {
 
 /// The SMM1 importer the screens are written for (`mmk_import::smm1::SMM1_IMPORTER_VERSION`).
 /// An older SMM1 import still opens (the SMM1-look 100 Mario is optional): what it lacks — the
-/// rescue scene's models and the menus' music since 5 — is left out.
-pub const SMM1_PACK_VERSION: u32 = 5;
+/// rescue scene's models and the menus' music since 5, the rescue's shoes, Yoshi and helmets
+/// since 6 — is left out.
+pub const SMM1_PACK_VERSION: u32 = 6;
 
 /// The SMM1 UI import (`smm1-<build>`).
 pub fn smm1_ui() -> Option<PathBuf> {

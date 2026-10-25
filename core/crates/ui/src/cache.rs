@@ -568,6 +568,18 @@ impl UiCache {
         self.texture_at(name, &rel, (0, 0)).ok()
     }
 
+    /// Frame `frame` of sprite model `model` of the import's sprite cache next to the UI
+    /// (`sprites/textures/<model>/<frame>.mtex`: an SMM1 import's costumes, whose menus show
+    /// their art), registered as `sprites/<model>/<frame>`.
+    pub fn sprite_texture(&mut self, model: &str, frame: &str) -> Option<TexRef> {
+        if !plain_name(model) || !plain_name(frame) {
+            return None;
+        }
+        let rel = format!("sprites/textures/{model}/{frame}.mtex");
+        self.texture_at(format!("sprites/{model}/{frame}"), &rel, (0, 0))
+            .ok()
+    }
+
     /// The pixels of texture `id` (as [`UiCache::texture_file`] gave it), once they are there.
     pub fn texture_data(&self, id: u32) -> Option<&Mtex> {
         let e = self.textures.get(id as usize)?;

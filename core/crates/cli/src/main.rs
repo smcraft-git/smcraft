@@ -127,6 +127,15 @@ enum Cmd {
         #[arg(long, default_value = "USen")]
         language: String,
     },
+    /// Convert SMM1 courses to SMM2 course data the engine plays: each input is a saved course
+    /// folder (`course_data.cdt`, `course_data_sub.cdt`), a main `.cdt`, or a built-in's `.szs`
+    /// (its `_sub` beside it). Writes `<out>/<stem>.course` (raw SMM2 course data) and
+    /// `<stem>.losses.json` (what SMM2 can't hold); one JSON line per course.
+    ImportSmm1Course {
+        inputs: Vec<PathBuf>,
+        #[arg(long)]
+        out: PathBuf,
+    },
     /// Import the SMM2 UI (layouts, animations, textures, fonts, text) from the user's own
     /// extracted RomFS into a layout-player cache folder (same form as `import-smm1`).
     ImportSmm2Ui {
@@ -1399,6 +1408,7 @@ fn main() -> ExitCode {
                 ExitCode::FAILURE
             }
         },
+        Cmd::ImportSmm1Course { inputs, out } => import_smm1_courses(&inputs, &out),
         Cmd::ImportSmm1 {
             base,
             update,
@@ -1993,6 +2003,51 @@ fn main() -> ExitCode {
                 }
             }
         }
+    }
+}
+
+/// `mmk import-smm1-course`: convert each SMM1 course (mmk_import::smm1_course).
+fn import_smm1_courses(inputs: &[PathBuf], out: &std::path::Path) -> ExitCode {
+    if let Err(e) = std::fs::create_dir_all(out) {
+        return fail("out", e);
+    }
+    let mut failed = 0;
+    for input in inputs {
+        let stem = input
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("course")
+            .to_string();
+        let written = mmk_import::smm1_course::convert_path(input).and_then(|c| {
+            let bytes = c.course.to_bytes().map_err(|e| e.to_string())?;
+            std::fs::write(out.join(format!("{stem}.course")), bytes).map_err(|e| e.to_string())?;
+            let losses = c.losses.to_json();
+            std::fs::write(
+                out.join(format!("{stem}.losses.json")),
+                serde_json::to_string_pretty(&losses).unwrap_or_default(),
+            )
+            .map_err(|e| e.to_string())?;
+            Ok((c, losses))
+        });
+        match written {
+            Ok((c, losses)) => println!(
+                "{}",
+                serde_json::json!({
+                    "input": input.display().to_string(), "name": c.name,
+                    "style": c.course.header.game_style.as_str_lossy(),
+                    "lossless": c.losses.is_empty(), "losses": losses,
+                })
+            ),
+            Err(e) => {
+                failed += 1;
+                eprintln!("{}: {e}", input.display());
+            }
+        }
+    }
+    if failed > 0 {
+        ExitCode::FAILURE
+    } else {
+        ExitCode::SUCCESS
     }
 }
 

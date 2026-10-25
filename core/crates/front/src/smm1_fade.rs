@@ -18,8 +18,9 @@
 //!
 //! So a type-1 fade covers in 25 ticks and uncovers in 25; the circles close on `N_Pos_00`,
 //! which the world map points at Mario while he leaves (0x024f6be0 → 0x02089364) [obs]. The
-//! screen stays covered two ticks while the scene changes [inf: the game holds it until the
-//! new scene has loaded].
+//! screen stays covered while the scene changes: the reveal starts once the fader is told the
+//! new scene is in and nothing is still loading (0x02089750: its flag +0x18 and 0x02089638's
+//! loading list) [obs]; loads are instant here, so the cover holds two ticks [departure].
 
 use crate::layout::{Layout, Ui};
 use crate::{DrawItem, push_layout};

@@ -697,6 +697,9 @@ impl Host for FfiHost {
             players: w.players() as u32,
             form: w.player.form as u8,
             costume: (w.player.form == mmk_sim::player::Form::Costume).then_some(w.player.costume),
+            shoe: w.player.shoe.filter(|_| !w.player.shoe_karon),
+            yoshi: w.player.yoshi.is_some(),
+            helmet: w.player.helmet,
         }
     }
 

@@ -175,6 +175,12 @@ Layout archives are found as loose `Layout/*.szs` and as `Layout/*.szs` members 
 `Pack/*.pack`. Texture conversion untiles GX2 surfaces with a clean implementation of the
 AddrLib (R6xx/R7xx) address functions; stored sizes match the computed padding for every texture.
 
+### SMM1 course conversion (`mmk import-smm1-course <course…> --out <dir>`)
+Input: SMM1 courses — a saved course folder (`course_data.cdt`, `course_data_sub.cdt`), a main
+`.cdt`, or a built-in's `.szs` (its `_sub` beside it). Output per course: `<stem>.course` (raw SMM2
+course data, what `mmk coverage`, `mmk simulate` and the library read) and `<stem>.losses.json`
+(what SMM2 course data can't hold). The mapping: docs/formats/smm1-course.md §3.
+
 ### SMM2 UI import (`mmk import-smm2-ui <romfs> <out> [--exefs <dir>] [--language USen]`)
 Input: the owner's extracted RomFS (update applied). Output `<assets>/smm2-ui-<build>/`, the same
 form as the SMM1 UI import (so `ui` and the app load either), plus `courses/` (the 10 title

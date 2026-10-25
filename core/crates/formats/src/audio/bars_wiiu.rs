@@ -10,7 +10,10 @@
 //! 0x0C  u32 offsets of DATA, MARK and STRG (from the AMTA's start)
 //! DATA: "DATA" u32 size, +0x08 u32 ×2, +0x10 u8 kind (0 wave, 1 stream), u8 channels, u16,
 //!       f32, +0x18 u32 sample rate, u32 loop start, u32 loop end
-//! STRG: "STRG" u32 length, the name
+//! MARK: "MARK" u32 size, u32 count, then 16-byte markers: u32 id, u32 name (from the start of
+//!       STRG's text), u32 sample position, u32 length — a stream's beat markers (`beat:<n>`,
+//!       `beatend`, `loopstart`, `loopend`, named ones such as `Koopa`)
+//! STRG: "STRG" u32 length, the name, then the markers' names
 //! ```
 
 use crate::archive::Sarc;
@@ -43,6 +46,8 @@ pub struct Amta {
     pub kind: SoundKind,
     pub channels: u8,
     pub sample_rate: u32,
+    /// The markers (name, sample position).
+    pub marks: Vec<(String, u32)>,
 }
 
 impl Amta {
@@ -68,7 +73,23 @@ impl Amta {
             1 => SoundKind::Stream,
             k => SoundKind::Other(k),
         };
+        let mut marks = Vec::new();
+        let mark = u32_at(d, 0x10)? as usize;
+        if mark != 0 && d.get(mark..mark + 4) == Some(b"MARK") {
+            let n = u32_at(d, mark + 8)? as usize;
+            for i in 0..n.min(256) {
+                let e = mark + 12 + 16 * i;
+                let name_at = strg + 8 + u32_at(d, e + 4)? as usize;
+                let tail = d.get(name_at..).unwrap_or_default();
+                let len = tail.iter().position(|&b| b == 0).unwrap_or(tail.len());
+                marks.push((
+                    String::from_utf8_lossy(&tail[..len]).into_owned(),
+                    u32_at(d, e + 8)?,
+                ));
+            }
+        }
         Ok(Self {
+            marks,
             name: String::from_utf8_lossy(&raw[..end]).into_owned(),
             kind,
             channels: d.get(data + 0x11).copied().unwrap_or(0),
