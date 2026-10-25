@@ -306,6 +306,25 @@ sway, importer and pack 12, the dev cache already at v12).
   (the kind-4 callers 0x71013924e0…), the filters, the spot's ground drop, the icon sizes, the
   hold rule's voice lengths. Captures: `maker-sound`, `maker-sound-ring`, `maker-sound-icons`;
   in play, the courses in the spec's list.
+  ✅ **2026-10-25, branch `separts2`**: the audio filters (spec §2b: the OtoAsobi bus — Twisty
+  Turny's delay + resonant band-pass swept 60 → 5000 → 50 Hz at Q 1.8 with the bus at 2.5, Woozy's
+  vibrato + tremolo by a level that rises on a player's entry; 16 beats of the course music's bpm
+  from `Mush/BGMList.byml`, then the `end` scratch; 0x71017b15d0, 0x7100e443c0, the DSP
+  0x71004fe0a0 / 0x7100521700 / 0x7100520780; `mmk_audio::oto`, checked with `mmk audio-render`:
+  16 beats at 100 bpm end at frame 576, the band-pass peak follows the sweep); every part's
+  trigger by class (spec §4's table: 0x7100d84810 is the shared "stood on", not the pipes — pipes
+  are the warp sequence's kind 5; P Switch, lifts, snake blocks, Dash Block stood on; Key, claw,
+  ! Block kind 4; Bill Blaster / Cannon shots, cars / Cloud got into kind 1; Yoshi's Egg hatched;
+  moving blocks; the POW and Crate only as music sources); music effects of parts as the source
+  registry 0x7101538eb0 (while alive, following, 200 px in, 304 out by kind); the course track
+  plays on under Heartbeat / Silence / Peaceful / Horror and resumes after a music effect (the
+  BGM layers 0x71017a6f20 / 0x71017a5990); the spot's ground ray; Mario's effect on a respawn
+  (the player's create virtual); the hold by the sound's real length; the maker's sound button
+  balloon (`Mode_Disp_*`) and the window not relaid as the parts ring. Importer 18 / **game pack
+  18** (`sound.json` `tempo`, `otoasobi_bus`) — re-import. Coverage 548 / 550, 272 / 273 (left:
+  Seesaw, Tree, Dry Bones shell); simulate 0 crashes. Left: those three, the default sound palette
+  (tables 0x71023d8508…, not applied), the icon sizes, the put-down sound's moment, player states
+  144 / 145, the console delay's network.
 - **Agent queue** (when a helper slot frees; running 2026-10-25: the maker's Water Level and
   Custom Scroll modes, physics): ✅ a Koopaling in a Clown Car (2026-10-25, branch
   `kclown`, research 120-koopalings.md "In a Koopa Clown Car": KoKoopaDefault's Clown vtable

@@ -11,6 +11,9 @@
 //!   (`Sound/Group/GroupSetting.bagst`) and the distance attenuation sets
 //!   (`Sound/Attenuation/Attenuation.baatarc`).
 //! - `Sound/Effect/delay_*.byml`, `reverb_*.byml`: the per style and theme effects.
+//! - `Pack/StaticSound.pack` `Sound/Bus/BusSetting.byml`: the `OtoAsobi` bus's effects (the
+//!   placed sound effects' filters); `Pack/Static.pack` `Mush/BGMList.byml`: the course music's
+//!   tempo per style and theme, normal and hurried (how long the filters run).
 //! - The waves: BWAVs from the BARS archives (`Sound/Resource/*.bars`, `Pack/*.pack`) or the
 //!   stream files (`Sound/Resource/Stream/`), copied unchanged to `audio/se/` (effects) and
 //!   `audio/music/` (streams).
@@ -23,6 +26,8 @@
 //!   "groups": [ { "name", "parent", "folder", "volume", "limit", "limit_type", "duck": [..] } ],
 //!   "attenuation": { "<set>": { "max", "min", "far_gain", "near_gain", "cull" } },
 //!   "effects": { "<style>": [ { "delay": {..}|null, "reverb": {..}|null } × 10 themes ] },
+//!   "tempo": { "<style>": [ [normal bpm, hurry bpm] × 10 themes ] },
+//!   "otoasobi_bus": { "<effect>": { "<param>": number } },
 //!   "waves": { "<wave>": "se/<file>.bwav" | "music/<file>.bwav" } }
 //! call: { "key", "parent"?, "if"?: ["==", value] | "weight"?: w,
 //!         asset: "wave", "volume", "pitch", "delay", "group", "priority", "stop", "fade_in",
@@ -580,6 +585,75 @@ fn effects_json(romfs: &Path) -> Result<Value> {
 
 /// Ground materials of the 3D styles' terrain parts per theme (`Mush/<style>_BgGroundAttrTable`:
 /// part → theme → material), for footstep and landing sounds.
+/// The course music's tempo by style and theme (`Mush/BGMList.byml`: rows of series, stage
+/// skin, normal and hurry bpm), as the audio manager reads it to time the placed sound effects'
+/// filters.
+fn tempo_json(romfs: &Path) -> Result<Value> {
+    // the stage skins by theme id, as the table names them
+    const SKINS: [&str; 10] = [
+        "地上",
+        "地下",
+        "城",
+        "飛行船",
+        "水中",
+        "お化け屋敷",
+        "雪",
+        "砂漠",
+        "アスレチック",
+        "森",
+    ];
+    let path = romfs.join("Pack/Static.pack");
+    let sarc = open(&path)?;
+    let Some(d) = sarc.get("Mush/BGMList.byml") else {
+        return Ok(json!({}));
+    };
+    let doc = byml::parse(d).map_err(fmt_err(&path))?;
+    let mut out = Map::new();
+    for style in STYLES {
+        let row: Vec<Value> = SKINS
+            .iter()
+            .map(|skin| {
+                doc.as_array()
+                    .into_iter()
+                    .flatten()
+                    .find(|r| r["シリーズ"] == *style && r["ステージスキン"] == *skin)
+                    .map_or(Value::Null, |r| json!([r["通常BPM"], r["HurryBPM"]]))
+            })
+            .collect();
+        out.insert(style.to_string(), Value::Array(row));
+    }
+    Ok(Value::Object(out))
+}
+
+/// The `OtoAsobi` bus's effects (`Sound/Bus/BusSetting.byml`: `OtoAsobi_Filter`,
+/// `Otoasobi_Delay`, `OtoAsobi_Vib`, `OtoAsobi_Mod`): their parameters, and the vibrato's
+/// `DepthMax`.
+fn otoasobi_bus_json(romfs: &Path) -> Result<Value> {
+    let path = romfs.join("Pack/StaticSound.pack");
+    let sarc = open(&path)?;
+    let Some(d) = sarc.get("Sound/Bus/BusSetting.byml") else {
+        return Ok(json!({}));
+    };
+    let doc = byml::parse(d).map_err(fmt_err(&path))?;
+    let mut out = Map::new();
+    for (name, fx) in doc["Effect"].as_object().into_iter().flatten() {
+        if !name.to_ascii_lowercase().starts_with("otoasobi") {
+            continue;
+        }
+        let mut params = Map::new();
+        for (k, v) in fx["Params"].as_object().into_iter().flatten() {
+            if v.is_number() {
+                params.insert(k.clone(), v.clone());
+            }
+        }
+        if let Some(m) = fx["DepthMax"].as_f64() {
+            params.insert("DepthMax".into(), json!(m));
+        }
+        out.insert(name.clone(), Value::Object(params));
+    }
+    Ok(Value::Object(out))
+}
+
 fn ground_json(romfs: &Path) -> Result<Value> {
     let path = romfs.join("Pack/Static.pack");
     let sarc = open(&path)?;
@@ -764,6 +838,8 @@ pub fn import_sounds(romfs: &Path, out: &Path, progress: Progress) -> Result<Sou
         "attenuation": attenuation_json(romfs)?,
         "effects": effects_json(romfs)?,
         "ground": ground_json(romfs)?,
+        "tempo": tempo_json(romfs)?,
+        "otoasobi_bus": otoasobi_bus_json(romfs)?,
         "waves": wave_files,
     });
     write(
@@ -776,6 +852,27 @@ pub fn import_sounds(romfs: &Path, out: &Path, progress: Progress) -> Result<Sou
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// On the user's own RomFS (`MMK_ROMFS`, ignored otherwise): the music's tempo and the
+    /// OtoAsobi bus as the import writes them (`MMK_DUMP`: also to that file).
+    #[test]
+    #[ignore]
+    fn tempo_and_bus_from_the_romfs() {
+        let Some(romfs) = std::env::var_os("MMK_ROMFS") else {
+            return;
+        };
+        let romfs = std::path::PathBuf::from(romfs);
+        let tempo = tempo_json(&romfs).unwrap();
+        let bus = otoasobi_bus_json(&romfs).unwrap();
+        assert_eq!(tempo["M1"].as_array().map(Vec::len), Some(10));
+        assert!(tempo["WU"][0][0].as_f64().is_some_and(|b| b > 50.0));
+        assert!(bus["Otoasobi_Delay"]["DelayTime"].is_number());
+        assert!(bus["OtoAsobi_Vib"]["DepthMax"].is_number());
+        if let Some(out) = std::env::var_os("MMK_DUMP") {
+            let doc = json!({"tempo": tempo, "otoasobi_bus": bus});
+            std::fs::write(out, serde_json::to_vec(&doc).unwrap()).unwrap();
+        }
+    }
 
     #[test]
     fn user_and_key_filters() {

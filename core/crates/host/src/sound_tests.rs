@@ -57,6 +57,12 @@ fn db() -> serde_json::Value {
         "groups": [{"name": "Root"}],
         "attenuation": {},
         "effects": {},
+        "tempo": {"M1": [[150.0, 200.0]]},
+        "otoasobi_bus": {
+            "Otoasobi_Delay": {"DelayTime": 150.0, "InGain": 0.7, "FeedbackGain": 0.7,
+                "DryGain": 0.7, "ChannelSpread": 1.0, "LowPassAmount": 0.0},
+            "OtoAsobi_Vib": {"DepthMax": 0.02}
+        },
         "waves": {},
         "users": {
             "CourseSceneBGM_M1": {"calls": bgm},
@@ -127,6 +133,7 @@ fn db() -> serde_json::Value {
                 asset("cue_bgm_hurry", "OtoLinkBossHurryDay")
             ]},
             "Otoasobi10": {"calls": [asset("cue", "OtoHeart")]},
+            "Otoasobi46": {"calls": [asset("cue", "OtoScratch"), asset("end", "OtoScratchEnd")]},
             "MyWorldScene": {"calls": [
                 asset("BGM_WorldMap_Plain_Play", "MapPlain"),
                 asset("BGM_WorldMap_Night_Play", "MapNight"),
@@ -211,6 +218,14 @@ impl Rig {
                 )),
                 Command::StopMusic { .. } => Some("stop_music".into()),
                 Command::SetMusicLayer { gain, .. } => Some(format!("layer:{gain}")),
+                Command::SetOtoasobi { params, .. } => Some(
+                    match (params.filter, params.woozy) {
+                        (Some(_), _) => "oto:filter",
+                        (None, Some(_)) => "oto:woozy",
+                        (None, None) => "oto:off",
+                    }
+                    .into(),
+                ),
                 _ => None,
             })
             .collect()
@@ -864,6 +879,49 @@ fn an_ambient_effect_sounds_over_the_course_music() {
     r.played();
     w.tick += 1;
     r.s.after_step(&w);
-    // the heartbeat in the theme track's place
-    assert_eq!(r.played(), ["sfx:OtoHeart", "stop_music"]);
+    // the heartbeat over the theme track (the Otoasobi BGM layer leaves it be)
+    assert_eq!(r.played(), ["sfx:OtoHeart"]);
+}
+
+#[test]
+fn a_music_effect_s_end_resumes_the_theme_track() {
+    let mut r = rig();
+    let mut w = world();
+    let (tx, ty) = ((w.player.x / 16.0) as u8, (w.player.y / 16.0) as u8);
+    w.sound_parts = sound_parts(0xff, &[(9, tx, ty)]);
+    r.s.start_course(&w);
+    r.played();
+    r.music_at("PlainDay", 50_000);
+    w.tick += 1;
+    r.s.after_step(&w);
+    assert_eq!(r.played(), ["music:OtoBossDay"]);
+    // 160 px from the spot: over, the theme track where it was (1152-sample blocks)
+    w.player.x += 200.0;
+    w.tick += 1;
+    r.s.after_step(&w);
+    assert_eq!(r.played(), ["music:PlainDay@49536"]);
+}
+
+#[test]
+fn twisty_turny_filters_the_mix_for_sixteen_beats() {
+    let mut r = rig();
+    let mut w = world();
+    w.sound_parts = sound_parts(46, &[]);
+    r.s.start_course(&w);
+    r.played();
+    w.tick += 1;
+    r.s.after_step(&w);
+    assert_eq!(r.played(), ["sfx:OtoScratch", "oto:filter"]);
+    // 16 beats at the course's 150 bpm: 384 frames, then the scratch's end and the bus clear
+    for _ in 1..384 {
+        w.tick += 1;
+        r.s.after_step(&w);
+        assert_eq!(r.played(), ["oto:filter"], "tick {}", w.tick);
+    }
+    w.tick += 1;
+    r.s.after_step(&w);
+    assert_eq!(r.played(), ["oto:off", "sfx:OtoScratchEnd"]);
+    w.tick += 1;
+    r.s.after_step(&w);
+    assert!(r.played().is_empty());
 }

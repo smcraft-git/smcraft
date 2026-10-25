@@ -54,7 +54,10 @@ pub mod sprites;
 ///     `.baglccr` or the folder's `ef_normal*`: the saturation of the game's final colour table).
 /// 17: the placed sound effects' sound users (`Otoasobi<id>`, `EditOtoasobi<id>` and their
 ///     `_Link` / `_USA` versions) and their waves and music streams.
-pub const IMPORTER_VERSION: u32 = 17;
+/// 18: the course music's tempo (`audio/sound.json` `tempo`, from `Mush/BGMList.byml`) and the
+///     `OtoAsobi` bus's effects (`otoasobi_bus`, from `Sound/Bus/BusSetting.byml`): the placed
+///     sound effects' filters.
+pub const IMPORTER_VERSION: u32 = 18;
 pub mod smm1;
 pub mod smm1_costumes;
 pub mod smm1_ui_sound;

@@ -153,6 +153,12 @@ impl ExclamationBlock {
         (self.tile.0 as f32 * TILE, self.tile.1 as f32 * TILE)
     }
 
+    /// Taking a hit: extending one segment or all of them (the placed sound effects' "bound"
+    /// states, `mmk_sim::otoasobi`).
+    pub fn bound(&self) -> bool {
+        self.bound != Bound::Wait
+    }
+
     /// Whether a hit counts now.
     fn takes_hits(&self) -> bool {
         self.bound == Bound::Wait && !self.all && !self.done

@@ -10,6 +10,7 @@ pub mod bank;
 pub mod fx;
 pub mod links;
 pub mod mixer;
+pub mod oto;
 pub mod stream;
 pub mod wav;
 

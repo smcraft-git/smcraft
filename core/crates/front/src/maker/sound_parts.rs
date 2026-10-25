@@ -10,9 +10,11 @@
 //! spot's big icon on its tile, a part's (and Mario's) small framed icon at the part's top
 //! right [inf: which size goes where; capture `maker-sound-icons`].
 //!
-//! Each effect sounds its Course Maker user's `cue` (`EditOtoasobi<id>`) when it is chosen or
-//! put down [inf: the maker's play calls 0x7100f0eaa0 / 0x71018e0c40 / 0x71018e6710 run the
-//! effect without its picture].
+//! Each effect sounds its Course Maker user's `cue` (`EditOtoasobi<id>`) when it is chosen (the
+//! sound palette's choice, 0x71018e6710 [obs v3.0.3]) or put down [inf: 0x7100f0eaa0, the icon
+//! object's virtual, its moment not read]; the maker's calls run the effect without its picture.
+//! The sound button's balloon names the palette it switches to (`Mode_Disp_Sound` /
+//! `Mode_Disp_Parts`, 0x71018e2fe0) [obs v3.0.3].
 
 use mmk_editor::EditError;
 use mmk_editor::sound_effects::SoundTarget;
