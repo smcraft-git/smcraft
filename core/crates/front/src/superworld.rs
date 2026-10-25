@@ -1554,7 +1554,9 @@ impl MapScene {
             if let Some(t) = self.ui.message("MyWEdit_PlayBalloonPos_00", label) {
                 b.text("L_Balloon_00/T_Challenge_00", &t);
             }
-            b.set_translate("N_Pos_00", [c[0] + 0.61 * CELL, c[1] - 0.22 * CELL]);
+            // by Mario, lifted with him onto a pipe's top [inf]
+            let lift = self.hop.height * swmap::SCALE;
+            b.set_translate("N_Pos_00", [c[0] + 0.61 * CELL, c[1] - 0.22 * CELL + lift]);
             push_layout(out, b, self.tick);
         }
         if let Some(h) = &mut self.hud {
