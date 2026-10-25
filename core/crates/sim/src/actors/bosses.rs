@@ -1242,6 +1242,34 @@ impl Actor {
                     self.bowser_enter(bw::LAND_ON, st);
                 }
             }
+            bw::BIG_JUMP => match self.bowser_sub() {
+                // the squat; the take-off moves on its frame [obs: Ryujinx whole trace
+                // X_bowser_M3 frame 357]
+                0 => {
+                    self.vx = 0.0;
+                    if self.timer == 0 {
+                        self.bowser_launch_big_jump(st);
+                        if self.wings {
+                            self.bowser_set_flag(bwf::FROM_BIG, true);
+                            self.bowser_enter(bw::FLY, st);
+                        } else {
+                            self.bowser_set_sub(if st == 1 { 2 } else { 1 });
+                        }
+                    }
+                }
+                1 => {
+                    if self.on_ground {
+                        self.bowser_enter(bw::LAND_ON, st);
+                    }
+                }
+                _ => {
+                    if self.on_ground {
+                        self.bowser_enter(bw::LAND_ON, st);
+                    } else if self.vy <= 0.0 {
+                        self.bowser_enter(bw::HIP_DROP, st);
+                    }
+                }
+            },
             bw::LOOK_AROUND => {
                 self.vx = 0.0;
                 if self.bowser_ground_lost(st) {
@@ -1304,7 +1332,6 @@ impl Actor {
     }
 
     fn bowser_move(&mut self, level: &Level, st: usize) {
-        let m3 = st == 1;
         match self.phase {
             bw::FALL
             | bw::LAND_ON
@@ -1312,7 +1339,8 @@ impl Actor {
             | bw::LITTLE_JUMP
             | bw::MIDDLE_JUMP
             | bw::LOOK_AROUND
-            | bw::TURN => {
+            | bw::TURN
+            | bw::BIG_JUMP => {
                 // the state's step runs on the last frame's move (its ground flag, timers);
                 // the frame's move then uses the speeds it, or the state it entered, left: a
                 // landing is seen a frame after the touch-down, a decision moves on the frame
@@ -1320,35 +1348,6 @@ impl Actor {
                 // frames 85 (a middle jump), 143–146 (landing, LandOn, Walk)]
                 self.bowser_exe(level, st);
                 self.bowser_physics(level);
-            }
-            bw::BIG_JUMP => {
-                self.fall_capped(level, G, CAP);
-                match self.bowser_sub() {
-                    0 => {
-                        self.vx = 0.0;
-                        if self.timer == 0 {
-                            self.bowser_launch_big_jump(st);
-                            if self.wings {
-                                self.bowser_set_flag(bwf::FROM_BIG, true);
-                                self.bowser_enter(bw::FLY, st);
-                            } else {
-                                self.bowser_set_sub(if m3 { 2 } else { 1 });
-                            }
-                        }
-                    }
-                    1 => {
-                        if self.on_ground {
-                            self.bowser_enter(bw::LAND_ON, st);
-                        }
-                    }
-                    _ => {
-                        if self.on_ground {
-                            self.bowser_enter(bw::LAND_ON, st);
-                        } else if self.vy <= 0.0 {
-                            self.bowser_enter(bw::HIP_DROP, st);
-                        }
-                    }
-                }
             }
             bw::HIP_DROP => {
                 if self.timer == 0 && self.bowser_flag(bwf::SUB) {
@@ -4189,7 +4188,8 @@ mod tests {
             hip |= a.phase == bw::HIP_DROP;
             looked |= hip && a.phase == bw::LOOK_AROUND;
         }
-        assert!((top_vy - 6.2).abs() < 1e-4, "{top_vy}");
+        // (6.2, moving on its take-off frame: 6.2 − 0.1875)
+        assert!((top_vy - (6.2 + G)).abs() < 1e-4, "{top_vy}");
         assert!(hip && looked);
     }
 

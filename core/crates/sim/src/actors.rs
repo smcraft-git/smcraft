@@ -794,8 +794,6 @@ pub struct Actor {
     /// Position before this frame's move (the world sets it; a stomp undoes the move: the
     /// game's enemies update after the player-contact check) [obs: Ryujinx trace M1_koopa].
     pub pre: (f32, f32),
-    /// The world tick `pre` was taken on.
-    pub pre_tick: u64,
     /// Something stands on this platform (set by the world).
     pub ridden: bool,
     /// Position change this frame (for carrying riders).
@@ -936,7 +934,6 @@ impl Actor {
             x,
             y,
             pre: (x, y),
-            pre_tick: 0,
             vx: 0.0,
             vy: 0.0,
             dir: 1,
@@ -1664,14 +1661,23 @@ impl Actor {
     /// X_walkin_M1, X_bowser_*, X_wbros_3W].
     pub fn creation_draws(&mut self, style: crate::player::Style) {
         use crate::player::Style;
-        if style == Style::W3 {
+        // the Angry Sun runs no map-object init; a Chain Chomp runs it twice (the Chomp and its
+        // stake) [obs: Ryujinx traces M1_sun, M1_chomp] [inf: every other placed actor once,
+        // as the ones traced]
+        let inits = match self.kind {
+            _ if style == Style::W3 => 0,
+            Kind::AngrySun { .. } => 0,
+            Kind::ChainChomp { .. } => 2,
+            _ => 1,
+        };
+        if inits == 0 {
             return;
         }
         let bowser = matches!(self.kind, Kind::Bowser { .. });
         if bowser {
             let _ = self.rand(60);
         }
-        for _ in 0..3 {
+        for _ in 0..3 * inits {
             let _ = crate::random::try_word();
         }
         if bowser && matches!(style, Style::MW | Style::WU) {

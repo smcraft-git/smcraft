@@ -53,30 +53,11 @@ impl World {
             }
             return false;
         }
-        if !boss {
-            // a flame / shuriken hurts on the next frame, as an enemy's touch does (Player::
-            // enemy_hit): a death freezes the shots before they move again [obs: Ryujinx whole
-            // trace X_bowserjr_M1: the fireballs keep their places on the death frame]
-            self.player.enemy_hit = true;
-            return false;
-        }
-        if self.player.hurt() {
-            if self.player.alive() {
-                self.events.push(Event::PowerDown);
-            } else {
-                // the boss's own update kills: the actors after him in the update order don't
-                // move this frame [obs: Ryujinx whole trace X_bowser_M3 frame 420, a hip drop
-                // onto the player: Bowser's flame keeps its place]
-                let tick = self.tick;
-                for a in &mut self.actors[i + 1..] {
-                    if a.pre_tick == tick {
-                        (a.x, a.y) = a.pre;
-                    }
-                }
-                self.events.push(Event::Death);
-            }
-            return true;
-        }
+        // a boss's body, flame or shuriken hurts on the next frame, as an enemy's touch does
+        // (Player::enemy_hit): a death freezes them before they move again [obs: Ryujinx whole
+        // traces X_bowserjr_M1, the fireballs keep their places on the death frame; X_bowser_M3
+        // frame 420, a hip drop onto the player: Bowser and his flame keep theirs]
+        self.player.enemy_hit = true;
         false
     }
 

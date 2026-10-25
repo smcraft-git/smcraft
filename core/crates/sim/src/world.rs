@@ -887,6 +887,10 @@ impl World {
         };
         w.field_model =
             Box::leak(field_model(&w.level.style, w.level.theme, w.level.night).into_boxed_str());
+        // the play scene's area init seeds the course generator with 0 at the course start
+        // [obs v3.0.3 0x7100e489c0]; a restart after a miss goes on with the same stream [obs:
+        // Ryujinx trace M1_monty (the title course): the respawned mole's draws follow on]
+        w.random = crate::random::Random::course();
         w.reset_course();
         w
     }
@@ -909,8 +913,6 @@ impl World {
     }
 
     fn reset_course_lent(&mut self) {
-        // the play scene's area init seeds the course generator with 0 [obs v3.0.3 0x7100e489c0]
-        crate::random::reset(&mut self.random, crate::random::Random::course());
         self.area = 0;
         self.stash = None;
         self.transit = None;
@@ -2657,7 +2659,6 @@ impl World {
             }
             w3::sense(a, self.liquid, &self.player);
             a.pre = (a.x, a.y);
-            a.pre_tick = self.tick;
             self.budget.show(a);
             let reserve = a.budget;
             let spawned = a.step_spawning(&self.level);

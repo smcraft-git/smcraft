@@ -116,6 +116,8 @@ pub struct BowserStyle {
     spawns: Vec<Actor>,
     /// A middle branch has been decided (the decision's +0x1d flag is up until then).
     decided: bool,
+    /// SMW: this jump was decided out of LandOn (its squat is one frame).
+    after_land: bool,
     /// The course's style index, from his first update (`style_index`); 3D World (which runs
     /// on NSMBU's rules here) apart.
     pub(super) style: u8,
@@ -306,6 +308,7 @@ impl Actor {
     /// Enters a state with the SMW / NSMBU rules (`fire`: SMW's in-air fire flag).
     pub(super) fn koopa_enter(&mut self, state: u8, st: usize, fire: bool) {
         let from = self.phase;
+        self.koopa.after_land = from == bw::LAND_ON;
         self.phase = state;
         self.koopa.frame = 0;
         self.koopa.sub = 0;
@@ -410,7 +413,14 @@ impl Actor {
                     return true;
                 }
                 self.vx = 0.0;
-                if f < self.koopa_anim(MW_SQUAT_S, 1.0) {
+                // out of LandOn the squat is a frame [obs: Ryujinx whole trace X_bowser_MW,
+                // decided on frame 419, moving on 421] [inf: why]
+                let squat = if self.koopa.after_land {
+                    1
+                } else {
+                    self.koopa_anim(MW_SQUAT_S, 1.0)
+                };
+                if f < squat {
                     return true;
                 }
                 let little = self.phase == bw::LITTLE_JUMP;
@@ -801,6 +811,10 @@ impl Actor {
             vy: fl.vy,
             state: 2,
         };
+        // level at its own speed on its birth frame, along its angle from the next [obs: Ryujinx
+        // whole trace X_bowser_MW frames 554 / 585: vx −1.5 vy 0 at birth]
+        fl.die_pending = Some((fl.vx, fl.vy));
+        (fl.vx, fl.vy) = (STRAIGHT_SPEED * d, 0.0);
         self.koopa_spawn(fl);
     }
 
@@ -817,15 +831,13 @@ impl Actor {
         let wu = st == 3 && !self.koopa.w3;
         // (GoStraight: Bowser Jr's fireball's box)
         fl.alt = wu;
-        if wu {
-            // NSMBU's: level at its own speed on its birth frame, along the aim from the next
-            // [obs: X_bowser_WU, vx −0.9 vy 0 at birth]
-            self.koopa_aim_straight(&mut fl, a, WU_FLAME_SPEED);
+        let base = if wu { WU_FLAME_SPEED } else { STRAIGHT_SPEED };
+        self.koopa_aim_straight(&mut fl, a, base);
+        if !self.koopa.w3 {
+            // level at its own speed on its birth frame, along the aim from the next [obs:
+            // X_bowser_WU, vx −0.9 vy 0 at birth; X_bowser_MW's rising flames the same]
             fl.die_pending = Some((fl.vx, fl.vy));
-            fl.vx = WU_FLAME_SPEED * d;
-            fl.vy = 0.0;
-        } else {
-            self.koopa_aim_straight(&mut fl, a, STRAIGHT_SPEED);
+            (fl.vx, fl.vy) = (base * d, 0.0);
         }
         fl
     }

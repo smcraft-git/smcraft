@@ -267,7 +267,7 @@ sway, importer and pack 12, the dev cache already at v12).
   frames, Bowser's fire helper ahead of his step, low-bit draws (the Bros' facing / jump).
   **682 / 683 traces exact** (was 675): X_bowser_M1 / _M3 / _MW / _WU, X_bowserjr_M1 / _WU,
   X_wbros_M1 exact (Bowser and all his flames over 601 frames in X_bowser_M1; Bowser exact in
-  re-recordings with his object for NSMBU, SMB3 to 357, SMW to 421; both Bowser Jrs exact).
+  re-recordings with his object for SMB3, SMW and NSMBU, 601 frames; both Bowser Jrs exact).
   ✅ found under the draws: SMW / NSMBU Bowsers take their counts from the decision objects and
   never arm the breath helper; NSMBU's Fire state runs two frames longer, its flame (0.9 px/f,
   level on its birth frame) leaves from the mouth joint and aims from there; Bowser Jr's
