@@ -874,6 +874,8 @@ pub struct Actor {
     pub plank: Option<seesaw::Plank>,
     pub riders_tau: f32,
     pub seesaw: Option<u32>,
+    /// A sliding shell: the boss it hit and still touches (it hits a boss once a contact).
+    pub boss_contact: Option<u32>,
     /// A plank walker's ground angle: this frame's and last frame's.
     pub plank_angle: (u32, u32),
     /// Bowser's middle jump is a gap jump (its speed set to land past the gap; MiddleJump's
@@ -985,6 +987,7 @@ impl Actor {
             plank: None,
             riders_tau: 0.0,
             seesaw: None,
+            boss_contact: None,
             plank_angle: (0, 0),
             gap_jump: false,
             wing_rate: 1.0,

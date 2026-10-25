@@ -3427,6 +3427,7 @@ impl World {
     }
 
     fn actor_interactions(&mut self) {
+        bosses::end_boss_contacts(&mut self.actors);
         let level_ref = &self.level;
         let n = self.actors.len();
         let mut scores = Vec::new();
