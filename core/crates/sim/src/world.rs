@@ -2783,11 +2783,8 @@ impl World {
         let mut out = Vec::new();
         let mut shaken = 0;
         for (ti, t) in self.level.trees.iter().enumerate() {
-            let (bottom, top) = t.canopy();
-            if climbing == Some(t.x)
-                && py + 16.0 >= top - 1.0
-                && self.trees_shaken.insert((self.area, ti))
-            {
+            let (bottom, _) = t.canopy();
+            if t.at_top(climbing, py) && self.trees_shaken.insert((self.area, ti)) {
                 shaken += 1;
                 if let Some(c) = t.contents {
                     out.push((t.x, (bottom + 8.0).max(t.y + 40.0), c));

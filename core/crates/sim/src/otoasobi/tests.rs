@@ -226,8 +226,10 @@ fn shared_voices_start_once_a_frame_and_own_voices_hold() {
 
 #[test]
 fn coverage_counts_what_is_not_modelled() {
-    // the filters, a lift, a Bill Blaster and a POW are played (the POW never sets off); a
-    // Seesaw's effect isn't modelled yet
+    // the filters, a lift, a Bill Blaster, a POW (it never sets off), a Seesaw, a Tree and a
+    // Dry Bones Shell (Dry Bones' 0x4 form) are all played
+    let mut shell = object(46, 24, 1, 5);
+    shell.flags |= 0x4;
     let c = course(
         vec![spot(46, 3, 1), spot(47, 4, 1)],
         vec![
@@ -236,10 +238,113 @@ fn coverage_counts_what_is_not_modelled() {
             object(13, 12, 1, 5),
             object(19, 14, 1, 5),
             object(91, 20, 4, 5),
+            object(106, 30, 1, 5),
+            shell,
         ],
     );
     let u = unsupported(&c);
-    assert_eq!(u, vec!["sound effect on part 91".to_string()], "{u:?}");
+    assert!(u.is_empty(), "{u:?}");
+}
+
+#[test]
+fn a_seesaw_plays_on_a_landing_on_its_empty_plank() {
+    let c = course(vec![], vec![object(91, 12, 4, 0)]);
+    let mut w = World::from_course(&c);
+    let mut s = SoundParts::new(&c);
+    run(&mut w, &mut s, 0, 2);
+    let seesaw = w
+        .actors
+        .iter()
+        .find(|a| matches!(a.kind, Kind::Seesaw { .. }))
+        .map(|a| a.id)
+        .expect("the seesaw");
+    let tick = |w: &mut World, s: &mut SoundParts, on: bool| {
+        w.player.ride = on.then_some(seesaw);
+        w.player.on_ground = true;
+        w.tick += 1;
+        s.step(w);
+        s.cues.iter().map(|c| (c.id, c.source)).collect::<Vec<_>>()
+    };
+    assert_eq!(
+        tick(&mut w, &mut s, true),
+        vec![(0, Source::Part(PartTrigger::Ridden))]
+    );
+    for _ in 0..3 {
+        assert!(tick(&mut w, &mut s, true).is_empty(), "standing on");
+    }
+    // off and on again inside the 25 frames: nothing, and the count starts over
+    for _ in 0..20 {
+        tick(&mut w, &mut s, false);
+    }
+    assert!(tick(&mut w, &mut s, true).is_empty());
+    for _ in 0..20 {
+        tick(&mut w, &mut s, false);
+    }
+    assert!(
+        tick(&mut w, &mut s, true).is_empty(),
+        "the count was refilled"
+    );
+    for _ in 0..25 {
+        tick(&mut w, &mut s, false);
+    }
+    assert_eq!(tick(&mut w, &mut s, true).len(), 1);
+}
+
+#[test]
+fn a_p_switch_plays_when_picked_up_not_when_stood_on() {
+    let c = course(vec![], vec![object(18, 12, 1, 0)]);
+    let mut w = World::from_course(&c);
+    let mut s = SoundParts::new(&c);
+    run(&mut w, &mut s, 0, 2);
+    let ps = w
+        .actors
+        .iter()
+        .find(|a| a.kind == Kind::PSwitch)
+        .map(|a| a.id)
+        .expect("the P Switch");
+    let tick = |w: &mut World, s: &mut SoundParts, on: bool, held: bool| {
+        w.player.ride = on.then_some(ps);
+        w.player.held = held.then_some(ps);
+        w.tick += 1;
+        s.step(w);
+        s.cues.iter().map(|c| (c.id, c.source)).collect::<Vec<_>>()
+    };
+    assert!(tick(&mut w, &mut s, true, false).is_empty(), "stood on");
+    assert_eq!(
+        tick(&mut w, &mut s, false, true),
+        vec![(0, Source::Part(PartTrigger::PickedUp))]
+    );
+    assert!(tick(&mut w, &mut s, false, true).is_empty(), "still held");
+}
+
+#[test]
+fn a_tree_plays_each_time_a_player_reaches_its_top() {
+    let mut tree = object(106, 12, 1, 0);
+    tree.height = 6;
+    let c = course(vec![], vec![tree]);
+    let mut w = World::from_course(&c);
+    let mut s = SoundParts::new(&c);
+    run(&mut w, &mut s, 0, 2);
+    let t = w.level.trees[0];
+    let top = t.canopy().1 - 16.0;
+    let tick = |w: &mut World, s: &mut SoundParts, y: f32| {
+        (w.player.x, w.player.y) = (t.x, y);
+        w.player.climbing = Some((t.x, 0));
+        w.tick += 1;
+        s.step(w);
+        s.cues
+            .iter()
+            .map(|c| (c.id, c.source, c.y))
+            .collect::<Vec<_>>()
+    };
+    assert!(tick(&mut w, &mut s, top - 8.0).is_empty(), "on the trunk");
+    assert_eq!(
+        tick(&mut w, &mut s, top),
+        vec![(0, Source::Part(PartTrigger::Shaken), t.y + 40.0)]
+    );
+    assert!(tick(&mut w, &mut s, top).is_empty(), "still at the top");
+    tick(&mut w, &mut s, top - 8.0);
+    assert_eq!(tick(&mut w, &mut s, top).len(), 1, "again");
 }
 
 #[test]

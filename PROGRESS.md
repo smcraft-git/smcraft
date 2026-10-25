@@ -325,6 +325,12 @@ sway, importer and pack 12, the dev cache already at v12).
   Seesaw, Tree, Dry Bones shell); simulate 0 crashes. Left: those three, the default sound palette
   (tables 0x71023d8508…, not applied), the icon sizes, the put-down sound's moment, player states
   144 / 145, the console delay's network.
+  ✅ **2026-10-25, branch `infres9`**: the last three — the Seesaw (its physics 0x71013d7d90 plays
+  through the shared stood-on call when a player lands on its empty plank with its 25-frame
+  count out; the count refills on every such landing — this was read as the P Switch's, whose
+  only call is its pick-up 0x71013e99a0), the Tree (0x710137eae0: each time a player reaches the
+  top of the trunk, at 40 px above its origin, kind 5) and the Dry Bones Shell (an enemy of the
+  enemy base). Coverage 550 / 550 and 273 / 273; simulate 0 crashes.
 - **Agent queue** (when a helper slot frees; running 2026-10-25: the maker's Water Level and
   Custom Scroll modes, physics): ✅ a Koopaling in a Clown Car (2026-10-25, branch
   `kclown`, research 120-koopalings.md "In a Koopa Clown Car": KoKoopaDefault's Clown vtable
