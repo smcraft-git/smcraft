@@ -3972,6 +3972,14 @@ impl Actor {
             self.collide(level);
             return;
         }
+        // a Leaf / Feather / Propeller Mushroom passing through the floor is gone once it is 40
+        // px below the view's bottom, at its next update (as a falling enemy) [obs: Ryujinx
+        // traces X_leafplace, X_featherplace, X_propplace: placed ones sway / bob down through
+        // the floor and freeze in the records at y −40.03 and −41.05 with the view's bottom at 0]
+        if self.y < self.camera.1 - 40.0 {
+            self.mode = Mode::Dead;
+            return;
+        }
         if level.style == "WU" {
             self.step_propeller(level);
             return;
@@ -5438,7 +5446,12 @@ mod tests {
         assert!((top - 126.0).abs() < 0.01, "peak {top}");
         assert!((xmax - xmin - 32.0).abs() < 1.0, "swing {}", xmax - xmin);
         assert_eq!(a.phase, 2);
-        assert!((a.y + 64.7).abs() < 0.01, "y {}", a.y);
+        // gone once 40 px under the view's bottom (at 0 here)
+        assert!(
+            a.mode == Mode::Dead && (a.y + 40.5248).abs() < 0.01,
+            "y {}",
+            a.y
+        );
     }
 
     #[test]

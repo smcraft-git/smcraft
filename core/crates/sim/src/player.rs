@@ -62,6 +62,15 @@ const SKID_REACCEL: f32 = 0.25;
 /// lengths [obs: 3W_Player_Animation_MarioClimb].
 pub const CAT_SCRATCH_FRAMES: i32 = 17;
 const CAT_SLIDE_FRAMES: i32 = 44;
+/// The Cat's wall test heights: the attach needs the wall's face 38 px up, the climb 28
+/// (0x71015f4a70 / DAT_7102318964) [obs v3.0.3].
+const CAT_ATTACH_REACH: f32 = 38.0;
+const CAT_CLIMB_REACH: f32 = 28.0;
+/// WallClimb's fall start (climb_wall_fall_start): frames hanging still [obs: Ryujinx trace
+/// 3W_formw cat_climb_limit].
+const CAT_FALL_START: i32 = 58;
+/// ClimbBodyAttackLand's animation (frames) [obs: Ryujinx trace 3W_form cat_dive_more].
+const CAT_DIVE_LAND: i32 = 17;
 /// Frames the Turn state holds the stopped player (counter +0x242c = 8) [obs].
 const SKID_PAUSE: i32 = 8;
 
@@ -102,6 +111,14 @@ pub const SMALL_M1: Sensors = Sensors {
 pub const SMALL_MW: Sensors = Sensors {
     head_y: 15.9,
     ..SMALL_M1
+};
+/// The 3D World Cat on the ground: the wall probes reach 13.9 px [obs: Ryujinx traces 3W_formw /
+/// 3W_formt: a Cat walking into a wall, fast or slowly, stops 13.9 from its face and stays there
+/// pushing; in the air it reaches the face (7.9)]; the rest as Super's (§6.1's Cat row 6 has a
+/// 15.9 head and a 4…8.5 wall span too [?]: not seen in a trace).
+pub const CAT_RUN: Sensors = Sensors {
+    wall_x: 13.9,
+    ..SUPER
 };
 /// Super/Fire standing (§6.1 row 0) and crouching (row 1).
 pub const SUPER: Sensors = Sensors {
@@ -516,6 +533,13 @@ pub struct Player {
     cat_climbed: f32,
     cat_climbs: u8,
     cat_reattach: i32,
+    /// Cat: frames on the wall without climbing (+0x2480), the fall start's hanging frames left.
+    cat_still: i32,
+    cat_fall_start: i32,
+    /// Cat: frames left of ClimbBodyAttackLand (a dive landed without a direction).
+    pub dive_land: i32,
+    /// Frames left with no air control (after the Cat's wall jump / top-out jump).
+    air_lock: i32,
     pub dive: bool,
     /// Sideways spring pushes: frames left in which another push counts as consecutive (10
     /// after each push), and how many came in a row (to 4) [obs 0x71009f37e0].
@@ -709,6 +733,10 @@ impl Player {
             cat_climbed: 0.0,
             cat_climbs: 0,
             cat_reattach: 0,
+            cat_still: 0,
+            cat_fall_start: 0,
+            air_lock: 0,
+            dive_land: 0,
             dive: false,
             side_push: 0,
             side_chain: 0,
@@ -843,6 +871,16 @@ impl Player {
         }
         if self.form == Form::Mega {
             return &MEGA;
+        }
+        // (the state this frame has: a take-off frame is already airborne)
+        if self.form == Form::Cat
+            && self.style == Style::W3
+            && self.on_ground
+            && !self.crouch
+            && self.cat_slide == 0
+            && self.dive_land == 0
+        {
+            return &CAT_RUN;
         }
         match (self.big(), self.crouch) {
             (false, false) if matches!(self.style, Style::MW | Style::WU | Style::W3) => &SMALL_MW,
@@ -1121,6 +1159,12 @@ impl Player {
     fn ground(&mut self, inp: Input) {
         let dir = inp.dir_x();
         let run = inp.held(input::RUN);
+        if self.dive_land > 0 {
+            self.dive_land -= 1;
+            self.vx = 0.0;
+            self.pose = Pose::Crouch;
+            return;
+        }
         if self.cat_slide > 0 {
             // cat slide attack (ClimbSlidingAttack 0x7100a1d030 / 0x7100a1d150) [obs]: 2.5 px/f
             // forward with no accel for 12 frames, then down to 0 at 0.075 (ice 0.0375) until
@@ -1791,6 +1835,10 @@ impl Player {
                         self.vx
                     };
                     self.vx = approach(self.vx, target, 0.07);
+                } else if self.air_lock > 0 {
+                    // the Cat's wall / top-out jump: no air control yet (target 0, accel 0)
+                    self.air_lock -= 1;
+                    self.air_move = (0.0, 0.0);
                 } else if !tw.as_ref().is_some_and(|t| t.steered) {
                     self.air(inp);
                 }
@@ -2226,25 +2274,36 @@ impl Player {
         self.vx = approach(vx_before, target, acc);
     }
 
-    /// Cat wall climb (§5.4 Neko): pushing into a wall in the air climbs it at 1.0 px/f (1.5
-    /// with run) for up to 120 frames or 120 px, gravity 0; reaching the top pops up (vy 4.8).
-    /// Then WallClimbFall: gravity −0.085, max fall −2.0 while still on the wall. Jump → the
-    /// wall jump; stick away or the wall ending lets go. The wall is only taken while falling
-    /// (attach check 0x7100a1aa30); the first two attachments of an air time climb, later ones
-    /// only slide (count +0x271c, bumped in WallClimb enter 0x7100a1b5b0, cleared on landing);
-    /// after letting go the wall can't be taken again for 16 frames (+0x2714) [obs].
-    fn cat_wall_climb(&mut self, inp: Input, pressed: bool, level: &Level) -> bool {
+    /// Cat wall climb (§5.4 Neko) [obs v3.0.3: attach 0x71015f4800, the wall test 0x71015f4a70,
+    /// WallClimb 0x71015f53a0 / 0x71015f54f0, the fall start 0x71015f5850 / 0x71015f5980,
+    /// WallClimbFall 0x71015f5ac0 / 0x71015f5c00; Ryujinx traces 3W_formw cat_*, 3W_formt]:
+    /// - attach (in the air, at the frame's start): the stick toward a wall the body touches,
+    ///   its face reaching 38 px up (and 9), falling, the 16-frame re-attach lock (+0x2778) run
+    ///   out; the first two attachments of an air time climb (count +0x2780), later ones slide;
+    /// - WallClimb, every frame from the entry: the wall's face must reach 28 px up (and 9), else
+    ///   the top-out jump (vy 4.8, gravity from the climb's vy 0, no air control for 5 frames);
+    ///   Up or the stick toward the wall climbs 1.0 a frame (1.5 with Run), Down or the stick away
+    ///   climbs down as fast; the position moves, the speeds stay 0; 120 px climbed (60 the second
+    ///   time) or 120 frames still end it into the fall start (58 frames hanging), then
+    ///   WallClimbFall: gravity −0.085, max fall −2.0 while the face is there;
+    /// - Jump on the wall: vy 3.5 (gravity from vy 0), 2.25 away, no air control for 12 frames;
+    ///   every way off the wall sets the re-attach lock.
+    fn cat_wall_climb(&mut self, inp: Input, pressed: bool, level: &Level, vy_before: f32) -> bool {
         let dir = inp.dir_x();
         if self.cat_reattach > 0 {
             self.cat_reattach -= 1;
         }
         if self.cat_climb == 0 {
+            // (not during an air scratch, ClimbAttackAir, nor on its Fall's first frame [obs:
+            // Ryujinx trace 3W_formw cat_climb_run])
             if self.cat_reattach > 0
+                || self.attack > 0
                 || self.held.is_some()
                 || self.shoe.is_some()
                 || dir == 0
-                || self.vy >= 0.0
-                || !self.wall_at(level, dir)
+                || dir != self.facing
+                || vy_before >= 0.0
+                || !self.cat_face(level, dir, CAT_ATTACH_REACH)
             {
                 return false;
             }
@@ -2256,49 +2315,89 @@ impl Player {
             }
             self.cat_wall = dir;
             self.cat_climbed = 0.0;
+            self.cat_still = 0;
+            self.cat_fall_start = 0;
             self.spinning = false;
+            self.vy = 0.0;
         }
         let w = self.cat_wall;
         self.facing = w;
         self.vx = 0.0;
+        let band0 = if inp.held(input::JUMP) {
+            GRAVITY_HELD[vy_band(0.0)]
+        } else {
+            GRAVITY_RELEASED[vy_band(0.0)]
+        };
+        let leave = |p: &mut Self| {
+            p.cat_climb = 0;
+            p.cat_reattach = 16;
+        };
         if pressed {
-            self.vy = 3.5;
+            leave(self);
+            self.vy = 3.5 + band0;
             self.vx = -w as f32 * 2.25;
             self.facing = -w;
-            self.cat_climb = 0;
-            self.cat_reattach = 16;
+            self.air_lock = 12;
             return true;
         }
-        if dir == -w {
-            self.cat_climb = 0;
-            self.cat_reattach = 16;
+        if !self.cat_face(level, w, CAT_CLIMB_REACH) {
+            let top = self.cat_climb > 0;
+            leave(self);
+            if top {
+                // the top-out jump (state 0x1c)
+                self.vy = 4.8 + band0;
+                self.air_lock = 5;
+                return true;
+            }
             return false;
         }
         if self.cat_climb > 0 {
-            if !self.wall_at(level, w) {
-                // over the top
-                self.vy = 4.8;
-                self.cat_climb = 0;
-                self.cat_reattach = 16;
-                return true;
-            }
             let speed = if inp.held(input::RUN) { 1.5 } else { 1.0 };
-            self.vy = speed;
-            self.cat_climbed += speed;
+            let up = inp.held(input::UP) || dir == w;
+            let down = inp.held(input::DOWN) || (dir != 0 && dir != w);
+            self.vy = 0.0;
+            if up {
+                self.y += speed;
+                self.cat_climbed += speed;
+            } else if down {
+                self.y -= speed;
+                self.cat_climbed += speed;
+            } else {
+                self.cat_still += 1;
+            }
             self.cat_climb += 1;
-            if self.cat_climb > 120 || self.cat_climbed >= 120.0 {
+            let limit = if self.cat_climbs == 2 { 60.0 } else { 120.0 };
+            if self.cat_still >= 120 || self.cat_climbed >= limit {
                 self.cat_climb = -1;
+                self.cat_fall_start = CAT_FALL_START;
+                self.cat_reattach = 16;
             }
             return true;
         }
-        // sliding down after the climb
-        if !self.wall_at(level, w) {
-            self.cat_climb = 0;
-            self.cat_reattach = 16;
-            return false;
+        if self.cat_fall_start > 0 {
+            // hanging through climb_wall_fall_start
+            self.cat_fall_start -= 1;
+            if self.cat_fall_start == 0 {
+                self.cat_reattach = 16;
+            }
+            self.vy = 0.0;
+            return true;
         }
-        self.vy = (self.vy - 0.085).max(-2.0);
+        self.vy = (vy_before - 0.085).max(-2.0);
         true
+    }
+
+    /// The Cat's wall test (0x71015f4a70): the body touching a wall on that side and its face
+    /// reaching `reach` and 9 px over the feet (two 14-px rays meeting it at the same distance;
+    /// the tile column next to the body).
+    fn cat_face(&self, level: &Level, dir: i32, reach: f32) -> bool {
+        let s = self.sensors();
+        let x = self.x + dir as f32 * (s.wall_x + 0.5);
+        let touch = level.cell_at(x, self.y + s.wall_y0).is_solid()
+            || level.cell_at(x, self.y + s.wall_y1).is_solid();
+        touch
+            && level.cell_at(x, self.y + 9.0).is_solid()
+            && level.cell_at(x, self.y + reach).is_solid()
     }
 
     fn wall_at(&self, level: &Level, dir: i32) -> bool {
@@ -2353,13 +2452,23 @@ impl Player {
             self.cat_climb = 0;
             self.cat_climbs = 0;
             self.cat_reattach = 0;
+            self.cat_fall_start = 0;
+            self.air_lock = 0;
             if std::mem::take(&mut self.dive) && self.on_ground {
-                // out of the dive on landing straight into Walk at the walk speed (no
-                // ClimbBodyAttackLand with a direction held) [obs: Ryujinx trace 3W_form
-                // form_dive: 4.0 on the landing frame, 1.5 from the next, Right held]
-                let cap = if inp.held(input::RUN) { 3.0 } else { 1.5 };
-                if self.vx.abs() > cap {
-                    self.vx = cap * self.vx.signum();
+                if inp.dir_x() != 0 {
+                    // out of the dive on landing straight into Walk at the walk speed (no
+                    // ClimbBodyAttackLand with a direction held) [obs: Ryujinx trace 3W_form
+                    // form_dive: 4.0 on the landing frame, 1.5 from the next, Right held]
+                    let cap = if inp.held(input::RUN) { 3.0 } else { 1.5 };
+                    if self.vx.abs() > cap {
+                        self.vx = cap * self.vx.signum();
+                    }
+                } else {
+                    // without one, ClimbBodyAttackLand (0x71015f7830): the speeds zeroed for
+                    // its 17-frame animation, then Walk [obs: Ryujinx trace 3W_form
+                    // cat_dive_more]
+                    self.vx = 0.0;
+                    self.dive_land = CAT_DIVE_LAND - 1;
                 }
             }
             return;
@@ -2388,9 +2497,15 @@ impl Player {
         // [obs v1.0.0: Fall begin 0x71009f20f0's table {0x33, 0x36, 0, 0, 0x3b, 0x3c, 6, 0x12,
         // 0x1a, 0x20, 10, 0}; +0x2A set by ZR in the 3W_form traces]
         let _ = down_pressed;
+        // a second Spin press ends the dive (its exec 0x71015f7460 falls back to Fall) [obs v3.0.3]
+        let cancel = self.dive && spin_pressed;
+        if cancel {
+            self.dive = false;
+        }
         if self.form == Form::Cat
             && self.pu.headdress.is_none()
             && spin_pressed
+            && !cancel
             // (on the ground the press is the long jump, BroadJump [obs: 3W_form form_spin_walk])
             && !self.broad
             && self.pound == 0
@@ -2433,7 +2548,7 @@ impl Player {
         }
         if self.form == Form::Cat
             && self.pu.headdress.is_none()
-            && self.cat_wall_climb(inp, pressed, level)
+            && self.cat_wall_climb(inp, pressed, level, vy_before)
         {
             return;
         }
@@ -2454,7 +2569,11 @@ impl Player {
         let dir = inp.dir_x();
         // wall slide / wall jump exist only in NSMBU and 3D World (0x7100a1e0c0 tests the
         // style) and start only while falling (0x7100a0e010) [obs; Ryujinx trace: none in SMW]
+        // (the Cat has its own wall states instead: during an air scratch it doesn't slide
+        // either [obs: Ryujinx trace 3W_formw cat_climb_run])
+        let cat = self.form == Form::Cat && self.pu.headdress.is_none();
         let able = matches!(self.style, Style::WU | Style::W3)
+            && !cat
             && self.held.is_none()
             && self.shoe.is_none()
             && vy_before < 0.0;
@@ -3088,8 +3207,17 @@ impl Player {
                 } else {
                     ((wx / TILE).floor() + 1.0) * TILE
                 };
-                // flush with the tile edge, as the game resolves walls [obs: Ryujinx trace]
-                self.x = tile_edge - dir * s.wall_x;
+                // flush with the tile edge, as the game resolves walls [obs: Ryujinx trace]; a
+                // deeper overlap than this frame's move into it (the Cat's ground probes widening
+                // next to a wall) is undone 2 px a frame [obs: Ryujinx trace 3W_formt
+                // cat_climb_top: 536.1 → 534.1 → 532.1 → 530.1]
+                let flush = tile_edge - dir * s.wall_x;
+                let most = (self.vx * cos * dir).max(0.0) + 2.0;
+                self.x = if (self.x - flush) * dir > most {
+                    self.x - dir * most
+                } else {
+                    flush
+                };
                 if self.vx * dir > 0.0 {
                     self.vx = 0.0;
                 }
@@ -3749,15 +3877,20 @@ mod tests {
         let mut climbed = false;
         let mut top = false;
         for _ in 0..200 {
+            let (y0, was) = (p.y, p.cat_climb > 0);
             p.step(
                 Input {
                     buttons: input::RIGHT | if p.on_ground { input::JUMP } else { 0 },
                 },
                 &level,
             );
-            if p.cat_climb > 0 {
+            if was && p.cat_climb > 0 {
+                // (the climb moves the position: its speeds stay 0)
                 climbed = true;
-                assert!((p.vy - 1.0).abs() < 1e-4, "climbs at 1.0: {}", p.vy);
+                assert!(
+                    p.vy == 0.0 && (p.y - y0 - 1.0).abs() < 1e-4,
+                    "climbs at 1.0"
+                );
             }
             if climbed && p.cat_climb == 0 && p.vy > 4.0 {
                 top = true;
@@ -3799,7 +3932,8 @@ mod tests {
         }
         assert_eq!(p.cat_climb, -1, "the climb ran out");
         let mut fell = p.vy;
-        for _ in 0..30 {
+        // (58 frames hanging through the fall start, then the slide)
+        for _ in 0..90 {
             p.step(
                 Input {
                     buttons: input::RIGHT,

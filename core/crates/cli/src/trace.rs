@@ -157,7 +157,7 @@ pub fn run_all(course: &[u8], script: &[Input], start: &Start) -> Result<(String
 // Physics test courses
 
 pub const STYLES: [&str; 5] = ["M1", "M3", "MW", "WU", "3W"];
-pub const KINDS: [&str; 31] = [
+pub const KINDS: [&str; 32] = [
     "flat",
     "wall",
     "slope",
@@ -189,6 +189,7 @@ pub const KINDS: [&str; 31] = [
     "seesawp",
     "formw",
     "formt",
+    "itemplace",
 ];
 
 /// Kinds made in SMB1 only (the terrain they test is the same in every style).
@@ -196,6 +197,8 @@ const M1_ONLY: [&str; 3] = ["slopejoin", "mushstart", "slopejoins"];
 /// Kinds made in NSMBU only (a ground pound in the air needs a style that has one in the
 /// engine).
 const WU_ONLY: [&str; 2] = ["seesaw", "seesawp"];
+/// Kinds made in SMB3, SMW and NSMBU only (their style power-up is a Leaf, Feather or Propeller).
+const LEAF_ONLY: [&str; 1] = ["itemplace"];
 /// Kinds made in 3D World only (clear pipes are a 3D World part).
 const W3_ONLY: [&str; 6] = ["cpipe", "cpipeg", "cpipev", "cpiped", "formw", "formt"];
 
@@ -216,6 +219,7 @@ pub fn course_names() -> Vec<String> {
                 || s != "M1" && M1_ONLY.contains(&k)
                 || s != "3W" && W3_ONLY.contains(&k)
                 || s != "WU" && WU_ONLY.contains(&k)
+                || !matches!(s, "M3" | "MW" | "WU") && LEAF_ONLY.contains(&k)
             {
                 continue;
             }
@@ -462,6 +466,14 @@ pub fn build_course(name: &str) -> Result<Vec<u8>, String> {
                 e.paint_ground(bx - 4, up(y)).map_err(err)?;
                 e.paint_ground(bx + 4, up(y)).map_err(err)?;
             }
+        }
+        "itemplace" => {
+            // the style power-up (part 44: Super Leaf, Cape Feather, Propeller Mushroom) placed
+            // in the course, not in a block: one on the floor at x 14, one in the air 6 tiles up
+            // at x 22 (the player stands at the start: neither reaches it)
+            floor(&mut e, 0, len - 1)?;
+            e.place(44, 14, up(1)).map_err(err)?;
+            e.place(44, 22, up(7)).map_err(err)?;
         }
         "formw" | "formt" => {
             // the Cat's walls: the Super Bell on the floor at x FLOOR_ITEM (it stays where it
