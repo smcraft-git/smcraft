@@ -267,7 +267,8 @@ pub enum Kind {
     Shoe {
         heels: bool,
     },
-    /// A block that moves (wings or a track): brick, ?, hard, ice or cloud, with its contents.
+    /// A block that moves (wings or a track): brick, ?, hard, ice, cloud or donut, with its
+    /// contents.
     MovingBlock {
         block: crate::blocks::BlockKind,
         contents: Option<crate::blocks::Contents>,

@@ -414,6 +414,8 @@ pub struct World {
     donut_timers: Vec<((i32, i32), i32, i32)>,
     /// Fallen donuts waiting to come back: tile, frames left.
     donut_respawn: Vec<((i32, i32), i32)>,
+    /// Fallen moving donuts (wings / a track) waiting to come back: spawn, frames left.
+    donut_back: Vec<(usize, i32)>,
     /// Conveyor carry applied to the player (px/frame).
     carry: f32,
     /// Autoscroll view position (x, or y in vertical areas).
@@ -829,6 +831,7 @@ impl World {
             p_coins: Vec::new(),
             donut_timers: Vec::new(),
             donut_respawn: Vec::new(),
+            donut_back: Vec::new(),
             carry: 0.0,
             autoscroll_pos: 0.0,
             custom_scroll: None,
@@ -933,6 +936,7 @@ impl World {
         self.p_coins.clear();
         self.donut_timers.clear();
         self.donut_respawn.clear();
+        self.donut_back.clear();
         self.carry = 0.0;
         let (sx, sy) = self.level.start;
         self.player = Player::new(sx, sy);
@@ -1113,6 +1117,7 @@ impl World {
         self.apply_on_off();
         self.donut_timers.clear();
         self.donut_respawn.clear();
+        self.donut_back.clear();
         for s in &mut self.spawns {
             s.alive = false;
             s.spawned = false;
@@ -6748,15 +6753,33 @@ impl World {
             }
             self.events.push(Event::DonutFall);
         }
+        self.step_moving_donuts();
         if self.coop.extra {
             return;
+        }
+        // (ChikuwaRestore's timer runs from the frame after the fall's end: back on the 120th)
+        let mut again = Vec::new();
+        self.donut_back.retain_mut(|(idx, n)| {
+            *n -= 1;
+            if *n <= 0 {
+                again.push(*idx);
+            }
+            *n > 0
+        });
+        for idx in again {
+            self.donut_comes_back(idx);
         }
         for a in &mut self.actors {
             if a.kind == Kind::Donut && (a.y < -2.0 * TILE || a.phase == 9) && a.mode != Mode::Dead
             {
                 a.mode = Mode::Dead;
-                self.donut_respawn
-                    .push(((a.home_x as i32, a.home_y as i32), 120));
+                match a.spawn {
+                    // a moving one comes back at its placement (ChikuwaRestore, below)
+                    Some(idx) => self.donut_back.push((idx, 120)),
+                    None => self
+                        .donut_respawn
+                        .push(((a.home_x as i32, a.home_y as i32), 120)),
+                }
             }
         }
         let mut back = Vec::new();
@@ -6775,6 +6798,107 @@ impl World {
                 .map
                 .insert((x, y), Block::new(BlockKind::Donut, None));
             self.level.set(x, y, Cell::SemiTop);
+        }
+    }
+
+    /// Donut Blocks with wings or on a track are block actors (`Kind::MovingBlock`) with the
+    /// tile donut's Wait state: the same 48-frame timer and ridden counter of 4, one per block,
+    /// run in any move state (v3.0.3 donut Wait exe 0x7101389df0: at 0 the move state becomes
+    /// ChikuwaFall, 4, whatever it was) [obs]; falling (`Kind::Donut`, 0x710138c8b0: −0.1875 a
+    /// frame to −2) it leaves its track or flight. Out of the area it is put back at its
+    /// placement (`donut_comes_back`).
+    fn step_moving_donuts(&mut self) {
+        let p = &self.player;
+        let ridden = p.ride.filter(|_| p.on_ground);
+        let main_pass = !self.coop.extra;
+        let mut fall = Vec::new();
+        for (i, a) in self.actors.iter_mut().enumerate() {
+            let Kind::MovingBlock {
+                block: BlockKind::Donut,
+                ..
+            } = a.kind
+            else {
+                continue;
+            };
+            if a.phase == 1 {
+                // ChikuwaRestore's scale-in (0x710138b740): 0.001 + 0.05 a frame, 20 frames,
+                // solid and in place; then its move state again (exit 0x710138ba10: Rail with a
+                // track, Wing with wings, else Wait)
+                if main_pass {
+                    a.timer += 1;
+                    if a.timer >= 20 {
+                        fall.push((i, false));
+                    }
+                }
+                continue;
+            }
+            if ridden == Some(a.id) {
+                if a.pause <= 0 {
+                    a.timer = 48;
+                    self.events.push(Event::DonutShake);
+                }
+                a.pause = 4;
+            }
+            if main_pass && a.pause > 0 {
+                a.timer -= 1;
+                a.pause -= 1;
+                if a.timer <= 0 {
+                    fall.push((i, true));
+                }
+            }
+        }
+        for (i, drop) in fall {
+            if !drop {
+                self.donut_moves_again(i);
+                continue;
+            }
+            let a = &mut self.actors[i];
+            a.kind = Kind::Donut;
+            (a.rail, a.derailed, a.wings, a.fly.on) = (None, false, false, false);
+            (a.pause, a.vx, a.vy) = (1, 0.0, -0.1875);
+            a.y -= 0.1875;
+            let id = a.id;
+            if ridden == Some(id) {
+                self.player.y -= 0.1875;
+            }
+            self.events.push(Event::DonutFall);
+        }
+    }
+
+    /// A fallen moving donut back at its placement after 120 frames hidden (ChikuwaRestore
+    /// enter 0x710138b630: timer 0x78, the collider off; the fall's end put it home,
+    /// 0x710138c8b0) [obs]: growing in place first (`step_moving_donuts`).
+    fn donut_comes_back(&mut self, idx: usize) {
+        let Some(rec) = self.spawns.get_mut(idx) else {
+            return;
+        };
+        let s = rec.spawn;
+        (rec.alive, rec.killed) = (true, false);
+        let mut a = Actor::new(s.kind, s.x, s.y);
+        (a.spawn, a.home_y, a.phase, a.timer) = (Some(idx), s.y, 1, 0);
+        self.events.push(Event::DonutBack);
+        self.add_actor(a);
+    }
+
+    /// The restored donut `i` takes up its move state from its placement: its track from the
+    /// placement's start (Rail enter 0x710138c400 attaches again), or its flight.
+    fn donut_moves_again(&mut self, i: usize) {
+        let Some(s) = self.actors[i]
+            .spawn
+            .and_then(|idx| self.spawns.get(idx))
+            .map(|r| r.spawn)
+        else {
+            return;
+        };
+        let rail = s.rail.and_then(|start| {
+            crate::track::Rail::attach(&self.level.tracks, s.x, s.y + 8.0, start, s.wings)
+        });
+        let a = &mut self.actors[i];
+        (a.phase, a.timer, a.pause, a.wings) = (0, 0, 0, s.wings);
+        if let Some(r) = rail {
+            let p = r.point(&self.level.tracks);
+            a.rail_off = (s.x - p.0, s.y - p.1);
+            a.rail = Some(r);
         }
     }
 
@@ -8696,6 +8820,18 @@ impl World {
                 let mut sp =
                     Self::model_sprite(field, field, a.x - 8.0, a.y, TILE, TILE, false, 25);
                 sp.image.rect = Some(((i % 16) as f32 * TILE, (i / 16) as f32 * TILE, TILE, TILE));
+                if block == BlockKind::Donut {
+                    if a.phase == 1 {
+                        // growing back about its middle (step_moving_donuts)
+                        let k = (0.001 + 0.05 * a.timer as f32).min(1.0);
+                        (sp.w, sp.h) = (TILE * k, TILE * k);
+                        (sp.x, sp.y) = (a.x - sp.w / 2.0, a.y + (TILE - sp.h) / 2.0);
+                    } else if a.pause > 0 {
+                        // shaking as a tile donut does
+                        let n = (48 - a.timer).max(0) as usize;
+                        sp.x += [1.0, 2.0, 1.0, 0.0, -1.0, -2.0, -1.0, 0.0][n % 8];
+                    }
+                }
                 return Some(sp);
             }
             Kind::ClownCar { fire } => (
@@ -12272,6 +12408,65 @@ mod tests {
             holding_stone: true,
             ..w.player.at_goal()
         }));
+    }
+
+    #[test]
+    fn a_donut_on_a_track_drops_off_it_and_comes_back_to_its_placement() {
+        let mut lvl = Level::flat(60);
+        lvl.tracks = crate::track::Tracks::new((0..12).map(|k| (9 + 2 * k, 3, 0)));
+        let donut = Kind::MovingBlock {
+            block: BlockKind::Donut,
+            contents: None,
+        };
+        let mut s = spawn(donut, 168.0, 64.0);
+        s.rail = Some(0);
+        lvl.spawns.push(s);
+        let mut w = World::with_level(lvl);
+        run(&mut w, 0, 2);
+        let find = |w: &World| w.actors.iter().position(|a| a.spawn == Some(0)).unwrap();
+        let i = find(&w);
+        let (id, x0) = (w.actors[i].id, w.actors[i].x);
+        run(&mut w, 0, 4);
+        assert!(
+            (w.actors[find(&w)].x - x0 - 3.0).abs() < 0.01,
+            "0.75 a frame"
+        );
+        // the player lands on it: its 48-frame timer runs while it carries him
+        let a = &w.actors[find(&w)];
+        (w.player.x, w.player.y, w.player.vy) = (a.x, a.y + 17.0, 0.0);
+        let mut ridden = 0;
+        for _ in 0..80 {
+            run(&mut w, 0, 1);
+            if w.actors[find(&w)].kind == Kind::Donut {
+                break;
+            }
+            ridden += (w.player.ride == Some(id)) as i32;
+        }
+        let a = &w.actors[find(&w)];
+        assert_eq!((a.kind, a.id, a.rail.is_some()), (Kind::Donut, id, false));
+        assert!((47..=49).contains(&ridden), "dropped after {ridden} frames");
+        // out of the area, hidden for 120 frames, then back where it was placed, growing there
+        let mut gone = 0;
+        let back = (0..400).find(|_| {
+            run(&mut w, 0, 1);
+            gone += w.actors.iter().all(|a| a.spawn != Some(0)) as i32;
+            w.actors
+                .iter()
+                .any(|a| a.spawn == Some(0) && a.kind == donut)
+        });
+        assert!(back.is_some());
+        assert_eq!(gone, 120);
+        let a = &w.actors[find(&w)];
+        assert_eq!((a.x, a.y, a.phase), (168.0, 64.0, 1));
+        assert!(a.solid_box().is_some(), "solid while it grows");
+        run(&mut w, 0, 20);
+        let a = &w.actors[find(&w)];
+        assert_eq!((a.x, a.phase, a.rail.is_some()), (168.0, 0, true));
+        run(&mut w, 0, 4);
+        assert!(
+            (w.actors[find(&w)].x - 171.0).abs() < 0.01,
+            "on its track again"
+        );
     }
 
     #[test]

@@ -523,6 +523,9 @@ const RIDES_TRACKS: &[i16] = &[
     // a hidden block (a moving one, as when winged), the style power-up, the SMB2 Mushroom, the
     // wearables, Pokey
     29, 44, 81, 127, 128, 129, 130, 131, 78,
+    // the Donut Block: rides as a block actor and falls off when stood on (move state Rail, then
+    // ChikuwaFall) [obs v3.0.3 0x710138c400, 0x7101389df0]
+    21,
 ];
 
 /// What a block (or tree, checkpoint flag) releases: its child part. The simple items keep
@@ -1574,8 +1577,9 @@ impl Level {
                 });
                 continue;
             }
-            if actorish && matches!(o.id, 4 | 5 | 6 | 22 | 23 | 29 | 63) {
-                // a winged or tracked block becomes a moving solid actor (4-brick.md B12)
+            if actorish && matches!(o.id, 4 | 5 | 6 | 21 | 22 | 23 | 29 | 63) {
+                // a winged or tracked block becomes a moving solid actor (4-brick.md B12); a
+                // donut keeps its Wait state there (`World::step_moving_donuts`)
                 let block = block_kind(o.id).unwrap();
                 lvl.spawns.push(Spawn {
                     kind: Kind::MovingBlock {

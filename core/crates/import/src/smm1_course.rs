@@ -15,7 +15,8 @@
 //!   ground array, tracks (59) to its track array (the extended data is SMM2's end word
 //!   `k1 << 16 | k0`, 0xFF → 0x104 "the neighbour writes it"; type `(flags >> 22) & 7`; the
 //!   link one up), the goal (26, 27 and the bridge 49 before it), the start (37, 38) and the
-//!   player placeholder (69) to the header;
+//!   player placeholder (69) to the header; Bowser's 0x4 form (SMM1's Bowser Jr.) to SMM2's
+//!   Bowser Jr. part (98);
 //! - sound effects: an SMM1 effect (type 0–13, variation 0 / 1, `cDefault` / `cShake`) becomes
 //!   the SMM2 effect with the same waves (§7), on its part (`sound_effect_id`), on Mario (the
 //!   header's player effect, from object 69) or on its spot.
@@ -55,6 +56,12 @@ const STYLE_POWER_UP: i8 = 44;
 const SUPER_MUSHROOM: i16 = 20;
 /// The Fire Flower (its 0x4 form is SMM2's Superball Flower in SMB1).
 const FIRE_FLOWER: i8 = 34;
+/// Bowser, whose 0x4 form is Bowser Jr. in SMM1: the v208 resolver 0x020ac8ac turns
+/// `KoopaM1`…`KoopaWU` with 0x4 into `KoopaJr` (`KoopaJrBig` when big) [obs]; SMM2 has him as a
+/// part of his own (98) and reads no 0x4 on Bowser (v3.0.3 resolver 0x7100d80df0 keeps
+/// `Koopa*`, EditDB `EditKoopa` AttrNum 1) [obs].
+const BOWSER: i16 = 62;
+const BOWSER_JR: i16 = 98;
 /// Parts whose 0x4 bit SMM2 never sets (it would read as their other look or form): mushroom
 /// platforms, semisolids, conveyors, the Rocky Wrench (SMM2 has no other form of it) [inf].
 const NO_ALT_BIT: [i8; 4] = [14, 16, 53, 58];
@@ -367,6 +374,17 @@ fn fix_part(n: &mut CourseObject, style: &str, losses: &mut Losses) {
     if NO_ALT_BIT.contains(&id) {
         n.flags &= !0x4;
     }
+    // SMM1's Bowser Jr. is Bowser's 0x4 form; the size, Clown Car and key bits carry over
+    // (both games' Jr. is 1 × 1, 2 × 2 big) [obs data: the 4 built-ins with one]
+    for (kind, flags) in [
+        (&mut n.id, &mut n.flags),
+        (&mut n.child_id, &mut n.child_flags),
+    ] {
+        if *kind == BOWSER && *flags & 0x4 != 0 {
+            *kind = BOWSER_JR;
+            *flags &= !0x4;
+        }
+    }
     if n.child_id == STYLE_POWER_UP as i16 {
         // SMM1's children 44 all carry 0x4, SMM2's none
         n.child_flags &= !0x4;
@@ -581,6 +599,35 @@ mod tests {
         assert_eq!(out.course.main.objects.items[1].flags & 0x4, 0);
         // the start columns had no ground: SMM2's start ground fills a pit there
         assert!(out.losses.start_widened);
+    }
+
+    #[test]
+    fn bowsers_shaken_form_is_bowser_jr() {
+        let mut m = blank_cdt("M3", 640);
+        // a big Bowser Jr. in a Clown Car, a plain one, and Bowser himself
+        let mut jr = object(62, 10, 4);
+        jr.flags = 0x0600_4a44;
+        m.objects.items.push(jr);
+        let mut small = object(62, 14, 4);
+        small.flags |= 0x4;
+        m.objects.items.push(small);
+        m.objects.items.push(object(62, 20, 4));
+        let out = convert(&m, None).unwrap();
+        let ids: Vec<(i16, u32)> = out
+            .course
+            .main
+            .objects
+            .iter()
+            .map(|o| (o.id, o.flags))
+            .collect();
+        assert_eq!(
+            ids,
+            [
+                (BOWSER_JR, 0x0600_4240),
+                (BOWSER_JR, 0x0600_0040),
+                (BOWSER, 0x0600_0040)
+            ]
+        );
     }
 
     /// The owner's SMM1 built-ins (skipped without the dump): all 76 convert and read back.
