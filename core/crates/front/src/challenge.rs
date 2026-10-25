@@ -255,6 +255,13 @@ impl RunLink for RunState {
         self.pending_next == Some(Next::Complete)
     }
 
+    fn course_counts(&self) -> (Option<i64>, Option<i64>) {
+        let Some(e) = self.course.as_ref().and_then(|c| self.entries.get(&c.id)) else {
+            return (None, None);
+        };
+        (e.meta.likes, e.meta.plays)
+    }
+
     fn world_record_ms(&self) -> Option<i64> {
         let c = self.course.as_ref()?;
         self.entries.get(&c.id)?.meta.world_record_ms

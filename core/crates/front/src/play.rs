@@ -62,6 +62,11 @@ pub trait RunLink {
     fn world_record_ms(&self) -> Option<i64>;
     /// The SMM1 intro card's contents.
     fn card_info(&self) -> RunCardInfo;
+    /// The course's stars and players, when the course data has them (SMM1's pause shows
+    /// them).
+    fn course_counts(&self) -> (Option<i64>, Option<i64>) {
+        (None, None)
+    }
 }
 
 /// The run behind a course, if any.
@@ -1013,6 +1018,7 @@ impl CoursePlay {
                 o.skip_cancel();
             }
             let name = r.course_name();
+            o.counts = r.course_counts();
             o.show_pause(
                 &r.pause_line(),
                 if name.is_empty() { &self.title } else { &name },

@@ -104,8 +104,20 @@ pub fn configure_card(card: &mut Layout, info: &RunCardInfo) {
     }
     card.text("T_Zanki_00", &info.lives.to_string());
     card.text("T_CourseNum_00", &format!("{}/{}", info.number, info.total));
-    card.show("L_NF_00", false); // national flag: no region data
+    // the maker's flag: SMM1 shows the course's country (0x0253d380); there is no country in
+    // the course data here [departure]. The Mii face stays the dummy, as SMM1 leaves it when
+    // the maker's face can't be fetched (0x02524f40) [obs; that its fallback is this picture
+    // inf]
+    card.show("L_NF_00", false);
     card.show("P_NFBase_00", false);
+    // the maker group (face, flag, name) centred on its name's width: x = (group − (flag +
+    // face + name)) × 0.5 + its own x (0x02524d0c, 0.5 at 0x100a1f9c) [obs]
+    if let (Some(g), Some(w)) = (card.pane("N_Player_00"), card.text_width("T_PlayerName_00")) {
+        let width = |p: &str| card.pane(p).map_or(0.0, |p| p.size[0]);
+        let used = width("L_NF_00") + width("P_DummyMii_00") + w;
+        let x = (g.size[0] - used) * 0.5 + g.translate[0];
+        card.set_translate("N_Player_00", [x, g.translate[1]]);
+    }
     let shown = info.lives.min(100) as usize;
     for i in 0..100 {
         card.visible(
@@ -1611,6 +1623,8 @@ pub struct RunOverlay {
     card_lives: u32,
     /// The scene fader over the course (a death's and Start Over's fade to the card).
     pub fade: crate::smm1_fade::Smm1Fade,
+    /// The course's stars and players for the pause menu, when known.
+    pub counts: (Option<i64>, Option<i64>),
     /// The course clear is leaving: its Out and the button's Decide play until this tick.
     pub clear_leave_at: Option<i32>,
 }
@@ -1640,6 +1654,7 @@ impl RunOverlay {
             card_retry: false,
             card_lives: 100,
             fade: crate::smm1_fade::Smm1Fade::new(ui),
+            counts: (None, None),
             clear_leave_at: None,
         }
     }
@@ -1698,25 +1713,35 @@ impl RunOverlay {
         if self.pause_l.is_none()
             && let Some(mut p) = self.ui.layout("Cmn_PauseMenu_00")
         {
-            // Type 6: the two play buttons without the network ones; the exit button reads
-            // "Save & Quit" (T_ExitBtn_01 of the same table) [inf]
+            // SMM1's 100 Mario pause is type 2: Type 0 (the network buttons — Star, comments —
+            // over Start Over / Save & Quit) and TypeCourseInfo 1 (the mode icon, the stars
+            // and players, the maker's Mii, name and flag) [obs 0x0240da10, table
+            // 0x1008130c]. There is no star or comment service for these courses, so the
+            // network buttons are left out and Type 6 places the play buttons as they stand
+            // without them [departure]; the exit button reads "Save & Quit" (T_ExitBtn_01)
             p.hold("Type", 6.0);
             p.text_from("L_ExitBtn_00/T_Btn_00", "T_ExitBtn_01");
-            p.hold("TypeCourseInfo", 2.0); // course-world icon, maker line
-            for n in [
-                "N_NetworkBtn_00",
-                "P_YeahCountIcon_00",
-                "P_PlayerCountIcon_00",
-                "L_NationalFlag_00",
-                "L_OptionBtn_00",
-            ] {
+            p.hold("TypeCourseInfo", 1.0);
+            // no country for the flag; the options are not a 100 Mario button [departure]
+            for n in ["N_NetworkBtn_00", "L_NationalFlag_00", "L_OptionBtn_00"] {
                 p.show(n, false);
             }
             self.pause_l = Some(p);
         }
         let t = self.tick;
         let ctx = self.style_ctx();
+        let (stars, players) = self.counts;
         let Some(p) = &mut self.pause_l else { return };
+        // the stars and players of the course data (shown as SMM1 shows the server's)
+        for (icon, text, n) in [
+            ("P_YeahCountIcon_00", "T_YeahCount_00", stars),
+            ("P_PlayerCountIcon_00", "T_PlayerCount_00", players),
+        ] {
+            p.visible(icon, if n.is_some() { None } else { Some(false) });
+            if let Some(n) = n {
+                p.text(text, &n.to_string());
+            }
+        }
         p.text("T_Mode_00", mode_line);
         p.text("T_CourseName_00", course);
         p.text("T_MiiName_00", maker);
@@ -1727,6 +1752,15 @@ impl RunOverlay {
         self.closing = None;
         self.set_mode(RunOverlayMode::Pause);
         self.focus_pause(selection);
+    }
+
+    /// Tests: where pause pane `name` is drawn.
+    #[cfg(test)]
+    pub(crate) fn pause_rect(&mut self, name: &str) -> Option<crate::layout::Rect> {
+        let t = self.tick;
+        let p = self.pause_l.as_mut()?;
+        p.apply(t);
+        p.rect(name)
     }
 
     /// The cursor moved to pause button `i` (its touch-select sound [inf]).

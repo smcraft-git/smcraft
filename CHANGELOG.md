@@ -186,6 +186,8 @@ SMCraft is back in development (it was archived in October 2026).
 - **GAME OVER drops in letter by letter** as in SMM1: the layout player now does text panes'
   per-character transforms (each letter on its own time along the pane's curves; ten SMM1
   layouts use them). Needs the SMM1 import again (importer 5).
+- The SMM1-look 100 Mario's pause shows the course's stars and players when the course data has
+  them, and the course card centres the maker's name and face as SMM1 does.
 - **Koopalings in Koopa Clown Cars**: the car chases you while the Koopaling fires volleys of
   his magic (Lemmy his balls, Wendy her rings) from it; a stomp stops the car while he ducks in,
   then he spins in his shell for a while (stomps bounce off) before he comes out; the third stomp

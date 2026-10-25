@@ -243,3 +243,40 @@ fn owner_game_over_letters_drop_in() {
     // …and have all landed
     assert_eq!(above(&mut s), 0);
 }
+
+/// The card's maker group is centred on the name's width (0x02524d0c): a short name moves it
+/// right of a long one.
+#[test]
+fn owner_card_centres_the_maker_group() {
+    let Some(smm1) = smm1() else { return };
+    let Some(mut card) = smm1.layout("Play_CourseIn100Mario_00") else {
+        return;
+    };
+    let x = |card: &mut crate::layout::Layout, maker: &str| {
+        let info = crate::smm1::RunCardInfo {
+            maker: maker.into(),
+            ..Default::default()
+        };
+        crate::smm1::configure_card(card, &info);
+        card.apply(0);
+        card.rect("N_Player_00").unwrap().center[0]
+    };
+    let short = x(&mut card, "Al");
+    let long = x(&mut card, "Alexandrina Montgomery");
+    assert!(short > long, "{short} {long}");
+}
+
+/// The pause shows the course's stars and players when the course data has them.
+#[test]
+fn owner_pause_shows_the_course_counts() {
+    let Some(smm1) = smm1() else { return };
+    let mut o = crate::smm1::RunOverlay::new(&smm1);
+    o.counts = (Some(1234), None);
+    o.show_pause("100 Mario Challenge (1/8)", "Course", "Maker", 0);
+    let mut out = Vec::new();
+    o.draw(&mut out);
+    let shown =
+        |o: &mut crate::smm1::RunOverlay, pane: &str| o.pause_rect(pane).is_some_and(|r| r.visible);
+    assert!(shown(&mut o, "P_YeahCountIcon_00"));
+    assert!(!shown(&mut o, "P_PlayerCountIcon_00"));
+}
