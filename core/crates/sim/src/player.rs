@@ -61,7 +61,7 @@ const SKID_REACCEL: f32 = 0.25;
 /// Cat scratch (ClimbAttack, 17-frame animation) and slide attack (ClimbSlidingAttack, 44)
 /// lengths [obs: 3W_Player_Animation_MarioClimb].
 pub const CAT_SCRATCH_FRAMES: i32 = 17;
-const CAT_SLIDE_FRAMES: i32 = 44;
+const CAT_SLIDE_FRAMES: i32 = 45;
 /// The Cat's wall test heights: the attach needs the wall's face 38 px up, the climb 28
 /// (0x71015f4a70 / DAT_7102318964) [obs v3.0.3].
 const CAT_ATTACH_REACH: f32 = 38.0;
@@ -536,6 +536,10 @@ pub struct Player {
     /// Cat: frames on the wall without climbing (+0x2480), the fall start's hanging frames left.
     cat_still: i32,
     cat_fall_start: i32,
+    /// Cat: frames the ground scratch keeps the crouch away.
+    cat_scratch: i32,
+    /// 3D World: crawling this frame (its direction; 0 not).
+    crawl: i32,
     /// Cat: frames left of ClimbBodyAttackLand (a dive landed without a direction).
     pub dive_land: i32,
     /// Frames left with no air control (after the Cat's wall jump / top-out jump).
@@ -737,6 +741,8 @@ impl Player {
             cat_fall_start: 0,
             air_lock: 0,
             dive_land: 0,
+            crawl: 0,
+            cat_scratch: 0,
             dive: false,
             side_push: 0,
             side_chain: 0,
@@ -1159,6 +1165,13 @@ impl Player {
     fn ground(&mut self, inp: Input) {
         let dir = inp.dir_x();
         let run = inp.held(input::RUN);
+        if self.crawl != 0 {
+            // the crawl: toward 0.5 at 0.25
+            self.facing = self.crawl;
+            self.vx = approach(self.vx, 0.5 * self.crawl as f32, 0.25);
+            self.pose = Pose::Crouch;
+            return;
+        }
         if self.dive_land > 0 {
             self.dive_land -= 1;
             self.vx = 0.0;
@@ -1166,25 +1179,21 @@ impl Player {
             return;
         }
         if self.cat_slide > 0 {
-            // cat slide attack (ClimbSlidingAttack 0x7100a1d030 / 0x7100a1d150) [obs]: 2.5 px/f
-            // forward with no accel for 12 frames, then down to 0 at 0.075 (ice 0.0375) until
-            // the 44-frame animation ends; then it stops dead unless a direction is held (on
-            // ice it halves instead). No steering meanwhile.
-            let elapsed = CAT_SLIDE_FRAMES - self.cat_slide;
-            if elapsed < 12 {
+            // cat slide attack / roll (ClimbSlidingAttack 0x71015f6a10, the roll state 13) [obs
+            // v3.0.3; Ryujinx traces 3W_form / 3W_items cat_slide]: 2.5 px/f forward with no
+            // accel for 12 frames (the entry frame's included), then down to 0 at 0.075 (ice
+            // 0.0375) to the 45th; the frame after it stops dead (no move; on ice it halves
+            // instead [inf]). No steering meanwhile.
+            let elapsed = CAT_SLIDE_FRAMES + 1 - self.cat_slide;
+            if elapsed >= CAT_SLIDE_FRAMES {
+                self.vx = if self.on_ice { self.vx * 0.5 } else { 0.0 };
+            } else if elapsed < 12 {
                 self.vx = 2.5 * self.facing as f32;
             } else {
                 let decel = if self.on_ice { 0.0375 } else { 0.075 };
                 self.vx = approach(self.vx, 0.0, decel);
             }
             self.cat_slide -= 1;
-            if self.cat_slide == 0 {
-                if self.on_ice {
-                    self.vx *= 0.5;
-                } else if dir == 0 {
-                    self.vx = 0.0;
-                }
-            }
             self.pose = Pose::Slide;
             return;
         }
@@ -1535,15 +1544,19 @@ impl Player {
             };
             // (in the air too the scratch is ClimbAttackAir, state 32, with the normal air
             // movement and gravity: no rise [obs: Ryujinx trace 3W_form form_attack])
-            if self.form == Form::Cat && self.on_ground && self.crouch {
-                // crouching, the attack is the slide (ClimbSlidingAttack, entered from the
-                // crouch check 0x7100a1b3f0) [obs]
-                self.attack = 0;
-                self.cat_slide = CAT_SLIDE_FRAMES;
+            // (crouching too it is the scratch, ClimbAttack, out of the crouch with no
+            // CrouchEnd [obs: Ryujinx trace 3W_form cat_roll]; the slide is Spin's: below)
+            if self.form == Form::Cat && self.on_ground {
                 self.crouch = false;
-                self.vx = 2.5 * self.facing as f32;
+                self.duck = false;
+                self.duck_end = 0;
+                self.crawl = 0;
+                // (ClimbAttack runs 18 frames, a frame past the swing, and its last frame's
+                // move is still its own when Crouch follows)
+                self.cat_scratch = CAT_SCRATCH_FRAMES + 3;
             }
         }
+        self.cat_scratch = (self.cat_scratch - 1).max(0);
         // (TailAttack is no walking state for the P-meter)
         if self.form != Form::Raccoon || self.in_water {
             self.tail_state = 0;
@@ -1594,13 +1607,18 @@ impl Player {
             self.sliding = false;
         }
 
+        let was_crouch = self.crouch || self.duck;
         // crouch: big forms on the ground with Down held (kept through a crouch jump)
         if self.on_ground {
             // (a costume can crouch though small, SMM1 action table)
+            // (the Cat's scratch from a crouch leaves it, ClimbAttack 30, and the crouch comes
+            // back after it [obs: Ryujinx trace 3W_form cat_roll: 0.05 a frame in the scratch])
+            let scratch = self.cat_scratch > 0;
             let want = (self.big() || self.form == Form::Costume)
                 && inp.held(input::DOWN)
                 && !self.sliding
-                && self.cat_slide == 0;
+                && self.cat_slide == 0
+                && !scratch;
             if want != self.crouch && (want || self.can_stand(level)) {
                 self.crouch = want;
             }
@@ -1609,6 +1627,7 @@ impl Player {
             let want = inp.held(input::DOWN)
                 && !self.sliding
                 && self.cat_slide == 0
+                && self.cat_scratch == 0
                 && self.held.is_none()
                 && (self.crouch || !self.big());
             // CrouchEnd runs its crouch-friction move until its animation ends, plus the
@@ -1638,6 +1657,22 @@ impl Player {
         } else {
             self.duck = false;
             self.duck_end = 0;
+        }
+        // 3D World crawls: crouching with a direction held (state 11) [obs: Ryujinx traces
+        // 3W_form / 3W_items cat_slide]; CrouchEnd after a crawl keeps its move
+        let raw_dir = inp.dir_x();
+        if self.style == Style::W3 && self.on_ground && (self.crouch || self.duck) {
+            // (from a crouch moving faster than the crawl the crouch slows first [inf: the
+            // threshold; seen: 2.08 decelerates in Crouch, 0 starts the crawl])
+            // (the crouch's first frame doesn't crawl yet)
+            let slow = self.crawl != 0 || self.vx.abs() <= 0.5;
+            self.crawl = if raw_dir != 0 && !self.landed && slow && was_crouch {
+                raw_dir
+            } else {
+                0
+            };
+        } else if self.duck_end == 0 || !self.on_ground {
+            self.crawl = 0;
         }
         let inp = if (self.crouch || self.duck || self.duck_end > 0) && self.on_ground {
             Input {
@@ -1742,6 +1777,22 @@ impl Player {
                     // the propeller launch replaces the spin jump
                 } else if self.broad_land > 0 {
                     // no actions until the long-jump landing ends
+                } else if spin_pressed
+                    && self.style == Style::W3
+                    && self.held.is_none()
+                    && self.crouch
+                    && raw_dir != 0
+                    && self.vx * self.facing as f32 >= 0.0
+                {
+                    // Spin crouching with a direction held (the crouch check 0x71015f5160): the
+                    // Cat's ClimbSlidingAttack (0x71015f6a10), the other forms' roll (state 13,
+                    // the same motion) [obs v3.0.3; Ryujinx traces 3W_form / 3W_items cat_slide]
+                    // (this frame's ground move is done: the slide's first frame was it; one
+                    // more counts the stop)
+                    self.cat_slide = CAT_SLIDE_FRAMES;
+                    self.crouch = false;
+                    self.crawl = 0;
+                    self.vx = 2.5 * self.facing as f32;
                 } else if spin_pressed && self.style == Style::W3 && self.held.is_none() {
                     // 3D World: the spin button is the long jump, and only when already moving
                     // faster than 0.5 (0x7100a0b2b0): 2.0 forward (3.0 above 1.5), vy 2.4
@@ -1769,6 +1820,9 @@ impl Player {
                     self.crouch = false;
                     self.on_ground = false;
                     self.skid = SkidPhase::None;
+                } else if jump_now && self.cat_slide > 0 {
+                    // the slide / roll takes no jump [obs: Ryujinx traces 3W_form / 3W_items
+                    // cat_slide_jump]
                 } else if jump_now {
                     jumped = true;
                     self.tail_state = 0;
@@ -2360,8 +2414,10 @@ impl Player {
                 self.y += speed;
                 self.cat_climbed += speed;
             } else if down {
-                self.y -= speed;
-                self.cat_climbed += speed;
+                // (down at 1.0 with Run held too [obs: Ryujinx trace 3W_formw cat_climb_down2;
+                // the decompiled exec reads the same input for both, +0x15 [?]])
+                self.y -= 1.0;
+                self.cat_climbed += 1.0;
             } else {
                 self.cat_still += 1;
             }
@@ -2392,7 +2448,9 @@ impl Player {
     /// the tile column next to the body).
     fn cat_face(&self, level: &Level, dir: i32, reach: f32) -> bool {
         let s = self.sensors();
-        let x = self.x + dir as f32 * (s.wall_x + 0.5);
+        // (touching: flush with the face counts, 0.06 short doesn't [obs: Ryujinx trace
+        // 3W_formw cat_climb_down2])
+        let x = self.x + dir as f32 * (s.wall_x + 0.01);
         let touch = level.cell_at(x, self.y + s.wall_y0).is_solid()
             || level.cell_at(x, self.y + s.wall_y1).is_solid();
         touch
@@ -2500,7 +2558,13 @@ impl Player {
         // a second Spin press ends the dive (its exec 0x71015f7460 falls back to Fall) [obs v3.0.3]
         let cancel = self.dive && spin_pressed;
         if cancel {
+            // (into Fall at most at the walk / run speed, as a landing with a direction [obs:
+            // Ryujinx trace 3W_form cat_dive_cancel: 4.0 → 1.5, Right held])
             self.dive = false;
+            let cap = if inp.held(input::RUN) { 3.0 } else { 1.5 };
+            if self.vx.abs() > cap {
+                self.vx = cap * self.vx.signum();
+            }
         }
         if self.form == Form::Cat
             && self.pu.headdress.is_none()
@@ -3760,13 +3824,26 @@ mod tests {
         };
         p.step(down, &level);
         assert!(p.crouch);
+        // crouching, Run is the scratch (out of the crouch), not the slide
         p.step(
             Input {
                 buttons: input::DOWN | input::RUN,
             },
             &level,
         );
-        assert_eq!(p.cat_slide, CAT_SLIDE_FRAMES - 1);
+        assert!(p.attack > 0 && p.cat_slide == 0 && !p.crouch);
+        for _ in 0..30 {
+            p.step(down, &level);
+        }
+        assert!(p.crouch, "crouching again after the scratch");
+        // Spin crouching with a direction held: the slide
+        p.step(
+            Input {
+                buttons: input::DOWN | input::RIGHT | input::SPIN,
+            },
+            &level,
+        );
+        assert_eq!(p.cat_slide, CAT_SLIDE_FRAMES);
         let mut speeds = vec![p.vx];
         for _ in 0..50 {
             p.step(down, &level);
@@ -3774,7 +3851,7 @@ mod tests {
         }
         assert!(speeds[..12].iter().all(|v| *v == 2.5), "{speeds:?}");
         assert!((speeds[12] - (2.5 - 0.075)).abs() < 1e-5, "{speeds:?}");
-        // the 44-frame animation ends with no direction held: a dead stop
+        // the 45-frame slide ends in a dead stop
         assert_eq!(p.cat_slide, 0);
         assert_eq!(p.vx, 0.0);
         // standing, Run is the scratch: 17 frames, movement untouched
