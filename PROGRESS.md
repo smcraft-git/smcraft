@@ -852,6 +852,9 @@ Nextendo; `docs/nextendo-network-play.md`, spec `research/specs/network-play.md`
   The goal time bonus is counted once, through the course's own time tally (50 a second, as the
   spec's bonus) [?: whether SMM2 adds it again on top: 0x71012c7bf0]. Endless still open: the
   server's runs and rankings
+- ✅ (2026-10-25, `hundred3`) Challenge Modes' 100 Mario on the SMM1 screens runs on SMM1's own
+  timing, fades and music and ends in SMM1's rescue scene (Phase 6); new captures
+  `challenge-ending-smb3|-smw|-nsmbu`, `challenge-credits`
 - ✅ One Mods page in the front end (`front/src/mods.rs`, `mods_page.rs`; every platform:
   `mmk-play` desktop / web, Android, the Swift app's front end): SMM2's settings window
   (`Cmn_OptionWindow_00`) over the title, opened from SMM2's round menu button in the title's
