@@ -457,6 +457,9 @@ pub struct World {
     pub cpipe: clear_pipe::ClearPipes,
     /// Local co-op (world/coop.rs): empty with one player.
     pub coop: coop::Coop,
+    /// The course's placed sound effects as loaded (otoasobi.rs): hosts copy it and step their
+    /// copy after every tick; the world itself never reads it.
+    pub sound_parts: crate::otoasobi::SoundParts,
 }
 
 impl Default for World {
@@ -686,6 +689,7 @@ impl World {
             h.clear_condition,
             h.clear_condition_magnitude.max(0) as u16,
         );
+        w.sound_parts = crate::otoasobi::SoundParts::new(course);
         w
     }
 
@@ -776,6 +780,7 @@ impl World {
             others: Vec::new(),
             other_chars: Vec::new(),
             coop: Default::default(),
+            sound_parts: Default::default(),
             main_char: 0,
             yoshi_mouth: None,
             tongue: 0,

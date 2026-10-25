@@ -150,6 +150,13 @@ enum Cmd {
         /// Cache folder of one build.
         out: PathBuf,
     },
+    /// Print the sound users whose names start with PREFIX (calls, params, action triggers) as
+    /// `sound.json` would store them, straight from the user's own extracted RomFS (inspection).
+    SoundUsers {
+        /// Extracted RomFS (update applied).
+        romfs: PathBuf,
+        prefix: String,
+    },
     /// Import only the Story Mode / Dojo data (event flows, Story tables, hub map, lesson list)
     /// into an existing SMM2 asset cache folder (the `modes` stage of `import`).
     ImportModes {
@@ -1420,6 +1427,16 @@ fn main() -> ExitCode {
                 }
             }
         }
+        Cmd::SoundUsers { romfs, prefix } => match mmk_import::sound::dump_users(&romfs, &prefix) {
+            Ok(v) => {
+                println!("{}", serde_json::to_string_pretty(&v).unwrap_or_default());
+                ExitCode::SUCCESS
+            }
+            Err(e) => {
+                eprintln!("sound-users: {e}");
+                ExitCode::FAILURE
+            }
+        },
         Cmd::ImportMyworld { romfs, exefs, out } => {
             let r = mmk_import::identify(&exefs)
                 .and_then(|(nso, _)| mmk_import::myworld::import_world_keys(&romfs, &nso, &out));
@@ -1968,6 +1985,8 @@ fn simulate_course(
     let mut w = mmk_sim::World::from_course(course);
     w.set_options(options);
     w.lives = 9999; // keep retrying for the whole run
+    // the placed sound effects' triggers run too (a panic there counts as a crash)
+    let mut sounds = w.sound_parts.clone();
     let start_x = w.player.x;
     let goal_x = w.level.goal.map(|g| g.0).unwrap_or(w.level.right);
     let lives0 = w.lives;
@@ -1980,6 +1999,7 @@ fn simulate_course(
             b |= input::JUMP;
         }
         w.step(Input { buttons: b });
+        sounds.step(&w);
         best = best.max(w.player.x);
         if (w.player.x - last_x).abs() < 0.2 {
             stuck += 1;

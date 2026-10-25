@@ -125,10 +125,12 @@ fn menu_music_key(key: &str) -> bool {
 }
 
 /// A user of the gameplay database: per-style course objects, the Course Maker's per-style
-/// part users (`<S>_Edit<Part>`: their sounds when put down, picked up, shaken) and the common
-/// course users.
+/// part users (`<S>_Edit<Part>`: their sounds when put down, picked up, shaken), the common
+/// course users and the placed sound effects' (`Otoasobi<id>`, the Course Maker's
+/// `EditOtoasobi<id>`, each with its `_Link` / `_USA` versions: research/specs/
+/// sound-effect-parts.md).
 fn gameplay_user(name: &str) -> bool {
-    if COMMON_USERS.contains(&name) || MAP_USERS.contains(&name) {
+    if COMMON_USERS.contains(&name) || MAP_USERS.contains(&name) || sound_effect_user(name) {
         return true;
     }
     if let Some(s) = name.strip_prefix("CourseSceneBGM_") {
@@ -138,6 +140,21 @@ fn gameplay_user(name: &str) -> bool {
         return false;
     };
     STYLES.contains(&prefix) || prefix == "MU"
+}
+
+/// `Otoasobi<nn>` / `EditOtoasobi<nn>`, optionally `_Link` / `_USA`.
+fn sound_effect_user(name: &str) -> bool {
+    let Some(rest) = name
+        .strip_prefix("EditOtoasobi")
+        .or_else(|| name.strip_prefix("Otoasobi"))
+    else {
+        return false;
+    };
+    let id = rest
+        .strip_suffix("_Link")
+        .or_else(|| rest.strip_suffix("_USA"))
+        .unwrap_or(rest);
+    id.len() == 2 && id.bytes().all(|b| b.is_ascii_digit())
 }
 
 /// Names of every resource list (each a sound user's name).
@@ -590,6 +607,106 @@ fn ground_json(romfs: &Path) -> Result<Value> {
     Ok(Value::Object(out))
 }
 
+/// One user's calls (and its distance set, priority and action triggers) as `sound.json` stores
+/// them; the waves it names are added to `waves`. None if the database has no such user.
+fn user_json(
+    x: &Xlnk,
+    slink_path: &Path,
+    name: &str,
+    waves: &mut BTreeSet<String>,
+) -> Result<Option<Value>> {
+    let Some(calls) = x.user_calls(name).map_err(fmt_err(slink_path))? else {
+        return Ok(None);
+    };
+    let music = name.starts_with("CourseSceneBGM");
+    let mut list = Vec::with_capacity(calls.len());
+    // a call is kept unless it (or its top-level ancestor) is a menu music key
+    let top = |mut i: usize| {
+        for _ in 0..64 {
+            match calls[i].parent {
+                Some(p) if p < calls.len() => i = p,
+                _ => break,
+            }
+        }
+        i
+    };
+    for (i, c) in calls.iter().enumerate() {
+        if music && menu_music_key(&calls[top(i)].key) {
+            // keep the slot (children are addressed by index) but drop the asset
+            list.push(json!({"key": c.key, "parent": c.parent, "kind": "blend"}));
+            continue;
+        }
+        list.push(call_json(&calls, c, waves));
+    }
+    let mut u = Map::new();
+    if let Some(p) = x.user_params(name).map_err(fmt_err(slink_path))? {
+        if let Some(d) = p
+            .get("DistanceParamSetName")
+            .and_then(|v| v.as_str())
+            .filter(|d| !d.is_empty())
+        {
+            u.insert("distance".into(), json!(d));
+        }
+        if let Some(v) = p.get("Priority").and_then(num) {
+            u.insert("priority".into(), v);
+        }
+    }
+    u.insert("calls".into(), Value::Array(list));
+    // state / animation triggers (which call an object's action starts)
+    let actions: Vec<Value> = x
+        .user_actions(name)
+        .map_err(fmt_err(slink_path))?
+        .unwrap_or_default()
+        .iter()
+        .map(|t| {
+            let mut v = json!({"action": t.action, "call": t.call});
+            if let Some(a) = &t.after {
+                v["after"] = json!(a);
+            }
+            if t.start_frame > 0 {
+                v["start"] = json!(t.start_frame);
+            }
+            if let Some(e) = t.end_frame {
+                v["end"] = json!(e);
+            }
+            v
+        })
+        .collect();
+    if !actions.is_empty() {
+        u.insert("actions".into(), Value::Array(actions));
+    }
+    Ok(Some(Value::Object(u)))
+}
+
+/// The users whose names start with `prefix`, as `sound.json` would store them (an inspection
+/// aid: `mmk sound-users`); the gameplay filter is not applied.
+pub fn dump_users(romfs: &Path, prefix: &str) -> Result<Value> {
+    let slink_path = romfs.join("SLink2/SLink2DB.szs");
+    let db = slink_db(&slink_path)?;
+    let x = Xlnk::parse(&db).map_err(fmt_err(&slink_path))?;
+    let mut waves = BTreeSet::new();
+    let mut users = Map::new();
+    for name in user_candidates(romfs) {
+        if !name.starts_with(prefix) {
+            continue;
+        }
+        if let Some(u) = user_json(&x, &slink_path, &name, &mut waves)? {
+            users.insert(name, u);
+        }
+    }
+    Ok(Value::Object(users))
+}
+
+/// The sound link database's bytes (`SLink2DB.szs`'s `.bslnk`).
+fn slink_db(slink_path: &Path) -> Result<Vec<u8>> {
+    let slink = open(slink_path)?;
+    slink
+        .files()
+        .find(|(n, _)| n.ends_with(".bslnk"))
+        .map(|(_, d)| d.to_vec())
+        .ok_or_else(|| ImportError::Invalid("SLink2DB.szs has no .bslnk".into()))
+}
+
 #[derive(Debug, Default)]
 pub struct SoundReport {
     pub users: usize,
@@ -601,12 +718,7 @@ pub struct SoundReport {
 /// Import the gameplay sound database and its waves into `out/audio/`.
 pub fn import_sounds(romfs: &Path, out: &Path, progress: Progress) -> Result<SoundReport> {
     let slink_path = romfs.join("SLink2/SLink2DB.szs");
-    let slink = open(&slink_path)?;
-    let db = slink
-        .files()
-        .find(|(n, _)| n.ends_with(".bslnk"))
-        .map(|(_, d)| d.to_vec())
-        .ok_or_else(|| ImportError::Invalid("SLink2DB.szs has no .bslnk".into()))?;
+    let db = slink_db(&slink_path)?;
     let x = Xlnk::parse(&db).map_err(fmt_err(&slink_path))?;
     let mut report = SoundReport::default();
     let mut waves = BTreeSet::new();
@@ -617,67 +729,9 @@ pub fn import_sounds(romfs: &Path, out: &Path, progress: Progress) -> Result<Sou
         if !gameplay_user(name) {
             continue;
         }
-        let Some(calls) = x.user_calls(name).map_err(fmt_err(&slink_path))? else {
-            continue;
-        };
-        let music = name.starts_with("CourseSceneBGM");
-        let mut list = Vec::with_capacity(calls.len());
-        // a call is kept unless it (or its top-level ancestor) is a menu music key
-        let top = |mut i: usize| {
-            for _ in 0..64 {
-                match calls[i].parent {
-                    Some(p) if p < calls.len() => i = p,
-                    _ => break,
-                }
-            }
-            i
-        };
-        for (i, c) in calls.iter().enumerate() {
-            if music && menu_music_key(&calls[top(i)].key) {
-                // keep the slot (children are addressed by index) but drop the asset
-                list.push(json!({"key": c.key, "parent": c.parent, "kind": "blend"}));
-                continue;
-            }
-            list.push(call_json(&calls, c, &mut waves));
+        if let Some(u) = user_json(&x, &slink_path, name, &mut waves)? {
+            users.insert(name.clone(), u);
         }
-        let mut u = Map::new();
-        if let Some(p) = x.user_params(name).map_err(fmt_err(&slink_path))? {
-            if let Some(d) = p
-                .get("DistanceParamSetName")
-                .and_then(|v| v.as_str())
-                .filter(|d| !d.is_empty())
-            {
-                u.insert("distance".into(), json!(d));
-            }
-            if let Some(v) = p.get("Priority").and_then(num) {
-                u.insert("priority".into(), v);
-            }
-        }
-        u.insert("calls".into(), Value::Array(list));
-        // state / animation triggers (which call an object's action starts)
-        let actions: Vec<Value> = x
-            .user_actions(name)
-            .map_err(fmt_err(&slink_path))?
-            .unwrap_or_default()
-            .iter()
-            .map(|t| {
-                let mut v = json!({"action": t.action, "call": t.call});
-                if let Some(a) = &t.after {
-                    v["after"] = json!(a);
-                }
-                if t.start_frame > 0 {
-                    v["start"] = json!(t.start_frame);
-                }
-                if let Some(e) = t.end_frame {
-                    v["end"] = json!(e);
-                }
-                v
-            })
-            .collect();
-        if !actions.is_empty() {
-            u.insert("actions".into(), Value::Array(actions));
-        }
-        users.insert(name.clone(), Value::Object(u));
     }
     progress("sound users", names.len(), names.len());
     report.users = users.len();
@@ -736,6 +790,9 @@ mod tests {
         assert!(!menu_music_key("BGM_Plain_Edit"));
         assert!(menu_music_key("BGM_Plain_Edit_Lesson"));
         assert!(gameplay_user("M1_EditKuribo"));
+        assert!(gameplay_user("Otoasobi00") && gameplay_user("EditOtoasobi54"));
+        assert!(gameplay_user("Otoasobi09_Link") && gameplay_user("EditOtoasobi48_USA"));
+        assert!(!gameplay_user("Otoasobi") && !gameplay_user("Otoasobi3DTV"));
         assert!(menu_music_key("BGM_Title_Day"));
         assert!(menu_music_key("Network_Clear"));
         assert!(!menu_music_key("BGM_Plain_Day_Hurry"));

@@ -42,6 +42,7 @@ pub mod liquid;
 pub mod mission;
 pub mod modes;
 pub mod scroll;
+pub mod sound_parts;
 pub mod subarea;
 pub mod trail;
 pub mod view;
@@ -403,6 +404,8 @@ pub struct MakerFlow {
     page_stale: bool,
     /// Player 2's glove (`Edit_mainCursor2P`'s textures), if the import has them.
     textures_2p: std::collections::HashMap<&'static str, u32>,
+    /// The sound effects' palette and window (`sound_parts`).
+    se: sound_parts::SoundTools,
 }
 
 impl MakerFlow {
@@ -509,6 +512,7 @@ impl MakerFlow {
                         .map(|t| (n, t.id))
                 })
                 .collect(),
+            se: Default::default(),
         };
         f.reset_palette();
         f.setup_page();
@@ -968,7 +972,11 @@ impl MakerFlow {
             self.open_ring();
             return;
         }
-        if keys & keys::NEXT != 0 && !self.palette.is_empty() {
+        if self.se.on && keys & (keys::NEXT | keys::PREV) != 0 {
+            let n = self.se.palette.len().max(1);
+            let step = if keys & keys::NEXT != 0 { 1 } else { n - 1 };
+            self.select_sound_slot((self.se.slot + step) % n);
+        } else if keys & keys::NEXT != 0 && !self.palette.is_empty() {
             self.select_slot((self.slot + 1) % self.palette.len());
         }
         if keys & keys::PREV != 0 && !self.palette.is_empty() {
@@ -1471,6 +1479,7 @@ impl MakerFlow {
     /// area's theme while editing (a theme or style switch changes it), none in test play
     /// (research/specs/maker.md C9).
     fn play_sounds(&mut self, host: &mut dyn Host) {
+        self.sound_effect_previews(host);
         let style = self.style();
         for (part, key, scale) in std::mem::take(&mut self.sounds) {
             let user = format!("{style}_Edit{}", catalog::edit_user(part));
@@ -1516,6 +1525,10 @@ impl MakerFlow {
     }
 
     fn press_place(&mut self, cx: &mut crate::Cx) {
+        if self.se.on {
+            self.press_place_sound(cx);
+            return;
+        }
         let (tx, ty) = self.cur;
         // the start and the goal are dragged, not built on (main area) [inf: as the game's
         // start sign and goal pole are]
@@ -1857,6 +1870,10 @@ impl MakerFlow {
     }
 
     fn erase_here(&mut self) {
+        if self.se.on {
+            self.erase_sound_here();
+            return;
+        }
         let (tx, ty) = self.cur;
         // the eraser leaves a part a cursor holds (0x7100fb57f0 gathers only parts whose
         // holder is none) [obs v3.0.3]
@@ -2131,7 +2148,16 @@ impl MakerFlow {
             .map(|i| format!("L_PaletteSet_00/{}/B_Btn_00", slot_part(i)))
             .collect();
         if let Some(i) = hit(page, self.tick, &slots, p) {
-            self.select_slot(i);
+            if self.se.on {
+                self.select_sound_slot(i);
+            } else {
+                self.select_slot(i);
+            }
+            return true;
+        }
+        let sound = ["L_PaletteSet_00/L_SoundBtn_00/B_Btn_00".to_string()];
+        if hit(page, self.tick, &sound, p).is_some() {
+            self.toggle_sound_mode();
             return true;
         }
         let buttons: [(&str, u8); 15] = [
@@ -2330,6 +2356,9 @@ impl MakerFlow {
                 }
             }
         }
+        if self.se.on {
+            self.layout_sound_slots();
+        }
         self.update_mode_buttons();
         let Some(p) = &mut self.page else { return };
         // the Undodog comes in once there is something to undo [inf]
@@ -2487,6 +2516,10 @@ impl MakerFlow {
     }
 
     fn open_ring(&mut self) {
+        if self.se.on {
+            self.open_sound_ring();
+            return;
+        }
         // open on the selected part's category and page
         let tool = self.tool();
         let mut ring = Ring::default();
@@ -2583,6 +2616,7 @@ impl MakerFlow {
         }
         // the category bar: the wide tab on this category, the page dots
         let bar = "L_RingMenu_00/L_Category_00";
+        p.show("L_RingMenu_00/L_Category_00", true);
         p.show("L_RingMenu_00/L_Category_01", false);
         for c in 0..4 {
             let a = format!("{bar}/ChangeCategory{c:02}");
@@ -2630,6 +2664,10 @@ impl MakerFlow {
         cx: &mut crate::Cx,
     ) {
         let _ = cx;
+        if self.se.on {
+            self.sound_ring_tick(pressed, keys, click);
+            return;
+        }
         let pages = self.ring_pages(self.ring.category);
         let n = pages.get(self.ring.page).map_or(1, |p| p.len().max(1));
         if keys & keys::PARTS != 0 || pressed.has(Buttons::BACK) {
@@ -4301,6 +4339,27 @@ impl MakerFlow {
                     return true;
                 }
                 self.enter_scroll();
+            }
+            // the sound effects: the sound palette ("sound"), its window on the Music page
+            // ("sound-ring"), and the course's icons ("sound-icons": a spot, a Goomba with Boss
+            // Music, Mario with Super Mario 64)
+            "sound" | "sound-ring" | "sound-icons" => {
+                self.toggle_sound_mode();
+                if what == "sound-ring" {
+                    self.open_sound_ring();
+                    self.se_ring_category(4);
+                }
+                if what == "sound-icons" {
+                    let _ = self.editor.put_sound_effect(0, 12, 4);
+                    if let Ok(g) = self.editor.place(0, 15, 2) {
+                        let _ = self.editor.put_sound_effect(9, 15, 2);
+                        let _ = g;
+                    }
+                    let [m, _] = self.editor.mario_tiles();
+                    let _ = self.editor.put_sound_effect(52, m.0, m.1);
+                    self.dirty = true;
+                    self.update_page();
+                }
             }
             _ => return false,
         }

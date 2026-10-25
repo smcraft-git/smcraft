@@ -60,6 +60,10 @@ pub fn overlay(f: &MakerFlow) -> DrawItem {
         t.flags &= !mmk_ui::FLAG_LINEAR;
         q.push(t);
     }
+    // the course's sound effects (sound_parts.rs)
+    if !f.water_mode() && !f.scroll_mode() {
+        f.sound_effect_quads(&mut q);
+    }
     if f.water_mode() || f.scroll_mode() {
         // a mode over the course: the course dims under the mode's lines and handles
         // (research/specs/maker.md C13)

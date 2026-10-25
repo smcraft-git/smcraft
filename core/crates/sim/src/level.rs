@@ -557,7 +557,7 @@ impl Level {
 }
 
 /// The actor a course part becomes, by its id and flags (placed in the course or held in a block).
-fn part_kind(o: &CourseObject, lvl: &Level) -> Option<Kind> {
+pub(crate) fn part_kind(o: &CourseObject, lvl: &Level) -> Option<Kind> {
     match o.id {
         0 if o.flags & 0x4 != 0 => Some(Kind::Goombrat),
         0 => Some(Kind::Goomba),
@@ -766,6 +766,8 @@ pub fn unsupported_features(course: &Course) -> Vec<String> {
     if let crate::clear::Goal::Unsupported(i) = cond.goal {
         out.insert(format!("clear condition {i}"));
     }
+    // placed sound effects the engine doesn't play (otoasobi.rs)
+    out.extend(crate::otoasobi::unsupported(course));
     out.into_iter().collect()
 }
 
@@ -806,7 +808,7 @@ fn pipe_dir(flags: u32) -> PipeDir {
     }
 }
 
-fn block_kind(id: i16) -> Option<BlockKind> {
+pub(crate) fn block_kind(id: i16) -> Option<BlockKind> {
     Some(match id {
         4 => BlockKind::Brick,
         5 => BlockKind::Question,

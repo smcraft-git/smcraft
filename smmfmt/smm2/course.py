@@ -34,7 +34,7 @@ class CourseHeader(Record):
         F("creation_id", 0x24, "I"),
         F("upload_id", 0x28, "Q"),
         F("clear_check_game_version", 0x30, "I"),
-        F("unk_f0", 0xF0, "B"),
+        F("player_sound_effect", 0xF0, "B"),
         F("game_style", 0xF1, "ascii", 3),
         F("name", 0xF4, "utf16", 0x21),
         F("description", 0x136, "utf16", 0x65),
@@ -255,7 +255,7 @@ class Course:
     def blank(cls, style: str = "M1") -> "Course":
         c = cls()
         h = c.header
-        h.timer, h.game_style, h.unk_f0 = 300, style, 0xFF
+        h.timer, h.game_style, h.player_sound_effect = 300, style, 0xFF
         h.start_y, h.goal_y, h.goal_x = 1, 1, 2400
         for area in (c.main, c.sub):
             area.header.boundary_top, area.header.boundary_right = 0x1B0, 0xF00

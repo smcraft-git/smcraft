@@ -1,7 +1,8 @@
 //! Course Maker core (Phase 9): an editable SMM2 course with the operations the maker UI needs —
 //! place, resize and erase parts, paint ground (auto-tiled), both areas, warp links (pipes, doors,
 //! warp boxes), tracks and block paths, rectangle selection with copy / paste / move, course and
-//! area settings, the game's placement rules, undo/redo — and the course file it saves. No UI
+//! area settings, the game's placement rules, placed sound effects, undo/redo — and the course
+//! file it saves. No UI
 //! here; the shells draw the editor with the engine.
 //!
 //! Coordinates are tiles of the current area (x right, y up; tile (0, 0) is the bottom-left).
@@ -18,6 +19,7 @@ pub mod paths;
 pub mod rules;
 pub mod select;
 pub mod settings;
+pub mod sound_effects;
 pub mod stack;
 pub mod tracks;
 
@@ -472,7 +474,8 @@ impl Editor {
     }
 
     /// Erase what is at a tile: a part first, then a clear pipe (all of it), a track piece,
-    /// else ground. True if something was removed.
+    /// ground, else a sound effect on the empty tile [inf: the eraser takes spots too]. True if
+    /// something was removed.
     pub fn erase(&mut self, tx: i32, ty: i32) -> bool {
         if let Some(i) = self.object_at(tx, ty) {
             self.erase_object(i);
@@ -484,7 +487,7 @@ impl Editor {
         if self.erase_track_at(tx, ty) {
             return true;
         }
-        self.erase_ground(tx, ty)
+        self.erase_ground(tx, ty) || self.erase_spot(tx, ty)
     }
 
     /// Erase a part and what belongs to it: its riders (pipe contents, clown-car passengers …),
