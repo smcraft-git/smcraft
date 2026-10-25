@@ -2031,13 +2031,32 @@ Not Nintendo's network: the engine talks to an open-source server the owner can 
   `mmk server` with captures `account`, `courseworld-leaderboards`, `courseworld-course-page`,
   `-comments`, `-post`, `-maker`, `-play`, `-pause`, `-clear` · comments from the pause / clear
   screens ⬜ ·
-  upload from the editor ⬜ (no Course Maker in the front end yet) · the Swift app ✅ (the same
+  upload from the editor 🔄 (online2, paused 2026-10-25: see the note below) · the Swift app ✅ (the same
   screens through `mmk_front_*`; its host makes the calls on threads, records server-course runs
   and sends them as replays — tested against a live server in `mmk-ffi`: a verified record, a
   like, a comment; the account screen signed in from UserDefaults; macOS types from the keyboard,
   iOS through a text prompt) · ghosts in the Swift app ⬜ (the engine snapshot draws one world) ·
   the server times a replay to the end of the clear sequence, the clear screen to the goal touch
   (16.35 s vs 9.18 s in one run) ⬜
+- ⏸ **online2 (paused 2026-10-25, owner saving credits; nothing merged)**. Research done from
+  v3.0.3 and written up in `research/specs/coursebot.md` A.4b: the Coursebot's upload sequence
+  state by state (0x71016f2d70), the SeqWindow message table, the editor's Upload checks
+  (0x71018e85f0), the clear check's goal (0x71012c8a30: header flag bit 1, attempts, time =
+  frames / 60 × 1000 truncated), editing resetting it by CRC at save (0x710169a1e0). Code written
+  and tested but **not committed** (the `--app` gate's release build was cut off with the disk
+  under 3.5 GB): the patch is `research/decomp/online2/online2-wip.patch` (apply on 7186031). It
+  holds: `mmk_editor::clear_check` (the marks, `play_key`, checkpoints; new courses no longer
+  start "cleared"); the server's upload rules (`--verified-uploads` with the clear check's
+  replay, `--upload-limit`, `--uploads-per-day`, 410 for a course the admin deleted, tags and
+  `clear_check_ms` on courses, `/api/me` counter); `mmk_online::UploadForm` / `upload_count` /
+  `http_status`, `mmk upload --tags --replay`; the replay timed from the attempt that cleared
+  (fixes 16.35 s vs 9.18 s: the server counted the deaths before it) with `clear_time_ms` used
+  by the front's clear screens. Fmt, clippy and workspace tests passed with it. Next: apply the
+  patch and run the gate; host hooks `Host::clear_check` / `take_clear_replay` (shell, web, FFI)
+  and `upload` / `uploads` routing; the front's upload window flow (`Cmn_SeqWindow_00`,
+  `Cmn_TagWindow_00`, `Lcl_UploadScene_00`) from the Coursebot and the maker's Save window, the
+  clear-check runs (start, then each checkpoint flag); then comments from the pause / clear
+  screens; then SMMDB import.
 - ✅ Local multiplayer (co-op, up to 4: Mario, Luigi, Toad, Toadette as the models' _2/_3/_4
   variants): extra players run the same rules, rejoin beside player 1 [inf: bubble], any player
   clears; `mmk-play --players N` (one pad each), FFI `mmk_engine_set_players / step_players`;
