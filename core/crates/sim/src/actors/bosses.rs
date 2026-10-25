@@ -260,8 +260,12 @@ const JR_SHELL_HOP_VX: f32 = 1.5;
 /// ShellWakeup (0x7100617170): hops out at vy 3.0; at vy ≤ 0.4 the Basic action resumes.
 const JR_WAKE_HOP: f32 = 3.0;
 const JR_WAKE_END: f32 = 0.4;
-/// Fire: 3 shots, each one 26 frames into a 60-frame animation.
-const JR_FIRE_ANIM: i32 = 60;
+/// Fire: 3 shots, each one 26 frames into the animation, one every 61 frames [obs: Ryujinx
+/// whole trace X_bowserjr_M1: fireballs born on frames 94, 155, 216].
+const JR_FIRE_ANIM: i32 = 61;
+/// A Bowser Jr. fireball's speed (Bowser's own fly at 1.5) [obs: X_bowserjr_M1, SMB1: 1.0 a
+/// frame from the frame after its birth, where it stands] [inf: the other styles'].
+const JR_FIRE_SPEED: f32 = 1.0;
 const JR_FIRE_AT: i32 = 26;
 /// Hammers (winged): 4 thrown 36, 52, 68 and 84 frames into a 110-frame animation.
 const JR_THROW_ANIM: i32 = 110;
@@ -458,12 +462,18 @@ impl Actor {
                 } else if self.target.0 <= self.x && !self.in_view() {
                     // waits off screen (mode 3) until it scrolls into view
                     self.bowser_set_mode(3, st);
-                } else if !self.on_ground {
+                } else if !self.on_ground && !level.cell_at(self.x, self.y - 0.5).is_solid() {
                     self.bowser_enter(bw::FALL, st);
                 } else if self.bowser_player_ahead_right(st) {
                     self.bowser_chase_dispatch(level, st);
                 } else {
+                    // placed on the ground: its first update already walks (LandOn decides at
+                    // once) [obs: Ryujinx whole trace X_bowser_M1: −0.3 from frame 0]
+                    self.on_ground = true;
                     self.bowser_enter(bw::LAND_ON, st);
+                    if self.timer == 0 {
+                        self.bowser_decide(level, st);
+                    }
                 }
             }
             Kind::BoomBoom { clown, pom, .. } => {
@@ -720,6 +730,9 @@ impl Actor {
     /// (`home_y`) climbs or dives at half its forward speed until it is within half a step of
     /// the lane, then flies level (BulletKoopaFire ThreeWayFire 0x71003b2380).
     pub(super) fn step_boss_shot(&mut self, level: &Level) {
+        if let Some((vx, vy)) = self.die_pending.take() {
+            (self.vx, self.vy) = (vx, vy);
+        }
         if self.kind == Kind::BowserFire && self.koopa_flame_step(level) {
             return;
         }
@@ -3200,11 +3213,11 @@ impl Actor {
         } else {
             0.0
         };
-        let speed = BOWSER_FIRE_SPEED + carry * cs * cs;
+        let speed = JR_FIRE_SPEED + carry * cs * cs;
         let mut f = Actor::new(Kind::BowserFire, sx, sy);
         f.dir = self.dir;
-        f.vx = cs * speed * d;
-        f.vy = sn * speed;
+        // (still on its birth frame, its speed from the next)
+        f.die_pending = Some((cs * speed * d, sn * speed));
         f.home_y = f32::NAN;
         f.timer = 600;
         f
@@ -4160,9 +4173,12 @@ mod tests {
             }
             if let Some(f) = out {
                 assert_eq!(f.kind, Kind::BowserFire);
-                let speed = (f.vx * f.vx + f.vy * f.vy).sqrt();
-                assert!((speed - 1.5).abs() < 1e-4);
-                assert!(f.vy.datan2(-f.vx).to_degrees().abs() <= JR_AIM + 1e-3);
+                // (still on its birth frame, its speed kept for the next)
+                assert_eq!((f.vx, f.vy), (0.0, 0.0));
+                let (vx, vy) = f.die_pending.expect("its speed");
+                let speed = (vx * vx + vy * vy).sqrt();
+                assert!((speed - JR_FIRE_SPEED).abs() < 1e-4);
+                assert!(vy.datan2(-vx).to_degrees().abs() <= JR_AIM + 1e-3);
                 volleys.last_mut().expect("in a volley").push(f.x);
             }
             was = a.phase;

@@ -40,7 +40,16 @@ SMCraft is back in development (it was archived in October 2026).
   Super Hammer's swing.
 - Placed Super Leaves, Cape Feathers and Propeller Mushrooms sway down through the floor as in
   the game and are gone once they leave the screen.
-- Goombas and other walkers ride Seesaws and tip them.
+- Lava Bubbles fall from where they are placed, hide and leap to that height exactly as in SMM2;
+  Boos, Spike Tops round corners and winged Hammer Bros' hops and jumps match the game frame by
+  frame, and thrown hammers vanish below the screen where the game's do. 3D World Goombas take
+  as long to notice Mario as in SMM2, and Bowser Jr's fireballs fly at the game's speed.
+- Autoscrolling courses start and push Mario as in SMM2 (the view's edge holds him 8 px in, in
+  every style).
+- Cat Mario on the ground has the game's lower body: he walks and runs through one-block-high
+  gaps, as in SMM2, and only the Cat has the wide reach to walls.
+- Goombas and other walkers ride Seesaws and tip them, hold on past a tilted plank's end as
+  far as the game's feet reach and keep the plank's swing as they drop off.
 - The screen's edges hold Mario as in the game: a Super Leaf flight levels off at the top of the
   screen, and a wall that fills a low 3D World course's screen stops the scrolling.
 - **Twisty Turny and Woozy bend the whole sound** as in the game: Twisty Turny sweeps a resonant

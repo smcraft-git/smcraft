@@ -89,6 +89,64 @@ impl Plank {
         table_atan2(p[3] - p[1], p[2] - p[0])
     }
 
+    /// How far a foot sensor `half` px either side of a walker's centre reaches past the ends
+    /// of the plank's top segment, along it (dx, dy; dx ≤ 0 for a plank within ±45°) [obs
+    /// v3.0.3 0x7100e32dd0, the floor test's open-end stretch (from 0x7100e2ccf0 in the
+    /// collider's point test 0x7100e2b3c0): an end with no neighbour segment moves out by the
+    /// sensor's half width × cos 2u along the segment's angle u; Ryujinx traces X_seesaw2 /
+    /// X_seesaw3: a Goomba (±4) held 1.35 px past an end at 31.7° and let go 0.48 past at 43.3°].
+    pub fn end_reach(&self, half: f32) -> (f32, f32) {
+        let e = self.ends;
+        let (dx, dy) = (e[2] - e[0], e[3] - e[1]);
+        // (the collider's angle: axis-aligned within 1e-5)
+        let u = if !(-1e-5..=1e-5).contains(&dx) {
+            if !(-1e-5..=1e-5).contains(&dy) {
+                table_atan2(dy, dx) as i32
+            } else if dx < 0.0 {
+                i32::MIN
+            } else {
+                0
+            }
+        } else if dy < 0.0 {
+            -0x4000_0000
+        } else {
+            0x4000_0000
+        };
+        if u.unsigned_abs() > LIMIT as u32 {
+            return (0.0, 0.0);
+        }
+        let h = (-half - half) * 0.5;
+        if u == 0 {
+            return (h, 0.0);
+        }
+        let (s, c) = table_sin_cos(u as u32);
+        let (_, c2) = table_sin_cos(((u as f32) + (u as f32)) as i32 as u32);
+        ((c * h - s * 0.0) * c2, (s * h + c * 0.0) * c2)
+    }
+
+    /// Where the plank's turn this frame takes a walker standing at (x, y), the plank's ends
+    /// being relative to (ox, oy): its point of last frame's top segment (its place along it,
+    /// held to the segment) goes where the ends take it, the walker's offset from that point
+    /// turns with the segment's angle [obs: Ryujinx traces X_seesaw2 / X_seesaw3, the Goombas'
+    /// carry +0x674: over the plank the lerp of the ends' movement, past an end that end's
+    /// movement plus the turn about it, within 1e-5, where the extended lerp is 8e-5 off] [inf:
+    /// the turn's exact form; the game's sine table is too coarse for it].
+    pub fn carry_walker(&self, ox: f32, oy: f32, x: f32, y: f32) -> (f32, f32) {
+        let (p, e) = (self.prev, self.ends);
+        let t = ((x - ox - p[0]) / (p[2] - p[0])).clamp(0.0, 1.0);
+        let at = |q: [f32; 4]| (q[0] + t * (q[2] - q[0]), q[1] + t * (q[3] - q[1]));
+        let ((ax, ay), (bx, by)) = (at(p), at(e));
+        // (the turn from the two segments' directions: the sine table's 2° is 7e-5 off)
+        let (d0, d1) = ((p[2] - p[0], p[3] - p[1]), (e[2] - e[0], e[3] - e[1]));
+        let n = (d0.0 * d0.0 + d0.1 * d0.1).sqrt() * (d1.0 * d1.0 + d1.1 * d1.1).sqrt();
+        let (c, s) = (
+            (d0.0 * d1.0 + d0.1 * d1.1) / n,
+            (d0.0 * d1.1 - d0.1 * d1.0) / n,
+        );
+        let (vx, vy) = (x - (ox + ax), y - (oy + ay));
+        ((ox + bx) + (c * vx - s * vy), (oy + by) + (s * vx + c * vy))
+    }
+
     /// How the plank's turn this frame moves a rider at x (relative to the pivot): the ends'
     /// movement taken at its place along last frame's ends.
     pub fn carry(&self, x: f32) -> (f32, f32) {
@@ -228,6 +286,26 @@ mod tests {
         assert!(bounced, "it bounces off the 45° stop");
         // the right end is down, the top line falls to the right
         assert!(p.ends[3] < p.ends[1] && p.slope() < 0.0);
+    }
+
+    #[test]
+    fn a_foot_reaches_past_the_ends_less_as_the_plank_turns() {
+        let mut p = Plank::new(5);
+        assert_eq!(
+            p.end_reach(4.0),
+            (-4.0, 0.0),
+            "level: the sensor's half width"
+        );
+        let mut last = 4.0f32;
+        // (up to about 43.6°, short of the stop)
+        while p.theta > -0x1f00_0000 {
+            p.step(5, 300.0);
+            let (dx, _) = p.end_reach(4.0);
+            assert!(dx <= 0.0 && -dx <= last + 1e-6, "{dx} after {last}");
+            last = -dx;
+        }
+        // (4 · cos 2u · cos u: 1.53 at 31.7°, 0.16 at 43.5°)
+        assert!(last < 0.5);
     }
 
     #[test]

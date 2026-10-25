@@ -963,7 +963,7 @@ impl World {
         } else {
             v.left
         };
-        self.sync_camera();
+        self.sync_camera(false);
         self.activate();
     }
 
@@ -2213,12 +2213,11 @@ impl World {
         } else {
             self.camera_y + VIEW_H + if self.player.in_water { 80.0 } else { 96.0 }
         };
-        // the sides: 8.1 inside (8.0 in 3D World [obs: 3W_formw cat_climb_cam]; v1.0.0 8.1)
-        let m = if self.style == crate::player::Style::W3 {
-            8.0
-        } else {
-            8.1
-        };
+        // the sides: 8.0 inside last frame's view, in every style [obs: Ryujinx traces 3W_formw
+        // cat_climb_cam (a still view: 8.0); X_ascroll_M1 … _3W (the slow autoscroll: the
+        // centre 7.5 inside this frame's view, 8.0 inside last frame's, SMB1 to 3D World alike;
+        // v1.0.0's 8.1 would leave 7.6)]
+        let m = 8.0;
         self.player.view_x = if alone {
             (self.camera_x + m, self.camera_x + VIEW_W - m)
         } else {
@@ -2615,7 +2614,13 @@ impl World {
             a.target_h = self.player.query_height();
             powerups::mask_target(a, masked);
             a.camera = (self.camera_x, self.camera_y);
-            a.floor_ref = self.liquid.map(|l| l.y).unwrap_or(self.level.bottom - 12.0);
+            // the Lava Bubble's reference level: lava (or poison) − 12, else the area's bottom
+            // [obs v3.0.3 0x71010a0570 / 0x71010a08b0; Ryujinx whole trace X_lavab_M1]
+            a.floor_ref = self
+                .liquid
+                .filter(|l| !l.water())
+                .map(|l| l.y - 12.0)
+                .unwrap_or(self.level.bottom);
             if a.kind == Kind::Lakitu {
                 a.speed = self.player.vx;
             }
@@ -3715,6 +3720,12 @@ impl World {
         let b = a.bbox();
         if style == crate::player::Style::WU && matches!(a.kind, Kind::Koopa { .. }) && !a.big {
             return (b.0, b.1, b.2, b.1 + 21.0);
+        }
+        // a Spike Top meets the player 1 px narrower a side than its 16-px box [obs: Ryujinx
+        // whole traces X_stop_M1 / _WU: a standing small player hurt with its last place 10.5 px
+        // away, not at 11.0 (a Goomba's touch is at 12: X_walkin_M1)] [inf: the big one's]
+        if matches!(a.kind, Kind::SpikeTop { .. }) && !a.big && !a.wings {
+            return (b.0 + 1.0, b.1, b.2 - 1.0, b.3);
         }
         b
     }
@@ -6043,19 +6054,20 @@ impl World {
             let Some(id) = self.actors[i].seesaw else {
                 continue;
             };
-            let Some((sx, plank)) = self
+            let Some((sx, sy, plank)) = self
                 .actors
                 .iter()
                 .find(|s| s.id == id)
-                .and_then(|s| s.plank.map(|p| (s.x, p)))
+                .and_then(|s| s.plank.map(|p| (s.x, s.y, p)))
             else {
                 self.actors[i].seesaw = None;
                 continue;
             };
             let a = &mut self.actors[i];
-            let (dx, dy) = plank.carry(a.x - sx);
-            a.x += dx;
-            a.y += dy;
+            // (the ends' line is 16 px over the Seesaw's y: actors.rs solid_box)
+            let (x, y) = plank.carry_walker(sx, sy + 16.0, a.x, a.y);
+            a.plank_carry = x - a.x;
+            (a.x, a.y) = (x, y);
             a.plank_angle = (plank.prev_angle(), a.plank_angle.0);
         }
     }
@@ -6080,18 +6092,31 @@ impl World {
     /// After the actors' moves: a walker over a Seesaw's plank stands on its top line (on it
     /// already, or falling onto it) [obs: Ryujinx trace X_seesaw2, a Goomba walking left along
     /// a tilting plank exactly on the line through its ends] [inf: the walkers this applies to;
-    /// a rider's step along the plank is its plain vx].
+    /// a rider's step along the plank is its plain vx]. Its foot sensor (±4 px [inf: the
+    /// sensor rows' floor span, e.g. 0x71023cb940 +0x30]) finds the plank while its centre is
+    /// over the top segment stretched at each end by the sensor (Plank::end_reach); off it,
+    /// the frame's step is still the plank's (vx along last frame's angle, with the fall's
+    /// first gravity) and the carry of that frame stays with it as a speed until it lands [obs:
+    /// X_seesaw2 / X_seesaw3, the Goombas' +0x658 contact, +0x560 step, +0x320 speed].
     fn seesaw_walkers(&mut self) {
-        let planks: Vec<(u32, crate::level::Solid)> = self
+        // a walker that left a plank keeps its last carry until it lands
+        for a in &mut self.actors {
+            if a.plat_vx != 0.0 && a.seesaw.is_none() {
+                a.x += a.plat_vx;
+                if a.on_ground || !Self::seesaw_walker(a) {
+                    a.plat_vx = 0.0;
+                }
+            }
+        }
+        let planks: Vec<(u32, crate::level::Solid, (f32, f32))> = self
             .level
             .solids
             .iter()
-            .filter(|s| {
-                self.actors
-                    .iter()
-                    .any(|a| a.id == s.owner && matches!(a.kind, Kind::Seesaw { .. }))
+            .filter_map(|s| {
+                let a = self.actors.iter().find(|a| a.id == s.owner)?;
+                let p = a.plank.filter(|_| matches!(a.kind, Kind::Seesaw { .. }))?;
+                Some((s.owner, *s, p.end_reach(4.0)))
             })
-            .map(|s| (s.owner, *s))
             .collect();
         if planks.is_empty() {
             return;
@@ -6101,9 +6126,16 @@ impl World {
                 a.seesaw = None;
                 continue;
             }
+            // a walker on a plank steps along it: vx · cos of the angle it had two frames
+            // before, as the player's [obs: X_seesaw2]; its foot looks for the plank there
+            let (sin, cos) = crate::fmath::table_sin_cos(a.plank_angle.0);
+            let step = a.x - a.pre.0;
+            if a.seesaw.is_some() {
+                a.x = a.pre.0 + step * cos;
+            }
             let mut on = None;
-            for (id, s) in &planks {
-                if a.x < s.x0 || a.x > s.x1 {
+            for (id, s, (rx, _)) in &planks {
+                if a.x < s.x0 + rx || a.x > s.x1 - rx {
                     continue;
                 }
                 let top = s.top_at(a.x);
@@ -6115,10 +6147,6 @@ impl World {
             }
             match on {
                 Some((id, _)) if a.seesaw == Some(id) => {
-                    // its step along the plank: vx · cos of the angle it had two frames before,
-                    // as the player's [obs: X_seesaw2]
-                    let (_, cos) = crate::fmath::table_sin_cos(a.plank_angle.0);
-                    a.x = a.pre.0 + (a.x - a.pre.0) * cos;
                     let s = planks.iter().find(|p| p.0 == id).map(|p| p.1);
                     if let Some(s) = s {
                         a.y = s.top_at(a.x);
@@ -6132,7 +6160,14 @@ impl World {
                     a.on_ground = true;
                     a.seesaw = Some(id);
                 }
-                None => a.seesaw = None,
+                None => {
+                    if a.seesaw.take().is_some() {
+                        // the leaving frame's step is the plank's, the fall's gravity added
+                        a.y += step * sin;
+                        a.plat_vx = a.plank_carry;
+                        a.on_ground = false;
+                    }
+                }
             }
         }
     }
@@ -7097,7 +7132,7 @@ impl World {
         let level = &self.level;
         self.camera
             .update(&area, &target, |x, y| level.cell(x, y) == Cell::Solid);
-        self.sync_camera();
+        self.sync_camera(true);
     }
 
     /// Re-centre the camera on the player, as the game does after a respawn or a pipe exit (also
@@ -7120,7 +7155,7 @@ impl World {
         } else {
             v.left
         };
-        self.sync_camera();
+        self.sync_camera(false);
     }
 
     fn camera_area(&self) -> camera::Area {
@@ -7133,7 +7168,10 @@ impl World {
         }
     }
 
-    fn sync_camera(&mut self) {
+    /// The view from the camera; `advance`: a frame's update moves an autoscroll on (a reset
+    /// doesn't: the view's left is 0.5 at the course's first update in the slow autoscroll
+    /// [obs: Ryujinx traces X_ascroll_<style>, the view rect 0x2132267be4]).
+    pub(crate) fn sync_camera(&mut self, advance: bool) {
         let v = self.camera.view(&self.camera_area());
         self.camera_x = v.left;
         self.camera_y = v.bottom;
@@ -7143,13 +7181,13 @@ impl World {
             let s = (self.level.autoscroll - 1) as usize;
             if self.level.vertical {
                 let max_y = (self.level.top - VIEW_H).max(self.level.bottom);
-                if self.player.alive() && self.goal_phase == GoalPhase::None {
+                if advance && self.player.alive() && self.goal_phase == GoalPhase::None {
                     self.autoscroll_pos = (self.autoscroll_pos + [0.28, 0.53, 1.12][s]).min(max_y);
                 }
                 self.camera_y = self.autoscroll_pos;
             } else {
                 let max_x = (self.level.right - VIEW_W).max(self.level.left);
-                if self.player.alive() && self.goal_phase == GoalPhase::None {
+                if advance && self.player.alive() && self.goal_phase == GoalPhase::None {
                     self.autoscroll_pos = (self.autoscroll_pos + [0.5, 1.0, 2.0][s]).min(max_x);
                 }
                 self.camera_x = self.autoscroll_pos;
@@ -7226,7 +7264,9 @@ impl World {
         {
             return;
         }
-        let (l, r) = (self.camera_x + 8.0, self.camera_x + VIEW_W - 8.0);
+        // the view's left pushes the centre 7.5 in, in every style [obs: Ryujinx traces
+        // X_ascroll_M1 … _3W: x = the view's left + 7.5 from the first push (frame 129) on]
+        let (l, r) = (self.camera_x + 7.5, self.camera_x + VIEW_W - 8.0);
         if self.player.x < l {
             self.player.x = l;
             let s = self.player.sensors();
@@ -10618,8 +10658,9 @@ mod tests {
     fn lava_bubble_hides_then_leaps_to_its_height() {
         let mut lvl = Level::flat(40);
         lvl.bottom = 0.0;
-        // placed 5 tiles above the reference level (bottom − 12)
-        let home = -12.0 + 5.0 * TILE;
+        // placed 5 tiles above the reference level (the area's bottom): it falls from there
+        // first, its home 0.5625 lower (taken on its third falling frame)
+        let home = 5.0 * TILE;
         lvl.spawns.push(spawn(Kind::LavaBubble, 200.0, home));
         let mut w = World::with_level(lvl);
         w.player.x = 40.0;
@@ -10635,8 +10676,8 @@ mod tests {
             }
             top = top.max(a.y);
         }
-        // H = 6 tiles: A = 6·4/7 + 1 = 4.43
-        assert!((first_vy - 4.43).abs() < 0.05, "{first_vy}");
+        // H = 5.96 tiles: A = 5.96·4/7 + 1 = 4.41
+        assert!((first_vy - 4.41).abs() < 0.02, "{first_vy}");
         assert!(
             top <= home + 4.0 && top > home - 24.0,
             "top {top} home {home}"
@@ -12726,7 +12767,7 @@ mod tests {
             "1 px/frame: {}",
             w.camera_x - c0
         );
-        assert!(w.player.x >= w.camera_x + 8.0 - 0.01, "pushed along");
+        assert!(w.player.x >= w.camera_x + 7.5 - 0.01, "pushed along");
         assert!(w.player.alive());
     }
 

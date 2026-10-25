@@ -143,6 +143,13 @@ impl Actor {
             self.bro_wing = w;
             return None;
         }
+        // placed on the ground, it starts in WingWalk and its first update runs it (Bros1st:
+        // the hop at once) [obs: Ryujinx whole trace X_wbros_M1: vy 2.0 − 0.1875 and 0.5 across
+        // on the first update]
+        if !w.on && self.age == 1 && level.cell_at(self.x, self.y - 0.5).is_solid() {
+            self.on_ground = true;
+            self.bro_wing_enter(&mut w);
+        }
         if !w.on {
             // Fall (0x7101095810): |vx| ≤ 0.5; grounded → WingWalk
             if self.on_ground {
@@ -233,9 +240,13 @@ impl Actor {
                 }
             }
         }
+        self.vy = (self.vy + ENEMY_GRAVITY).max(MAX_FALL);
         if self.hops == 0 {
-            self.vy = (self.vy + ENEMY_GRAVITY).max(MAX_FALL);
             self.collide(level);
+        } else {
+            // the jump moves from the frame it is decided [obs: Ryujinx whole trace
+            // X_wbros_M1 frame 168: 16 → 22.3125, vy 6.5 − 0.1875]
+            self.bro_ghost_move(level, ENEMY_GRAVITY);
         }
         w.wall = self.wall;
         self.bro_wing = w;

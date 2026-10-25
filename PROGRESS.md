@@ -219,6 +219,43 @@ sway, importer and pack 12, the dev cache already at v12).
   Seesaws (weight 2, the riders' torques summed, carried, x · cos). Open: the Cat's rolling attack (0x71015f6f70, its
   trigger not found), where a walker leaves a Seesaw's end [?], a Cat's 15.9 head on the ground
   [?]. Coverage 550 / 550 + 273 / 273; simulate 0 crashes.
+- 🔄 **Physics pass 10** (2026-10-25, branch `physics10`, research fidelity-log.md "physics10",
+  91-seesaw.md "Leaving the plank"): **675 / 683 traces exact** (was 652 / 654; the 8 others are new enemy traces parting at the game's random draws). ✅ a walker leaving a
+  Seesaw's end (v3.0.3 floor test 0x7100e2b3c0 / 0x7100e2ccf0 / 0x7100e32dd0): the plank is one
+  floor segment whose open ends stretch by the foot sensor's half width (4) × cos 2u, so a foot
+  holds 1.5 px past an end at 31.7° and 0.16 px at 43.5°; the leaving frame still steps along the
+  plank, and the carry of that frame stays as an x speed until the landing (+0x320); past an end
+  the carry is that end's movement plus the turn about it. ✅ the Cat's ground sensor row
+  (v3.0.3 rows 0x71023d497c.., pick 0x7101592480: pose 6 for form 7 in every ground state —
+  head 15.9, walls 4…8.5 at 13.9): it walks / runs through a 1-tile-high tunnel (new course
+  `3W_tunnel_form`); its landing frame keeps the air row's height with the wide reach; it rests
+  8.6 in at the course's left side; no other 3D World form gets 13.9 (3W Super stops 7.9 from
+  the tunnel, `3W_tunnel_items`); a move ending flush on a wall's right face zeroes the speed.
+  ✅ the Cat's rolling attack (ClimbRollingAttack 34): unreachable in v3.0.3 — its only way in is
+  the action delegate +0x2700 (0x71015e6f80), slot 60, which no state's action list (0x71015e76c0,
+  161 callers) names. ✅ the view's side hold: 8.0 inside last frame's view in every style (not
+  v1.0.0's 8.1) — the slow autoscroll in SMB1 … 3D World (new whole traces X_ascroll_<style>,
+  `trace-courses` kind `autoscroll`) pushes the standing player 7.5 inside this frame's view;
+  the autoscroll starts at 0.5 on the first update (a reset doesn't move it). ✅ enemy whole
+  traces (`trace-courses` kinds wbros, boo, lavab, pbeetle, stop, bowser, bowserjr, walkin): the
+  Lava Bubble rebuilt from v3.0.3 (0x71010a0570 / 0x71010a08b0 / 0x71010a0ee0: placed falling,
+  home from its third falling frame, L = lava − 12 or the area's bottom, hidden at L − 32, the
+  sine leap) — X_lavab_M1 exact 600 frames; the Boo sees the player a frame late (X_boo_M1
+  exact); the Para-Beetle exact as it was (X_pbeetle_M1 / _WU); Spike Top corners: the outside
+  turn's last frame doesn't move, its speeds are the step / 0.49 into the surface, an inside turn
+  off a wall idles a frame first (X_stop exact to the player's death, 462); the winged Hammer Bro
+  placed on the ground hops on its first update and its jump moves on the frame it's decided,
+  hammers go 32 under the view (X_wbros_M1 exact to frame 242, then its random facing); a Spike
+  Top meets the player 1 px narrower a side (10.5 hurts, 11 not; X_stop_M1 / _WU exact 600
+  frames) and is put exactly on a face after a corner; the 3D World Goomba's Find is 45 frames
+  and it stands 8 after a landing (X_walkin_3W, X_cpipeg exact); Bowser placed on the ground
+  walks from frame 0 (X_bowser_M1 exact to his first random draw, 47); Bowser Jr's fireballs
+  (SMB1) fly at 1.0 from the frame after their birth, one every 61 frames (seen in X_bowserjr_M1,
+  whose Jr hops on a random draw at 20). Left: the game's random draws (Bowser, Bowser Jr, the
+  winged Bro's facing); 3D World Hammer Bros / Bowser not found by the scans yet; the projectile
+  budget can't be reached in an editor-made course (100 enemies an area).
+  Coverage 548 / 550
+  + 272 / 273 (as main); simulate 0 crashes.
 - 🔄 **Inferred-behaviour pass 6** (2026-10-25, branch `infres6`, research specs/inf-inventory.md
   "Pass 6"): ✅ the Propeller Mushroom's own Move (#38, ItemPropeller 0x710134ca70 / 0x710134c3c0 /
   limits 0x710134c880; the Block context's enter 0x710134d550 skips the slow rise): out of a

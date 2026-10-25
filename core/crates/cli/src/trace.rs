@@ -167,7 +167,7 @@ pub fn run_all(course: &[u8], script: &[Input], start: &Start) -> Result<(String
 // Physics test courses
 
 pub const STYLES: [&str; 5] = ["M1", "M3", "MW", "WU", "3W"];
-pub const KINDS: [&str; 39] = [
+pub const KINDS: [&str; 50] = [
     "flat",
     "wall",
     "slope",
@@ -207,8 +207,21 @@ pub const KINDS: [&str; 39] = [
     "seesaw2",
     "seesaw3",
     "balloon",
+    "tunnel_items",
+    "tunnel_form",
+    "autoscroll",
+    "wbros",
+    "boo",
+    "lavab",
+    "pbeetle",
+    "stop",
+    "bowser",
+    "bowserjr",
+    "walkin",
 ];
 
+/// Kinds not made in 3D World (no winged Buzzy Beetle, Spike Top or Bowser Jr there).
+const NOT_W3: [&str; 3] = ["pbeetle", "stop", "bowserjr"];
 /// Kinds made in SMB1 only (the terrain they test is the same in every style).
 const M1_ONLY: [&str; 5] = ["slopejoin", "mushstart", "slopejoins", "sword", "sball"];
 /// Kinds made in NSMBU only (a ground pound in the air needs a style that has one in the
@@ -219,8 +232,16 @@ const LEAF_ONLY: [&str; 1] = ["itemplace"];
 /// Kinds made in SMW only.
 const MW_ONLY: [&str; 1] = ["balloon"];
 /// Kinds made in 3D World only (clear pipes are a 3D World part).
-const W3_ONLY: [&str; 7] = [
-    "cpipe", "cpipeg", "cpipev", "cpiped", "formw", "formt", "hammer",
+const W3_ONLY: [&str; 9] = [
+    "cpipe",
+    "cpipeg",
+    "cpipev",
+    "cpiped",
+    "formw",
+    "formt",
+    "hammer",
+    "tunnel_items",
+    "tunnel_form",
 ];
 
 /// Where the items / form courses keep their power-up: the ? block's tile column and its row
@@ -239,6 +260,7 @@ pub fn course_names() -> Vec<String> {
             if s == "3W" && k == "note"
                 || s != "M1" && M1_ONLY.contains(&k)
                 || s != "3W" && W3_ONLY.contains(&k)
+                || s == "3W" && NOT_W3.contains(&k)
                 || s != "WU" && WU_ONLY.contains(&k)
                 || !matches!(s, "M3" | "MW" | "WU") && LEAF_ONLY.contains(&k)
                 || s != "MW" && MW_ONLY.contains(&k)
@@ -263,7 +285,16 @@ pub fn build_course(name: &str) -> Result<Vec<u8>, String> {
     // the items / form courses are longer: their power-up block is past every test's reach
     let len = if matches!(
         kind,
-        "items" | "form" | "bigblk" | "form2" | "sword" | "sball" | "hammer" | "balloon"
+        "items"
+            | "form"
+            | "bigblk"
+            | "form2"
+            | "sword"
+            | "sball"
+            | "hammer"
+            | "balloon"
+            | "tunnel_items"
+            | "tunnel_form"
     ) {
         160
     } else {
@@ -496,7 +527,10 @@ pub fn build_course(name: &str) -> Result<Vec<u8>, String> {
         // balloon: the items course (a Super Mushroom in the pen's block); the capture makes
         // the Super player a Power Balloon one (form +0x4a8 = 12): the balloon floats out of
         // reach of the pen's exit
-        "items" | "form" | "balloon" => {
+        // tunnel_items / tunnel_form (3D World): the items / form course (Super Mario, the Cat)
+        // with a one-tile-high tunnel at x 24..31 (its roof the second row up): which bodies
+        // walk under a 16-px roof (the Cat's walking sensor row has a 15.9 head)
+        "items" | "form" | "balloon" | "tunnel_items" | "tunnel_form" => {
             // the power-up in a ? block 4 tiles up, far enough right that no test reaches it:
             // a Super Mushroom (items) or the style's own power-up (form; part 44: leaf,
             // feather, propeller, bell; a mushroom in SMB1). On the floor the game's items
@@ -508,7 +542,12 @@ pub fn build_course(name: &str) -> Result<Vec<u8>, String> {
             // floor it stays put and the player's touch does nothing [obs: emulator, its actor
             // found in memory]), so WU_form has the Super Mushroom and the capture makes the
             // Super player a Propeller one (player form +0x4a8 = 3)
-            let item = if kind == "items" || kind == "balloon" || style == "WU" {
+            if kind.starts_with("tunnel") {
+                for x in 24..=31 {
+                    e.paint_ground(x, up(2)).map_err(err)?;
+                }
+            }
+            let item = if matches!(kind, "items" | "balloon" | "tunnel_items") || style == "WU" {
                 20
             } else {
                 44
@@ -697,6 +736,46 @@ pub fn build_course(name: &str) -> Result<Vec<u8>, String> {
             let (_, sh) = mmk_editor::default_size(91);
             e.place_sized(91, 18, up(3), 5, sh, mmk_editor::DEFAULT_FLAGS)
                 .map_err(err)?;
+        }
+        // whole-course enemy tests (recorded with the player standing at the start): one enemy
+        // or two in the first screen
+        "wbros" | "boo" | "lavab" | "pbeetle" | "stop" | "bowser" | "bowserjr" | "walkin" => {
+            floor(&mut e, 0, len - 1)?;
+            let wings = mmk_editor::DEFAULT_FLAGS | 0x2;
+            let put = |e: &mut Editor, part: i16, x: i32, y: i32, flags: u32| {
+                let (w, h) = mmk_editor::default_size(part);
+                e.place_sized(part, x, y, w, h, flags)
+                    .map(|_| ())
+                    .map_err(err)
+            };
+            match kind {
+                // a winged Hammer Bro (it hops and flies, throwing)
+                "wbros" => put(&mut e, 3, 18, up(1), wings)?,
+                // a Boo (the script turns the player away from it)
+                "boo" => put(&mut e, 41, 18, up(4), mmk_editor::DEFAULT_FLAGS)?,
+                // a Lava Bubble on the floor (it leaps from where it is placed)
+                "lavab" => put(&mut e, 60, 18, up(1), mmk_editor::DEFAULT_FLAGS)?,
+                // a Para-Beetle (winged Buzzy Beetle) in the air
+                "pbeetle" => put(&mut e, 28, 20, up(4), wings)?,
+                // a Spike Top on a 2×2 block (it walks round its corners) and a winged one
+                "stop" => {
+                    for (x, y) in [(16, 1), (17, 1), (16, 2), (17, 2)] {
+                        e.paint_ground(x, up(y)).map_err(err)?;
+                    }
+                    put(&mut e, 40, 16, up(3), mmk_editor::DEFAULT_FLAGS)?;
+                    put(&mut e, 40, 22, up(5), wings)?;
+                }
+                "bowser" => put(&mut e, 62, 18, up(1), mmk_editor::DEFAULT_FLAGS)?,
+                // a Goomba walking left into the standing player (the touch distance)
+                "walkin" => put(&mut e, 0, 12, up(1), mmk_editor::DEFAULT_FLAGS)?,
+                _ => put(&mut e, 98, 18, up(1), mmk_editor::DEFAULT_FLAGS)?,
+            }
+        }
+        "autoscroll" => {
+            // a flat course with the slow autoscroll: the view's left side pushes a player who
+            // stands still (where it holds the player, in each style)
+            floor(&mut e, 0, len - 1)?;
+            e.set_autoscroll(1);
         }
         "seesaw2" | "seesaw3" => {
             // the `seesaw` Seesaw with a Goomba placed on its right half (seesaw3: and another
