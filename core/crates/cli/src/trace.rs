@@ -167,7 +167,7 @@ pub fn run_all(course: &[u8], script: &[Input], start: &Start) -> Result<(String
 // Physics test courses
 
 pub const STYLES: [&str; 5] = ["M1", "M3", "MW", "WU", "3W"];
-pub const KINDS: [&str; 38] = [
+pub const KINDS: [&str; 39] = [
     "flat",
     "wall",
     "slope",
@@ -206,6 +206,7 @@ pub const KINDS: [&str; 38] = [
     "hammer",
     "seesaw2",
     "seesaw3",
+    "balloon",
 ];
 
 /// Kinds made in SMB1 only (the terrain they test is the same in every style).
@@ -215,6 +216,8 @@ const M1_ONLY: [&str; 5] = ["slopejoin", "mushstart", "slopejoins", "sword", "sb
 const WU_ONLY: [&str; 4] = ["seesaw", "seesawp", "seesaw2", "seesaw3"];
 /// Kinds made in SMB3, SMW and NSMBU only (their style power-up is a Leaf, Feather or Propeller).
 const LEAF_ONLY: [&str; 1] = ["itemplace"];
+/// Kinds made in SMW only.
+const MW_ONLY: [&str; 1] = ["balloon"];
 /// Kinds made in 3D World only (clear pipes are a 3D World part).
 const W3_ONLY: [&str; 7] = [
     "cpipe", "cpipeg", "cpipev", "cpiped", "formw", "formt", "hammer",
@@ -238,6 +241,7 @@ pub fn course_names() -> Vec<String> {
                 || s != "3W" && W3_ONLY.contains(&k)
                 || s != "WU" && WU_ONLY.contains(&k)
                 || !matches!(s, "M3" | "MW" | "WU") && LEAF_ONLY.contains(&k)
+                || s != "MW" && MW_ONLY.contains(&k)
             {
                 continue;
             }
@@ -259,7 +263,7 @@ pub fn build_course(name: &str) -> Result<Vec<u8>, String> {
     // the items / form courses are longer: their power-up block is past every test's reach
     let len = if matches!(
         kind,
-        "items" | "form" | "bigblk" | "form2" | "sword" | "sball" | "hammer"
+        "items" | "form" | "bigblk" | "form2" | "sword" | "sball" | "hammer" | "balloon"
     ) {
         160
     } else {
@@ -489,7 +493,10 @@ pub fn build_course(name: &str) -> Result<Vec<u8>, String> {
                 e.paint_ground(bx + 4, up(y)).map_err(err)?;
             }
         }
-        "items" | "form" => {
+        // balloon: the items course (a Super Mushroom in the pen's block); the capture makes
+        // the Super player a Power Balloon one (form +0x4a8 = 12): the balloon floats out of
+        // reach of the pen's exit
+        "items" | "form" | "balloon" => {
             // the power-up in a ? block 4 tiles up, far enough right that no test reaches it:
             // a Super Mushroom (items) or the style's own power-up (form; part 44: leaf,
             // feather, propeller, bell; a mushroom in SMB1). On the floor the game's items
@@ -501,7 +508,7 @@ pub fn build_course(name: &str) -> Result<Vec<u8>, String> {
             // floor it stays put and the player's touch does nothing [obs: emulator, its actor
             // found in memory]), so WU_form has the Super Mushroom and the capture makes the
             // Super player a Propeller one (player form +0x4a8 = 3)
-            let item = if kind == "items" || style == "WU" {
+            let item = if kind == "items" || kind == "balloon" || style == "WU" {
                 20
             } else {
                 44

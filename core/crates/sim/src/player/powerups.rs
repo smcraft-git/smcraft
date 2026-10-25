@@ -287,6 +287,8 @@ pub struct PowerUps {
     prop_first: bool,
     spin_once: bool,
     spin_lock: i32,
+    /// Power Balloon: Run held last frame.
+    jet_run_prev: bool,
     /// Frog Suit: a hop started this frame.
     hop_new: bool,
     /// Super Acorn: the twirl of a Spin press in the glide once the boost is used.
@@ -356,6 +358,7 @@ impl Default for PowerUps {
             spin_lock: 0,
             twirl: false,
             hop_new: false,
+            jet_run_prev: false,
             killer_time: KILLER_TIME,
             killer: false,
             killer_lock: 0,
@@ -471,9 +474,16 @@ fn approach2(v: (f32, f32), t: (f32, f32), step: f32) -> (f32, f32) {
 }
 
 /// Turn angle `a` toward `t` (degrees) by at most `step`, the short way round.
+/// Degrees as a 32-bit binary angle.
+fn deg_to_binary(d: f32) -> u32 {
+    ((d as f64 / 360.0 * 4_294_967_296.0).round() as i64) as u32
+}
+
 fn turn_toward(a: f32, t: f32, step: f32) -> f32 {
+    // (a half turn exactly goes the negative way, as a wrapped binary angle difference does
+    // [obs: Ryujinx trace MW_balloon balloon_fly: −90° toward +90° by −95°, −100° …])
     let mut d = (t - a) % 360.0;
-    if d > 180.0 {
+    if d >= 180.0 {
         d -= 360.0;
     } else if d < -180.0 {
         d += 360.0;
@@ -1229,6 +1239,14 @@ impl Player {
         let cap = if liquid { 1.5 } else { 2.0 };
         let speed = self.vx.dhypot(self.vy);
         let want_tilt = dy.datan2(dx).to_degrees() - 90.0;
+        let run_prev = std::mem::replace(&mut self.pu.jet_run_prev, inp.held(input::RUN));
+        // Run starts the jet before the drift's move: the jet's first frame is the jet's alone
+        // [obs: Ryujinx trace MW_balloon balloon_fly: the tilt 90° → 85° (5°), the step 0.07
+        // along it]
+        let wedged = self.on_ground && self.wall_at(level, -1) && self.wall_at(level, 1);
+        if !self.pu.jet && inp.held(input::RUN) && self.pu.jet_lock == 0 && !wedged {
+            self.pu.jet = true;
+        }
         if !self.pu.jet {
             let mut t = (u.0 * 0.5, u.1 * 0.5);
             let step = if speed > 0.5 {
@@ -1257,10 +1275,6 @@ impl Player {
             if has_dir {
                 self.pu.tilt = turn_toward(self.pu.tilt, want_tilt, 6.0);
             }
-            let wedged = self.on_ground && self.wall_at(level, -1) && self.wall_at(level, 1);
-            if inp.held(input::RUN) && self.pu.jet_lock == 0 && !wedged {
-                self.pu.jet = true;
-            }
         }
         if self.pu.jet {
             if has_dir {
@@ -1273,9 +1287,11 @@ impl Player {
                 (false, false) => (if liquid { 1.5 } else { 2.0 }, 0.07),
                 (false, true) => (if liquid { 2.0 } else { 2.5 }, 0.07),
             };
-            let (sn, cs) = self.pu.tilt.to_radians().dsin_cos();
+            // (the game's table sine of the tilt as a binary angle [obs: MW_balloon])
+            let (sn, cs) = crate::fmath::table_sin_cos(deg_to_binary(self.pu.tilt));
             (self.vx, self.vy) = approach2((self.vx, self.vy), (-sn * s, cs * s), step);
-            if !inp.held(input::RUN) {
+            // (Run let go ends it a frame late [obs: Ryujinx trace MW_balloon balloon_fly])
+            if !inp.held(input::RUN) && !run_prev {
                 self.pu.jet = false;
             }
         }

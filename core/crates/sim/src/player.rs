@@ -1547,6 +1547,14 @@ impl Player {
             // ends with its 17-frame animation and leaves normal movement alone [obs]
             if self.form == Form::Raccoon {
                 self.tail_state = 18;
+                // (TailFlying's exec hands a Run press to TailAttack: its flap timer runs on, or
+                // restarts at 18 when a flap was queued [obs v3.0.3 0x71015dca60; Ryujinx trace
+                // M3_form leaf_fly_spin])
+                if self.tail_flying && std::mem::take(&mut self.flap_again) {
+                    self.flap = 18;
+                }
+                self.tail_flying = false;
+                self.flap_again = false;
             }
             self.attack = match self.form {
                 Form::Raccoon => 18,
@@ -1791,16 +1799,19 @@ impl Player {
                     // the propeller launch replaces the spin jump
                 } else if self.broad_land > 0 {
                     // no actions until the long-jump landing ends
+                } else if spin_pressed && self.style == Style::W3 && self.cat_slide > 0 {
+                    // (the slide / roll takes no Spin either [obs: Ryujinx trace 3W_form
+                    // cat_slide_spin])
                 } else if spin_pressed
                     && self.style == Style::W3
                     && self.held.is_none()
                     && self.crouch
-                    && raw_dir != 0
                     && self.vx * self.facing as f32 >= 0.0
                 {
-                    // Spin crouching with a direction held (the crouch check 0x71015f5160): the
-                    // Cat's ClimbSlidingAttack (0x71015f6a10), the other forms' roll (state 13,
-                    // the same motion) [obs v3.0.3; Ryujinx traces 3W_form / 3W_items cat_slide]
+                    // Spin crouching (the crouch check 0x71015f5160; with no direction held too,
+                    // from a standstill [obs: 3W_form cat_slide_run]): the Cat's
+                    // ClimbSlidingAttack (0x71015f6a10), the other forms' roll (state 13, the
+                    // same motion) [obs v3.0.3; Ryujinx traces 3W_form / 3W_items cat_slide]
                     // (this frame's ground move is done: the slide's first frame was it; one
                     // more counts the stop)
                     self.cat_slide = CAT_SLIDE_FRAMES;
