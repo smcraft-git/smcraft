@@ -163,6 +163,16 @@ SMCraft is back in development (it was archived in October 2026).
   and walk, the wipe), the 100 Marios on the course card, the pause menu's style sound, course
   clear and the skip countdown, all from your SMM1 dump's own sound data (import SMM1 again:
   `mmk import-smm1`).
+- **The SMM1-look 100 Mario runs with SMM1's own timing**: the world map's demos play state by
+  state as in the game (New Game: the curtain, the banner, the Goombas carrying Peach, Mario
+  jumping out of the castle to the first course; Continue: his two jumps; after a clear: the
+  next course appears and he walks to it), each ending with Mario stepping into the course; A
+  skips to that. Future courses stay hidden on the map until Mario reaches them. SMM1's fades
+  between the screens (a quick fade from the menu and after a miss, blocks to the map, a circle
+  closing on Mario from the map to the course), the course card over the course for every
+  course (the 100 Marios on the first, the jump after a Continue or a miss), the skip after
+  1.9 s of holding, the clear screen's buttons once it has come in, and no early exits SMM1
+  doesn't have (the map, the game over screen).
 - **Koopalings in Koopa Clown Cars**: the car chases you while the Koopaling fires volleys of
   his magic (Lemmy his balls, Wendy her rings) from it; a stomp stops the car while he ducks in,
   then he spins in his shell for a while (stomps bounce off) before he comes out; the third stomp

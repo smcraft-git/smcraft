@@ -35,6 +35,7 @@ pub mod play;
 pub mod screens;
 pub mod search;
 pub mod smm1;
+pub mod smm1_fade;
 pub mod smm1_sound;
 pub mod sound;
 pub mod superworld;
@@ -43,6 +44,8 @@ pub mod swmap;
 pub(crate) mod testing;
 #[cfg(test)]
 mod tests_online;
+#[cfg(test)]
+mod tests_smm1_flow;
 #[cfg(test)]
 mod tests_smm1_sound;
 pub mod thumbs;
