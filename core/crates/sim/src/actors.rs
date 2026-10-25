@@ -14,6 +14,7 @@ mod bosses;
 mod bros;
 pub use bros::BroWing;
 mod budget;
+pub use bosses::BowserStyle;
 pub use budget::{Hold as BudgetHold, Reserve, ThrowBudget};
 mod ceiling;
 mod chute;
@@ -74,10 +75,21 @@ pub const PIRANHA_H: f32 = 24.0;
 const LAKITU_CHILDREN: u32 = 10;
 /// Spike Top crawl speed (px/frame; ×1.5 for the alternate form) [obs 0x7100778710 tail].
 const SPIKE_TOP_WALK: f32 = 0.5;
-/// Spike Top corner turn rate, 3°/frame (binary angle 0x2222222) [obs 0x7100779d40].
-const SPIKE_TOP_TURN: f32 = 3.0;
+/// Spike Top corner turn rate, 3°/frame as a binary angle (0x2222222), 1.5° (0x1111110) under
+/// the water-speed rule [obs v3.0.3 RotationWall / RotationCliff exes 0x7101278570 /
+/// 0x7101278940].
+const SPIKE_TOP_TURN: i32 = 0x0222_2222;
+const SPIKE_TOP_TURN_SLOW: i32 = 0x0111_1110;
+/// A quarter turn as a binary angle.
+const QUARTER_TURN: i32 = 0x4000_0000;
+/// Round an outside corner it moves 0.34 px/f (big 0.72) along its body angle + 5° (0x38e38e3)
+/// the way it crawls [obs v3.0.3 0x7101278940, 0x71023197f0].
+const SPIKE_TOP_CLIFF_SPEED: f32 = 0.34;
+const SPIKE_TOP_CLIFF_SPEED_BIG: f32 = 0.72;
+const SPIKE_TOP_CLIFF_LEAD: i32 = 0x038e_38e3;
 /// Spike Top righting rate in the air and on landing, 15°/frame (0xaaaaaaa), and onto a
-/// ceiling, 80°/frame (0x38e38e38) [obs 0x71007781d0, 0x71007784c0].
+/// ceiling, 80°/frame (0x38e38e38); halved under the water-speed rule [obs 0x71007781d0,
+/// 0x71007784c0; v3.0.3 InAir / Stick exes 0x7101276730 / 0x7101276a20].
 const SPIKE_TOP_STICK: f32 = 15.0;
 const SPIKE_TOP_STICK_CEILING: f32 = 80.0;
 
@@ -882,11 +894,14 @@ pub struct Actor {
     pub spring_reach_little: f32,
     pub spring_reach_mid: f32,
     pub spring_reach_big: f32,
+    pub spring_reach_third: f32,
     pub spring_reach_body: f32,
     /// Bowser under the water-speed rule: the reaches above are the water ones.
     pub spring_slow: bool,
     /// A thrower's reservation in the area's projectile budget (actors/budget.rs).
     pub budget: Reserve,
+    /// SMW / NSMBU Bowser's own states and falling-fire rain (actors/bosses/styles.rs).
+    pub koopa: BowserStyle,
 }
 
 impl Actor {
@@ -980,9 +995,11 @@ impl Actor {
             spring_reach_little: 0.0,
             spring_reach_mid: 0.0,
             spring_reach_big: 0.0,
+            spring_reach_third: 0.0,
             spring_reach_body: 0.0,
             spring_slow: false,
             budget: Reserve::default(),
+            koopa: BowserStyle::default(),
         }
     }
 
@@ -2419,7 +2436,7 @@ impl Actor {
             | Kind::LinkBomb
             | Kind::CannonShot
             | Kind::RedPowRing => self.step_pu(level),
-            Kind::BowserFire | Kind::Shuriken => self.step_boss_shot(),
+            Kind::BowserFire | Kind::Shuriken => self.step_boss_shot(level),
             Kind::ChainChomp { chained } => self.step_chomp(level, chained),
             Kind::LavaBubble => self.step_lava_bubble(),
             Kind::FishBone => self.step_fish_bone(level),
@@ -3218,8 +3235,8 @@ impl Actor {
     /// px/f (alternate 0.75) [obs 0x7100778710 tail, 0x710077a6d0]. Phases: 0 floor or air,
     /// 1 wall or ceiling, 2 inside corner (RotationWall: turns in place), 3 outside corner
     /// (RotationCliff: swings round the block corner), 4 Stick (rights itself in place). A turn
-    /// keeps its target angle in `pause`, its start angle in `speed`, σ in `hops` (0 = +1), its
-    /// frames in `timer` and the corner it swings round in (`home_x`, `home_y`).
+    /// keeps its target angle in `pause`, its start angle in `speed`, σ in `hops` (0 = +1) and
+    /// the binary angle it has left to turn in `timer`.
     fn step_spike_top(&mut self, level: &Level, surface: u8) {
         let h = if self.big { 16.0 } else { 8.0 };
         if self.age <= 1 {
@@ -3238,9 +3255,9 @@ impl Actor {
         }
         match self.phase {
             1 => self.spike_top_crawl(level, h),
-            2 => self.spike_top_turn(h, false),
-            3 => self.spike_top_turn(h, true),
-            4 => self.spike_top_stick(),
+            2 => self.spike_top_turn(level, h, false),
+            3 => self.spike_top_turn(level, h, true),
+            4 => self.spike_top_stick(level),
             _ => self.spike_top_floor(level, h),
         }
     }
@@ -3254,22 +3271,26 @@ impl Actor {
     }
 
     /// On the floor (Walk) or in the air (InAir 0x71007781d0: gravity −0.1875, cap −4, the
-    /// body righting itself at 15°/frame). Where the floor under its centre ends it wraps the
-    /// block's corner if solid terrain is 3.5 px behind the centre and 4 px under the feet,
-    /// else it reverses (8-frame lock) — so it turns back at the end of a semisolid; a block in
-    /// the way is climbed, anything else (the area edge) turns it [obs 0x7100778710].
+    /// body righting itself at 15°/frame). Where the floor under its feet from the centre to
+    /// the front ends (the Walk's ray along the feet, 0x710231c300: from under the centre 8 px
+    /// ahead, big 16 [obs v3.0.3 0x7101276c70]) it wraps the block's corner if solid terrain
+    /// is 3.5 px behind the centre and 4 px under the feet, else it reverses (8-frame lock) —
+    /// so it turns back at the end of a semisolid; a block in the way is climbed, anything
+    /// else (the area edge) turns it [obs 0x7100778710].
     fn spike_top_floor(&mut self, level: &Level, h: f32) {
         let speed = self.spike_top_speed();
         let s = self.dir as f32;
         if self.on_ground {
-            let under = level.cell_at(self.x, self.y - 0.5);
+            let under = match level.cell_at(self.x, self.y - 0.5) {
+                Cell::Empty => level.cell_at(self.x + s * (h - 0.01), self.y - 0.5),
+                c => c,
+            };
             let slope = level
                 .slope_at(self.x)
                 .is_some_and(|(top, _)| top >= self.y - 8.0);
             if under == Cell::Empty && !slope && self.turn_lock == 0 {
                 if level.cell_at(self.x - 3.5 * s, self.y - 4.0).is_solid() {
-                    let corner = ((self.x / TILE).round() * TILE, self.y);
-                    self.spike_top_begin(true, corner);
+                    self.spike_top_begin(true);
                     return;
                 }
                 self.turn();
@@ -3277,7 +3298,12 @@ impl Actor {
             self.vx = speed * self.dir as f32;
         } else {
             self.vx = self.vx.clamp(-speed, speed);
-            self.heading = turn_toward(self.heading, 0.0, SPIKE_TOP_STICK);
+            let rate = if self.slow_rule(level) {
+                SPIKE_TOP_STICK * 0.5
+            } else {
+                SPIKE_TOP_STICK
+            };
+            self.heading = turn_toward(self.heading, 0.0, rate);
         }
         let rising = self.vy > 0.0;
         let was_ground = self.on_ground;
@@ -3299,7 +3325,7 @@ impl Actor {
         if self.wall && self.on_ground && self.turn_lock == 0 {
             let s = self.dir as f32;
             if level.cell_at(self.x + s * (h + 1.0), self.y + h).is_solid() {
-                self.spike_top_begin(false, (0.0, 0.0));
+                self.spike_top_begin(false);
             } else {
                 self.turn();
             }
@@ -3307,8 +3333,9 @@ impl Actor {
     }
 
     /// On a wall or the ceiling: a block across the leading face is an inside corner; where
-    /// the surface ends under the centre it wraps the corner (solid 3.5 px behind the centre,
-    /// 4 px beyond the feet); with nothing to cling to it falls (InAir) [obs 0x7100778710].
+    /// the surface under its feet from the centre to the front ends it wraps the corner (solid
+    /// 3.5 px behind the centre, 4 px beyond the feet); with nothing to cling to it falls
+    /// (InAir) [obs 0x7100778710; v3.0.3 Walk 0x7101276c70].
     fn spike_top_crawl(&mut self, level: &Level, h: f32) {
         let solid = |x: f32, y: f32| level.cell_at(x, y).is_solid();
         let (u, f) = crawl_axes(self.pause);
@@ -3337,12 +3364,18 @@ impl Actor {
             }
             self.x = cx;
             self.y = cy - h;
-            self.spike_top_begin(false, (0.0, 0.0));
+            self.spike_top_begin(false);
             return;
         }
         self.x = cx;
         self.y = cy - h;
-        if solid(cx + (h + 0.5) * f.0, cy + (h + 0.5) * f.1) {
+        let surface = |k: f32| {
+            solid(
+                cx + k * t.0 + (h + 0.5) * f.0,
+                cy + k * t.1 + (h + 0.5) * f.1,
+            )
+        };
+        if surface(0.0) || surface(h - 0.01) {
             return;
         }
         let (bx, by) = (
@@ -3350,13 +3383,7 @@ impl Actor {
             cy - 3.5 * t.1 + (h + 4.0) * f.1,
         );
         if solid(bx, by) {
-            let round = |v: f32| (v / TILE).round() * TILE;
-            let (sx, sy) = (cx + h * f.0, cy + h * f.1);
-            let corner = (
-                if t.0 != 0.0 { round(cx) } else { round(sx) },
-                if t.1 != 0.0 { round(cy) } else { round(sy) },
-            );
-            self.spike_top_begin(true, corner);
+            self.spike_top_begin(true);
             return;
         }
         // nothing to cling to: it falls as a floor walker (InAir 0x7100778140 resets the
@@ -3368,61 +3395,126 @@ impl Actor {
         self.vy = 0.0;
     }
 
-    /// Start a corner turn: inside corners turn the body +90°·σ, outside corners −90°·σ.
-    fn spike_top_begin(&mut self, cliff: bool, corner: (f32, f32)) {
+    /// Start a corner turn: inside corners turn the body +90°·σ, outside corners −90°·σ. The
+    /// enters (0x71012784d0 / 0x7101278720 [obs v3.0.3]) stop it where it is: round an
+    /// outside corner its centre starts just past the edge.
+    fn spike_top_begin(&mut self, cliff: bool) {
         let s = self.dir;
         let quarter = if cliff { -90 * s } else { 90 * s };
         self.speed = self.pause as f32;
         self.pause = (self.pause + quarter).rem_euclid(360);
         self.hops = u8::from(s < 0);
-        self.timer = 0;
+        self.timer = QUARTER_TURN;
         self.phase = if cliff { 3 } else { 2 };
-        (self.home_x, self.home_y) = corner;
         self.vx = 0.0;
         self.vy = 0.0;
         self.on_ground = false;
     }
 
-    /// RotationWall / RotationCliff: the body turns 3°/frame, a quarter turn in 30 frames
-    /// [obs 0x7100779d40, 0x710077a120]. Round an outside corner the centre swings on a
-    /// quarter circle of radius h round the corner, from over the old surface to beside the
-    /// new one [inf: the binary moves 0.34 px/f (big 0.72) along θ ± 5° with its contact
-    /// probes holding it to the corner; the circle is the grid equivalent].
-    fn spike_top_turn(&mut self, h: f32, cliff: bool) {
-        let s = if self.hops == 0 { 1 } else { -1 };
-        self.timer += 1;
-        let a = (self.timer as f32 * SPIKE_TOP_TURN).min(90.0);
-        let sign = if cliff { -s } else { s } as f32;
-        self.heading = (self.speed + sign * a).rem_euclid(360.0);
+    /// RotationWall / RotationCliff [obs v3.0.3 exes 0x7101278570 / 0x7101278940]: the body
+    /// angle steps 3° a frame (1.5° under the water-speed rule) toward the new quarter and is
+    /// done once what is left is within a step — 31 frames (61 slow) — then it walks on. An
+    /// inside corner turns in place. Round an outside corner it moves 0.34 px/f (big 0.72)
+    /// along θ + 5°·σ, θ taken before the step, with terrain off (enter 0x7101278720: +0x524
+    /// bit 4) and the integrator halving the move under the rule (0x7101290e30) — a quarter
+    /// circle of radius ≈ 6.5 px (13.75), the motion 5° outside the body's tangent. Each frame
+    /// the contact probe (0x7101279310, cliff mode) needs ground at the feet + R(θ)·(σ·(6 −
+    /// 10·q), −4) (big σ·(8 − 12·q); q = the quarter turn left; offsets 0x7101279020 /
+    /// 0x7101279030 → 0x71023ce47c / 0x71023ce46c), else it drops (InAir, its speed zeroed).
+    /// The turn ends with the body 0.5–0.8 px into the new face, the next frame's BG pushing
+    /// it out [inf: modelled as a snap of the feet onto the face].
+    fn spike_top_turn(&mut self, level: &Level, h: f32, cliff: bool) {
+        let s: i32 = if self.hops == 0 { 1 } else { -1 };
+        let sf = s as f32;
+        // +1 = the body angle rising (counter-clockwise)
+        let sign = if cliff { -s } else { s };
+        let slow = self.slow_rule(level);
+        let rate = if slow {
+            SPIKE_TOP_TURN_SLOW
+        } else {
+            SPIKE_TOP_TURN
+        };
+        let start = (self.speed as i32 / 90).wrapping_mul(QUARTER_TURN) as u32;
+        let angle = |left: i32| start.wrapping_add(sign.wrapping_mul(QUARTER_TURN - left) as u32);
+        let left = self.timer;
+        let theta = angle(left);
         self.vx = 0.0;
         self.vy = 0.0;
         if cliff {
-            let (u, f) = crawl_axes(self.speed as i32);
-            let t = (u.0 * s as f32, u.1 * s as f32);
-            let (sn, cs) = if a >= 90.0 {
-                (1.0, 0.0)
+            let v = if self.big {
+                SPIKE_TOP_CLIFF_SPEED_BIG
             } else {
-                a.to_radians().dsin_cos()
+                SPIKE_TOP_CLIFF_SPEED
             };
-            self.x = self.home_x + h * (t.0 * sn - f.0 * cs);
-            self.y = self.home_y + h * (t.1 * sn - f.1 * cs) - h;
+            let lead = theta.wrapping_add(s.wrapping_mul(SPIKE_TOP_CLIFF_LEAD) as u32);
+            let (sn, cs) = crate::fmath::table_sin_cos(lead);
+            self.vx = cs * v * sf;
+            self.vy = sn * v * sf;
+            // the probe: feet + R(θ)·(a, b)
+            let (sn, cs) = crate::fmath::table_sin_cos(theta);
+            let (ox, ease) = if self.big { (8.0, 12.0) } else { (6.0, 10.0) };
+            let q = left as f32 * f32::from_bits(0x3000_0000) * 2.0;
+            let (a, b) = (ox * sf - ease * sf * q, -4.0);
+            let (fx, fy) = (self.x + h * sn, self.y + h - h * cs);
+            if !level
+                .cell_at(fx + (cs * a - sn * b), fy + (sn * a + cs * b))
+                .is_solid()
+            {
+                // InAir (its enter 0x71012766a0 aims it back at the floor quarter)
+                self.pause = 0;
+                self.phase = 0;
+                self.dir = s;
+                self.on_ground = false;
+                self.vx = 0.0;
+                self.vy = 0.0;
+                return;
+            }
         }
-        if a >= 90.0 {
+        let done = left <= rate;
+        self.timer = if done { 0 } else { left - rate };
+        self.heading = (angle(self.timer) as f64 * (360.0 / 4_294_967_296.0)) as f32;
+        if cliff {
+            let m = if slow { 0.5 } else { 1.0 };
+            self.x += self.vx * m;
+            self.y += self.vy * m;
+        }
+        self.vx = 0.0;
+        self.vy = 0.0;
+        if done {
             self.dir = s;
             self.spike_top_settle();
+            if cliff {
+                // the BG's push-out onto the new face
+                let (_, f) = crawl_axes(self.pause);
+                let snap = |v: f32| (v / TILE).round() * TILE - v;
+                if f.0 != 0.0 {
+                    let d = snap(self.x + h * f.0);
+                    if d.abs() < 2.0 {
+                        self.x += d;
+                    }
+                } else {
+                    let d = snap(self.y + h + h * f.1);
+                    if d.abs() < 2.0 {
+                        self.y += d;
+                    }
+                }
+            }
         }
     }
 
     /// Stick (0x71007784c0): still, it rights itself toward `pause` at 15°/frame (80°/frame
     /// onto a ceiling), then walks on.
-    fn spike_top_stick(&mut self) {
+    fn spike_top_stick(&mut self, level: &Level) {
         self.vx = 0.0;
         self.vy = 0.0;
-        let rate = if self.pause == 180 {
+        let mut rate = if self.pause == 180 {
             SPIKE_TOP_STICK_CEILING
         } else {
             SPIKE_TOP_STICK
         };
+        if self.slow_rule(level) {
+            rate *= 0.5;
+        }
         self.heading = turn_toward(self.heading, self.pause as f32, rate);
         if self.heading == self.pause as f32 {
             self.spike_top_settle();
@@ -5317,7 +5409,7 @@ mod tests {
     }
 
     #[test]
-    fn spike_top_corner_takes_30_frames_and_climbs_walls() {
+    fn spike_top_corner_takes_31_frames_and_climbs_walls() {
         let mut level = Level::flat(60);
         for y in 2..8 {
             level.set_solid(30, y);
@@ -5337,9 +5429,102 @@ mod tests {
                 break;
             }
         }
-        assert_eq!(turning, 30); // the corner frame, then 29 turning; the 30th settles
+        assert_eq!(turning, 31); // the corner frame, then 30 turning; the 31st settles
         assert!(climbed);
         assert!(a.x + 8.0 <= 30.0 * TILE + 0.01);
+    }
+
+    /// Off a ledge (tiles 17..=20 × 3..=6: top 112, right face 336), crawling right.
+    fn spike_top_at_a_ledge(big: bool) -> (Level, Actor) {
+        let mut level = Level::flat(60);
+        for x in 17..=20 {
+            for y in 3..=6 {
+                level.set_solid(x, y);
+            }
+        }
+        let mut a = Actor::new(Kind::SpikeTop { surface: 3 }, 316.0, 112.0);
+        a.on_ground = true;
+        a.dir = 1;
+        a.big = big;
+        (level, a)
+    }
+
+    #[test]
+    fn spike_top_rounds_a_ledge_on_the_binarys_quarter_circle() {
+        for (big, h, drop) in [(false, 8.0, 6.056), (true, 16.0, 12.825)] {
+            let (level, mut a) = spike_top_at_a_ledge(big);
+            while a.phase != 3 {
+                a.step(&level, 0.0);
+            }
+            // the centre just past the edge, where the walker left it
+            let x0 = a.x;
+            assert!((336.0..336.5).contains(&x0), "{x0}");
+            let mut frames = 0;
+            let mut prev = (a.x, a.y);
+            while a.phase == 3 {
+                a.step(&level, 0.0);
+                frames += 1;
+                // 0.34 px/f (big 0.72) a frame
+                let step = (a.x - prev.0).dhypot(a.y - prev.1);
+                if a.phase == 3 {
+                    let v = if big { 0.72 } else { 0.34 };
+                    assert!((step - v).abs() < 1e-3, "{step}");
+                }
+                prev = (a.x, a.y);
+            }
+            assert_eq!(frames, 31);
+            assert_eq!((a.phase, a.heading), (1, 270.0));
+            // flush with the face, 6.06 px (big 12.8) below where it started, not h
+            assert_eq!(a.x, 336.0 + h);
+            assert!((a.y - (112.0 - drop)).abs() < 0.01, "{}", a.y);
+            // and it walks down the face
+            for _ in 0..20 {
+                a.step(&level, 0.0);
+            }
+            assert_eq!(a.phase, 1);
+            assert!(a.y < 112.0 - drop - 5.0);
+        }
+    }
+
+    #[test]
+    fn spike_top_drops_when_the_corner_goes_mid_turn() {
+        let (mut level, mut a) = spike_top_at_a_ledge(false);
+        while a.phase != 3 {
+            a.step(&level, 0.0);
+        }
+        for _ in 0..10 {
+            a.step(&level, 0.0);
+        }
+        assert_eq!(a.phase, 3);
+        // the probe finds no ground under its feet: InAir
+        for x in 17..=20 {
+            level.set(x, 6, Cell::Empty);
+        }
+        a.step(&level, 0.0);
+        assert_eq!(a.phase, 0);
+        assert!(!a.on_ground);
+        let y = a.y;
+        for _ in 0..5 {
+            a.step(&level, 0.0);
+        }
+        assert!(a.y < y);
+    }
+
+    #[test]
+    fn spike_top_turns_at_half_rate_and_speed_in_water() {
+        let (mut level, mut a) = spike_top_at_a_ledge(false);
+        level.theme = 4;
+        while a.phase != 3 {
+            a.step(&level, 0.0);
+        }
+        let mut frames = 0;
+        while a.phase == 3 {
+            a.step(&level, 0.0);
+            frames += 1;
+        }
+        assert_eq!(frames, 61);
+        assert_eq!((a.phase, a.x), (1, 344.0));
+        assert!((a.y - (112.0 - 5.98)).abs() < 0.01, "{}", a.y);
     }
 
     #[test]

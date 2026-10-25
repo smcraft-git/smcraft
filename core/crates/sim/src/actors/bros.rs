@@ -285,8 +285,7 @@ impl Actor {
             return;
         }
         if self.vy <= 0.0 {
-            let slow =
-                self.wet() || level.theme == 4 || (level.night && matches!(level.theme, 3 | 8));
+            let slow = self.slow_rule(level);
             self.vy = if slow { HOP_VY_SLOW } else { HOP_VY };
         }
         let mut speed = HOP_VX;

@@ -15,6 +15,9 @@ use crate::fmath::DetMath;
 use crate::level::{Cell, Level, TILE};
 use crate::world::{VIEW_H, VIEW_W};
 
+mod styles;
+pub use styles::BowserStyle;
+
 /// The attacks the engine can deliver to a boss.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BossAttack {
@@ -106,6 +109,16 @@ mod bw {
     pub const FLY: u8 = 10;
     pub const HIT_BLOCK: u8 = 11;
     pub const CLOWN: u8 = 12;
+    /// SMW's and NSMBU's own states (actors/bosses/styles.rs).
+    pub const BEFORE_JUMP: u8 = 13;
+    pub const JUMP: u8 = 14;
+    pub const FIRE: u8 = 15;
+    pub const JUMP_FIRE: u8 = 16;
+    pub const FIRE_FALLING: u8 = 17;
+    pub const BEFORE_BIG_JUMP: u8 = 18;
+    pub const SPREAD_FIRE: u8 = 19;
+    pub const WAIT: u8 = 20;
+    pub const IN_AIR: u8 = 21;
 }
 
 /// Bowser's `chain` byte 3 flags.
@@ -231,10 +244,17 @@ const JR_SHELL_TOP: f32 = 1.6;
 const JR_SHELL_ACCEL: f32 = 0.1;
 const JR_SHELL_JERK: f32 = 0.02;
 const JR_SHELL_TURN: u8 = 10;
-/// ShellSlide sub-phases (+0x90): 1 settle and aim, 2 slide, 4 brake and turn.
+/// ShellSlide sub-phases (+0x90): 1 settle and aim, 2 slide, 3 the obstacle hop, 4 brake and
+/// turn.
 const SL_AIM: u8 = 1;
 const SL_SLIDE: u8 = 2;
+const SL_HOP: u8 = 3;
 const SL_BRAKE: u8 = 4;
+/// ShellSlide's hop over an obstacle: vy 3.0 at 1.5 px/f, gravity −0.1875 [obs v3.0.3
+/// 0x710108aa50]; the obstacle analysis looks h = 16 px over his feet + 8 (32 under the
+/// water-speed rule, 0x7102318d6c).
+const JR_SHELL_HOP_VY: f32 = 3.0;
+const JR_SHELL_HOP_VX: f32 = 1.5;
 /// ShellWakeup (0x7100617170): hops out at vy 3.0; at vy ≤ 0.4 the Basic action resumes.
 const JR_WAKE_HOP: f32 = 3.0;
 const JR_WAKE_END: f32 = 0.4;
@@ -694,7 +714,10 @@ impl Actor {
     /// Flames and shuriken: straight flight through terrain. A Bowser flame with a lane
     /// (`home_y`) climbs or dives at half its forward speed until it is within half a step of
     /// the lane, then flies level (BulletKoopaFire ThreeWayFire 0x71003b2380).
-    pub(super) fn step_boss_shot(&mut self) {
+    pub(super) fn step_boss_shot(&mut self, level: &Level) {
+        if self.kind == Kind::BowserFire && self.koopa_flame_step(level) {
+            return;
+        }
         if self.kind == Kind::Shuriken {
             // BulletPunpunShuriken Move (0x71003b9490): while the target (home) is still ahead
             // it turns toward it by at most 2° a frame, staying within 45° of level; speed 1.0
@@ -841,6 +864,9 @@ impl Actor {
     /// The walk-speed setter (0x71006b1d20): 0.3 px/f along `heading`; chase mode 0.7 (SMB1)
     /// / 0.9; off-screen mode 0.
     fn bowser_walk_speed(&mut self, st: usize) {
+        if st >= 2 {
+            return self.koopa_walk_speed(st);
+        }
         self.vx = match self.bowser_mode() {
             2 => BOWSER_CHASE[(st != 0) as usize] * self.heading,
             3 => 0.0,
@@ -870,6 +896,14 @@ impl Actor {
     }
 
     fn bowser_enter(&mut self, state: u8, st: usize) {
+        if st >= 2
+            && matches!(
+                state,
+                bw::WALK | bw::LAND_ON | bw::LITTLE_JUMP | bw::MIDDLE_JUMP | bw::BIG_JUMP
+            )
+        {
+            return self.koopa_enter(state, st, false);
+        }
         let m1 = st == 0;
         self.phase = state;
         match state {
@@ -1021,7 +1055,12 @@ impl Actor {
         }
         let state = self.phase;
         self.spring_over = self.bowser_height_search(level);
-        self.bowser_move(level, st);
+        if st < 2 || !self.koopa_move(level, st) {
+            self.bowser_move(level, st);
+        }
+        if st == 2 {
+            self.koopa_rain();
+        }
         self.bowser_record_step();
         // the fire helper runs in Fall, LandOn, Walk, LittleJump, MiddleJump and a Fly that
         // came from a middle jump (0x71006b1de0)
@@ -1315,17 +1354,27 @@ impl Actor {
     /// little hop. No big jump with a Trampoline over him within its reach
     /// (`bowser_height_search`) [obs v3.0.3 0x7101153750]; in SMB1 / SMB3 no middle jump
     /// either with one within the middle jump's reach (the decision 0x7101152520's slot 0x368,
-    /// 0x710115ab40) [obs v3.0.3]. SMW and NSMBU have their own branch slots: SMW's middle
-    /// branch (0x7101157dd0) picks MiddleJump, LittleJump, MiddleJump (with +0xc1) or Fire at
-    /// random (Fire with such a Trampoline), its big branch (0x7101157c70) BigJump or
-    /// FireFalling; NSMBU's (0x7101152ab0) BeforeJump, Fire or JumpFire (Fire with a Trampoline),
-    /// its big one (0x7101152970) BeforeBigJump or SpreadFire [obs v3.0.3; not ported: the
-    /// engine has none of those states and runs the SMB1 / SMB3 decision for both].
+    /// 0x710115ab40) [obs v3.0.3]. SMW and NSMBU have their own branch slots (SMW 0x7101157dd0
+    /// / 0x7101157c70, NSMBU 0x7101152ab0 / 0x7101152970) and states: actors/bosses/styles.rs.
     fn bowser_counters(&mut self, st: usize) {
         let j = self.byte(0).saturating_sub(1);
         let b = self.byte(1).saturating_sub(1);
         self.set_byte(0, j);
         self.set_byte(1, b);
+        if st >= 2 {
+            // SMW / NSMBU: the big jump is always allowed (slot 0x360 0x7101152aa0); their
+            // own branches (actors/bosses/styles.rs)
+            if b == 0 {
+                self.bowser_reset_big(st);
+                self.koopa_big_branch(st);
+            } else if j == 0 {
+                self.bowser_reset_jump(st);
+                self.koopa_middle_branch(st);
+            } else {
+                self.bowser_walk(st);
+            }
+            return;
+        }
         // (the big jump's allowed test 0x7101153750: no Trampoline over him within its reach)
         let big_ok = st != 0
             && !self.bowser_flag(bwf::BREATHING)
@@ -1348,11 +1397,13 @@ impl Actor {
         }
     }
 
+    /// The decision's walk (slot 0x308): SMB1 Walk, SMB3 LittleJump (0x710115a810), SMW and
+    /// NSMBU Walk (0x71011524d0) [obs v3.0.3].
     fn bowser_walk(&mut self, st: usize) {
-        if st == 0 {
-            self.bowser_enter(bw::WALK, st);
-        } else {
+        if st == 1 {
             self.bowser_enter(bw::LITTLE_JUMP, st);
+        } else {
+            self.bowser_enter(bw::WALK, st);
         }
     }
 
@@ -1373,6 +1424,11 @@ impl Actor {
             }
         }
         self.bowser_reset_jump(st);
+        if st >= 2 {
+            // SMW / NSMBU: their middle branch (the off-screen decision 0x7101152800 runs
+            // slot 0x368)
+            return self.koopa_middle_branch(st);
+        }
         self.bowser_enter(bw::MIDDLE_JUMP, st);
     }
 
@@ -1449,6 +1505,10 @@ impl Actor {
                 .spring_over
                 .is_some_and(|h| h <= self.bowser_reach(level, kind == 2));
         let wall = self.touching_wall(level, 1);
+        if wall && can && st >= 2 {
+            self.koopa_chase_jump(st, kind == 2, None);
+            return true;
+        }
         if wall && can {
             self.bowser_enter(
                 if kind == 2 {
@@ -1462,6 +1522,13 @@ impl Actor {
         }
         let (gap, landing) = self.bowser_gap_ahead(level);
         if gap {
+            if can && !wall && st >= 2 {
+                // SMW / NSMBU: the big jump at the landing speed (slot 0x310)
+                self.bowser_reset_jump(st);
+                self.bowser_reset_big(st);
+                self.koopa_chase_jump(st, true, Some(landing));
+                return true;
+            }
             if can && !wall {
                 self.bowser_reset_jump(st);
                 self.bowser_reset_big(st);
@@ -1597,7 +1664,7 @@ impl Actor {
             }
             h + top + 16.0
         };
-        let slow = self.wet() || level.theme == 4 || (level.night && matches!(level.theme, 3 | 8));
+        let slow = self.slow_rule(level);
         let reach = |v: f32, g: f32| if slow { apex_wet(v, g) } else { apex(v, g) };
         let wings = self.wings;
         self.spring_slow = slow;
@@ -1605,6 +1672,8 @@ impl Actor {
         self.spring_reach_little = reach(1.1, -0.07);
         self.spring_reach_mid = reach(if wings { 3.4 } else { 3.0 }, BOWSER_GRAVITY);
         self.spring_reach_big = reach(if wings { 6.4 } else { 5.9 }, -0.1875);
+        // the third (+0xac / +0xb0), NSMBU's JumpFire: 3.2 (winged 3.4) at −0.1
+        self.spring_reach_third = reach(if wings { 3.4 } else { 3.2 }, BOWSER_GRAVITY);
         self.spring_reach_body = top + 16.0;
         if self.overhead_units.is_empty() {
             return None;
@@ -1693,7 +1762,12 @@ impl Actor {
     /// jump's time, |d| / 2 · |g| / vy, at most 1.8 (in water × 0.6); with no landing found
     /// 1.8.
     fn bowser_gap_speed(&self, level: &Level, from: (f32, f32)) -> f32 {
-        const MAX: f32 = 1.8;
+        self.bowser_gap_speed_with(level, from, 1.8, BOWSER_GRAVITY)
+    }
+
+    /// The landing speed for a jump of gravity `g` (vy already set), at most `max` (the SMW /
+    /// NSMBU big jump's 2.6, 0x7102318bd4).
+    fn bowser_gap_speed_with(&self, level: &Level, from: (f32, f32), max: f32, g: f32) -> f32 {
         let mut x = ((from.0 - 4.0) * (1.0 / 16.0)).floor() * 16.0 + 40.0;
         let top = ((from.1 + 4.0) * (1.0 / 16.0)).floor() * 16.0 + 2.0;
         let mut land = None;
@@ -1705,11 +1779,11 @@ impl Actor {
             x += 32.0;
         }
         let Some(lx) = land.filter(|&lx| lx.abs() > f32::EPSILON) else {
-            return MAX;
+            return max;
         };
         let d = lx - self.x;
         let half = (d * 0.5).abs();
-        let mut v = (half * BOWSER_GRAVITY / self.vy).abs().min(MAX);
+        let mut v = (half * g / self.vy).abs().min(max);
         if self.wet() {
             v *= 0.6;
         }
@@ -2614,11 +2688,13 @@ impl Actor {
             || (self.vx > 0.0 && level.right - 16.0 <= self.x + w)
     }
 
-    /// ShellSlide (0x7100614b10). `pause` is the slide counter, `speed` the slide speed,
-    /// `heading` its acceleration, chain byte 1 the turn cooldown, `jr_sub` the sub-phase.
-    /// [?: the obstacle analysis when he meets a wall on the ground — hop a step at vy 3.0 /
-    /// 1.5 px/f, or wake up at a tall wall — is not modelled; he bounces back as the game does
-    /// for the walls it does not jump]
+    /// ShellSlide (0x7100614b10; v3.0.3 exe 0x710108aa50). `pause` is the slide counter,
+    /// `speed` the slide speed, `heading` its acceleration, chain byte 1 the turn cooldown,
+    /// `jr_sub` the sub-phase, `home_y` the x a hop left from. On the floor he looks under his
+    /// front edge each frame (`jr_shell_ledge_wakes`); a wall met on the floor is analysed the
+    /// next frame (`jr_shell_obstacle`): he hops it or comes out of the shell. In the air a
+    /// wall bounces him back at ×−0.2 (0x71023191a0). [?: with the wall-contact bit 16 set the
+    /// game only reverses the speed; what sets it is not known]
     fn jr_shell_slide(&mut self, level: &Level) {
         if self.pause > 0 {
             self.pause -= 1;
@@ -2631,6 +2707,21 @@ impl Actor {
                     self.dir = toward;
                     self.speed = 0.0;
                     self.heading = 0.0;
+                    self.jr_set_sub(SL_SLIDE);
+                }
+                return;
+            }
+            SL_HOP => {
+                // sub 3: lands, then slides on at 1.5; a hop that did not move him ends the
+                // slide counter and the turn cooldown. The speed (+0x274) outlasts a wall
+                // touch: the BG only stops the move.
+                self.vx = self.speed * self.dir as f32;
+                self.fall_capped(level, G, CAP);
+                if self.on_ground {
+                    if (self.x - self.home_y).abs() <= 1e-5 {
+                        self.pause = 0;
+                        self.set_byte(1, 0);
+                    }
                     self.jr_set_sub(SL_SLIDE);
                 }
                 return;
@@ -2655,6 +2746,15 @@ impl Actor {
             }
             _ => {}
         }
+        // chain byte 0: he met a wall on the floor last frame (+0x658 bit 14)
+        let wall = self.byte(0) != 0;
+        self.set_byte(0, 0);
+        if self.on_ground && self.jr_shell_ledge_wakes(level) {
+            self.vx = 0.0;
+            self.speed = 0.0;
+            self.jr_enter_wakeup();
+            return;
+        }
         if self.dir != toward && self.speed.abs() > 1e-5 {
             self.jr_set_sub(SL_BRAKE);
         }
@@ -2666,6 +2766,22 @@ impl Actor {
             self.jr_enter_wakeup();
             return;
         }
+        if wall && self.on_ground && self.dir == toward && self.speed.abs() > 1e-5 {
+            if self.jr_shell_obstacle(level) {
+                self.vy = JR_SHELL_HOP_VY;
+                self.speed = JR_SHELL_HOP_VX;
+                self.vx = self.speed * self.dir as f32;
+                self.home_y = self.x;
+                self.on_ground = false;
+                self.jr_set_sub(SL_HOP);
+                self.fall_capped(level, G, CAP);
+            } else {
+                self.vx = 0.0;
+                self.speed = 0.0;
+                self.jr_enter_wakeup();
+            }
+            return;
+        }
         if self.jr_at_area_edge(level) {
             self.jr_set_sub(SL_BRAKE);
         }
@@ -2674,11 +2790,107 @@ impl Actor {
         self.vx = self.speed * self.dir as f32;
         let ground = self.on_ground;
         self.fall_capped(level, G, CAP);
-        if self.wall {
-            // "koura_hit": back off the wall (in the air ×−0.2)
-            self.speed *= if ground { -1.0 } else { -0.2 };
+        if self.wall && ground && self.on_ground {
+            self.set_byte(0, 1);
+        } else if self.wall && !ground {
+            // "koura_hit": back off the wall
+            self.speed *= -0.2;
             self.vx = self.speed * self.dir as f32;
         }
+    }
+
+    /// ShellSlide's floor look under his front edge (x + 6·facing, big 12), each frame on the
+    /// floor [obs v3.0.3 0x710108aa50 sub 2 head, LAB_710108b184]: from 6 px under his feet
+    /// it scans down in 8-px steps to 142 px for a floor (one under the surface of lava, the
+    /// area's liquid type 2, does not count). Floor that deep: he slides off. Floor within 6
+    /// px, or none: if the floor is within 4 px of his feet at the front edge he slides on,
+    /// else he looks 16 px further: solid at his feet + 4 there wakes him, floor within 4 px
+    /// there lets him slide on, anything else (a drop, a pit, lava) wakes him (ShellWakeup).
+    /// [inf: a slope's surface counts as floor for every ray (`jr_floor`); the game tilts the
+    /// ±4 ray by the floor's angle]
+    fn jr_shell_ledge_wakes(&self, level: &Level) -> bool {
+        let f = self.dir as f32;
+        let front = self.x + 6.0 * self.scale() * f;
+        let lava = level.liquid.is_some_and(|l| l.kind == 2);
+        let surface = self.w3.liquid.map_or(f32::NEG_INFINITY, |(y, _)| y);
+        let mut k = -0.5_f32;
+        while k >= -8.0 {
+            let p = self.y + 16.0 * k + 2.0;
+            if jr_floor(level, front, self.y, p, floor_in).is_some() {
+                break;
+            }
+            if jr_floor(level, front, p, p - 16.0, ground_ray)
+                .is_some_and(|hit| !(lava && hit < surface))
+            {
+                return false;
+            }
+            k -= 0.5;
+        }
+        if jr_floor(level, front, self.y + 4.0, self.y - 4.0, ground_ray).is_some() {
+            return false;
+        }
+        let ahead = front + 16.0 * f;
+        if level.cell_at(ahead, self.y + 4.0).is_solid() {
+            return true;
+        }
+        !jr_floor(level, ahead, self.y + 4.0, self.y - 4.0, ground_ray)
+            .is_some_and(|hit| (hit - self.y).abs() < 16.0)
+    }
+
+    /// ShellSlide meeting a wall on the floor, the frame after (the wall bit +0x658 bit 14
+    /// with ground contact): true = hop it, false = come out of the shell (ShellWakeup, speed
+    /// 0) [obs v3.0.3 0x710108aa50 sub 2]. From his front edge, h = 16 (32 under the
+    /// water-speed rule): anything solid up the face from his feet + 8 to + 8 + h, or across
+    /// the 16 px ahead at that height, wakes him. A further wall face 16..16 + 2h ahead at
+    /// that height with floor within h under it 8 px short of it: the hop. Otherwise the test
+    /// arc (vy 3.0, his gravity and fall cap; the water set, halved, under the rule): for a
+    /// landing height of 16 px (32 under the rule) down to −128 in 8-px steps, the frames
+    /// until the arc comes back down to it, at 1.5 px/f (halved under the rule; under it the
+    /// frames to rise 16 px don't count when solid stands at his feet + 24 within 8 px of the
+    /// front) — solid at that spot 2 px over the height wakes him, floor within 16 px under
+    /// that spot is the hop; no height found wakes him.
+    fn jr_shell_obstacle(&self, level: &Level) -> bool {
+        let f = self.dir as f32;
+        // just off the face he stands against [inf: the engine's body is 8 px a side (big 16)
+        // where the game's background half-width is 6 (12); the rays start at the face, as
+        // the game's do]
+        let front = self.x + (self.half_w() - 0.01) * f;
+        let slow = self.slow_rule(level);
+        let h = if slow { 32.0 } else { 16.0 };
+        let solid = |x: f32, y: f32| level.cell_at(x, y).is_solid();
+        let top = self.y + 8.0 + h;
+        if floor_in(level, front, top, self.y + 8.0).is_some()
+            || wall_in(level, top, front, front + 16.0 * f).is_some()
+        {
+            return false;
+        }
+        if wall_in(level, top, front + 16.0 * f, front + (16.0 + 2.0 * h) * f)
+            .is_some_and(|face| jr_floor(level, face - 8.0 * f, top, top - h, ground_ray).is_some())
+        {
+            return true;
+        }
+        let skip = if slow && wall_in(level, self.y + 24.0, front, front + 8.0 * f).is_some() {
+            jr_arc_frames(slow, |sum, _| sum >= 16.0) - 1
+        } else {
+            0
+        };
+        let mut k: f32 = if slow { 2.0 } else { 1.0 };
+        while k >= -8.0 {
+            let n = jr_arc_frames(slow, |sum, v| v < 0.0 && sum <= k * 16.0);
+            let mut dx = f * 1.5 * (n - skip) as f32;
+            if slow {
+                dx *= 0.5;
+            }
+            let (x, y) = (front + dx, self.y + 16.0 * k + 2.0);
+            if solid(x, y) {
+                return false;
+            }
+            if jr_floor(level, x, y, y - 16.0, ground_ray).is_some() {
+                return true;
+            }
+            k -= 0.5;
+        }
+        false
     }
 
     /// Both foot probes (x ∓ 4, big 8) find the floor within 10 px below.
@@ -3123,6 +3335,102 @@ fn sweep(level: &Level, a: (f32, f32), b: (f32, f32)) -> Option<(f32, f32, bool)
     None
 }
 
+/// The frames of ShellSlide's test arc (vy 3.0, gravity −0.1875 to the fall cap; under the
+/// water-speed rule the water set by |vy| — −0.01875 under 0.3, −0.028125 under 0.7, −0.0375
+/// under 1.2, else −0.075 — to half the cap, each step halved) before the one where `done`
+/// (height so far, vy) holds [obs v3.0.3 0x710108aa50].
+fn jr_arc_frames(slow: bool, done: impl Fn(f32, f32) -> bool) -> i32 {
+    let (mut v, mut sum, mut n) = (JR_SHELL_HOP_VY, 0.0_f32, 0);
+    loop {
+        let step = if slow {
+            let a = v.abs();
+            let g = if a < 0.3 {
+                -0.01875
+            } else if a < 0.7 {
+                -0.028125
+            } else if a < 1.2 {
+                -0.0375
+            } else {
+                -0.075
+            };
+            v = (v + g).max(CAP * 0.5);
+            v * 0.5
+        } else {
+            v = (v + G).max(CAP);
+            v
+        };
+        sum += step;
+        if done(sum, v) {
+            return n;
+        }
+        n += 1;
+        if n > 10_000 {
+            return n;
+        }
+    }
+}
+
+/// A downward ray for ShellSlide's looks: `ray` over the cells, or a slope's surface in the span
+/// when that is higher.
+fn jr_floor(
+    level: &Level,
+    x: f32,
+    y_hi: f32,
+    y_lo: f32,
+    ray: fn(&Level, f32, f32, f32) -> Option<f32>,
+) -> Option<f32> {
+    let slope = level
+        .slope_at(x)
+        .map(|(y, _)| y)
+        .filter(|&y| (y_lo..=y_hi).contains(&y));
+    match (ray(level, x, y_hi, y_lo), slope) {
+        (Some(a), Some(b)) => Some(a.max(b)),
+        (a, b) => a.or(b),
+    }
+}
+
+/// A ray at column `x` between `y_hi` and `y_lo` meeting solid terrain from any side: the top
+/// of the first solid going down (`y_hi` itself when it starts inside). Rays that look for
+/// floors only (the game's flag 8) are `ground_ray`, which also stops on one-way tops.
+fn floor_in(level: &Level, x: f32, y_hi: f32, y_lo: f32) -> Option<f32> {
+    let mut y = y_hi;
+    loop {
+        if level.cell_at(x, y).is_solid() {
+            return Some(y_hi.min(((y / TILE).floor() + 1.0) * TILE));
+        }
+        let next = (y / TILE).floor() * TILE - 0.001;
+        if next < y_lo {
+            return None;
+        }
+        y = next;
+    }
+}
+
+/// A sideways ray at height `y` from `x0` toward `x1`: the face of the first solid it meets.
+fn wall_in(level: &Level, y: f32, x0: f32, x1: f32) -> Option<f32> {
+    let d = if x1 >= x0 { 1.0 } else { -1.0 };
+    let mut x = x0;
+    loop {
+        if level.cell_at(x, y).is_solid() {
+            let c = (x / TILE).floor() * TILE;
+            return Some(if d > 0.0 {
+                c.max(x0)
+            } else {
+                (c + TILE).min(x0)
+            });
+        }
+        let next = if d > 0.0 {
+            ((x / TILE).floor() + 1.0) * TILE
+        } else {
+            (x / TILE).floor() * TILE - 0.001
+        };
+        if (next - x1) * d > 0.0 {
+            return None;
+        }
+        x = next;
+    }
+}
+
 /// The boss jump solver (0x7100619690): the launch (vx ≥ 0, vy) that lands `dy` above (or
 /// below) a point `dx` away under gravity −0.1875 / fall cap −4, clearing 16 px (32 winged)
 /// above the higher end; a steeper arc is tried while the speed would exceed 3 px/f.
@@ -3183,7 +3491,11 @@ impl Actor {
         let face = self.dir > 0;
         Some(match self.kind {
             Kind::Bowser { .. } => {
-                let tex = if self.boss_breathing() {
+                let firing = matches!(
+                    self.phase,
+                    bw::FIRE | bw::JUMP_FIRE | bw::SPREAD_FIRE | bw::FIRE_FALLING
+                );
+                let tex = if self.boss_breathing() || firing {
                     "fire.0"
                 } else if !self.on_ground && self.phase != bw::CLOWN {
                     cycle(&["fall.0", "fall.1"], 5)
@@ -3351,10 +3663,17 @@ mod tests {
         a.vy = 3.0;
         let v = a.bowser_gap_speed(&level, from);
         assert!(v > 0.0 && v <= 1.8, "{v}");
-        // in the chase it middle-jumps across
-        assert!(a.bowser_chase_jumps(&level, 2));
+        // in the chase it middle-jumps across (SMB1 / SMB3)
+        let mut b = a.clone();
+        assert!(a.bowser_chase_jumps(&level, 1));
         assert_eq!(a.phase, bw::MIDDLE_JUMP);
         assert!(a.gap_jump && a.vx > 0.0);
+        // SMW big-jumps it at the landing speed (slot 0x310), NSMBU after BeforeBigJump
+        let mut c = b.clone();
+        assert!(b.bowser_chase_jumps(&level, 2));
+        assert_eq!(b.phase, bw::BIG_JUMP);
+        assert!(c.bowser_chase_jumps(&level, 3));
+        assert_eq!(c.phase, bw::BEFORE_BIG_JUMP);
     }
 
     #[test]
@@ -3512,8 +3831,9 @@ mod tests {
         f.vy = 0.75;
         f.home_y = 69.0;
         f.timer = 600;
+        let level = Level::flat(20);
         for _ in 0..40 {
-            f.step_boss_shot();
+            f.step_boss_shot(&level);
         }
         assert!((f.y - 69.25).abs() < 1e-3, "{}", f.y);
         assert_eq!(f.vy, 0.0);
@@ -3927,8 +4247,9 @@ mod tests {
         let mut s = shots.remove(0);
         assert_eq!(s.dir, -1);
         let mut climb: f32 = 0.0;
+        let flat = Level::flat(20);
         for _ in 0..60 {
-            s.step_boss_shot();
+            s.step_boss_shot(&flat);
             climb = climb.max(s.heading);
             assert!((s.vx.dhypot(s.vy) - 1.0).abs() < 1e-4);
         }
@@ -4045,6 +4366,117 @@ mod tests {
         assert_eq!(a.boss_hit(BossAttack::Fire, a.x), BossHit::Ignored);
         assert_eq!(a.boss_hit(BossAttack::BlockHit, a.x), BossHit::Absorbed);
         assert_eq!((a.vy, a.boss_hp()), (2.0, 2));
+    }
+
+    /// Bowser Jr. sliding left in his shell at full speed, on the floor (y 32).
+    fn jr_sliding(level: Level, x: f32) -> (Level, Actor) {
+        let (_, mut a) = boss(BOWSER_JR, x);
+        a.phase = jr::SHELL;
+        a.pause = JR_SHELL_FRAMES;
+        a.jr_set_sub(SL_SLIDE);
+        a.dir = -1;
+        a.speed = JR_SHELL_TOP;
+        a.heading = JR_SHELL_ACCEL;
+        a.vx = -JR_SHELL_TOP;
+        a.target = (a.x - 2000.0, 32.0);
+        (level, a)
+    }
+
+    /// Steps until he leaves the shell or `stop` holds (at most 300 frames).
+    fn jr_run(level: &Level, a: &mut Actor, stop: impl Fn(&Actor) -> bool) {
+        for _ in 0..300 {
+            let _ = a.step_spawning(level);
+            if a.phase != jr::SHELL || stop(a) {
+                return;
+            }
+        }
+    }
+
+    #[test]
+    fn bowser_jr_in_his_shell_hops_a_step_and_a_block() {
+        // a step one tile high, four wide (tiles 26..=29): the arc lands on it
+        let mut level = Level::flat(80);
+        for x in 26..=29 {
+            level.set_solid(x, 2);
+        }
+        let (level, mut a) = jr_sliding(level, 40.0 * TILE);
+        jr_run(&level, &mut a, |a| a.jr_sub() == SL_HOP);
+        assert_eq!((a.phase, a.jr_sub()), (jr::SHELL, SL_HOP));
+        assert!((a.vx + JR_SHELL_HOP_VX).abs() < 1e-5, "{}", a.vx);
+        jr_run(&level, &mut a, |a| a.jr_sub() == SL_SLIDE);
+        assert_eq!(a.jr_sub(), SL_SLIDE);
+        assert_eq!(a.y, 48.0);
+        // a single block: the test arc lands beyond it, so he hops; the face holds him back
+        // while he rises, so he comes down on it and slides off the far side
+        let mut level = Level::flat(80);
+        level.set_solid(29, 2);
+        let (level, mut a) = jr_sliding(level, 40.0 * TILE);
+        jr_run(&level, &mut a, |a| a.jr_sub() == SL_HOP);
+        assert_eq!(a.jr_sub(), SL_HOP);
+        jr_run(&level, &mut a, |a| a.jr_sub() == SL_SLIDE);
+        assert_eq!(a.y, 48.0);
+        jr_run(&level, &mut a, |a| a.y == 32.0 && a.on_ground);
+        assert_eq!((a.phase, a.y), (jr::SHELL, 32.0));
+        assert!(a.x < 29.0 * TILE);
+    }
+
+    #[test]
+    fn bowser_jr_comes_out_of_his_shell_at_a_tall_wall_or_a_pit() {
+        // a wall two tiles high
+        let mut level = Level::flat(80);
+        level.set_solid(29, 2);
+        level.set_solid(29, 3);
+        let (level, mut a) = jr_sliding(level, 40.0 * TILE);
+        jr_run(&level, &mut a, |_| false);
+        assert_eq!(a.phase, jr::SHELL_OUT);
+        assert!(a.x > 30.0 * TILE);
+        // a pit: no floor under his front edge (tiles 20..=29 open)
+        let mut level = Level::flat(80);
+        for x in 20..=29 {
+            level.set(x, 0, Cell::Empty);
+            level.set(x, 1, Cell::Empty);
+        }
+        let (level, mut a) = jr_sliding(level, 40.0 * TILE);
+        jr_run(&level, &mut a, |_| false);
+        assert_eq!(a.phase, jr::SHELL_OUT);
+        assert!((a.x - (30.0 * TILE + 6.0)).abs() < 2.0, "{}", a.x);
+        // a drop to a floor two tiles down: he slides off it
+        let mut level = Level::flat(80);
+        for x in 0..=29 {
+            level.set(x, 1, Cell::Empty);
+        }
+        for x in 30..80 {
+            level.set_solid(x, 2);
+            level.set_solid(x, 3);
+        }
+        let (level, mut a) = jr_sliding(level, 40.0 * TILE);
+        a.y = 64.0;
+        jr_run(&level, &mut a, |a| a.y < 20.0);
+        assert_eq!(a.phase, jr::SHELL);
+        assert!(a.y < 20.0);
+    }
+
+    #[test]
+    fn bowser_jr_in_his_shell_slides_down_a_slope() {
+        // a plateau 4 tiles high from tile 16 with a "/" slope down to the floor at tile 10
+        let mut level = Level::flat(80);
+        level.add_test_slope(
+            crate::level::Slope {
+                left: 10,
+                bottom: 1,
+                width: 6,
+                height: 3,
+                rising: true,
+                steep: false,
+            },
+            16,
+            4,
+        );
+        let (level, mut a) = jr_sliding(level, 24.0 * TILE);
+        a.y = 64.0;
+        jr_run(&level, &mut a, |a| a.x < 8.0 * TILE);
+        assert_eq!(a.phase, jr::SHELL, "{} {}", a.x, a.y);
+        assert!(a.x < 8.0 * TILE && a.y < 40.0, "{} {}", a.x, a.y);
     }
 
     #[test]
