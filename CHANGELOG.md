@@ -173,6 +173,11 @@ SMCraft is back in development (it was archived in October 2026).
   course (the 100 Marios on the first, the jump after a Continue or a miss), the skip after
   1.9 s of holding, the clear screen's buttons once it has come in, and no early exits SMM1
   doesn't have (the map, the game over screen).
+- **100 Mario's rescue scene, as in SMM1**: after the last course Mario walks into the castle
+  to Peach (Toad on Easy) in the style he finished in — SMB1, SMB3 or SMW, from your SMM1 dump's
+  own models, in the form he reached the goal with (cape and all) — and her line appears in the
+  balloon (it changes with his costume); then the credits roll. NSMBU and 3D World courses end in
+  SMW's scene. Import SMM1 again for it (`mmk import-smm1`, importer 5).
 - **Koopalings in Koopa Clown Cars**: the car chases you while the Koopaling fires volleys of
   his magic (Lemmy his balls, Wendy her rings) from it; a stomp stops the car while he ducks in,
   then he spins in his shell for a while (stomps bounce off) before he comes out; the third stomp

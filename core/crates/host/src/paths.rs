@@ -116,9 +116,19 @@ pub fn outdated_import() -> bool {
     )
 }
 
+/// The SMM1 importer the screens are written for (`mmk_import::smm1::SMM1_IMPORTER_VERSION`).
+/// An older SMM1 import still opens (the SMM1-look 100 Mario is optional): what it lacks — the
+/// rescue scene's models and the menus' music since 5 — is left out.
+pub const SMM1_PACK_VERSION: u32 = 5;
+
 /// The SMM1 UI import (`smm1-<build>`).
 pub fn smm1_ui() -> Option<PathBuf> {
     find_import("smm1-", None, "smm1-v208")
+}
+
+/// There is an SMM1 import, but an older importer made it (import it again for everything).
+pub fn outdated_smm1_import() -> bool {
+    smm1_ui().is_some_and(|p| pack_version(&p) < SMM1_PACK_VERSION)
 }
 
 /// The course library: `<data root>/courses`, else `~/smm-work/courses`.

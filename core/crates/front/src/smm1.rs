@@ -594,7 +594,6 @@ pub enum Smm1Event {
     Locked(usize),
     BackToSelect,
     Play,
-    EndingFinished,
 }
 
 // MARK: - difficulty select
@@ -1506,128 +1505,6 @@ impl GameOverScene {
 
     pub fn draw(&mut self, out: &mut Vec<DrawItem>) {
         push_layout(out, &mut self.layout, self.tick);
-    }
-}
-
-/// After the run's last course: the world map with Mario at the castle and the message balloon
-/// `Play_EndingText_00`, then the staff credits `Nwk_StaffCredit_*` listing the cleared courses
-/// and their makers. The rescue scene itself is not a layout, so the map stands in for it.
-pub struct EndingScene {
-    map: Option<WorldMap>,
-    text: Layout,
-    credits: Option<Layout>,
-    pub tick: i32,
-    credits_start: i32,
-    done: bool,
-}
-
-const TEXT_HOLD: i32 = 240;
-
-impl EndingScene {
-    pub fn new(ui: &Ui, d: usize, lives: u32, list: &[(String, String)]) -> Option<Self> {
-        let mut t = ui.layout("Play_EndingText_00")?;
-        let mut map = WorldMap::new(ui, d);
-        if let Some(m) = &mut map {
-            m.layout.hold_end("MapIn");
-            m.layout.hold_end("AnimB");
-            for i in 0..m.count {
-                m.dot_setup(i, false, true, true, 0);
-            }
-            m.set_counters(lives, m.count);
-            m.place_mario(Some(m.count - 1));
-        }
-        // character variants _x1.._x4 are for Mystery Mushroom costumes; plain Mario is _x0
-        let label = format!(
-            "T_ThankYou_{}",
-            match d {
-                0 => "10",
-                1 => "20",
-                _ => "30",
-            }
-        );
-        t.text_from("T_ThankYou_00", &label);
-        t.play("In", 20);
-        let wait_at = 20 + t.length("In") as i32;
-        t.play_loop("Wait", wait_at);
-        let out_at = wait_at + TEXT_HOLD;
-        t.play("Out", out_at);
-        let credits_start = out_at + t.ticks("Out", 1) + 20;
-        // 01: 8 entries + "TO BE CONTINUED" (Easy), 00: 16 entries (Normal, Expert), 03: 6
-        // entries + "THE END" (Super Expert) [inf from the entry counts]
-        let mut credits = ui.layout(&format!(
-            "Nwk_StaffCredit_{}",
-            match d {
-                0 => "01",
-                3 => "03",
-                _ => "00",
-            }
-        ));
-        if let Some(c) = &mut credits {
-            c.play("InOut", credits_start);
-            for i in 0..16 {
-                let part = format!("L_MiiInfo_{i:02}");
-                if c.pane(&part).is_none() {
-                    continue;
-                }
-                if let Some((name, maker)) = list.get(i) {
-                    c.visible(&part, None);
-                    c.text(&format!("{part}/T_CourseName_00"), name);
-                    c.text(&format!("{part}/T_MiiName_00"), maker);
-                    c.show(&format!("{part}/L_NationalFlag_00"), false);
-                    c.show(&format!("{part}/P_Frame_00"), false);
-                } else {
-                    c.show(&part, false);
-                }
-            }
-        }
-        Some(Self {
-            map,
-            text: t,
-            credits,
-            tick: 0,
-            credits_start,
-            done: false,
-        })
-    }
-
-    pub fn step(&mut self, input: &UiInput) -> Option<Smm1Event> {
-        self.tick += 1;
-        if self.done {
-            return None;
-        }
-        let confirm = input.pressed.has(Buttons::CONFIRM)
-            || input.pressed.has(Buttons::BACK)
-            || input.click.is_some();
-        if self.tick < self.credits_start {
-            if confirm && self.tick > 30 {
-                self.credits_start = self.tick;
-                if let Some(c) = &mut self.credits {
-                    c.play("InOut", self.tick);
-                }
-            }
-            return None;
-        }
-        let len = self.credits.as_mut().map_or(1, |c| c.ticks("InOut", 1));
-        let end = self.credits_start + len;
-        if self.tick >= end || (confirm && self.tick > self.credits_start + 30) {
-            self.done = true;
-            return Some(Smm1Event::EndingFinished);
-        }
-        None
-    }
-
-    pub fn draw(&mut self, out: &mut Vec<DrawItem>) {
-        let t = self.tick;
-        if t >= self.credits_start
-            && let Some(c) = &mut self.credits
-        {
-            push_layout(out, c, t);
-            return;
-        }
-        if let Some(m) = &mut self.map {
-            push_layout(out, &mut m.layout, t);
-        }
-        push_layout(out, &mut self.text, t);
     }
 }
 

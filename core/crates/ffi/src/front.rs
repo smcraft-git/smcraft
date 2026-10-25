@@ -692,6 +692,8 @@ impl Host for FfiHost {
             clear_color: mmk_host::clear_color(w, &self.assets().cache),
             condition,
             players: w.players() as u32,
+            form: w.player.form as u8,
+            costume: (w.player.form == mmk_sim::player::Form::Costume).then_some(w.player.costume),
         }
     }
 

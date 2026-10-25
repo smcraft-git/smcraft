@@ -20,9 +20,10 @@ use crate::menu::UiInput;
 use crate::play::{CoursePlay, PlayEvent, PlayInput, RunLink};
 use crate::screens::{CardInfo, CourseScreens};
 use crate::smm1::{
-    CardStart, ChallengeMenuScene, EndingScene, Entry, GameOverScene, MapIntroScene, RUN_LENGTHS,
-    RunCardInfo, RunOverlay, RunQuery, Smm1Event, WorldMap,
+    CardStart, ChallengeMenuScene, Entry, GameOverScene, MapIntroScene, RUN_LENGTHS, RunCardInfo,
+    RunOverlay, RunQuery, Smm1Event, WorldMap,
 };
+use crate::smm1_ending::{CreditsScene, RescueInfo, RescueScene};
 use crate::smm1_fade::{Smm1Fade, Smm1FadeKind};
 use crate::{Cx, DrawItem, Go};
 
@@ -42,6 +43,8 @@ enum AfterCover {
     Session,
     /// Back to the difficulty select.
     Select,
+    /// The rescue scene is over: the credits.
+    Credits,
     /// The ending is over: the select, with the news.
     EndingDone,
 }
@@ -59,13 +62,15 @@ pub enum ChallengeGo {
     Play,
 }
 
+#[allow(clippy::large_enum_variant)] // one scene at a time
 enum Scene {
     Menu(EndlessMenuScene),
     Map(EndlessMapScene),
     Smm1Menu(ChallengeMenuScene),
     Smm1Intro(MapIntroScene),
     GameOver(GameOverScene),
-    Ending(EndingScene),
+    Rescue(Box<RescueScene>),
+    Credits(CreditsScene),
     None,
 }
 
@@ -617,11 +622,16 @@ impl ChallengeFlow {
                     self.back_to_select(cx);
                     return;
                 }
+                // the goal's form and costume go to the rescue scene (0x0277109c) [obs]
+                let st = cx.host.course_status();
                 cx.host.unload_course();
-                let lives = self.run.status().lives;
-                self.scene =
-                    EndingScene::new(&self.ui, self.run.difficulty, lives, &self.run.credits)
-                        .map_or(Scene::None, Scene::Ending);
+                let info = RescueInfo {
+                    style: st.style,
+                    difficulty: self.run.difficulty,
+                    form: st.form,
+                    costume: st.costume,
+                };
+                self.scene = Scene::Rescue(Box::new(RescueScene::new(&self.ui, info)));
             }
             _ => self.back_to_select(cx),
         }
@@ -666,6 +676,13 @@ impl ChallengeFlow {
             AfterCover::Play => self.play(cx),
             AfterCover::Session => self.session_ended(cx),
             AfterCover::Select => self.back_to_select(cx),
+            AfterCover::Credits => {
+                self.scene = Scene::Credits(CreditsScene::new(
+                    &self.ui,
+                    self.run.difficulty,
+                    &self.run.credits,
+                ));
+            }
             AfterCover::EndingDone => self.ending_finished(cx),
         }
     }
@@ -770,8 +787,15 @@ impl ChallengeFlow {
                     self.cover(cx, Smm1FadeKind::SCENE, [0.0, 0.0], AfterCover::Select);
                 }
             }
-            Scene::Ending(s) => {
-                if s.step(ui).is_some() {
+            Scene::Rescue(s) => {
+                // NetEndingDemoScene → NetEndingScene (0x02768ba4), every request's fade [obs]
+                if s.step() {
+                    self.cover(cx, Smm1FadeKind::SCENE, [0.0, 0.0], AfterCover::Credits);
+                }
+            }
+            Scene::Credits(s) => {
+                // → NetworkMainScene2 (0x02767f18) [obs]
+                if s.step() {
                     self.cover(cx, Smm1FadeKind::SCENE, [0.0, 0.0], AfterCover::EndingDone);
                 }
             }
@@ -790,7 +814,8 @@ impl ChallengeFlow {
                 Scene::Smm1Menu(s) => s.draw(out),
                 Scene::Smm1Intro(s) => s.draw(out),
                 Scene::GameOver(s) => s.draw(out),
-                Scene::Ending(s) => s.draw(out),
+                Scene::Rescue(s) => s.draw(out),
+                Scene::Credits(s) => s.draw(out),
                 Scene::None => {}
             }
         }
@@ -835,7 +860,8 @@ impl ChallengeFlow {
         }
     }
 
-    pub fn debug_ending(&mut self, d: usize, library: &[CourseEntry]) {
+    /// The rescue scene of a run on difficulty `d` finished in a course of `style`.
+    pub fn debug_ending(&mut self, d: usize, style: u32, library: &[CourseEntry]) {
         if self.smm2() {
             return;
         }
@@ -845,9 +871,21 @@ impl ChallengeFlow {
             .take(RUN_LENGTHS[d.min(3)])
             .map(|e| (e.name.clone(), e.meta.maker.clone().unwrap_or_default()))
             .collect();
-        let lives = self.run.status().lives;
-        self.scene = EndingScene::new(&self.ui, d, lives, &self.run.credits)
-            .map_or(Scene::None, Scene::Ending);
+        let info = RescueInfo {
+            style,
+            difficulty: d.min(3),
+            ..Default::default()
+        };
+        self.scene = Scene::Rescue(Box::new(RescueScene::new(&self.ui, info)));
+    }
+
+    /// The staff credits of a finished run on difficulty `d` (captures).
+    pub fn debug_credits(&mut self, d: usize, library: &[CourseEntry]) {
+        if self.smm2() {
+            return;
+        }
+        self.debug_ending(d, 0, library);
+        self.scene = Scene::Credits(CreditsScene::new(&self.ui, d.min(3), &self.run.credits));
     }
 
     /// The current course's play with its screens (captures).
