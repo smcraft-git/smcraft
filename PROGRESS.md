@@ -236,6 +236,25 @@ sway, importer and pack 12, the dev cache already at v12).
   its +0x534 bits 19 / 20); the general branch not followed. 🔄 decoded, not ported: the Spike
   Top's RotationCliff (#24), Bowser Jr's shell-slide wall analysis (#37), the SMW / NSMBU Bowser
   decision tails. 598 / 598 traces exact; coverage 550/550 + 273/273; simulate 0 crashes.
+- 🔄 **Inferred-behaviour pass 8** (2026-10-25, branch `infres8`, research specs/inf-inventory.md
+  "Pass 8"): ✅ #24 the Spike Top's RotationCliff (0x7101278940) and contact probe (0x7101279310):
+  0.34 px/f (big 0.72) along θ + 5°σ while the body turns 3° (binary exact, 31 frames; 1.5° / 61
+  and the move halved under the water-speed rule), the probe at the feet + R(θ)(σ(6 − 10q), −4)
+  (big σ(8 − 12q)) drops it when the corner goes; the Walk's ground test is the ray along the feet
+  (0x710231c300); the push-out onto the new face is [inf]. ✅ #37 Bowser Jr's ShellSlide wall
+  analysis (0x710108aa50): wake-up rays, the hop, the arc search for landing heights 16 … −128,
+  the ledge look under his front edge (pits, lava). ✅ SMW / NSMBU Bowser's own states
+  (actors/bosses/styles.rs; KoopaMW 0x71028e4060, KoopaWU 0x71028e3648): Walk cycles and speeds,
+  LandOn lengths, SMW Little / MiddleJump with the in-air fire, Fire + Wait, FireFalling and its
+  rain manager (0x710115c660), BigJump; NSMBU BeforeJump / Jump, Fire (aimed, 0x710114b470),
+  JumpFire, BeforeBigJump / BigJump, SpreadFire; the chase's gap jump as the big jump. 🔄 #15:
+  the general branch (LAB_7101201db4) sends the shell's own reaction 0 unless +0x52c bit 31; the
+  branch taken depends on the boss collider's data flags (+0x91 bit 0, +0x92 bit 6), not traced.
+  🔄 #36: the eat handler (+0x338 → +0xc88, vtable 0x71028e8508) forwards to the actor's vfuncs
+  0x4a8 / 0x4b0 and context switch 0x7101299930; the item overrides not followed. 598 / 598
+  traces exact (40 new physics9 recordings since pass 7, 37 of them diverging on main too, not
+  counted); coverage 510/550 + 211/273 (sound-effect blockers, as main); simulate 0 crashes
+  (23 / 21 cleared).
 - 🔄 **Placed sound effects** (2026-10-25, branch `separts`, research specs/sound-effect-parts.md):
   ✅ the record (spots: id, tile x, tile y, 0, 300 an area; a part's `sound_effect_id`; Mario's
   in header byte 0xF0, now `player_sound_effect`: the course writer 0x7100fde2c0) and its round

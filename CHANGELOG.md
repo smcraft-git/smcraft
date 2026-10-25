@@ -119,6 +119,18 @@ SMCraft is back in development (it was archived in October 2026).
   hops low under a Trampoline and doesn't jump into one above him, and how often he jumps in SMW
   and NSMBU follows those styles' own timings.
 
+- **SMW and NSMBU Bowser fight as in SMM2**: they no longer borrow SMB3's moves. SMW Bowser
+  stops to breathe fire, jumps and breathes fire in mid-air, and sends five flames up off the
+  screen that come back down as a rain of fire ahead of him; NSMBU Bowser crouches before his
+  jumps, aims his fire at Mario, breathes fire at the top of a jump and fans five flames out in
+  a roar. Both walk instead of hopping between moves, and NSMBU's Bowser walks faster.
+- **Spike Tops round corners as in SMM2**: they swing round an outside corner on the game's own
+  curve and timing, turn half as fast under water, and drop off if the corner goes away under
+  them.
+- **Bowser Jr's shell slide**: in his shell he hops over a low step or a single block in his way
+  and comes out of the shell at a tall wall, a ceiling just ahead or the edge of a pit (or lava),
+  instead of bouncing back.
+
 - **Import once, then no dump or keys.** SMCraft reads your NSPs and `prod.keys` itself (no
   hactool, nothing extracted) and writes its own asset pack; the game runs from the pack alone.
   On macOS the setup screen picks the files; on Windows, Linux and Android you put them in the
