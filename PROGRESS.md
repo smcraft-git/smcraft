@@ -194,6 +194,31 @@ sway, importer and pack 12, the dev cache already at v12).
   under the feet at the press (WU_seesaw's pound scripts); a crouch walks off a ledge into its
   fall at once. Left [?]: the clear pipe's push entry (0x71015a9d00: 9 frames of pushing didn't
   take the player in), the Seesaw's blocked-rider sum (two riders).
+- ✅ **Physics pass 9** (2026-10-25, branch `physics9`, research fidelity-log.md "physics9",
+  player-physics.md §5.4b, objects/44-style-powerup.md "Traced", 81-style-powerup-2.md §12,
+  91-seesaw.md "Walkers"): the power-up specials against the game — **650 traces, 648 exact**
+  (598 → 650: 52 new on new test courses `M3/MW/WU/3W_form`, `3W_formw` / `3W_formt` (the Cat's
+  walls), `<style>_form2` (part 81), `M1_sword`, `M1_sball`, `3W_hammer`, `<style>_itemplace`,
+  `WU_seesaw2` / `seesaw3`; recorded with research/tools/ryujinx-trace `capform.py`). ✅ SMB3
+  Super Leaf flight (TailFlying from v3.0.3: a flap only below vy 0.75, the 18-frame flap timer,
+  queued presses, the tail's air mode to the landing, the P-meter frame by frame — hold counted
+  twice, walking states only, kept full in Jump / Fall — the 240-frame window, TailAttack's
+  landing); the view's top + 96 and sides 8.0 / 8.1 hold the player alone. ✅ SMW cape: the
+  take-off frame empties a 29 meter, MantFlying's entry frame, the cape's stage count, Fall's
+  first frame without float, Landing → Crouch with Down, Turn's facing. ✅ NSMBU propeller: its
+  own air control, the fall spin (−1.0 for 37 frames, 20-frame cooldown), the drill on the
+  ground-pound command (≥ 10 frames). ✅ 3D World Cat: the wall climb rebuilt from v3.0.3 (rays
+  38 / 28 / 9 px, 1.0 / 1.5, 120 / 60 px, 120 still frames, the 58-frame fall start, the slide,
+  the top-out 4.8, wall jump 3.5 / 2.25, air locks), 13.9-px ground probes, no WallSlide, the
+  dive's cancel and still landing, the crouch scratch; 3D World's Spin slide / roll (all forms)
+  and crawl; a low 3D World area is a low-camera one. ✅ Link's down-thrust on the pound command,
+  the Frog Suit's hops, Super Acorn's boost / twirl / spin jump, the Super Hammer's 27 frames;
+  SMB2 Mushroom, Superball and Boomerang exact as they were. ✅ placed Leaves / Feathers /
+  Propeller Mushrooms (infres7's Move start) exact, removed 40 px under the view. ✅ walkers on
+  Seesaws (weight 2, the riders' torques summed, carried, x · cos). Open: the Power Balloon (not
+  traced: it floats out of the capture's reach), the Cat's rolling attack (0x71015f6f70, its
+  trigger not found), where a walker leaves a Seesaw's end [?], a Cat's 15.9 head on the ground
+  [?]. Coverage 550 / 550 + 273 / 273; simulate 0 crashes.
 - 🔄 **Inferred-behaviour pass 6** (2026-10-25, branch `infres6`, research specs/inf-inventory.md
   "Pass 6"): ✅ the Propeller Mushroom's own Move (#38, ItemPropeller 0x710134ca70 / 0x710134c3c0 /
   limits 0x710134c880; the Block context's enter 0x710134d550 skips the slow rise): out of a

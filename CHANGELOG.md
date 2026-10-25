@@ -8,6 +8,19 @@ SMCraft never needs them again.
 
 SMCraft is back in development (it was archived in October 2026).
 
+- **The power-ups move as in SMM2**, checked frame by frame against the game: the Super Leaf's
+  flight (the P-meter, the flaps, the climb to the top of the view and the drift after), the Cape
+  Feather's glide and dives, the Propeller Mushroom's fall spin and drill, the Super Bell's wall
+  climb (Cat Mario climbs, hangs, slides down, jumps off and pops over the top as in 3D World),
+  its dive, scratch and slide, 3D World's crouch slide and crawl for every form, Link's
+  down-thrust, the Frog Suit's hops, the Super Acorn's boost and twirl and the Super Hammer's
+  swing.
+- Placed Super Leaves, Cape Feathers and Propeller Mushrooms sway down through the floor as in
+  the game and are gone once they leave the screen.
+- Goombas and other walkers ride Seesaws and tip them.
+- The screen's edges hold Mario as in the game: a Super Leaf flight levels off at the top of the
+  screen, and a wall that fills a low 3D World course's screen stops the scrolling.
+
 - **3D World looks like the game's**: its final pass (the game's tone map and colour correction,
   NSMBU's correction too) and its environment palette (the lights and fogs the game really uses
   per theme) — the snow background is no longer deep blue, the ground and sky backgrounds no
