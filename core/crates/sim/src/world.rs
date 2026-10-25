@@ -3592,6 +3592,12 @@ impl World {
         if style == crate::player::Style::WU && matches!(a.kind, Kind::Koopa { .. }) && !a.big {
             return (b.0, b.1, b.2, b.1 + 21.0);
         }
+        // a Spike Top meets the player 1 px narrower a side than its 16-px box [obs: Ryujinx
+        // whole traces X_stop_M1 / _WU: a standing small player hurt with its last place 10.5 px
+        // away, not at 11.0 (a Goomba's touch is at 12: X_walkin_M1)] [inf: the big one's]
+        if matches!(a.kind, Kind::SpikeTop { .. }) && !a.big && !a.wings {
+            return (b.0 + 1.0, b.1, b.2 - 1.0, b.3);
+        }
         b
     }
 

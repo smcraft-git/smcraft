@@ -220,7 +220,7 @@ sway, importer and pack 12, the dev cache already at v12).
   trigger not found), where a walker leaves a Seesaw's end [?], a Cat's 15.9 head on the ground
   [?]. Coverage 550 / 550 + 273 / 273; simulate 0 crashes.
 - 🔄 **Physics pass 10** (2026-10-25, branch `physics10`, research fidelity-log.md "physics10",
-  91-seesaw.md "Leaving the plank"): **658 / 658 traces exact** (was 652 / 654). ✅ a walker leaving a
+  91-seesaw.md "Leaving the plank"): **675 / 683 traces exact** (was 652 / 654; the 8 others are new enemy traces parting at the game's random draws). ✅ a walker leaving a
   Seesaw's end (v3.0.3 floor test 0x7100e2b3c0 / 0x7100e2ccf0 / 0x7100e32dd0): the plank is one
   floor segment whose open ends stretch by the foot sensor's half width (4) × cos 2u, so a foot
   holds 1.5 px past an end at 31.7° and 0.16 px at 43.5°; the leaving frame still steps along the
@@ -245,9 +245,15 @@ sway, importer and pack 12, the dev cache already at v12).
   turn's last frame doesn't move, its speeds are the step / 0.49 into the surface, an inside turn
   off a wall idles a frame first (X_stop exact to the player's death, 462); the winged Hammer Bro
   placed on the ground hops on its first update and its jump moves on the frame it's decided,
-  hammers go 32 under the view (X_wbros_M1 exact to frame 242, then its random facing). Left: the
-  game's random draws; Bowser / Bowser Jr / 3D World enemies aren't in the recorded pool slots (to
-  record with scans); a Spike Top touches the player at 10.5 px, not 11+ (the engine 12).
+  hammers go 32 under the view (X_wbros_M1 exact to frame 242, then its random facing); a Spike
+  Top meets the player 1 px narrower a side (10.5 hurts, 11 not; X_stop_M1 / _WU exact 600
+  frames) and is put exactly on a face after a corner; the 3D World Goomba's Find is 45 frames
+  and it stands 8 after a landing (X_walkin_3W, X_cpipeg exact); Bowser placed on the ground
+  walks from frame 0 (X_bowser_M1 exact to his first random draw, 47); Bowser Jr's fireballs
+  (SMB1) fly at 1.0 from the frame after their birth, one every 61 frames (seen in X_bowserjr_M1,
+  whose Jr hops on a random draw at 20). Left: the game's random draws (Bowser, Bowser Jr, the
+  winged Bro's facing); 3D World Hammer Bros / Bowser not found by the scans yet; the projectile
+  budget can't be reached in an editor-made course (100 enemies an area).
   Coverage 548 / 550
   + 272 / 273 (as main); simulate 0 crashes.
 - 🔄 **Inferred-behaviour pass 6** (2026-10-25, branch `infres6`, research specs/inf-inventory.md

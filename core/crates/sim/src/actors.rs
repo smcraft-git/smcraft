@@ -884,6 +884,10 @@ pub struct Actor {
     pub plat_vx: f32,
     /// Whether the player looked at this Boo last frame (1 / −1; it reacts a frame late).
     pub boo_facing: i32,
+    /// A 3D World Goomba: the age of its last walking frame, and the frames left before it
+    /// looks again after a landing.
+    pub k3_age: u32,
+    pub sight_wait: u8,
     /// Bowser's middle jump is a gap jump (its speed set to land past the gap; MiddleJump's
     /// enter 0x71006b0370 flag +0x90).
     pub gap_jump: bool,
@@ -997,6 +1001,8 @@ impl Actor {
             plank_carry: 0.0,
             plat_vx: 0.0,
             boo_facing: 0,
+            k3_age: 0,
+            sight_wait: 0,
             gap_jump: false,
             wing_rate: 1.0,
             bro_wing: BroWing::default(),
@@ -1163,9 +1169,11 @@ impl Actor {
     /// The 3D World Goomba's sight (0-goomba.md "Kuribo3W extra states", Basic vtable
     /// 0x7102170c58, v1.0.0): walking on the ground (`phase` 0) it spots a player in front within
     /// 80 px, from 16 px under its feet to 32 over (0x71006f91c0), and stops for its notice
-    /// animation (Find, 7), 53 frames counting the one it sees [obs: Ryujinx trace X_cpipeg, a
-    /// Goomba landing out of a clear pipe 62 px from the player: still frames 268..320, running
-    /// from 321]; then runs at 0.7 (Run, 8) for at least 10 frames, until the player is out of
+    /// animation (Find, 7), 45 frames counting the one it sees [obs: Ryujinx whole trace
+    /// X_walkin_3W: walking at a standing player, still 160..204, running from 205]; landed, it
+    /// stands 8 frames before it walks or looks [obs: Ryujinx trace X_cpipeg, a Goomba landing
+    /// out of a clear pipe 62 px from the player on frame 267: still 268..320, running from 321]
+    /// [inf: a landing pause; seen after a pipe ride]; then runs at 0.7 (Run, 8) for at least 10 frames, until the player is out of
     /// 128 px sideways, 80 up or 32 down, or behind it for 16 frames (0x71006f97a0); then slows
     /// to a stop by 0.05 a frame (Lost, 9) and walks on [inf: the Lost animation's end taken as
     /// the stop]. The speed to walk at this frame (0 while it stands).
@@ -1176,6 +1184,12 @@ impl Actor {
         }
         let (dx, dy) = (self.target.0 - self.x, self.target.1 - self.y);
         let ahead = dx * self.dir as f32 > 0.0;
+        // back to walking after frames of something else (a fall, a pipe ride): it stands 8
+        // frames before it walks or looks again
+        if self.age > self.k3_age + 1 {
+            self.sight_wait = 8;
+        }
+        self.k3_age = self.age;
         match self.phase {
             7 => {
                 self.timer -= 1;
@@ -1203,8 +1217,13 @@ impl Actor {
                 self.vx.abs()
             }
             _ => {
+                if self.sight_wait > 0 {
+                    // (it stands meanwhile)
+                    self.sight_wait -= 1;
+                    return 0.0;
+                }
                 if self.on_ground && ahead && dx.abs() <= 80.0 && (-16.0..=32.0).contains(&dy) {
-                    (self.phase, self.timer) = (7, 53);
+                    (self.phase, self.timer) = (7, 45);
                     return 0.0;
                 }
                 WALK
@@ -3529,16 +3548,17 @@ impl Actor {
                     self.vx = 0.1 * f.0;
                     self.vy = 0.1 * f.1;
                 }
-                let snap = |v: f32| (v / TILE).round() * TILE - v;
+                // (put on the face exactly: 248.0 [obs: X_stop_M1])
+                let face = |v: f32| (v / TILE).round() * TILE;
                 if f.0 != 0.0 {
-                    let d = snap(self.x + h * f.0);
-                    if d.abs() < 2.0 {
-                        self.x += d;
+                    let v = face(self.x + h * f.0);
+                    if (v - (self.x + h * f.0)).abs() < 2.0 {
+                        self.x = v - h * f.0;
                     }
                 } else {
-                    let d = snap(self.y + h + h * f.1);
-                    if d.abs() < 2.0 {
-                        self.y += d;
+                    let v = face(self.y + h + h * f.1);
+                    if (v - (self.y + h + h * f.1)).abs() < 2.0 {
+                        self.y = v - h - h * f.1;
                     }
                 }
             }
