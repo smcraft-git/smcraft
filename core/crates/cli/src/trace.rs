@@ -167,7 +167,7 @@ pub fn run_all(course: &[u8], script: &[Input], start: &Start) -> Result<(String
 // Physics test courses
 
 pub const STYLES: [&str; 5] = ["M1", "M3", "MW", "WU", "3W"];
-pub const KINDS: [&str; 39] = [
+pub const KINDS: [&str; 42] = [
     "flat",
     "wall",
     "slope",
@@ -207,6 +207,9 @@ pub const KINDS: [&str; 39] = [
     "seesaw2",
     "seesaw3",
     "balloon",
+    "tunnel_items",
+    "tunnel_form",
+    "autoscroll",
 ];
 
 /// Kinds made in SMB1 only (the terrain they test is the same in every style).
@@ -219,8 +222,16 @@ const LEAF_ONLY: [&str; 1] = ["itemplace"];
 /// Kinds made in SMW only.
 const MW_ONLY: [&str; 1] = ["balloon"];
 /// Kinds made in 3D World only (clear pipes are a 3D World part).
-const W3_ONLY: [&str; 7] = [
-    "cpipe", "cpipeg", "cpipev", "cpiped", "formw", "formt", "hammer",
+const W3_ONLY: [&str; 9] = [
+    "cpipe",
+    "cpipeg",
+    "cpipev",
+    "cpiped",
+    "formw",
+    "formt",
+    "hammer",
+    "tunnel_items",
+    "tunnel_form",
 ];
 
 /// Where the items / form courses keep their power-up: the ? block's tile column and its row
@@ -263,7 +274,16 @@ pub fn build_course(name: &str) -> Result<Vec<u8>, String> {
     // the items / form courses are longer: their power-up block is past every test's reach
     let len = if matches!(
         kind,
-        "items" | "form" | "bigblk" | "form2" | "sword" | "sball" | "hammer" | "balloon"
+        "items"
+            | "form"
+            | "bigblk"
+            | "form2"
+            | "sword"
+            | "sball"
+            | "hammer"
+            | "balloon"
+            | "tunnel_items"
+            | "tunnel_form"
     ) {
         160
     } else {
@@ -496,7 +516,10 @@ pub fn build_course(name: &str) -> Result<Vec<u8>, String> {
         // balloon: the items course (a Super Mushroom in the pen's block); the capture makes
         // the Super player a Power Balloon one (form +0x4a8 = 12): the balloon floats out of
         // reach of the pen's exit
-        "items" | "form" | "balloon" => {
+        // tunnel_items / tunnel_form (3D World): the items / form course (Super Mario, the Cat)
+        // with a one-tile-high tunnel at x 24..31 (its roof the second row up): which bodies
+        // walk under a 16-px roof (the Cat's walking sensor row has a 15.9 head)
+        "items" | "form" | "balloon" | "tunnel_items" | "tunnel_form" => {
             // the power-up in a ? block 4 tiles up, far enough right that no test reaches it:
             // a Super Mushroom (items) or the style's own power-up (form; part 44: leaf,
             // feather, propeller, bell; a mushroom in SMB1). On the floor the game's items
@@ -508,7 +531,12 @@ pub fn build_course(name: &str) -> Result<Vec<u8>, String> {
             // floor it stays put and the player's touch does nothing [obs: emulator, its actor
             // found in memory]), so WU_form has the Super Mushroom and the capture makes the
             // Super player a Propeller one (player form +0x4a8 = 3)
-            let item = if kind == "items" || kind == "balloon" || style == "WU" {
+            if kind.starts_with("tunnel") {
+                for x in 24..=31 {
+                    e.paint_ground(x, up(2)).map_err(err)?;
+                }
+            }
+            let item = if matches!(kind, "items" | "balloon" | "tunnel_items") || style == "WU" {
                 20
             } else {
                 44
@@ -697,6 +725,12 @@ pub fn build_course(name: &str) -> Result<Vec<u8>, String> {
             let (_, sh) = mmk_editor::default_size(91);
             e.place_sized(91, 18, up(3), 5, sh, mmk_editor::DEFAULT_FLAGS)
                 .map_err(err)?;
+        }
+        "autoscroll" => {
+            // a flat course with the slow autoscroll: the view's left side pushes a player who
+            // stands still (where it holds the player, in each style)
+            floor(&mut e, 0, len - 1)?;
+            e.set_autoscroll(1);
         }
         "seesaw2" | "seesaw3" => {
             // the `seesaw` Seesaw with a Goomba placed on its right half (seesaw3: and another

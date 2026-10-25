@@ -112,11 +112,23 @@ pub const SMALL_MW: Sensors = Sensors {
     head_y: 15.9,
     ..SMALL_M1
 };
-/// The 3D World Cat on the ground: the wall probes reach 13.9 px [obs: Ryujinx traces 3W_formw /
-/// 3W_formt: a Cat walking into a wall, fast or slowly, stops 13.9 from its face and stays there
-/// pushing; in the air it reaches the face (7.9)]; the rest as Super's (§6.1's Cat row 6 has a
-/// 15.9 head and a 4…8.5 wall span too [?]: not seen in a trace).
+/// The 3D World Cat on the ground: its own sensor row (the size class's row 6: v3.0.3
+/// 0x71023d4a54, picked by 0x7101592480 while +0x49c bit 10 is set — the ground states' begins
+/// set it: Walk, Turn, Landing, Crouch, CrouchWalk, the slides, the scratch, the dive's landing —
+/// for form 7 holding nothing and outside a vehicle): head 15.9, walls 4…8.5 reaching 13.9 [obs:
+/// Ryujinx traces 3W_formw / 3W_formt: a Cat walking into a wall stops 13.9 from its face;
+/// 3W_tunnel_form: it walks and runs through a one-tile-high tunnel].
 pub const CAT_RUN: Sensors = Sensors {
+    head_y: 15.9,
+    wall_y1: 8.5,
+    wall_x: 13.9,
+    ..SUPER
+};
+/// The Cat's first frame on the ground after the air (the Jump / Fall state still runs, its
+/// end hands over to Walk): the wide reach with the air row's height [inf: the one frame this
+/// is seen, Ryujinx trace 3W_tunnel_form cat_tunnel_jump: landing flush against a 16-px-high
+/// tunnel's roof, the Cat is pushed 2 px off it that frame and walks in from the next].
+pub const CAT_LAND: Sensors = Sensors {
     wall_x: 13.9,
     ..SUPER
 };
@@ -888,11 +900,10 @@ impl Player {
         if self.form == Form::Cat
             && self.style == Style::W3
             && self.on_ground
-            && !self.crouch
-            && self.cat_slide == 0
-            && self.dive_land == 0
+            && self.held.is_none()
+            && self.car.is_none()
         {
-            return &CAT_RUN;
+            return if self.landed { &CAT_LAND } else { &CAT_RUN };
         }
         match (self.big(), self.crouch) {
             (false, false) if matches!(self.style, Style::MW | Style::WU | Style::W3) => &SMALL_MW,
@@ -3271,7 +3282,13 @@ impl Player {
             wall_base = wall_base.max((wall_base / TILE).floor() * TILE + TILE);
         }
         for dir in [-1.0f32, 1.0] {
-            let wx = self.x + dir * s.wall_x;
+            let mut wx = self.x + dir * s.wall_x;
+            // a probe exactly on a tile's right edge touches that tile, as one on its left edge
+            // does [obs: Ryujinx trace 3W_tunnel_items sup_tunnel: walking left, the move ends
+            // flush (519.9 by a face at 512) and the speed is 0 that frame]
+            if dir < 0.0 && wx > 0.0 && wx == (wx / TILE).floor() * TILE {
+                wx = f32::from_bits(wx.to_bits() - 1);
+            }
             let prev_wx = wx - self.vx * cos;
             let cell_x = (wx / TILE).floor() * TILE;
             let inside_own = own_slope.is_some_and(|sl| sl.covers(wx));
@@ -3333,7 +3350,14 @@ impl Player {
                 }
             }
         }
-        self.x = self.x.clamp(level.left + s.wall_x, level.right - s.wall_x);
+        // (the course's sides are no wall to the Cat's wide ground probes: it rests 8.6 in at
+        // the left, as every body does [obs: Ryujinx trace 3W_tunnel_form cat_tunnel_jump])
+        let side = if s.wall_x == CAT_RUN.wall_x {
+            SUPER.wall_x
+        } else {
+            s.wall_x
+        };
+        self.x = self.x.clamp(level.left + side, level.right - side);
 
         // vertical
         let prev_y = self.y;

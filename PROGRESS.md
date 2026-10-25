@@ -220,13 +220,20 @@ sway, importer and pack 12, the dev cache already at v12).
   trigger not found), where a walker leaves a Seesaw's end [?], a Cat's 15.9 head on the ground
   [?]. Coverage 550 / 550 + 273 / 273; simulate 0 crashes.
 - 🔄 **Physics pass 10** (2026-10-25, branch `physics10`, research fidelity-log.md "physics10",
-  91-seesaw.md "Leaving the plank"): **654 / 654 traces exact** (was 652). ✅ a walker leaving a
+  91-seesaw.md "Leaving the plank"): **658 / 658 traces exact** (was 652 / 654). ✅ a walker leaving a
   Seesaw's end (v3.0.3 floor test 0x7100e2b3c0 / 0x7100e2ccf0 / 0x7100e32dd0): the plank is one
   floor segment whose open ends stretch by the foot sensor's half width (4) × cos 2u, so a foot
   holds 1.5 px past an end at 31.7° and 0.16 px at 43.5°; the leaving frame still steps along the
   plank, and the carry of that frame stays as an x speed until the landing (+0x320); past an end
-  the carry is that end's movement plus the turn about it. Coverage 548 / 550 + 272 / 273 (as
-  main); simulate 0 crashes.
+  the carry is that end's movement plus the turn about it. ✅ the Cat's ground sensor row
+  (v3.0.3 rows 0x71023d497c.., pick 0x7101592480: pose 6 for form 7 in every ground state —
+  head 15.9, walls 4…8.5 at 13.9): it walks / runs through a 1-tile-high tunnel (new course
+  `3W_tunnel_form`); its landing frame keeps the air row's height with the wide reach; it rests
+  8.6 in at the course's left side; no other 3D World form gets 13.9 (3W Super stops 7.9 from
+  the tunnel, `3W_tunnel_items`); a move ending flush on a wall's right face zeroes the speed.
+  ✅ the Cat's rolling attack (ClimbRollingAttack 34): unreachable in v3.0.3 — its only way in is
+  the action delegate +0x2700 (0x71015e6f80), slot 60, which no state's action list (0x71015e76c0,
+  161 callers) names. Coverage 548 / 550 + 272 / 273 (as main); simulate 0 crashes.
 - 🔄 **Inferred-behaviour pass 6** (2026-10-25, branch `infres6`, research specs/inf-inventory.md
   "Pass 6"): ✅ the Propeller Mushroom's own Move (#38, ItemPropeller 0x710134ca70 / 0x710134c3c0 /
   limits 0x710134c880; the Block context's enter 0x710134d550 skips the slow rise): out of a
