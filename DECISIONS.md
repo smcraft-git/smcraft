@@ -1687,3 +1687,26 @@ under `recomp/private|generated|build/`, and text that looks like disassembly or
   then the scene root's. Sounds due later wait in the scene and are dropped when it skips ahead.
 - `SoundCue::ui` says which import's `ui/sound/` a cue is from (FFI `MmkFrontSound.ui`).
   Details and the open points: private research/specs/smm1-sound.md.
+
+## 2026-10-25 — 100 Mario (SMM1 look): the binary's choreography, the rescue scene as flat quads
+- The "inferred choreography" of 2026-10-18 above is replaced by the game's own (research
+  smm1-100mario-screens.md §2 and §8, v208 addresses): the map class's states one frame per change,
+  the dots hidden until Mario reaches them (the clear stamp is `Type` 0 with `Clear` at its end),
+  the course card the course's for every course (it waits under the card), SMM1's scene fader
+  (type 1 at 4.0 for every scene request, blocks at 1.0 to the between-course map, the circle on
+  Mario at 2.0 from it), the input locks the states imply, no early exits SMM1 doesn't have.
+- **Course World's map → the course uses the plain fade.** The Course World state sets the circle
+  (type 7) before its scene request, which resets the fader to type 1; NetWorldMapScene sets it
+  after, so only the between-course map closes the circle on Mario. Kept as the binary does it.
+- **"Clear shown"**: SMM1 keeps a save flag per difficulty for "the map has shown the last clear";
+  a run saved at the course clear walks Mario on when continued. Kept as the setting
+  `hundred.clear_shown` (the clears shown per difficulty) beside the run's save.
+- **After a skip** the next course's card comes straight away behind a scene fade: the result
+  handler requests no scene for a skip [obs]; what the game shows then was not traced [inf].
+- **The rescue scene is drawn as flat quads from the UI import** (`ui/ending/ending.json`, SMM1
+  importer 5), like the Super World map: SMM1's stage, Peach / Toad and the 2D styles' player
+  models are all camera-facing quads with texture patterns, placed by the scene's constants
+  (stage (0, 48), Peach (416, 48), Mario −32 → 384 at 1.5, camera 384 × 216 inside x 0–1152).
+  **NSMBU's demo Mario is a 3D model and 3D World has no SMM1 scene: both use SMW's scene**
+  (Mario, stage and Peach), keeping their own timing (NSMBU with Peach holds 300). The clear colour
+  behind the SMB3 / SMW stages is black [inf]. Forms SMM1 lacks draw Super Mario's model.

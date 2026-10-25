@@ -828,9 +828,59 @@ fn load_bfres(file: &PathBuf, member: Option<&str>) -> Result<Vec<u8>, String> {
     Err("archive nesting too deep".into())
 }
 
+/// A Wii U BFRES (FRES 3): the flat models (bones, shapes with their material, texture, SRT
+/// and wrap; with `curves` the vertices) and the texture-pattern animations.
+fn dump_bfres_wiiu(data: &[u8], curves: bool) -> Result<Value, String> {
+    use mmk_formats::bfres_wiiu as w;
+    let e = |x: mmk_formats::Error| x.to_string();
+    let models: Vec<Value> = w::models(data)
+        .map_err(e)?
+        .iter()
+        .map(|m| {
+            json!({
+                "name": m.name,
+                "bones": m.bones.iter().map(|b| json!([b.name, b.parent, b.scale, b.rotate, b.translate])).collect::<Vec<_>>(),
+                "shapes": m.shapes.iter().map(|s| {
+                    let mut v = json!({
+                        "name": s.name, "bone": s.bone, "material": s.material.name,
+                        "texture": s.material.texture, "tex_srt": s.material.tex_srt,
+                        "wrap": s.material.wrap, "vertices": s.positions.len(), "indices": s.indices.len(),
+                    });
+                    if curves {
+                        v["positions"] = json!(s.positions);
+                        v["uv0"] = json!(s.uvs);
+                        v["triangles"] = json!(s.indices);
+                    }
+                    v
+                }).collect::<Vec<_>>(),
+            })
+        })
+        .collect();
+    let patterns: Vec<Value> = w::tex_patterns(data)
+        .map_err(e)?
+        .iter()
+        .map(|p| {
+            json!({
+                "name": p.name, "frames": p.frames, "loop": p.looping, "textures": p.textures,
+                "materials": p.materials.iter().map(|t| json!({"material": t.material, "base": t.base, "keys": t.keys})).collect::<Vec<_>>(),
+            })
+        })
+        .collect();
+    let textures: Vec<Value> = w::textures(data)
+        .map_err(e)?
+        .iter()
+        .map(|t| json!([t.name, t.width, t.height, format!("{:#x}", t.format)]))
+        .collect();
+    Ok(json!({ "models": models, "texture_patterns": patterns, "textures": textures }))
+}
+
 fn dump_bfres(file: &PathBuf, member: Option<&str>, curves: bool) -> Result<Value, String> {
     use mmk_formats::bfres;
-    let f = bfres::parse(&load_bfres(file, member)?).map_err(|e| e.to_string())?;
+    let data = load_bfres(file, member)?;
+    if data.get(4) == Some(&3) {
+        return dump_bfres_wiiu(&data, curves);
+    }
+    let f = bfres::parse(&data).map_err(|e| e.to_string())?;
     let models: Vec<Value> = f
         .models
         .iter()

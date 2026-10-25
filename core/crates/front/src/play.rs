@@ -8,7 +8,8 @@
 use crate::host::CourseStatus;
 use crate::menu::{Buttons, Script, UiInput};
 use crate::screens::{CardInfo, CourseScreens, Mode, SKIP_HOLD};
-use crate::smm1::{RunCardInfo, RunOverlay, RunOverlayMode};
+use crate::smm1::{CardStart, RunCardInfo, RunOverlay, RunOverlayMode};
+use crate::smm1_fade::Smm1FadeKind;
 use crate::{Cx, DrawItem};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -17,8 +18,10 @@ pub enum Phase {
     Paused,
     Cleared,
     GameOver,
-    /// SMM1 overlays: the intro card after a death, the skip's Pass animation.
+    /// SMM1 overlays: the course's intro card (the course waits), the skip's Pass animation.
     Card,
+    /// SMM1 overlays: the screen fading out before Start Over restarts the course.
+    Covering,
     Skipping,
     /// SMM2 layouts: the course card, "You gave up...", the pause menu's settings window.
     Intro,
@@ -59,6 +62,11 @@ pub trait RunLink {
     fn world_record_ms(&self) -> Option<i64>;
     /// The SMM1 intro card's contents.
     fn card_info(&self) -> RunCardInfo;
+    /// The course's stars and players, when the course data has them (SMM1's pause shows
+    /// them).
+    fn course_counts(&self) -> (Option<i64>, Option<i64>) {
+        (None, None)
+    }
 }
 
 /// The run behind a course, if any.
@@ -128,6 +136,8 @@ pub struct CoursePlay {
     smw_wipe_until: Option<u32>,
     /// The player's character (the settings window).
     pub character: usize,
+    /// SMM1 overlays: Start Over waits for the fade to cover the screen.
+    restart_covered: bool,
 }
 
 const RESULT_GRACE: u32 = 30;
@@ -211,6 +221,7 @@ impl CoursePlay {
             auto_pause_tick: None,
             engine_tick: 0,
             character,
+            restart_covered: false,
         };
         let status = cx.host.course_status();
         if let Some(s) = &mut p.screens {
@@ -230,6 +241,19 @@ impl CoursePlay {
     fn set_phase(&mut self, p: Phase) {
         self.phase = p;
         self.phase_frames = 0;
+    }
+
+    /// SMM1 overlays: the course's intro card first (the course waits under it).
+    pub fn start_card(&mut self, info: &RunCardInfo, start: CardStart) {
+        if let Some(o) = &mut self.overlay {
+            o.show_card(info, start);
+            self.set_phase(Phase::Card);
+        }
+    }
+
+    /// SMM1 overlays: the fader over the course is covering, or holds the screen covered.
+    pub fn covered(&self) -> bool {
+        self.overlay.as_ref().is_some_and(|o| o.fade.busy())
     }
 
     /// The course view, then the layouts over it.
@@ -356,6 +380,14 @@ impl CoursePlay {
             }
             Phase::Cleared if self.overlay.is_some() => {
                 let o = self.overlay.as_mut().expect("checked");
+                if let Some(at) = o.clear_leave_at {
+                    // the decided button and the layout's Out have played: the result
+                    // (0x024ddf68 → cOutEndToNext)
+                    if o.tick >= at {
+                        return Some(PlayEvent::Exit);
+                    }
+                    return None;
+                }
                 if o.clear_ready() {
                     if pressed.has(Buttons::LEFT) {
                         o.clear_select(0);
@@ -370,14 +402,18 @@ impl CoursePlay {
                             r.save_and_quit_after_clear();
                         }
                         o.press_clear();
-                        return Some(PlayEvent::Exit);
                     }
                 }
             }
             Phase::GameOver if self.overlay.is_some() && run.is_some() => {
                 return Some(PlayEvent::Exit);
             }
-            Phase::Card | Phase::Skipping | Phase::Intro | Phase::Retire | Phase::Options => {}
+            Phase::Card
+            | Phase::Covering
+            | Phase::Skipping
+            | Phase::Intro
+            | Phase::Retire
+            | Phase::Options => {}
             Phase::Cleared | Phase::GameOver => {
                 // a short beat so a held jump doesn't skip the screen
                 if self.phase_frames > RESULT_GRACE
@@ -747,6 +783,17 @@ impl CoursePlay {
         if self.screens.is_some() {
             return self.observe_smm2(&h, dying, cx, run);
         }
+        if dying
+            && run.is_some()
+            && let Some(o) = &mut self.overlay
+            && !o.fade.active()
+            && h.restart_in <= o.fade.cover_ticks(Smm1FadeKind::SCENE)
+        {
+            // a death in a run: the play scene's request for the course-in scene again, with
+            // every scene request's fade (type 1 at 4.0, 0x0277117c → 0x02766e1c) [obs], timed
+            // to cover the screen as the engine restarts the course [inf]
+            o.fade.cover(Smm1FadeKind::SCENE, [0.0, 0.0]);
+        }
         if self.was_dying && !dying {
             if let Some(r) = run.as_deref_mut() {
                 // the engine restarted the course; the run decides whether it continues
@@ -895,14 +942,17 @@ impl CoursePlay {
         let (Some(o), Some(r)) = (&mut self.overlay, run) else {
             return;
         };
-        o.show_card(&r.card_info());
+        o.show_card(&r.card_info(), CardStart::Retry);
         self.set_phase(Phase::Card);
     }
 
     /// One tick of the SMM1 overlay: animations, the skip hold, the end of the card / Pass.
     fn overlay_tick(&mut self, input: &PlayInput, cx: &mut Cx, run: Run<'_>) -> Option<PlayEvent> {
         let o = self.overlay.as_mut()?;
-        o.step();
+        let covered = o.step();
+        if covered && self.phase == Phase::Covering {
+            self.restart_covered = true;
+        }
         match self.phase {
             Phase::Playing => {
                 let r = run?;
@@ -933,14 +983,25 @@ impl CoursePlay {
                     return Some(PlayEvent::Exit);
                 }
             }
-            Phase::Card if o.card_done() => {
-                o.hide_card();
-                self.set_phase(Phase::Playing);
-                self.held_start = true;
+            Phase::Card => {
+                // A (or a tap) once the course is loaded cuts the card [obs 0x0254862c]
+                if !o.fade.busy()
+                    && (input.ui.pressed.has(Buttons::CONFIRM) || input.ui.click.is_some())
+                {
+                    o.card_skip();
+                }
+                if o.card_done() {
+                    o.hide_card();
+                    self.set_phase(Phase::Playing);
+                    self.held_start = true;
+                }
+            }
+            Phase::Covering if self.restart_covered => {
+                self.restart_covered = false;
+                self.restart(cx, run);
             }
             _ => {}
         }
-        let _ = cx;
         None
     }
 
@@ -957,6 +1018,7 @@ impl CoursePlay {
                 o.skip_cancel();
             }
             let name = r.course_name();
+            o.counts = r.course_counts();
             o.show_pause(
                 &r.pause_line(),
                 if name.is_empty() { &self.title } else { &name },
@@ -1020,7 +1082,18 @@ impl CoursePlay {
     fn choose(&mut self, item: PauseItem, cx: &mut Cx, run: Run<'_>) -> Option<PlayEvent> {
         match item {
             PauseItem::Resume => self.resume(),
-            PauseItem::Restart => self.restart(cx, run),
+            PauseItem::Restart => {
+                if let (Some(o), Some(_)) = (&mut self.overlay, run.as_deref()) {
+                    // Start Over (result 3): the course-in scene again through a scene fade
+                    // (0x0277117c → 0x02766e1c) [obs]; the course restarts once covered
+                    o.hide_pause();
+                    if o.fade.cover(Smm1FadeKind::SCENE, [0.0, 0.0]) {
+                        self.set_phase(Phase::Covering);
+                        return None;
+                    }
+                }
+                self.restart(cx, run)
+            }
             PauseItem::Exit => {
                 let Some(s) = &mut self.screens else {
                     return Some(PlayEvent::Exit);

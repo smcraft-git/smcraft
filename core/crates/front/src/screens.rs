@@ -958,6 +958,7 @@ impl CourseScreens {
             volume: 1.0,
             delay: 0.0,
             ui: crate::layout::UiKind::Smm2,
+            kind: crate::sound::CueKind::Sound,
         }]);
     }
 

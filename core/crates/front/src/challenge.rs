@@ -20,12 +20,34 @@ use crate::menu::UiInput;
 use crate::play::{CoursePlay, PlayEvent, PlayInput, RunLink};
 use crate::screens::{CardInfo, CourseScreens};
 use crate::smm1::{
-    ChallengeMenuScene, EndingScene, Entry, GameOverScene, MapIntroScene, RUN_LENGTHS, RunCardInfo,
+    CardStart, ChallengeMenuScene, Entry, GameOverScene, MapIntroScene, RUN_LENGTHS, RunCardInfo,
     RunOverlay, RunQuery, Smm1Event, WorldMap,
 };
+use crate::smm1_ending::{CreditsScene, RescueInfo, RescueScene};
+use crate::smm1_fade::{Smm1Fade, Smm1FadeKind};
 use crate::{Cx, DrawItem, Go};
 
 pub const DIFFICULTIES: [&str; 4] = ["Easy", "Normal", "Expert", "Super Expert"];
+
+/// The setting with, per difficulty, how many of the run's clears its world map has shown
+/// (SMM1's "clear shown" save flag, 0x02084060 / 0x020844e0): a run saved at the course clear
+/// shows Mario walking on when it is continued.
+pub const CLEAR_SHOWN_KEY: &str = "hundred.clear_shown";
+
+/// What the SMM1 screens do once their fade has covered the screen.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum AfterCover {
+    /// Load the course (its intro card comes up under the reveal).
+    Play,
+    /// The course is over: the next screen of the run.
+    Session,
+    /// Back to the difficulty select.
+    Select,
+    /// The rescue scene is over: the credits.
+    Credits,
+    /// The ending is over: the select, with the news.
+    EndingDone,
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Presentation {
@@ -40,13 +62,15 @@ pub enum ChallengeGo {
     Play,
 }
 
+#[allow(clippy::large_enum_variant)] // one scene at a time
 enum Scene {
     Menu(EndlessMenuScene),
     Map(EndlessMapScene),
     Smm1Menu(ChallengeMenuScene),
     Smm1Intro(MapIntroScene),
     GameOver(GameOverScene),
-    Ending(EndingScene),
+    Rescue(Box<RescueScene>),
+    Credits(CreditsScene),
     None,
 }
 
@@ -57,6 +81,10 @@ pub struct RunState {
     pub course: Option<CourseRef>,
     pending_next: Option<Next>,
     entry: Entry,
+    /// How the next course's intro card starts.
+    card: CardStart,
+    /// Clears shown on each difficulty's map ([`CLEAR_SHOWN_KEY`]).
+    clear_shown: [usize; 4],
     pub unlocked: Option<usize>,
     pub credits: Vec<(String, String)>,
     /// The library's courses by id (path), for names, makers, themes, codes.
@@ -69,8 +97,12 @@ pub struct ChallengeFlow {
     scene: Scene,
     pub playing: Option<CoursePlay>,
     pub run: RunState,
-    /// Map and title bar from the SMM1 select screen to the MapIn that follows.
-    handoff: Option<(WorldMap, Layout)>,
+    /// Map and title bar from the SMM1 select screen to the MapIn that follows, and whether
+    /// the select showed a Continue.
+    handoff: Option<(WorldMap, Layout, bool)>,
+    /// SMM1: the scene fader and what follows its cover.
+    fade: Option<Smm1Fade>,
+    after_cover: Option<AfterCover>,
     /// SMM2: the Endless menu handed to the run's map (ChangeMap continues it).
     endless_handoff: Option<EndlessBoard>,
     /// Captures: start the course without the card (`MMK_UI_INTRO=0`).
@@ -107,11 +139,28 @@ impl RunQuery for RunState {
         let r = self.challenge.save.records[d.min(3)].as_ref()?;
         Some((r.counters.lives, r.cleared.len()))
     }
+
+    fn clear_shown(&self, d: usize) -> bool {
+        let n = self.challenge.save.records[d.min(3)]
+            .as_ref()
+            .map_or(0, |r| r.cleared.len());
+        self.clear_shown[d.min(3)] >= n
+    }
 }
 
 impl RunState {
     fn persist(&self, cx: &mut Cx) {
         cx.host.store_value("hundred", &self.challenge.save_json());
+    }
+
+    /// The map has shown difficulty `d`'s clears up to now.
+    fn mark_clear_shown(&mut self, cx: &mut Cx, d: usize) {
+        let n = self.challenge.save.records[d.min(3)]
+            .as_ref()
+            .map_or(0, |r| r.cleared.len());
+        self.clear_shown[d.min(3)] = n;
+        let list: Vec<String> = self.clear_shown.iter().map(usize::to_string).collect();
+        cx.host.store_value(CLEAR_SHOWN_KEY, &list.join(","));
     }
 
     pub fn status(&self) -> mmk_modes::challenge::Status {
@@ -206,6 +255,13 @@ impl RunLink for RunState {
         self.pending_next == Some(Next::Complete)
     }
 
+    fn course_counts(&self) -> (Option<i64>, Option<i64>) {
+        let Some(e) = self.course.as_ref().and_then(|c| self.entries.get(&c.id)) else {
+            return (None, None);
+        };
+        (e.meta.likes, e.meta.plays)
+    }
+
     fn world_record_ms(&self) -> Option<i64> {
         let c = self.course.as_ref()?;
         self.entries.get(&c.id)?.meta.world_record_ms
@@ -243,6 +299,17 @@ impl ChallengeFlow {
             _ => (Presentation::Smm2, smm2.clone()),
         };
         let save = cx.host.load_value("hundred");
+        let mut clear_shown = [0usize; 4];
+        for (i, v) in cx
+            .host
+            .load_value(CLEAR_SHOWN_KEY)
+            .unwrap_or_default()
+            .split(',')
+            .enumerate()
+            .take(4)
+        {
+            clear_shown[i] = v.trim().parse().unwrap_or(0);
+        }
         let seed = cx.host.random().max(1);
         let mut challenge = Challenge::from_json(save.as_deref(), seed);
         let mut entries = HashMap::new();
@@ -258,6 +325,7 @@ impl ChallengeFlow {
             );
             entries.insert(e.id.clone(), e.clone());
         }
+        let fade = (presentation == Presentation::Smm1).then(|| Smm1Fade::new(&ui));
         let mut f = Self {
             presentation,
             ui,
@@ -269,10 +337,14 @@ impl ChallengeFlow {
                 course: None,
                 pending_next: None,
                 entry: Entry::NewGame,
+                card: CardStart::NewRun,
+                clear_shown,
                 unlocked: None,
                 credits: Vec::new(),
                 entries,
             },
+            fade,
+            after_cover: None,
             handoff: None,
             endless_handoff: None,
             intro: true,
@@ -345,7 +417,7 @@ impl ChallengeFlow {
                     b
                 });
             }
-            Scene::Smm1Menu(s) => self.handoff = s.into_handoff(),
+            Scene::Smm1Menu(s) => self.handoff = s.into_handoff(&self.run),
             other => self.scene = other,
         }
         self.start(cx, d, resume);
@@ -358,6 +430,11 @@ impl ChallengeFlow {
             Entry::Resume
         } else {
             Entry::NewGame
+        };
+        self.run.card = if resume {
+            CardStart::Resume
+        } else {
+            CardStart::NewRun
         };
         if self
             .run
@@ -405,10 +482,27 @@ impl ChallengeFlow {
                 EndlessMapScene::new(&self.ui, e, d, status.lives, cleared, theme, handoff)
                     .map_or(Scene::None, Scene::Map);
         } else {
-            let info = self.run.card_info();
-            let handoff = self.handoff.take();
-            self.scene = MapIntroScene::new(&self.ui, self.run.entry, d, &info, cleared, handoff)
-                .map_or(Scene::None, Scene::Smm1Intro);
+            let entry = self.run.entry;
+            self.run.entry = Entry::Direct;
+            if entry == Entry::Direct {
+                // after a skip the next course comes without the map [inf]
+                self.handoff = None;
+                self.run.card = CardStart::Next;
+                self.play(cx);
+                return;
+            }
+            if entry == Entry::AfterClear {
+                self.run.card = CardStart::Next;
+            }
+            let lives = status.lives;
+            let shown = self.run.clear_shown(d);
+            let (handoff, had) = match self.handoff.take() {
+                Some((m, t, had)) => (Some((m, t)), had),
+                None => (None, false),
+            };
+            self.scene =
+                MapIntroScene::new(&self.ui, entry, d, lives, cleared, shown, had, handoff)
+                    .map_or(Scene::None, Scene::Smm1Intro);
         }
         self.handoff = None;
         self.run.entry = Entry::Direct;
@@ -442,9 +536,13 @@ impl ChallengeFlow {
                     best_ticks: key.as_ref().and_then(|k| cx.saves.record(k).best_ticks),
                     ..Default::default()
                 };
-                let p = CoursePlay::new(
+                let mut p = CoursePlay::new(
                     cx, title, key, screens, overlay, info, self.intro, false, true,
                 );
+                if self.intro {
+                    p.start_card(&self.run.card_info(), self.run.card);
+                }
+                self.run.card = CardStart::Next;
                 self.run.challenge.course_started();
                 self.run.persist(cx);
                 self.scene = Scene::None;
@@ -531,11 +629,16 @@ impl ChallengeFlow {
                     self.back_to_select(cx);
                     return;
                 }
+                // the goal's form and costume go to the rescue scene (0x0277109c) [obs]
+                let st = cx.host.course_status();
                 cx.host.unload_course();
-                let lives = self.run.status().lives;
-                self.scene =
-                    EndingScene::new(&self.ui, self.run.difficulty, lives, &self.run.credits)
-                        .map_or(Scene::None, Scene::Ending);
+                let info = RescueInfo {
+                    style: st.style,
+                    difficulty: self.run.difficulty,
+                    form: st.form,
+                    costume: st.costume,
+                };
+                self.scene = Scene::Rescue(Box::new(RescueScene::new(&self.ui, info)));
             }
             _ => self.back_to_select(cx),
         }
@@ -564,15 +667,81 @@ impl ChallengeFlow {
         }
     }
 
+    /// SMM1: cover the screen with `kind` and do `then` once covered (at once without the
+    /// fade layout).
+    fn cover(&mut self, cx: &mut Cx, kind: Smm1FadeKind, center: [f32; 2], then: AfterCover) {
+        // the scene's music goes with it, over the cover [inf: the fade-out's length]
+        let ticks = self.fade.as_mut().map_or(0, |f| f.cover_ticks(kind));
+        self.ui.push_cues(vec![crate::sound::SoundCue::stop_music(
+            ticks as f32,
+            self.ui.kind(),
+        )]);
+        let started = self.fade.as_mut().is_some_and(|f| f.cover(kind, center));
+        if started {
+            self.after_cover = Some(then);
+        } else {
+            self.after_cover(cx, then);
+        }
+    }
+
+    fn after_cover(&mut self, cx: &mut Cx, then: AfterCover) {
+        match then {
+            AfterCover::Play => self.play(cx),
+            AfterCover::Session => self.session_ended(cx),
+            AfterCover::Select => self.back_to_select(cx),
+            AfterCover::Credits => {
+                self.scene = Scene::Credits(CreditsScene::new(
+                    &self.ui,
+                    self.run.difficulty,
+                    &self.run.credits,
+                ));
+            }
+            AfterCover::EndingDone => self.ending_finished(cx),
+        }
+    }
+
+    /// SMM1: the course screen closed; the next screen comes behind a fade: blocks to the
+    /// between-course map, every other scene request's type 1 (game over and the run's end
+    /// come behind the fade the course already covered the screen with) [obs 0x0277117c].
+    fn course_left(&mut self, cx: &mut Cx) {
+        if self.playing.as_ref().is_some_and(|p| p.covered()) {
+            if let Some(f) = &mut self.fade {
+                f.hold_covered(Smm1FadeKind::SCENE);
+            }
+            self.session_ended(cx);
+            return;
+        }
+        let kind = match self.run.pending_next {
+            Some(Next::Play) if self.run.entry == Entry::AfterClear => Smm1FadeKind::TO_MAP,
+            _ => Smm1FadeKind::SCENE,
+        };
+        self.cover(cx, kind, [0.0, 0.0], AfterCover::Session);
+    }
+
     pub fn step(&mut self, input: &PlayInput, cx: &mut Cx) -> Option<ChallengeEvent> {
+        let mut faded_in = true;
+        if let Some(f) = &mut self.fade {
+            if f.step()
+                && let Some(then) = self.after_cover.take()
+            {
+                self.after_cover(cx, then);
+            }
+            faded_in = self.fade.as_ref().is_none_or(|f| !f.active());
+        }
+        if self.after_cover.is_some() {
+            // covering: the screen below waits
+            return None;
+        }
         if let Some(p) = &mut self.playing {
             match p.step(input, cx, Some(&mut self.run)) {
+                Some(PlayEvent::Exit) if !self.smm2() => self.course_left(cx),
                 Some(PlayEvent::Exit) => self.session_ended(cx),
                 Some(PlayEvent::Cleared) | None => {}
             }
             return None;
         }
-        let ui: &UiInput = &input.ui;
+        let quiet = UiInput::default();
+        let ui: &UiInput = if faded_in { &input.ui } else { &quiet };
         if let Some(a) = &mut self.asking {
             match a.step(ui, cx) {
                 None => {}
@@ -609,25 +778,43 @@ impl ChallengeFlow {
             Scene::Smm1Menu(s) => match s.step(ui, &self.run)? {
                 Smm1Event::Exit => {
                     self.run.challenge.end();
+                    // leaving for Course World: the select's music fades with the screen [inf]
+                    self.ui.push_cues(vec![crate::sound::SoundCue::stop_music(
+                        30.0,
+                        self.ui.kind(),
+                    )]);
                     return Some(ChallengeEvent::Exit);
                 }
                 Smm1Event::Locked(d) => cx.toast(endless::locked_message(d)),
                 Smm1Event::Start { difficulty, resume } => self.begin(cx, difficulty, resume),
                 _ => {}
             },
-            Scene::Smm1Intro(s) => match s.step(ui)? {
-                Smm1Event::BackToSelect => self.back_to_select(cx),
-                Smm1Event::Play => self.play(cx),
-                _ => {}
-            },
-            Scene::GameOver(s) => {
-                if s.step(ui).is_some() {
-                    self.back_to_select(cx);
+            Scene::Smm1Intro(s) => {
+                if let Some(Smm1Event::Play) = s.step(ui, faded_in) {
+                    if s.clear_shown {
+                        let d = self.run.difficulty;
+                        self.run.mark_clear_shown(cx, d);
+                    }
+                    let (kind, center) = s.leave_fade();
+                    self.cover(cx, kind, center, AfterCover::Play);
                 }
             }
-            Scene::Ending(s) => {
+            Scene::GameOver(s) => {
                 if s.step(ui).is_some() {
-                    self.ending_finished(cx);
+                    // GameOverScene → NetworkMainScene2 (0x02700d44) [obs]
+                    self.cover(cx, Smm1FadeKind::SCENE, [0.0, 0.0], AfterCover::Select);
+                }
+            }
+            Scene::Rescue(s) => {
+                // NetEndingDemoScene → NetEndingScene (0x02768ba4), every request's fade [obs]
+                if s.step() {
+                    self.cover(cx, Smm1FadeKind::SCENE, [0.0, 0.0], AfterCover::Credits);
+                }
+            }
+            Scene::Credits(s) => {
+                // → NetworkMainScene2 (0x02767f18) [obs]
+                if s.step() {
+                    self.cover(cx, Smm1FadeKind::SCENE, [0.0, 0.0], AfterCover::EndingDone);
                 }
             }
             Scene::None => {}
@@ -638,16 +825,20 @@ impl ChallengeFlow {
     pub fn draw(&mut self, out: &mut Vec<DrawItem>) {
         if let Some(p) = &mut self.playing {
             p.draw(out);
-            return;
+        } else {
+            match &mut self.scene {
+                Scene::Menu(s) => s.draw(out),
+                Scene::Map(s) => s.draw(out),
+                Scene::Smm1Menu(s) => s.draw(out),
+                Scene::Smm1Intro(s) => s.draw(out),
+                Scene::GameOver(s) => s.draw(out),
+                Scene::Rescue(s) => s.draw(out),
+                Scene::Credits(s) => s.draw(out),
+                Scene::None => {}
+            }
         }
-        match &mut self.scene {
-            Scene::Menu(s) => s.draw(out),
-            Scene::Map(s) => s.draw(out),
-            Scene::Smm1Menu(s) => s.draw(out),
-            Scene::Smm1Intro(s) => s.draw(out),
-            Scene::GameOver(s) => s.draw(out),
-            Scene::Ending(s) => s.draw(out),
-            Scene::None => {}
+        if let Some(f) = &mut self.fade {
+            f.draw(out);
         }
     }
 
@@ -662,19 +853,6 @@ impl ChallengeFlow {
     /// The map walk after clearing `cleared` courses (or a new run's map when 0 and `new_game`).
     pub fn debug_map(&mut self, d: usize, new_game: bool, cleared: usize) {
         self.run.difficulty = d.min(3);
-        let total = RUN_LENGTHS[d.min(3)] as u32;
-        let mut info = RunCardInfo {
-            name: "Course".into(),
-            maker: "Maker".into(),
-            lives: 87,
-            number: cleared as u32 + 1,
-            total,
-            code: None,
-        };
-        if let Some(e) = self.run.entries.values().next() {
-            info.name = e.name.clone();
-            info.maker = e.meta.maker.clone().unwrap_or_default();
-        }
         if self.smm2() {
             let e = if new_game {
                 MapEntry::NewGame
@@ -689,7 +867,7 @@ impl ChallengeFlow {
             } else {
                 Entry::AfterClear
             };
-            self.scene = MapIntroScene::new(&self.ui, e, d, &info, cleared, None)
+            self.scene = MapIntroScene::new(&self.ui, e, d, 87, cleared, false, false, None)
                 .map_or(Scene::None, Scene::Smm1Intro);
         }
     }
@@ -700,7 +878,8 @@ impl ChallengeFlow {
         }
     }
 
-    pub fn debug_ending(&mut self, d: usize, library: &[CourseEntry]) {
+    /// The rescue scene of a run on difficulty `d` finished in a course of `style`.
+    pub fn debug_ending(&mut self, d: usize, style: u32, library: &[CourseEntry]) {
         if self.smm2() {
             return;
         }
@@ -710,9 +889,21 @@ impl ChallengeFlow {
             .take(RUN_LENGTHS[d.min(3)])
             .map(|e| (e.name.clone(), e.meta.maker.clone().unwrap_or_default()))
             .collect();
-        let lives = self.run.status().lives;
-        self.scene = EndingScene::new(&self.ui, d, lives, &self.run.credits)
-            .map_or(Scene::None, Scene::Ending);
+        let info = RescueInfo {
+            style,
+            difficulty: d.min(3),
+            ..Default::default()
+        };
+        self.scene = Scene::Rescue(Box::new(RescueScene::new(&self.ui, info)));
+    }
+
+    /// The staff credits of a finished run on difficulty `d` (captures).
+    pub fn debug_credits(&mut self, d: usize, library: &[CourseEntry]) {
+        if self.smm2() {
+            return;
+        }
+        self.debug_ending(d, 0, library);
+        self.scene = Scene::Credits(CreditsScene::new(&self.ui, d.min(3), &self.run.credits));
     }
 
     /// The current course's play with its screens (captures).

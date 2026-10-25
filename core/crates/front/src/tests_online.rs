@@ -322,7 +322,8 @@ fn endless_menu_clicks_choose_and_start() {
 fn smm1_menu_clicks_choose_and_start() {
     let Some(ui) = smm1() else { return };
     let mut m = ChallengeMenuScene::new(&ui, 0, &AllOpen).unwrap();
-    for _ in 0..40 {
+    // input waits for the title bar's In (40) and the map's In (48)
+    for _ in 0..48 {
         m.step(&idle(), &AllOpen);
     }
     let p = center(
@@ -332,7 +333,8 @@ fn smm1_menu_clicks_choose_and_start() {
     );
     m.step(&click(p), &AllOpen);
     assert_eq!(m.difficulty, 1);
-    for _ in 0..40 {
+    // and for the maps' 64-frame slide
+    for _ in 0..64 {
         m.step(&idle(), &AllOpen);
     }
     let p = m.start_button_center("L_StartBtn_00").unwrap();

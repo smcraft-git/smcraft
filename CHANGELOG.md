@@ -194,6 +194,31 @@ SMCraft is back in development (it was archived in October 2026).
   and walk, the wipe), the 100 Marios on the course card, the pause menu's style sound, course
   clear and the skip countdown, all from your SMM1 dump's own sound data (import SMM1 again:
   `mmk import-smm1`).
+- **The SMM1-look 100 Mario runs with SMM1's own timing**: the world map's demos play state by
+  state as in the game (New Game: the curtain, the banner, the Goombas carrying Peach, Mario
+  jumping out of the castle to the first course; Continue: his two jumps; after a clear: the
+  next course appears and he walks to it), each ending with Mario stepping into the course; A
+  skips to that. Future courses stay hidden on the map until Mario reaches them. SMM1's fades
+  between the screens (a quick fade from the menu and after a miss, blocks to the map, a circle
+  closing on Mario from the map to the course), the course card over the course for every
+  course (the 100 Marios on the first, the jump after a Continue or a miss), the skip after
+  1.9 s of holding, the clear screen's buttons once it has come in, and no early exits SMM1
+  doesn't have (the map, the game over screen).
+- **100 Mario's rescue scene, as in SMM1**: after the last course Mario walks into the castle
+  to Peach (Toad on Easy) in the style he finished in — SMB1, SMB3 or SMW, from your SMM1 dump's
+  own models, in the form he reached the goal with (cape and all) — and her line appears in the
+  balloon (it changes with his costume); then the credits roll. NSMBU and 3D World courses end in
+  SMW's scene. Import SMM1 again for it (`mmk import-smm1`, importer 5).
+- **SMM1's music on the SMM1-look 100 Mario screens**: Course World's tune on the difficulty
+  select (its track changes with the tab, in time), the map's tune between courses, game over's,
+  the rescue scene's by style (Peach's or Toad's) and the staff roll's, looping where SMM1's
+  streams loop and fading with the screen (imported with SMM1, importer 5; the Swift app and the
+  desktop / web players play it).
+- **GAME OVER drops in letter by letter** as in SMM1: the layout player now does text panes'
+  per-character transforms (each letter on its own time along the pane's curves; ten SMM1
+  layouts use them). Needs the SMM1 import again (importer 5).
+- The SMM1-look 100 Mario's pause shows the course's stars and players when the course data has
+  them, and the course card centres the maker's name and face as SMM1 does.
 - **Koopalings in Koopa Clown Cars**: the car chases you while the Koopaling fires volleys of
   his magic (Lemmy his balls, Wendy her rings) from it; a stomp stops the car while he ducks in,
   then he spins in his shell for a while (stomps bounce off) before he comes out; the third stomp

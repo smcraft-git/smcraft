@@ -367,6 +367,10 @@ pub struct CourseStatus {
     pub condition: Option<Condition>,
     /// Players in the course (1; 2–4 in local co-op).
     pub players: u32,
+    /// Player 1's form (`mmk_sim::player::Form` as a number: 0 small, 1 Super, 2 Fire, …) and
+    /// SMM1 costume (with the Costume form): the 100 Mario ending's rescue scene shows him so.
+    pub form: u8,
+    pub costume: Option<u16>,
 }
 
 /// My Courses slots of the Coursebot (SMM2 has 120, research/specs/coursebot.md A.3).

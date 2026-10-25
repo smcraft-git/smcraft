@@ -35,6 +35,8 @@ pub mod play;
 pub mod screens;
 pub mod search;
 pub mod smm1;
+pub mod smm1_ending;
+pub mod smm1_fade;
 pub mod smm1_sound;
 pub mod sound;
 pub mod superworld;
@@ -43,6 +45,8 @@ pub mod swmap;
 pub(crate) mod testing;
 #[cfg(test)]
 mod tests_online;
+#[cfg(test)]
+mod tests_smm1_flow;
 #[cfg(test)]
 mod tests_smm1_sound;
 pub mod thumbs;
@@ -53,7 +57,7 @@ pub use host::{CourseEntry, CourseStatus, Host, Icon, Saves, Source, WorldCourse
 pub use layout::{Layout, Ui, UiKind};
 pub use menu::{Buttons, UiInput};
 pub use smm1_sound::Smm1Sounds;
-pub use sound::{SoundCue, UiSounds};
+pub use sound::{CueKind, SoundCue, UiSounds};
 
 use challenge::{ChallengeEvent, ChallengeFlow, ChallengeGo, Presentation};
 use fade::{FadeKind, FadeStart, SceneFade};
@@ -1030,8 +1034,8 @@ impl Front {
     /// Endless Challenge), courseworld, courseworld-list, the online screens (account,
     /// courseworld-leaderboards, courseworld-course-page / -comments / -post / -maker / -play /
     /// -pause / -clear of the list's first server course), challenge, challenge-map,
-    /// challenge-walk, challenge-gameover, challenge-ending (`difficulty`, `cleared` for the
-    /// walk), superworld, superworld-title / -map / -walk / -play / -enemy / -retreat / -pipe /
+    /// challenge-walk, challenge-gameover, challenge-ending[-smb3|-smw|-nsmbu] (the rescue scene),
+    /// challenge-credits (`difficulty`, `cleared` for the walk), superworld, superworld-title / -map / -walk / -play / -enemy / -retreat / -pipe /
     /// -ending (the library's test world; `cleared` for the map). Returns false for an unknown
     /// name.
     pub fn capture(
@@ -1294,9 +1298,23 @@ impl Front {
                     "challenge-map" | "challenge-intro" => f.start(&mut cx, difficulty, false),
                     "challenge-walk" => f.debug_map(difficulty, false, cleared),
                     "challenge-gameover" => f.debug_game_over(),
-                    "challenge-ending" => {
+                    // the rescue scene in a course of SMB1 (plain), SMB3, SMW, NSMBU
+                    "challenge-ending"
+                    | "challenge-ending-smb3"
+                    | "challenge-ending-smw"
+                    | "challenge-ending-nsmbu" => {
+                        let style = match s {
+                            "challenge-ending-smb3" => 1,
+                            "challenge-ending-smw" => 2,
+                            "challenge-ending-nsmbu" => 3,
+                            _ => 0,
+                        };
                         let lib = cx.host.library();
-                        f.debug_ending(difficulty, &lib);
+                        f.debug_ending(difficulty, style, &lib);
+                    }
+                    "challenge-credits" => {
+                        let lib = cx.host.library();
+                        f.debug_credits(difficulty, &lib);
                     }
                     "challenge-pause" | "challenge-clear" | "challenge-skip" | "challenge-card" => {
                         f.start(&mut cx, difficulty, false);

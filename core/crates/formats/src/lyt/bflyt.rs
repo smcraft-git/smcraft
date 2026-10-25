@@ -248,8 +248,25 @@ pub struct Text {
     pub shadow_top: [u8; 4],
     pub shadow_bottom: [u8; 4],
     pub shadow_italic: f32,
+    /// The per-character transform (flag bit 4), when the pane has one.
+    pub per_char: Option<PerCharTransform>,
 }
 
+/// A text pane's per-character transform (BFLYT 5.x, at the offset after the shadow fields):
+/// every character is placed by the curves evaluated at its own time — the pane's time offset
+/// (animated by an `FLCT` tag, target 0) plus its share of the time width — so the letters move
+/// one after another (SMM1's "GAME OVER" drops in letter by letter).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct PerCharTransform {
+    pub eval_offset: f32,
+    pub eval_width: f32,
+    /// 0 one time (clamped at the curves' ends), 1 loop.
+    pub loop_type: u8,
+    /// The characters' vertical origin for rotation and scale (0 middle, 1 baseline / bottom).
+    pub origin_v: u8,
+    /// The curves (an `FLCC` tag: targets 0–2 translate x / y / z, 3–5 rotate x / y / z, …).
+    pub curves: Option<super::AnimTag>,
+}
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Window {
     /// Content inflation (px, may be negative): left, right, top, bottom.
@@ -627,6 +644,28 @@ fn parse_picture_block(r: &Reader, o: usize) -> Result<(Picture, usize)> {
 }
 
 /// One pane section at `o` (section header included).
+/// A text pane's per-character transform at `off` from the pane section `o` (`size` bytes):
+/// f32 time offset, f32 time width, u8 loop type, u8 vertical origin, u8 "has curves", then the
+/// `FLCC` tag [obs: SMM1's `Cmn_GameOver_00`].
+fn per_char(r: &Reader, o: usize, size: usize, off: usize) -> Result<Option<PerCharTransform>> {
+    if off == 0 || off + 12 > size {
+        return Ok(None);
+    }
+    let p = o + off;
+    let curves = if r.u8(p + 10)? != 0 && off + 20 <= size && r.bytes(p + 12, 4)? == b"FLCC" {
+        Some(super::bflan::parse_tag(r, p + 12)?)
+    } else {
+        None
+    };
+    Ok(Some(PerCharTransform {
+        eval_offset: r.f32(p)?,
+        eval_width: r.f32(p + 4)?,
+        loop_type: r.u8(p + 8)?,
+        origin_v: r.u8(p + 9)?,
+        curves,
+    }))
+}
+
 pub(crate) fn parse_pane(r: &Reader, o: usize, size: usize) -> Result<Pane> {
     let magic: [u8; 4] = r.bytes(o, 4)?.try_into().unwrap();
     let b = o + 8;
@@ -680,6 +719,11 @@ pub(crate) fn parse_pane(r: &Reader, o: usize, size: usize) -> Result<Pane> {
                 shadow_top: r.rgba(x + 0x40)?,
                 shadow_bottom: r.rgba(x + 0x44)?,
                 shadow_italic: r.f32(x + 0x48)?,
+                per_char: if r.u8(x + 10)? & 0x10 != 0 {
+                    per_char(r, o, size, r.u32(x + 0x4C)? as usize)?
+                } else {
+                    None
+                },
             })
         }
         b"wnd1" => {

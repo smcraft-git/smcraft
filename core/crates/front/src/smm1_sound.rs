@@ -169,6 +169,7 @@ impl Smm1Sounds {
                     volume: node["volume"].as_f64().unwrap_or(1.0) as f32,
                     delay: d,
                     ui: UiKind::Smm1,
+                    kind: crate::sound::CueKind::Sound,
                 });
             }
             return;

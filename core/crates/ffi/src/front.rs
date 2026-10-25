@@ -124,7 +124,10 @@ pub struct MmkFrontItem {
 }
 
 /// A UI sound to start (`MmkFrontSound`, 24 bytes): `<ui import>/ui/sound/<name>.wav` of the
-/// SMM2 import (`ui` 0) or the SMM1 one (`ui` 1).
+/// SMM2 import (`ui` 0) or the SMM1 one (`ui` 1). `kind` ([`mmk_front::CueKind`]): 0 a sound,
+/// 1 the menu music (it replaces the music playing; it loops between the WAV's `smpl` loop
+/// points), 2 the music switching to another track of the same stream at the position it has
+/// reached, 3 the music fading out over `delay` frames (no name).
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
 pub struct MmkFrontSound {
@@ -133,7 +136,7 @@ pub struct MmkFrontSound {
     /// Frames (60 per second) to wait before it starts.
     pub delay: f32,
     pub ui: u32,
-    pub _pad: u32,
+    pub kind: u32,
 }
 
 /// What the app needs to know about the front end now (`MmkFrontStatus`, 16 bytes).
@@ -692,6 +695,8 @@ impl Host for FfiHost {
             clear_color: mmk_host::clear_color(w, &self.assets().cache),
             condition,
             players: w.players() as u32,
+            form: w.player.form as u8,
+            costume: (w.player.form == mmk_sim::player::Form::Costume).then_some(w.player.costume),
         }
     }
 
@@ -1550,7 +1555,12 @@ pub unsafe extern "C" fn mmk_front_sounds(
                 volume: c.volume,
                 delay: c.delay,
                 ui: (c.ui == UiKind::Smm1) as u32,
-                _pad: 0,
+                kind: match c.kind {
+                    mmk_front::CueKind::Sound => 0,
+                    mmk_front::CueKind::Music => 1,
+                    mmk_front::CueKind::MusicTrack => 2,
+                    mmk_front::CueKind::StopMusic => 3,
+                },
             })
             .collect();
         if let Some(out) = unsafe { out.as_mut() } {

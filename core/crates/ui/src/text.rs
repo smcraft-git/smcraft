@@ -5,8 +5,14 @@
 //! sits `(ascent − baseline) · sy` below the line top. The text block (widest line × line count)
 //! is placed in the pane by the text position (packed like a pane origin), and each line is
 //! aligned inside the block by the line alignment (or the position's horizontal part).
+//!
+//! A per-character transform (`PerCharTransform`) moves each character by its curves evaluated
+//! at the character's own time: the pane's time offset (animated by `FLCT`) plus `i · width / n`
+//! for character `i` of `n` (spaces count) [inf: the share]; one-time curves hold their ends,
+//! looping ones wrap over their keys. Translation x / y (targets 0, 1) and the rotation about z
+//! (5, about the glyph's centre, or its bottom with vertical origin 1) are applied.
 
-use mmk_formats::lyt::Text;
+use mmk_formats::lyt::{PerCharTransform, Text};
 
 use crate::font::FontRes;
 use crate::player::Mtx;
@@ -61,9 +67,42 @@ pub(crate) fn emit(
     black: [u8; 4],
     white: [u8; 4],
     blend: u32,
+    per_char: Option<(&PerCharTransform, [f32; 2])>,
     out: &mut Vec<Quad>,
 ) {
     let f = &font.font;
+    let n_chars = s.chars().filter(|c| !c.is_control()).count().max(1);
+    // (dx, dy, rz in degrees) of character `i`
+    let char_xf = |i: usize| -> (f32, f32, f32) {
+        let Some((pc, [offset, width])) = per_char else {
+            return (0.0, 0.0, 0.0);
+        };
+        let Some(curves) = &pc.curves else {
+            return (0.0, 0.0, 0.0);
+        };
+        let mut t = offset + i as f32 * width / n_chars as f32;
+        if pc.loop_type == 1 {
+            let (a, b) = curves
+                .entries
+                .iter()
+                .flat_map(|e| e.keys.iter().map(|k| k.frame))
+                .fold((f32::MAX, f32::MIN), |(a, b), f| (a.min(f), b.max(f)));
+            if b > a {
+                t = a + (t - a).rem_euclid(b - a);
+            }
+        }
+        let mut xf = (0.0, 0.0, 0.0);
+        for e in &curves.entries {
+            let v = e.eval(t);
+            match e.target {
+                0 => xf.0 = v,
+                1 => xf.1 = v,
+                5 => xf.2 = v,
+                _ => {}
+            }
+        }
+        xf
+    };
     let (_, sy) = scale(font, t.font_size);
     let line_h = f.line_feed as f32 * sy + t.line_space;
     let lines: Vec<&str> = s.split('\n').collect();
@@ -100,10 +139,13 @@ pub(crate) fn emit(
         } else {
             ([0.0, 0.0], fade(t.top_color), fade(t.bottom_color))
         };
+        let mut ci = 0usize;
         for (i, line) in lines.iter().enumerate() {
             let mut pen = bx + (block_w - widths[i]) * line_factor + off[0];
             let line_top = by - i as f32 * line_h + off[1];
             for c in line.chars().filter(|c| !c.is_control()) {
+                let (dx, dy, rz) = char_xf(ci);
+                ci += 1;
                 let gf = font.for_char(c);
                 let (sx, gsy) = scale(gf, t.font_size);
                 let g = gf.glyph(c);
@@ -115,13 +157,21 @@ pub(crate) fn emit(
                 if c == ' ' || c == '\u{3000}' || g.width.glyph_width == 0 {
                     continue;
                 }
+                // the character's own move: rotated about its centre (or bottom), then shifted
+                let (px, py) = (
+                    (x0 + x1) / 2.0,
+                    match per_char.map(|p| p.0.origin_v) {
+                        Some(1) => y1,
+                        _ => (y0 + y1) / 2.0,
+                    },
+                );
+                let (sn, cs) = rz.to_radians().sin_cos();
+                let at = |x: f32, y: f32| {
+                    let (rx, ry) = (x - px, y - py);
+                    mtx.apply(px + rx * cs - ry * sn + dx, py + rx * sn + ry * cs + dy)
+                };
                 out.push(Quad {
-                    pos: [
-                        mtx.apply(x0, y0),
-                        mtx.apply(x1, y0),
-                        mtx.apply(x0, y1),
-                        mtx.apply(x1, y1),
-                    ],
+                    pos: [at(x0, y0), at(x1, y0), at(x0, y1), at(x1, y1)],
                     uv0: [[g.u0, g.v0], [g.u1, g.v0], [g.u0, g.v1], [g.u1, g.v1]],
                     uv1: [[0.0; 2]; 4],
                     color: [top_c, top_c, bottom_c, bottom_c],

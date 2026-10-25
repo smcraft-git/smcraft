@@ -383,7 +383,9 @@ typedef struct {
     float volume;
     float delay;                // frames
     uint32_t ui;                // 0 the SMM2 UI import, 1 the SMM1 one
-    uint32_t _pad;
+    uint32_t kind;              // 0 sound, 1 menu music (loops at the WAV's smpl points),
+                                // 2 music: another track at the same position, 3 music fades
+                                // out over `delay` frames
 } MmkFrontSound;                                                       // 24 bytes
 
 enum { MMK_FRONT_COURSE_SHOWN = 1, MMK_FRONT_COURSE_DONE = 2, MMK_FRONT_PLAYING = 4, MMK_FRONT_NO_SCREEN = 8,

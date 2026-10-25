@@ -817,3 +817,107 @@ fn characters_the_sheets_lack_are_drawn_at_run_time() {
     assert!(c.update_glyphs());
     assert_eq!(c.textures[first].version, c.revision());
 }
+
+/// A per-character transform (SMM1's GAME OVER): each letter takes the curve at its own time,
+/// the pane's time offset (animated by `FLCT`) plus its share of the width.
+#[test]
+fn per_character_transforms_move_each_letter_at_its_own_time() {
+    use mmk_formats::lyt::{
+        AnimContent, AnimEntry, AnimKey, AnimTag, CurveType, PerCharTransform, Text,
+    };
+    let mut c = sample_cache(); // has MessageFont
+    let key = |frame: f32, value: f32| AnimKey {
+        frame,
+        value,
+        slope: 0.0,
+    };
+    // a step from 100 (above) down to 0 at time −10
+    let curve = AnimTag {
+        magic: "FLCC".into(),
+        entries: vec![AnimEntry {
+            index: 0,
+            target: 1,
+            curve: CurveType::Step,
+            keys: vec![key(-10.0, 0.0), key(-9.0, 100.0)],
+        }],
+    };
+    let text = Pane {
+        kind: PaneKind::Text(Text {
+            font_size: [7.0, 9.0],
+            top_color: [255; 4],
+            bottom_color: [255; 4],
+            text: "AB".into(),
+            per_char: Some(PerCharTransform {
+                eval_offset: -100.0,
+                eval_width: 20.0,
+                loop_type: 0,
+                origin_v: 0,
+                curves: Some(curve),
+            }),
+            ..Default::default()
+        }),
+        name: "T_Text_00".into(),
+        size: [100.0, 20.0],
+        ..Default::default()
+    };
+    let mut l = layout("Over", vec![text]);
+    l.fonts = vec!["MessageFont.bffnt".into()];
+    // FLCT: the time offset 0 → −20 over frames 0–20
+    let anim = Animation {
+        name: "OneTime".into(),
+        frame_size: 20,
+        contents: vec![AnimContent {
+            name: "T_Text_00".into(),
+            kind: 0,
+            tags: vec![AnimTag {
+                magic: "FLCT".into(),
+                entries: vec![AnimEntry {
+                    index: 0,
+                    target: 0,
+                    curve: CurveType::Hermite,
+                    keys: vec![
+                        AnimKey {
+                            frame: 0.0,
+                            value: 0.0,
+                            slope: -1.0,
+                        },
+                        AnimKey {
+                            frame: 20.0,
+                            value: -20.0,
+                            slope: -1.0,
+                        },
+                    ],
+                }],
+            }],
+        }],
+        ..Default::default()
+    };
+    let mut animations = BTreeMap::new();
+    animations.insert("OneTime".to_string(), anim);
+    c.add_layout(LayoutSource {
+        layout: l,
+        animations,
+        textures: vec![("T".into(), tex(16, 16))],
+    });
+    let mut p = LayoutPlayer::new(c.layout("Over").unwrap());
+    let tops = |p: &LayoutPlayer| -> Vec<f32> {
+        p.draw_list()
+            .iter()
+            .filter(|q| q.tex0 == 0)
+            .map(|q| q.pos[0][1])
+            .collect()
+    };
+    // unanimated: the pane's own offset −100: both letters landed (time −100, −90)
+    let rest = tops(&p);
+    assert_eq!(rest.len(), 2);
+    // frame 0: offset 0, both above (times 0 and 10)
+    p.play("OneTime", 0.0);
+    let up = tops(&p);
+    assert!((up[0] - rest[0] - 100.0).abs() < 1e-3, "{up:?} {rest:?}");
+    assert!((up[1] - rest[1] - 100.0).abs() < 1e-3);
+    // frame 12: offset −12: "A" (time −12) has landed, "B" (time −2) not yet
+    p.play("OneTime", 12.0);
+    let mid = tops(&p);
+    assert!((mid[0] - rest[0]).abs() < 1e-3, "{mid:?}");
+    assert!((mid[1] - rest[1] - 100.0).abs() < 1e-3, "{mid:?}");
+}

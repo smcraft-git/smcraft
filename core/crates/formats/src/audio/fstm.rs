@@ -93,7 +93,8 @@ pub fn parse(d: &[u8]) -> Result<Fwav> {
     let last = u32_at(d, si + 0x1C)? as usize;
     let last_padded = u32_at(d, si + 0x24)? as usize;
     let start = reference(d, si + 0x30, data + 8)?;
-    if !(1..=8).contains(&n_ch) || blocks == 0 || encoding > 2 {
+    // multi-track streams hold up to 16 channels (SMM1's Course World stream: 12)
+    if !(1..=16).contains(&n_ch) || blocks == 0 || encoding > 2 {
         return Err(bad(format!(
             "{n_ch} channels, {blocks} blocks, encoding {encoding}"
         )));

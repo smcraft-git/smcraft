@@ -93,6 +93,8 @@ struct PaneState {
     alpha: f32,
     visible: bool,
     colors: [[f32; 4]; 4],
+    /// A text pane's per-character time offset and width (`FLCT` targets 0 / 1).
+    char_eval: [f32; 2],
 }
 
 #[derive(Clone, Debug)]
@@ -734,6 +736,13 @@ impl LayoutPlayer {
                     PaneKind::Window(w) => w.content.vertex_colors.map(rgba_f),
                     _ => [[255.0; 4]; 4],
                 };
+                let char_eval = match &p.kind {
+                    PaneKind::Text(t) => t
+                        .per_char
+                        .as_ref()
+                        .map_or([0.0; 2], |pc| [pc.eval_offset, pc.eval_width]),
+                    _ => [0.0; 2],
+                };
                 PaneState {
                     t: p.translate,
                     r: p.rotate,
@@ -742,6 +751,7 @@ impl LayoutPlayer {
                     alpha: p.alpha as f32,
                     visible: p.visible(),
                     colors,
+                    char_eval,
                 }
             })
             .collect::<Vec<_>>();
@@ -1114,6 +1124,7 @@ impl LayoutPlayer {
                             (Some(m), Some(ms)) => (ms.black, ms.white, blend_flags(m)),
                             _ => ([0.0; 4], [255.0; 4], BLEND_NORMAL),
                         };
+                        let per_char = t.per_char.as_ref().map(|pc| (pc, st.char_eval));
                         text::emit(
                             font,
                             t,
@@ -1124,6 +1135,7 @@ impl LayoutPlayer {
                             black.map(to_u8),
                             white.map(to_u8),
                             blend,
+                            per_char,
                             out,
                         );
                     }
@@ -1179,6 +1191,12 @@ fn apply_pane_tag(st: &mut PaneState, tag: &AnimTag, frame: f32) {
                 _ => {}
             },
             "FLVI" => st.visible = v >= 0.5,
+            // a text pane's per-character transform: its time offset and width
+            "FLCT" => {
+                if e.target < 2 {
+                    st.char_eval[e.target as usize] = v;
+                }
+            }
             "FLVC" => match e.target {
                 0..=15 => st.colors[e.target as usize / 4][e.target as usize % 4] = v,
                 16 => st.alpha = v,
