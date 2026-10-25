@@ -2,24 +2,27 @@
 //! bar's sound button (`L_PaletteSet_00/L_SoundBtn_00`) turns the palette into the effects'
 //! (their pictures `Lyt_E_P_SE_<label>`, names from `SoundIconName`), the search button opens
 //! the effect window (the ring with the five sound categories, `L_Category_01`: Feelings,
-//! Stingers, Reactions, Animations, Music, one page each), and a press puts the effect on the
-//! tile: on Mario, on a part that can hold one, else on the empty tile (`mmk_editor::
-//! sound_effects`). The eraser (or the back button) takes it off again.
+//! Stingers, Reactions, Animations, Music, over the game's eight pages), and a press puts the
+//! effect on the tile: on Mario, on a part that can hold one, else on the empty tile
+//! (`mmk_editor::sound_effects`). The eraser (or the back button) takes it off again.
 //!
 //! The course shows every effect with its icon from the sheet `Otoasobi_CategoryPanel`: a
 //! spot's big icon on its tile, a part's (and Mario's) small framed icon at the part's top
 //! right [inf: which size goes where; capture `maker-sound-icons`].
 //!
 //! Each effect sounds its Course Maker user's `cue` (`EditOtoasobi<id>`) when it is chosen (the
-//! sound palette's choice, 0x71018e6710 [obs v3.0.3]) or put down [inf: 0x7100f0eaa0, the icon
-//! object's virtual, its moment not read]; the maker's calls run the effect without its picture.
+//! sound palette's choice, 0x71018e6710; a new selection in the window, 0x71018e0c40) or put
+//! down (0x7100f0eaa0: the effect icon's put-down virtual, after the parts' common one
+//! 0x7100e92b10, unless the icon's +0x52 or its cursor's +0xf47e flag is set) [obs v3.0.3]; the
+//! maker's calls run the effect without its picture.
 //! The sound button's balloon names the palette it switches to (`Mode_Disp_Sound` /
 //! `Mode_Disp_Parts`, 0x71018e2fe0) [obs v3.0.3].
 
 use mmk_editor::EditError;
 use mmk_editor::sound_effects::SoundTarget;
 use mmk_formats::smm2::sound_effects::{
-    CATEGORY_KEYS, ICON_IDS, PAGES, label, page_of, sheet_cell,
+    CATEGORY_KEYS, ICON_IDS, RING_CATEGORY_PAGE, RING_PAGES, label, ring_category, ring_place,
+    sheet_cell,
 };
 use mmk_ui::{Quad, TEXTURE_NONE};
 
@@ -46,24 +49,27 @@ pub struct SoundTools {
     pub palette: Vec<u8>,
     pub slot: usize,
     pub(super) ring: Ring,
+    /// Each window page's selection, kept while the maker is open.
+    pub(super) ring_sel: [usize; RING_PAGES.len()],
     /// Effects to sound this tick (their `EditOtoasobi<id>` cue).
     pub previews: Vec<u8>,
 }
 
 impl Default for SoundTools {
-    /// The palette starts with the first twelve effects of the Feelings and Stingers pages
-    /// [inf].
+    /// The palette starts with the window's first twelve effects [inf: the game's start wasn't
+    /// read; 0x71019227b0's lists are the window's pages, not a palette].
     fn default() -> Self {
         Self {
             on: false,
-            palette: PAGES[0]
+            palette: RING_PAGES
                 .iter()
-                .chain(PAGES[1])
+                .flat_map(|p| p.iter())
                 .take(SLOTS)
                 .map(|&i| ICON_IDS[i])
                 .collect(),
             slot: 0,
             ring: Ring::default(),
+            ring_sel: [0; RING_PAGES.len()],
             previews: Vec::new(),
         }
     }
@@ -218,11 +224,24 @@ impl MakerFlow {
 
     // ------------------------------------------------------------ the effect window
 
+    /// The window's effects on ring page `page`.
+    fn ring_page(page: usize) -> Vec<u8> {
+        RING_PAGES
+            .get(page)
+            .map(|p| p.iter().map(|&i| ICON_IDS[i]).collect())
+            .unwrap_or_default()
+    }
+
     pub(super) fn open_sound_ring(&mut self) {
+        // on the selected effect's page, else the first; each page keeps its own selection
+        // (the page's +0x16b8, by page +0x16a8) [obs v3.0.3 0x71018e4960]
         let mut ring = Ring::default();
-        if let Some((pg, at)) = self.sound_effect().and_then(page_of) {
-            (ring.category, ring.sel) = (pg, at);
+        if let Some((pg, at)) = self.sound_effect().and_then(ring_place) {
+            self.se.ring_sel[pg] = at;
+            ring.page = pg;
         }
+        ring.category = ring_category(ring.page);
+        ring.sel = self.se.ring_sel[ring.page];
         self.se.ring = ring;
         self.mode = Mode::Ring;
         self.ui
@@ -238,23 +257,57 @@ impl MakerFlow {
         self.layout_sound_ring(true);
     }
 
-    /// Show sound category `c` in the open window (captures).
+    /// Show sound category `c` in the open window, on its first page (captures).
     pub(super) fn se_ring_category(&mut self, c: usize) {
-        self.se.ring = Ring {
-            category: c.min(PAGES.len() - 1),
-            ..Default::default()
-        };
-        self.layout_sound_ring(true);
+        self.se_ring_page(
+            RING_CATEGORY_PAGE[c.min(RING_CATEGORY_PAGE.len() - 1)],
+            true,
+        );
     }
 
-    /// The ring with the current sound category: its effects' pictures, the selection, the
-    /// five-tab category bar (`L_Category_01`) [obs data].
+    /// Ring page `page` (its remembered selection), `change` when the category changed.
+    fn se_ring_page(&mut self, page: usize, change: bool) {
+        let page = page.min(RING_PAGES.len() - 1);
+        self.se.ring = Ring {
+            category: ring_category(page),
+            page,
+            sel: self.se.ring_sel[page],
+        };
+        self.layout_sound_ring(change);
+    }
+
+    /// A new selection in the window sounds its effect (0x71018e0c40: the effect's play call
+    /// with trigger kind 3 at the view's centre when the page's selection changes) [obs v3.0.3].
+    fn se_ring_select(&mut self, sel: usize) {
+        let page = self.se.ring.page;
+        if sel != self.se.ring.sel
+            && let Some(&id) = Self::ring_page(page).get(sel)
+        {
+            self.se.previews.push(id);
+        }
+        self.se.ring.sel = sel;
+        self.se.ring_sel[page] = sel;
+    }
+
+    /// The ring with the current page: its effects' pictures, the selection, the five-tab
+    /// category bar (`L_Category_01`) with the category's page dots [obs data]. The ring's
+    /// `Category` colour is frame 4 + the category (0x71018e4960: pages 0–1 frame 4, then
+    /// 0x71023d8620's 5, 5, 6, 7, 8, 8) [obs v3.0.3].
     pub(super) fn layout_sound_ring(&mut self, change: bool) {
-        let cat = self.se.ring.category.min(PAGES.len() - 1);
-        let page: Vec<u8> = PAGES[cat].iter().map(|&i| ICON_IDS[i]).collect();
+        let pg = self.se.ring.page.min(RING_PAGES.len() - 1);
+        let cat = ring_category(pg);
+        self.se.ring.category = cat;
+        let page = Self::ring_page(pg);
         let n = page.len().max(1);
         self.se.ring.sel = self.se.ring.sel.min(n - 1);
         let sel = self.se.ring.sel;
+        // the category's pages, and which of them this is
+        let first = RING_CATEGORY_PAGE[cat];
+        let pages = RING_CATEGORY_PAGE
+            .get(cat + 1)
+            .copied()
+            .unwrap_or(RING_PAGES.len())
+            - first;
         let name = page.get(sel).map(|&id| self.sound_effect_name(id));
         let title = self
             .ui
@@ -264,7 +317,7 @@ impl MakerFlow {
         let set = "L_RingMenu_00/L_RingIconSet_00";
         p.hold(&format!("{set}/Type"), (n.max(2) - 1) as f32);
         p.hold(&format!("{set}/Select"), sel as f32);
-        p.hold(&format!("{set}/Category"), cat as f32);
+        p.hold(&format!("{set}/Category"), (4 + cat) as f32);
         for k in 0..RING {
             let icon = format!("{set}/L_RingIcon_{:02}", k + 1);
             match page.get(k).and_then(|&id| picture(id)) {
@@ -290,7 +343,7 @@ impl MakerFlow {
         p.show("L_RingMenu_00/L_Category_00", false);
         p.show("L_RingMenu_00/L_Category_01", true);
         let bar = "L_RingMenu_00/L_Category_01";
-        for c in 0..PAGES.len() {
+        for c in 0..CATEGORY_KEYS.len() {
             let a = format!("{bar}/ChangeCategory{c:02}");
             if c == cat {
                 if change {
@@ -302,9 +355,21 @@ impl MakerFlow {
                 p.stop(&a);
             }
         }
-        p.hold(&format!("{bar}/PageVolume"), 0.0);
+        p.hold(&format!("{bar}/PageVolume"), (pages.max(1) - 1) as f32);
         for d in 0..6 {
-            p.show(&format!("{bar}/P_Page_{d:02}"), false);
+            let dot = format!("{bar}/P_Page_{d:02}");
+            p.show(&dot, d < pages && pages > 1);
+            p.set_pane(
+                &dot,
+                mmk_ui::PaneOverride {
+                    scale: Some(if d == pg - first {
+                        [1.0, 1.0]
+                    } else {
+                        [0.6, 0.6]
+                    }),
+                    ..Default::default()
+                },
+            );
         }
         if let Some(t) = title {
             p.text(&format!("{bar}/T_Category_00"), &t);
@@ -317,9 +382,7 @@ impl MakerFlow {
     }
 
     pub(super) fn sound_ring_tick(&mut self, pressed: Buttons, keys: u16, click: Option<[f32; 2]>) {
-        let n = PAGES[self.se.ring.category.min(PAGES.len() - 1)]
-            .len()
-            .max(1);
+        let n = Self::ring_page(self.se.ring.page).len().max(1);
         if keys & keys::PARTS != 0 || pressed.has(Buttons::BACK) {
             self.close_ring();
             return;
@@ -334,21 +397,21 @@ impl MakerFlow {
             } else {
                 n - 1
             };
-            self.se.ring.sel = (self.se.ring.sel + step) % n;
+            self.se_ring_select((self.se.ring.sel + step) % n);
             self.ui.sound_key(PAGE, "p_MoveRightRingMenu", &[]);
             self.layout_sound_ring(false);
         } else if pressed.has(Buttons::UP) || pressed.has(Buttons::DOWN) {
-            // one page a category: up / down go through the categories
-            let k = PAGES.len();
-            let c = self.se.ring.category;
-            self.se.ring.category = if pressed.has(Buttons::DOWN) {
-                (c + 1) % k
+            // page by page, round from the last to the first, through the categories
+            let k = RING_PAGES.len();
+            let pg = self.se.ring.page;
+            let next = if pressed.has(Buttons::DOWN) {
+                (pg + 1) % k
             } else {
-                (c + k - 1) % k
+                (pg + k - 1) % k
             };
-            self.se.ring.sel = 0;
+            let change = ring_category(next) != ring_category(pg);
             self.ui.sound_key(PAGE, "p_MoveLeftRingMenu", &[]);
-            self.layout_sound_ring(true);
+            self.se_ring_page(next, change);
         } else if pressed.has(Buttons::CONFIRM) {
             self.choose_sound_ring();
         }
@@ -362,38 +425,49 @@ impl MakerFlow {
             .map(|k| format!("{set}/L_RingIcon_{:02}/W_Square_00", k + 1))
             .collect();
         if let Some(k) = hit(page, tick, &icons, p) {
-            self.se.ring.sel = k;
+            self.se_ring_select(k);
             self.layout_sound_ring(false);
             self.choose_sound_ring();
             return;
         }
-        let tabs: Vec<String> = (0..PAGES.len())
+        let tabs: Vec<String> = (0..CATEGORY_KEYS.len())
             .map(|c| format!("L_RingMenu_00/L_Category_01/L_BdBase_{c:02}"))
             .collect();
         if let Some(c) = hit(page, tick, &tabs, p) {
             if c != self.se.ring.category {
-                self.se.ring = Ring {
-                    category: c,
-                    ..Default::default()
-                };
-                self.layout_sound_ring(true);
+                self.se_ring_category(c);
             }
             return;
         }
         let close = ["L_RingMenu_00/L_CloseBtn_00".to_string()];
         if hit(page, tick, &close, p).is_some() {
             self.close_ring();
+            return;
+        }
+        let sides = [
+            "L_RingMenu_00/L_BdRingIconSet_01".to_string(),
+            "L_RingMenu_00/L_BdRingIconSet_02".to_string(),
+        ];
+        if let Some(s) = hit(page, tick, &sides, p) {
+            let k = RING_PAGES.len();
+            let pg = self.se.ring.page;
+            let next = if s == 1 {
+                (pg + 1) % k
+            } else {
+                (pg + k - 1) % k
+            };
+            let change = ring_category(next) != ring_category(pg);
+            self.ui.sound_key(PAGE, "p_MoveLeftRingMenu", &[]);
+            self.se_ring_page(next, change);
         }
     }
 
     /// The chosen effect goes to the front of the palette (a history, as the parts') and is
     /// selected.
     fn choose_sound_ring(&mut self) {
-        let cat = self.se.ring.category.min(PAGES.len() - 1);
-        let Some(&icon) = PAGES[cat].get(self.se.ring.sel) else {
+        let Some(&id) = Self::ring_page(self.se.ring.page).get(self.se.ring.sel) else {
             return;
         };
-        let id = ICON_IDS[icon];
         self.se.palette.retain(|&x| x != id);
         self.se.palette.insert(0, id);
         self.se.palette.truncate(SLOTS);

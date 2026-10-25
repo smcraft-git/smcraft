@@ -178,12 +178,14 @@ pub const PAGES: [&[u8]; 12] = [
 ];
 
 /// Super Mario 3D World's pages (0x71019228e0, from 0x71023d839c); its third page has a tenth
-/// part (84) once the save data's bit 1 at +0x108 is set (0x71023d84bc instead of
-/// 0x71023d84e4) [obs v3.0.3; inf: an unlock].
+/// part, the Super Hammer (84, after the SpecialItem), once the save data's bit 1 at +0x108 is
+/// set (0x71023d84bc instead of 0x71023d84e4; the ring's count for the page goes 9 → 10 with
+/// the same bit, 0x71018e4960) [obs v3.0.3; inf: the unlock]. SMCraft offers the Super Hammer
+/// from the start, so its page is the unlocked one [departure].
 pub const PAGES_3W: [&[u8]; 11] = [
     &[0, 2, 1, 3, 81, 83],
     &[9, 8, 10, 11, 12, 14, 15],
-    &[16, 17, 18, 19, 23, 20, 105, 21, 22],
+    &[16, 17, 18, 19, 23, 84, 20, 105, 21, 22],
     &[114, 115, 116, 117, 118],
     &[24, 25, 85, 28, 29, 30, 101],
     &[88, 89, 31, 87, 33, 36, 90],
@@ -194,10 +196,12 @@ pub const PAGES_3W: [&[u8]; 11] = [
     &[73, 74, 82, 97, 119, 100, 60, 104, 98],
 ];
 
-/// The first page of each of the four categories (Terrain, Items, Enemies, Gizmos):
-/// 0x7102320710 / 0x7102320b90 [obs v3.0.3].
-pub const CATEGORY_PAGE: [usize; 4] = [0, 2, 4, 8];
-pub const CATEGORY_PAGE_3W: [usize; 4] = [0, 2, 3, 8];
+/// The first page of each of the four categories (Terrain, Items, Enemies, Gizmos): the other
+/// styles' 0x7102320b90 (one Items page, five of Enemies), 3D World's 0x7102320710 (its
+/// wearables' page with the Items) — 0x710191e1f0 takes 0x7102320710 for style 4 (3D World),
+/// and the ring colours the pages so (0x71018e4960) [obs v3.0.3].
+pub const CATEGORY_PAGE: [usize; 4] = [0, 2, 3, 8];
+pub const CATEGORY_PAGE_3W: [usize; 4] = [0, 2, 4, 8];
 
 fn pages(style: &str) -> &'static [&'static [u8]] {
     if style == "3W" { &PAGES_3W } else { &PAGES }
@@ -209,6 +213,18 @@ fn category_pages(style: &str) -> [usize; 4] {
     } else {
         CATEGORY_PAGE
     }
+}
+
+/// The pages of category `category` (0–3) in the style's order.
+pub fn category_pages_of(style: &str, category: usize) -> std::ops::Range<usize> {
+    let first = category_pages(style);
+    let c = category.min(3);
+    first[c]..first.get(c + 1).copied().unwrap_or(pages(style).len())
+}
+
+/// The number of parts on page `page`.
+pub fn page_len(style: &str, page: usize) -> usize {
+    pages(style).get(page).map_or(0, |p| p.len())
 }
 
 /// A place in the menu's order: page and index.
@@ -651,10 +667,16 @@ mod tests {
 
     #[test]
     fn categories_start_on_their_first_page() {
-        assert_eq!(category("M1", 3), 1);
+        // the other styles: one Items page (Coin …), Enemies from Goomba's page 3; 3D World's
+        // wearables (page 3) are Items
+        assert_eq!(category("M1", 2), 1);
+        assert_eq!(category("M1", 3), 2);
+        assert_eq!(id_at("M1", Place { page: 3, index: 0 }), Some(24));
         assert_eq!(category("M1", 7), 2);
         assert_eq!(category("M1", 11), 3);
-        assert_eq!(category("3W", 3), 2);
+        assert_eq!(category("3W", 3), 1);
+        assert_eq!(category("3W", 4), 2);
+        assert_eq!(id_at("3W", Place { page: 4, index: 0 }), Some(24));
         let at = Place { page: 5, index: 3 };
         assert_eq!(change_category("M1", at, true), Place { page: 8, index: 0 });
         assert_eq!(

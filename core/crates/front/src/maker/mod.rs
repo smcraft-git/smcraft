@@ -45,6 +45,7 @@ pub mod scroll;
 pub mod sound_parts;
 pub mod subarea;
 pub mod trail;
+pub mod trash;
 pub mod view;
 
 use mmk_editor::clearpipe::{CLEAR_PIPE, PipeEnd};
@@ -341,6 +342,10 @@ pub struct MakerFlow {
     play_hold: i32,
     repeat: i32,
     ring: Ring,
+    /// The part window's selection on each of its pages (style, category, page).
+    ring_sel: std::collections::HashMap<(String, usize, usize), usize>,
+    /// The trash can (`L_TrashCan_00`, trash.rs).
+    trash: trash::TrashCan,
     menu_sel: usize,
     save_sel: usize,
     window_sel: usize,
@@ -463,6 +468,8 @@ impl MakerFlow {
             play_hold: -1,
             repeat: 0,
             ring: Ring::default(),
+            ring_sel: std::collections::HashMap::new(),
+            trash: trash::TrashCan::default(),
             menu_sel: 1,
             save_sel: 0,
             window_sel: 0,
@@ -942,6 +949,7 @@ impl MakerFlow {
         {
             self.show_tip(cx.host, t);
         }
+        self.trash_tick();
         if self.mode != Mode::Test {
             self.trail.tick(self.trail_on);
             if self.trail_label.is_some_and(|t| self.tick >= t)
@@ -2522,10 +2530,21 @@ impl MakerFlow {
     // ------------------------------------------------------------ the part window
 
     fn ring_pages(&self, category: usize) -> Vec<Vec<Entry>> {
-        catalog::pages(
-            &catalog::of(catalog::CATEGORIES[category], &self.style()),
-            RING,
-        )
+        catalog::ring_pages(category, &self.style())
+    }
+
+    /// Ring page `page` of `category`'s remembered selection: the ring keeps one per page (the
+    /// page's +0x16b8, by page +0x16a8) [obs v3.0.3 0x71018e4960 / 0x71018e0c40].
+    fn ring_memory(&self, category: usize, page: usize) -> usize {
+        self.ring_sel
+            .get(&(self.style(), category, page))
+            .copied()
+            .unwrap_or(0)
+    }
+
+    fn remember_ring(&mut self) {
+        let key = (self.style(), self.ring.category, self.ring.page);
+        self.ring_sel.insert(key, self.ring.sel);
     }
 
     fn open_ring(&mut self) {
@@ -2533,19 +2552,26 @@ impl MakerFlow {
             self.open_sound_ring();
             return;
         }
-        // open on the selected part's category and page
+        // open on the selected part's category and page [inf: where the game opens it]
         let tool = self.tool();
-        let mut ring = Ring::default();
-        if let Some(e) = catalog::entry(tool) {
-            ring.category = e.category.index();
-            for (pi, pg) in self.ring_pages(ring.category).iter().enumerate() {
+        let mut ring = Ring {
+            sel: self.ring_memory(0, 0),
+            ..Ring::default()
+        };
+        'found: for category in 0..catalog::CATEGORIES.len() {
+            for (pi, pg) in self.ring_pages(category).iter().enumerate() {
                 if let Some(si) = pg.iter().position(|x| x.tool == tool) {
-                    ring.page = pi;
-                    ring.sel = si;
+                    ring = Ring {
+                        category,
+                        page: pi,
+                        sel: si,
+                    };
+                    break 'found;
                 }
             }
         }
         self.ring = ring;
+        self.remember_ring();
         self.mode = Mode::Ring;
         self.ui
             .sound_button(PAGE, "L_PaletteSet_00/L_SearchBtn_00", Event::Decide);
@@ -2698,6 +2724,7 @@ impl MakerFlow {
                 n - 1
             };
             self.ring.sel = (self.ring.sel + step) % n;
+            self.remember_ring();
             self.ui.sound_key(PAGE, "p_MoveRightRingMenu", &[]);
             self.layout_ring(false);
         } else if pressed.has(Buttons::UP) || pressed.has(Buttons::DOWN) {
@@ -2727,7 +2754,7 @@ impl MakerFlow {
             self.ring.page = self.ring_pages(self.ring.category).len().max(1) - 1;
             change = true;
         }
-        self.ring.sel = 0;
+        self.ring.sel = self.ring_memory(self.ring.category, self.ring.page);
         self.ui.sound_key(PAGE, "p_MoveLeftRingMenu", &[]);
         self.layout_ring(change);
     }
@@ -2741,6 +2768,7 @@ impl MakerFlow {
             .collect();
         if let Some(k) = hit(page, tick, &icons, p) {
             self.ring.sel = k;
+            self.remember_ring();
             self.layout_ring(false);
             self.choose_ring();
             return;
@@ -2752,7 +2780,8 @@ impl MakerFlow {
             if c != self.ring.category {
                 self.ring = Ring {
                     category: c,
-                    ..Default::default()
+                    page: 0,
+                    sel: self.ring_memory(c, 0),
                 };
                 self.layout_ring(true);
             }
@@ -4211,6 +4240,7 @@ impl MakerFlow {
     }
 
     /// Captures: open a window ("parts", "menu", "save", "style", "theme", "play", "subarea";
+    /// "trash": the trash can eating at the centre;
     /// "inparts", "inparts-big": the contents balloon over a ? block;
     /// "vertical": a vertical sub-area; "water", "water-rising", "water-both", "water-speed",
     /// "water-tip": the Water Level mode in the forest; "scroll", "scroll-nodes", "scroll-tip":
@@ -4227,6 +4257,8 @@ impl MakerFlow {
             "autoscroll" => self.open_window(3),
             "mission" => self.open_mission(),
             "play" => self.start_test(cx, Some(None)),
+            // the trash can's Act at the screen's centre (nothing in the maker starts it yet)
+            "trash" => self.trash_act([0.0, 0.0]),
             // the sub-area's orientation window, and a vertical sub-area (its scroll bar)
             "subarea" => self.switch_area(),
             // co-op making: its window; two cursors (player 2 with the Super Mushroom, holding a

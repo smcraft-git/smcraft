@@ -63,10 +63,10 @@ pub const ICON_LABELS: [&str; 47] = [
     "SoundEffect",
 ];
 
-/// The effect window's five categories (the ring's `Edit_RingCategory_01`), each one page: the
-/// icons (indices into [`ICON_IDS`]) in their order. They are the rows of the course icons'
-/// sheet `Otoasobi_CategoryPanel` (yellow, orange, green, purple, blue), which put Flash and the
-/// two filters with the animations [obs data: the sheet's cells against the palette pictures].
+/// The rows of the course icons' sheet `Otoasobi_CategoryPanel` (yellow, orange, green, purple,
+/// blue): the icons (indices into [`ICON_IDS`]) in their order, which put Flash and the two
+/// filters with the animations [obs data: the sheet's cells against the palette pictures]. The
+/// effect window orders them its own way ([`RING_PAGES`]).
 pub const PAGES: [&[usize]; 5] = [
     &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
     &[10, 11, 12, 13, 14, 15, 16, 17, 18, 19],
@@ -78,6 +78,44 @@ pub const PAGES: [&[usize]; 5] = [
 /// The categories' names: `CategoryName_<key>` of `Edit_MainPage_00` (Feelings, Stingers,
 /// Reactions, Animations, Music) [obs data].
 pub const CATEGORY_KEYS: [&str; 5] = ["Emotion", "OneShot", "Eval", "Visual", "BGM"];
+
+/// The effect window's pages, as the ring and player 2's menu lay them out in sound mode: icons
+/// (indices into [`ICON_IDS`]) page by page (0x71019227b0 (page, index) → the lists at
+/// 0x71023d8508…0x71023d85ac; each page's count 0x7102991cf0) [obs v3.0.3]. Feelings and Stingers
+/// take two pages each, Music two; Zap! (24) sits on Stingers' second page, not with the sheet's
+/// Reactions. The same for every style.
+pub const RING_PAGES: [&[usize]; 8] = [
+    &[0, 1, 2, 3, 8],
+    &[5, 6, 7, 4, 9],
+    &[10, 11, 12, 13, 14, 15],
+    &[16, 17, 18, 19, 24],
+    &[20, 21, 22, 23, 26, 27],
+    &[28, 29, 30, 31, 32, 33, 45, 46, 25],
+    &[39, 40, 35, 36, 37],
+    &[34, 38, 44, 42, 43, 41],
+];
+
+/// Each category's first page in [`RING_PAGES`]: Feelings 0, then 2, 4, 5, 6 (player 2's menu's
+/// category steps 0x7102320a50; the ring's colour per page 0x71023d8620) [obs v3.0.3].
+pub const RING_CATEGORY_PAGE: [usize; 5] = [0, 2, 4, 5, 6];
+
+/// The category of ring page `page`.
+pub fn ring_category(page: usize) -> usize {
+    (0..RING_CATEGORY_PAGE.len())
+        .rev()
+        .find(|&c| page >= RING_CATEGORY_PAGE[c])
+        .unwrap_or(0)
+}
+
+/// Where effect `id` sits in the window: its page in [`RING_PAGES`] and its place there (the
+/// game's own map 0x71019230a0) [obs v3.0.3].
+pub fn ring_place(id: u8) -> Option<(usize, usize)> {
+    let i = icon(id)?;
+    RING_PAGES
+        .iter()
+        .enumerate()
+        .find_map(|(p, page)| page.iter().position(|&k| k == i).map(|at| (p, at)))
+}
 
 /// The icon (index into [`ICON_IDS`]) of course id `id`, None for an id the maker never offers.
 pub fn icon(id: u8) -> Option<usize> {
@@ -108,4 +146,34 @@ pub fn page_of(id: u8) -> Option<(usize, usize)> {
 /// picture 20 px into the cell) [obs data].
 pub fn sheet_cell(id: u8) -> Option<(usize, usize)> {
     page_of(id).map(|(p, at)| (at, p))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The window's pages hold every offered effect once, and agree with the game's own map of
+    /// icon → page (0x71023dab30) and place (0x71023dabf0) [obs v3.0.3].
+    #[test]
+    fn ring_pages_match_the_games_map() {
+        const PAGE: [usize; 47] = [
+            0, 0, 0, 0, 1, 1, 1, 1, 0, 1, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 3, 5, 4, 4, 5,
+            5, 5, 5, 5, 5, 7, 6, 6, 6, 7, 6, 6, 7, 7, 7, 7, 5, 5,
+        ];
+        const PLACE: [usize; 47] = [
+            0, 1, 2, 3, 3, 0, 1, 2, 4, 4, 0, 1, 2, 3, 4, 5, 0, 1, 2, 3, 0, 1, 2, 3, 4, 8, 4, 5, 0,
+            1, 2, 3, 4, 5, 0, 2, 3, 4, 1, 0, 1, 5, 3, 4, 2, 6, 7,
+        ];
+        let mut seen = [false; 47];
+        for (i, &id) in ICON_IDS.iter().enumerate() {
+            assert_eq!(ring_place(id), Some((PAGE[i], PLACE[i])), "icon {i}");
+            seen[i] = true;
+        }
+        assert!(seen.iter().all(|&s| s));
+        assert_eq!(RING_PAGES.iter().map(|p| p.len()).sum::<usize>(), 47);
+        assert_eq!(
+            (0..8).map(ring_category).collect::<Vec<_>>(),
+            [0, 0, 1, 1, 2, 3, 4, 4]
+        );
+    }
 }

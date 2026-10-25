@@ -1,9 +1,9 @@
 //! The parts the maker offers, by the part window's four categories (Terrain, Items, Enemies,
-//! Gizmos: `CategoryName_*` of `Edit_MainPage_00` [obs data]). Which part sits on which page and
-//! in what order is built by the game's code from its editor part kinds and wasn't decoded
-//! (research/specs/maker.md C3); this order is ours [inf], one entry per part, alternate forms
-//! left to the part itself. Names come from the import's `PartsIconName` table by label
-//! (`<style>_<label>` first, as the game's own per-style names).
+//! Gizmos: `CategoryName_*` of `Edit_MainPage_00` [obs data]), one entry per part, alternate
+//! forms left to the part itself. The window lays them out on the game's own pages
+//! ([`ring_pages`], research/specs/maker.md C16); [`ENTRIES`]' order is only the catalog's.
+//! Names come from the import's `PartsIconName` table by label (`<style>_<label>` first, as the
+//! game's own per-style names).
 
 use mmk_editor::rules;
 
@@ -266,6 +266,38 @@ pub const DEFAULT_PALETTE: [Tool; 12] = [
     P(10),
     P(18),
 ];
+
+/// The part window's pages of category `category` in `style`, as the game lays them out: its
+/// own page lists of palette ids (the other styles' 12 pages, 3D World's 11), the ring and player
+/// 2's menu reading the same tables (0x71018e4960 / 0x710191e1f0 → 0x7101922b20 /
+/// 0x71019228e0), a page's category by its first page (pages < 2 Terrain, …: 0x71018e4960's
+/// colour per page, the 2P menu's steps 0x7102320b90 / 0x7102320710) [obs v3.0.3]. Parts
+/// SMCraft can't put yet are left out, and a page left empty with them [departure].
+pub fn ring_pages(category: usize, style: &str) -> Vec<Vec<Entry>> {
+    use super::coop;
+    let cat = CATEGORIES[category.min(CATEGORIES.len() - 1)];
+    coop::category_pages_of(style, category)
+        .filter_map(|page| {
+            let entries: Vec<Entry> = (0..coop::page_len(style, page))
+                .filter_map(|index| {
+                    let at = coop::Place { page, index };
+                    if !coop::usable(style, at) {
+                        return None;
+                    }
+                    let id = coop::id_at(style, at)?;
+                    let tool = coop::tool(id)?;
+                    let label = entry(tool).map_or(coop::label(id)?, |e| e.label);
+                    Some(Entry {
+                        tool,
+                        label,
+                        category: cat,
+                    })
+                })
+                .collect();
+            (!entries.is_empty()).then_some(entries)
+        })
+        .collect()
+}
 
 /// Pages of at most `per` entries.
 pub fn pages(entries: &[Entry], per: usize) -> Vec<Vec<Entry>> {

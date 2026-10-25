@@ -134,12 +134,13 @@ fn the_part_window_puts_its_choice_at_the_front_of_the_palette() {
     let mut m = maker(&mut host, &mut saves, MakerStart::New("M1".into()));
     run(&mut m, &mut host, &mut saves, keys(keys::PARTS));
     assert_eq!(m.mode, Mode::Ring);
-    // Ground is the first Terrain part; one to the right is the gentle slope
+    // Ground is the first Terrain part; one to the right is the steep slope (the game's page:
+    // Ground, slope_l45, slope_l30, …)
     run(&mut m, &mut host, &mut saves, idle());
     run(&mut m, &mut host, &mut saves, press(Buttons::RIGHT));
     run(&mut m, &mut host, &mut saves, press(Buttons::CONFIRM));
     assert_eq!(m.mode, Mode::Edit);
-    assert_eq!(m.palette[0], Tool::Part(87));
+    assert_eq!(m.palette[0], Tool::Part(88));
     assert_eq!(m.slot, 0);
     assert_eq!(m.palette.len(), SLOTS, "the oldest part dropped out");
     // down pages on to the next category
@@ -2369,13 +2370,14 @@ fn sound_effects_go_on_tiles_parts_and_mario_from_their_window() {
     m.toggle_sound_mode();
     assert!(m.se.on);
     assert_eq!(m.sound_effect(), Some(0), "Shock first");
-    // the window's Music page: Boss Music, chosen to the front of the palette
+    // the window's last page (Music's second): Boss Music, chosen to the front of the palette
     run(&mut m, &mut host, &mut saves, keys(keys::PARTS));
     assert_eq!(m.mode, Mode::Ring);
-    for _ in 0..4 {
+    for _ in 0..7 {
         run(&mut m, &mut host, &mut saves, press(Buttons::DOWN));
         run(&mut m, &mut host, &mut saves, idle());
     }
+    assert_eq!((m.se.ring.page, m.se.ring.category), (7, 4));
     run(&mut m, &mut host, &mut saves, press(Buttons::CONFIRM));
     assert_eq!(m.mode, Mode::Edit);
     assert_eq!((m.se.palette[0], m.se.slot), (9, 0));
@@ -2443,4 +2445,129 @@ fn the_sound_capture_states_open() {
             assert_eq!(m.editor.placed_effects().len(), 3);
         }
     }
+}
+
+#[test]
+fn the_part_window_has_the_games_pages_per_style() {
+    use catalog::{CATEGORIES, ring_pages};
+    // the other styles: Terrain's first page as the game's list (palette ids 0, 2, 1, 3, 4 …),
+    // the Hidden Block on the second; one Items page; Enemies from the Goomba's page
+    let terrain = ring_pages(0, "M1");
+    let tools: Vec<Tool> = terrain[0].iter().map(|e| e.tool).collect();
+    assert_eq!(
+        tools[..6],
+        [
+            Tool::Ground,
+            Tool::Part(88),
+            Tool::Part(87),
+            Tool::Pipe,
+            Tool::Part(43),
+            Tool::Part(14)
+        ]
+    );
+    assert!(terrain[1].iter().any(|e| e.tool == Tool::Part(29)));
+    assert_eq!(ring_pages(1, "M1").len(), 1);
+    assert_eq!(ring_pages(2, "M1")[0][0].tool, Tool::Part(0));
+    assert_eq!(ring_pages(2, "M1").len(), 5);
+    // 3D World: the Clear Pipe with the terrain, the wearables' page with the items, three
+    // Gizmos pages
+    assert!(
+        ring_pages(0, "3W")[0]
+            .iter()
+            .any(|e| e.tool == Tool::ClearPipe)
+    );
+    assert_eq!(ring_pages(1, "3W").len(), 2);
+    assert_eq!(ring_pages(1, "3W")[1][0].tool, Tool::Part(127));
+    assert_eq!(ring_pages(3, "3W").len(), 3);
+    // every page fits the ring, and every part a style offers is on one of its pages but the
+    // ones the game's pages lack [departure: SMCraft's extra entries]
+    for style in ["M1", "M3", "MW", "WU", "3W"] {
+        let on_pages: Vec<Tool> = (0..CATEGORIES.len())
+            .flat_map(|c| ring_pages(c, style))
+            .flatten()
+            .map(|e| e.tool)
+            .collect();
+        for c in 0..CATEGORIES.len() {
+            assert!(
+                ring_pages(c, style).iter().all(|p| p.len() <= RING),
+                "{style}"
+            );
+        }
+        for c in CATEGORIES {
+            for e in catalog::of(c, style) {
+                assert!(on_pages.contains(&e.tool), "{style}: {e:?} not on a page");
+            }
+        }
+    }
+}
+
+#[test]
+fn the_part_window_keeps_each_pages_selection() {
+    let (mut host, mut saves) = (MockHost::default(), Saves::default());
+    let mut m = maker(&mut host, &mut saves, MakerStart::New("M1".into()));
+    run(&mut m, &mut host, &mut saves, keys(keys::PARTS));
+    run(&mut m, &mut host, &mut saves, idle());
+    let page = m.ring.page;
+    run(&mut m, &mut host, &mut saves, press(Buttons::RIGHT));
+    run(&mut m, &mut host, &mut saves, idle());
+    let sel = m.ring.sel;
+    run(&mut m, &mut host, &mut saves, press(Buttons::DOWN));
+    run(&mut m, &mut host, &mut saves, idle());
+    assert_eq!(m.ring.sel, 0, "a page not yet visited");
+    run(&mut m, &mut host, &mut saves, press(Buttons::UP));
+    run(&mut m, &mut host, &mut saves, idle());
+    assert_eq!((m.ring.page, m.ring.sel), (page, sel), "back where it was");
+}
+
+#[test]
+fn the_effect_window_has_the_games_eight_pages() {
+    let (mut host, mut saves) = (MockHost::default(), Saves::default());
+    let mut m = maker(&mut host, &mut saves, MakerStart::New("M1".into()));
+    run(&mut m, &mut host, &mut saves, idle());
+    m.toggle_sound_mode();
+    run(&mut m, &mut host, &mut saves, keys(keys::PARTS));
+    run(&mut m, &mut host, &mut saves, idle());
+    assert_eq!((m.se.ring.page, m.se.ring.category), (0, 0));
+    host.edit_sounds.clear();
+    // a new selection sounds its effect (Scream, icon 1, course id 11)
+    run(&mut m, &mut host, &mut saves, press(Buttons::RIGHT));
+    run(&mut m, &mut host, &mut saves, idle());
+    assert_eq!(
+        std::mem::take(&mut host.edit_sounds),
+        [("EditOtoasobi11".to_string(), "cue".to_string())]
+    );
+    // Feelings' second page, then Stingers; each page keeps its selection
+    run(&mut m, &mut host, &mut saves, press(Buttons::DOWN));
+    run(&mut m, &mut host, &mut saves, idle());
+    assert_eq!(
+        (m.se.ring.page, m.se.ring.category, m.se.ring.sel),
+        (1, 0, 0)
+    );
+    run(&mut m, &mut host, &mut saves, press(Buttons::DOWN));
+    run(&mut m, &mut host, &mut saves, idle());
+    assert_eq!((m.se.ring.page, m.se.ring.category), (2, 1));
+    run(&mut m, &mut host, &mut saves, press(Buttons::UP));
+    run(&mut m, &mut host, &mut saves, press(Buttons::UP));
+    run(&mut m, &mut host, &mut saves, idle());
+    assert_eq!((m.se.ring.page, m.se.ring.sel), (0, 1));
+    // a category tab: its first page
+    m.se_ring_category(3);
+    assert_eq!((m.se.ring.page, m.se.ring.category), (5, 3));
+}
+
+#[test]
+fn the_trash_can_eats_and_goes_away() {
+    let (mut host, mut saves) = (MockHost::default(), Saves::default());
+    let mut m = maker(&mut host, &mut saves, MakerStart::New("M1".into()));
+    run(&mut m, &mut host, &mut saves, idle());
+    assert!(with(&mut host, &mut saves, |cx| m.debug_open(cx, "trash")));
+    assert!(m.trash.shown());
+    for _ in 0..trash::ACT {
+        run(&mut m, &mut host, &mut saves, idle());
+    }
+    assert!(m.trash.shown(), "Out plays first");
+    for _ in 0..trash::IN_OUT {
+        run(&mut m, &mut host, &mut saves, idle());
+    }
+    assert!(!m.trash.shown());
 }
