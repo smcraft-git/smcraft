@@ -15,7 +15,13 @@ SMCraft is back in development (it was archived in October 2026).
   a skid). The music effects (Boss, Bonus, Final Boss, the Super Mario Galaxy / 64 / Sunshine /
   Kart tracks, Heartbeat, Silence, Peaceful, Horror) take the music's place until Mario walks
   away from them, with their own hurry-up versions; the pictures (fireworks, sparks, flashes …)
-  show where they go off.
+  show where they go off. Seesaws (when Mario lands on one), trees (when he climbs to the top)
+  and Dry Bones Shells set theirs off too, so every course in the samples now plays in full.
+- A kicked shell no longer breaks on Bowser, Boom Boom or Bowser Jr.: it hits them once and slides on
+  through, as in SMM2, and a big shell takes 5 of Bowser's HP.
+- Yoshi keeps a power-up he licks up in his mouth and spits it out, bouncing, instead of handing it to
+  Mario; his tongue reaches as far as in each style (much farther in New Super Mario Bros. U), and
+  stretches out on the game's frames.
 - The Course Maker's sound button: the palette turns into the sound effects, the effect window
   has the game's five categories, and effects go on empty tiles, on parts that can hold one and
   on Mario; the course shows their icons, the eraser takes them off, and they save with the

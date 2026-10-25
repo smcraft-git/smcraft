@@ -112,17 +112,29 @@ impl World {
     }
 }
 
-/// A sliding shell meeting a boss: the boss takes a Shell hit (attack 6) and the shell is spent
-/// [inf: it is knocked away. The Default Shell context's hit slots (0x68 / 0x88) are empty
-/// (0x71005e4f10 / 0x71005e4f50), so the shell's fate is what its own collider callback
-/// (0x71011ff860 v3.0.3) hands its reaction component (+0x6b8, 0x710123bd20 → 0x710123aca0:
-/// a reaction other than 4 / 7 sends the actor its context 4 with the message). Its dedicated
-/// "shell against a blocker" branch (LAB_7101202450: own collider attack +0x78 = 6, the
-/// other's +0x80 bit 7 set and category +0x74 ≠ 10 → reaction 5) needs the shell's own +0x534
-/// bit 19 or 20, which nothing in v3.0.3 sets (one clear, 0x710113db94, and no other store to
-/// +0x534 / +0x536 / +0x530 makes them) [obs v3.0.3], so it is dead; the general branch after
-/// it (LAB_7101201db4) was not followed]. Returns None when neither is a boss hit by a sliding
-/// shell; otherwise the score to award, if the boss was defeated.
+/// A sliding shell meeting a boss: the boss takes the shell attack (attack 6; a big shell's
+/// costs Bowser 5) and the shell slides on through him [obs v3.0.3]. Both colliders' callbacks
+/// run for an overlapping pair (0x7100e28af0) and send nothing back to the shell:
+/// - the shell's own (0x71011ff860): the bosses' colliders do carry +0x91 bit 0 (each frame's
+///   update 0x7101208390 sets it from the actor's +0x534 bit 15, set by the Bowser, Boom Boom
+///   and Bowser Jr ctors 0x7101147650, 0x71010a1860 / 0x71010a7ad0 / 0x71010af760,
+///   0x7101193fc0), but its general branch (LAB_7101201db4) knocks the shell out (its own
+///   reaction 0, kind 6) only for an attacker that isn't an enemy: 0x71012a55d0 holds for the
+///   enemy class 0x7102853080 that a Koopa or Buzzy shell is, and leaves it the shell-against-
+///   shell rule (both +0x2b8 = 3), which a boss isn't. The "blocker" branch (LAB_7101202450)
+///   needs the shell's +0x534 bit 19 or 20, which nothing in v3.0.3 sets (pass 7). No boss
+///   attacks with its body (+0x78 = 0), so the shell takes nothing either, and ShellSlide
+///   (0x710105b390) turns back only at a BG wall (+0x658 & 0x24000 = 0x4000), not on the
+///   walker's turn flag (+0x528 bit 27);
+/// - the boss's (the same callback; 3D World's Boom Boom through its wrapper 0x71010a1c30):
+///   the shell attack goes to its reaction (EnemyDB `shell` = ReactOnly for
+///   Bowser) and the damage helper (Bowser 0x710115dcc0 → 0x710115e350: HP, the hurt effect,
+///   the score), none of which answers the attacker (0x710123a500, 0x710123b1c0).
+///
+/// [inf: the shell hits a boss once while they touch — nothing found in the damage path keeps
+/// a sliding shell from hitting Bowser again on the next overlapping frame (Boom Boom and Bowser
+/// Jr. are guarded in their damage states).] Returns None when neither is a boss hit by a
+/// sliding shell; otherwise the score to award, if the boss was defeated.
 pub(super) fn boss_shell_hit(a: &mut Actor, b: &mut Actor) -> Option<Option<(u32, f32, f32)>> {
     let (shell, boss) = if a.mode == Mode::ShellSlide && b.kind.is_boss() {
         (a, b)
@@ -131,9 +143,35 @@ pub(super) fn boss_shell_hit(a: &mut Actor, b: &mut Actor) -> Option<Option<(u32
     } else {
         return None;
     };
-    let hit = boss.boss_hit(BossAttack::Shell, shell.x);
-    shell.die_fall(boss.x);
+    if shell.boss_contact == Some(boss.id) {
+        return Some(None);
+    }
+    shell.boss_contact = Some(boss.id);
+    let attack = if shell.big {
+        BossAttack::BigShell
+    } else {
+        BossAttack::Shell
+    };
+    let hit = boss.boss_hit(attack, shell.x);
     Some((hit == BossHit::Defeated).then_some((SCORE_TABLE[4], boss.x, boss.y + 24.0)))
+}
+
+/// A shell's boss contact ends when they no longer overlap (or either is gone).
+pub(super) fn end_boss_contacts(actors: &mut [Actor]) {
+    for i in 0..actors.len() {
+        let Some(id) = actors[i].boss_contact else {
+            continue;
+        };
+        let still = actors.iter().any(|b| {
+            b.id == id
+                && b.alive()
+                && actors[i].mode == Mode::ShellSlide
+                && super::overlap(actors[i].bbox(), b.bbox())
+        });
+        if !still {
+            actors[i].boss_contact = None;
+        }
+    }
 }
 
 #[cfg(test)]
@@ -257,21 +295,27 @@ mod tests {
     }
 
     #[test]
-    fn a_sliding_shell_costs_bowser_three_hp_and_is_spent() {
-        let mut w = world_with(BOWSER, false);
-        let (x, y) = (boss(&w).x, boss(&w).y);
-        let mut s = Actor::new(Kind::Shell { red: false }, x - 12.0, y);
-        s.mode = Mode::ShellWait;
-        s.kick(1, 0.0);
-        s.kick_lock = 0;
-        w.add_actor(s);
-        run(&mut w, 0, 2);
-        assert_eq!(boss(&w).boss_hp(), 17);
-        assert!(
-            w.actors
-                .iter()
-                .any(|a| matches!(a.kind, Kind::Shell { .. }) && a.mode == Mode::DieFall)
-        );
+    fn a_sliding_shell_costs_bowser_three_hp_once_and_slides_on() {
+        for (big, hp) in [(false, 17u8), (true, 15)] {
+            let mut w = world_with(BOWSER, false);
+            let (x, y) = (boss(&w).x, boss(&w).y);
+            let mut s = Actor::new(Kind::Shell { red: false }, x - 12.0, y);
+            s.big = big;
+            s.mode = Mode::ShellWait;
+            s.kick(1, 0.0);
+            s.kick_lock = 0;
+            w.add_actor(s);
+            let sid = w.actors.last().unwrap().id;
+            run(&mut w, 0, 2);
+            assert_eq!(boss(&w).boss_hp(), hp, "big {big}");
+            // it slides on through him, hitting him once
+            for _ in 0..8 {
+                run(&mut w, 0, 1);
+                let shell = w.actors.iter().find(|a| a.id == sid).expect("the shell");
+                assert_eq!(shell.mode, Mode::ShellSlide);
+            }
+            assert_eq!(boss(&w).boss_hp(), hp);
+        }
     }
 
     #[test]

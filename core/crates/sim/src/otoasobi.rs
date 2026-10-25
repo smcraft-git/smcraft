@@ -28,7 +28,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use mmk_formats::smm2::{Area, Course, CourseObject};
 
 use crate::World;
-use crate::actors::Kind;
+use crate::actors::{Kind, Mode};
 use crate::level::{Level, TILE};
 use crate::world::{Event, VIEW_H, VIEW_W};
 
@@ -236,23 +236,32 @@ pub const JUMP_SPEED: f32 = 3.0;
 ///   0x71013db8f0, 0x71013f0260), doors (0x71013a5a00, 0x71013a6710) and pipes (the warp
 ///   sequence 0x71012d95f0) entered, a warp box left (0x71013f2060): kind 5;
 /// - a Key collected (0x71013bf530), the claw catching (0x71013e87c0): kind 4;
-/// - lifts and the P Switch stood on (0x7100d84810 from 0x71013c1bf0…0x71013c6930 and
-///   0x71013d7d90): kind 6.
+/// - lifts and the Seesaw stood on (0x7100d84810 from 0x71013c1bf0…0x71013c6930 and the
+///   Seesaw's physics 0x71013d7d90): kind 6;
+/// - the P Switch picked up (its carry handler 0x71013e99a0), a Tree shaken (0x710137eae0):
+///   kind 5.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PartTrigger {
     /// Defeated (stomped, knocked out, gone in a puff).
     Defeated,
-    /// Taken by a player (coins, power-ups), or picked up (the P Switch, 0x71013e99a0).
+    /// Taken by a player (coins, power-ups).
     Taken,
+    /// The P Switch picked up (its carry handler 0x71013e99a0, kind 5); its music plays from
+    /// its carry base's source while it is there (0x710135a900 → 0x710128b250), as the POW's.
+    PickedUp,
     /// Hit from below or the side, or broken.
     Hit,
     /// Bounced on (springs, Mushroom Trampolines).
     Bounced,
     /// Entered (pipes, doors).
     Entered,
-    /// Stood on (lifts: each landing, 8 frames apart; the P Switch: a landing 25 frames after
-    /// the last).
+    /// Stood on (lifts: each landing, 8 frames apart; the Seesaw: a player landing on an empty
+    /// plank, 25 frames after the last such landing).
     Ridden,
+    /// A Tree shaken: a player reaching the top of its trunk (the release bits +0x8cc that
+    /// TreeClimbTop sets; 0x710137eae0 plays the effect, kind 5, 40 px above the tree's
+    /// origin, each time).
+    Shaken,
     /// A Key collected.
     Collected,
     /// A Bill Blaster's shot (0x71011406f0 → 0x710128ef80 at the muzzle).
@@ -288,12 +297,16 @@ impl PartTrigger {
     }
 
     /// Parts whose music effect plays while the part is there, from the music source registry
-    /// (0x7101538eb0): enemies and items while alive (0x710128b250), a stood-on lift or P Switch
-    /// once it has been stood on (0x71013d7d90).
+    /// (0x7101538eb0): enemies and items while alive (0x710128b250), a stood-on lift or Seesaw
+    /// once it has been stood on (0x71013d7d90: +0x8ec, kind 6).
     fn music_source(self) -> bool {
         matches!(
             self,
-            PartTrigger::Defeated | PartTrigger::Taken | PartTrigger::Ridden | PartTrigger::Inert
+            PartTrigger::Defeated
+                | PartTrigger::Taken
+                | PartTrigger::PickedUp
+                | PartTrigger::Ridden
+                | PartTrigger::Inert
         )
     }
 }
@@ -312,7 +325,7 @@ pub enum Trigger {
     Held,
     /// 5: an object's.
     Object,
-    /// 6: a stood-on object's (lifts, P Switch).
+    /// 6: a stood-on object's (lifts, the Seesaw).
     Ridden,
 }
 
@@ -376,6 +389,7 @@ fn part_trigger(o: &CourseObject, lvl: &Level) -> Option<PartTrigger> {
         // the Dash Block (0x71013a3f30) and snake blocks (0x71013e1490) are stood on (kind 6)
         80 | 84 if !actorish => return Some(PartTrigger::Ridden),
         119 => return Some(PartTrigger::Bound),
+        106 => return Some(PartTrigger::Shaken),
         _ => {}
     }
     let kind = crate::level::part_kind(o, lvl)?;
@@ -387,7 +401,13 @@ fn part_trigger(o: &CourseObject, lvl: &Level) -> Option<PartTrigger> {
         | Kind::OnOffTrampoline { .. } => Some(PartTrigger::Bounced),
         Kind::ClownCar { .. } | Kind::KoopaCar | Kind::Cloud => Some(PartTrigger::Boarded),
         Kind::YoshiEgg { .. } => Some(PartTrigger::Hatched),
-        Kind::Lift { .. } | Kind::LavaLift { .. } | Kind::PSwitch => Some(PartTrigger::Ridden),
+        Kind::Lift { .. } | Kind::LavaLift { .. } | Kind::Seesaw { .. } => {
+            Some(PartTrigger::Ridden)
+        }
+        Kind::PSwitch => Some(PartTrigger::PickedUp),
+        // the empty shells (the 0x4 forms: KaronShell, MetShell, TogezoShell) are enemies of
+        // the enemy base, defeated like their walking forms (they spawn as a Shell)
+        Kind::EmptyShell { .. } => Some(PartTrigger::Defeated),
         Kind::Key => Some(PartTrigger::Collected),
         Kind::Claw => Some(PartTrigger::Caught),
         // the POW's and the Crate's classes (0x71013d3dd0…, 0x71013f5bb0…) never read their
@@ -528,6 +548,8 @@ struct AreaParts {
     snakes: BTreeMap<(i32, i32), u8>,
     exclams: BTreeMap<(i32, i32), u8>,
     cannons: BTreeMap<(i32, i32), u8>,
+    /// Trees by their origin (trunk centre, bottom row centre; 1/10 px).
+    trees: BTreeMap<(i32, i32), u8>,
     /// The area's tempo (bpm): the course music's, normal and hurried.
     tempo: [f32; 2],
 }
@@ -578,6 +600,10 @@ impl AreaParts {
                 }
                 PartTrigger::Out => {
                     a.boxes.insert(spawn_key(ox, oy - 8.0), id);
+                    continue;
+                }
+                PartTrigger::Shaken => {
+                    a.trees.insert(spawn_key(ox, oy), id);
                     continue;
                 }
                 _ => {}
@@ -636,16 +662,18 @@ struct Tagged {
     y: f32,
     /// Taken (items), ridden (springs, lifts), pushing (sideways springs) last tick.
     state: u8,
-    /// Frames until a stood-on part sets off again (lifts 8, the P Switch 25).
+    /// Frames until a stood-on part sets off again (lifts 8, the Seesaw 25).
     cool: u32,
     /// Stood on at least once (a stood-on part's music source registers from then on).
     armed: bool,
 }
 
-/// Lifts set off once a landing, 8 frames apart (+0x514, 0x71013c1bf0…); the P Switch on a
-/// landing 25 frames after it was last stood on (+0x8e8, 0x71013d7d90) [obs v3.0.3].
+/// Lifts set off once a landing, 8 frames apart (+0x514, 0x71013c1bf0…); the Seesaw when a
+/// player lands on its empty plank (its rider mask +0x8e4 from none, last frame's +0x8e5) with
+/// its 25-frame count (+0x8e8) out, the count refilled by every such landing (0x71013d7d90)
+/// [obs v3.0.3].
 const LIFT_COOL: u32 = 8;
-const P_SWITCH_COOL: u32 = 25;
+const SEESAW_COOL: u32 = 25;
 
 /// The voices the effects share, as of their start frames (the repeat rules of [`Voice`]).
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -707,6 +735,8 @@ pub struct SoundParts {
     stood: BTreeMap<(i32, i32), (bool, u32)>,
     snakes_on: BTreeMap<usize, (bool, u32)>,
     exclams_bound: BTreeSet<usize>,
+    /// Trees a player was at the top of last tick (their index in the level).
+    trees_top: BTreeSet<usize>,
     voices: Voices,
 }
 
@@ -991,6 +1021,7 @@ impl SoundParts {
         self.stood.clear();
         self.snakes_on.clear();
         self.exclams_bound.clear();
+        self.trees_top.clear();
     }
 
     /// One world tick: this tick's effects into [`Self::cues`]; the music effect's start and end.
@@ -1245,8 +1276,11 @@ impl SoundParts {
             let music = matches!(VOICES[id as usize], Voice::Music(_) | Voice::Ambient(_));
             match t {
                 PartTrigger::Defeated => {
+                    // an empty shell put on (a helmet, the Dry Bones Shell ridden) leaves
+                    // without a defeat [inf: its worn context, not followed]
+                    let worn = a.shell_of != 0 && a.mode == Mode::Dead;
                     if was.is_some() && !a.alive() {
-                        if !music {
+                        if !music && !worn {
                             self.fire(world, id, a.x, a.y, Source::Part(t), false);
                         }
                         continue;
@@ -1276,23 +1310,29 @@ impl SoundParts {
                     now.insert(a.id, cur);
                     continue;
                 }
-                PartTrigger::Ridden => {
-                    let p_switch = a.kind == Kind::PSwitch;
-                    let on = Self::stood_on(world, a.id);
-                    let landed = on && !was.is_some_and(|w| w.state & 1 != 0);
-                    // the P Switch picked up (its carry handler 0x71013e99a0, kind 5)
+                PartTrigger::PickedUp => {
                     let held = std::iter::once(&world.player)
                         .chain(&world.others)
                         .any(|p| p.held == Some(a.id));
-                    let pick = p_switch && held && !was.is_some_and(|w| w.state & 2 != 0);
-                    if p_switch {
-                        // stood on: fires when the 25-frame count is out, and keeps it full
-                        if on {
-                            if cur.cool == 0 && !music {
-                                self.fire(world, id, a.x, a.y, Source::Part(t), false);
+                    if held && !was.is_some_and(|w| w.state != 0) && !music {
+                        self.fire(world, id, a.x, a.y, Source::Part(t), false);
+                    }
+                    cur.state = held as u8;
+                }
+                PartTrigger::Ridden => {
+                    let on = Self::stood_on(world, a.id);
+                    let landed = on && !was.is_some_and(|w| w.state != 0);
+                    if matches!(a.kind, Kind::Seesaw { .. }) {
+                        // a landing on the empty plank: plays when the count is out, and
+                        // refills it either way
+                        if landed {
+                            if cur.cool == 0 {
+                                if !music {
+                                    self.fire(world, id, a.x, a.y, Source::Part(t), false);
+                                }
+                                cur.armed = true;
                             }
-                            cur.cool = P_SWITCH_COOL;
-                            cur.armed = true;
+                            cur.cool = SEESAW_COOL;
                         }
                     } else if landed && cur.cool == 0 {
                         if !music {
@@ -1301,13 +1341,10 @@ impl SoundParts {
                         cur.cool = LIFT_COOL;
                         cur.armed = true;
                     }
-                    if pick && !music {
-                        self.fire(world, id, a.x, a.y, Source::Part(PartTrigger::Taken), false);
-                    }
                     if cur.armed && music && a.alive() {
                         self.register(world, id, a.x, a.y + 8.0, Trigger::Ridden, a.id);
                     }
-                    cur.state = on as u8 | (held as u8) << 1;
+                    cur.state = on as u8;
                     if a.alive() {
                         now.insert(a.id, cur);
                     }
@@ -1471,6 +1508,27 @@ impl SoundParts {
             }
             self.stood.insert(tile, (on, cool));
         }
+        // Trees: a player reaching the top of the trunk sets its release bits, and the tree
+        // plays its effect each time (0x710137eae0: at x, y + 40 [+ its +0x3f8, not read])
+        let mut tops = BTreeSet::new();
+        for (ti, tree) in world.level.trees.iter().enumerate() {
+            let Some(&id) = area.trees.get(&spawn_key(tree.x, tree.y)) else {
+                continue;
+            };
+            if !players
+                .iter()
+                .any(|p| p.alive() && tree.at_top(p.climbing.map(|(x, _)| x), p.y))
+            {
+                continue;
+            }
+            tops.insert(ti);
+            if !self.trees_top.contains(&ti) {
+                // a direct play call: a music effect starts from it too (kind 5's range)
+                let (x, y) = (tree.x, tree.y + 40.0);
+                self.fire(world, id, x, y, Source::Part(PartTrigger::Shaken), false);
+            }
+        }
+        self.trees_top = tops;
         // snake blocks: a landing, 8 frames apart (as a lift); ! Blocks: each hit
         for (si, sn) in world.snakes.iter().enumerate() {
             let Some(&(tx, ty, ..)) = world.level.snakes.get(si) else {

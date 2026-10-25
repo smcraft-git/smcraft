@@ -26,6 +26,8 @@ pub enum BossAttack {
     Fire,
     /// A sliding shell.
     Shell,
+    /// A big one (placed big: flags & 0x6000 = 0x4000).
+    BigShell,
     /// A Bob-omb explosion.
     Blast,
     /// A block bumped from below under the boss.
@@ -501,7 +503,9 @@ impl Actor {
 
     /// A hit from `attack` (coming from `from_x`), through the boss HP rules.
     ///
-    /// Bowser (helper 0x71006b4c20): fire 1, shell 3, Bob-omb blast 3 (the blast is the shell
+    /// Bowser (helper 0x71006b4c20; v3.0.3 0x710115dcc0): fire 1, shell 3, a big shell 5 (the
+    /// shell attack, kinds 6 / 0x29, costs 5 from a big attacker, 3 from any other; Spike's
+    /// snowballs 0xa9 / 0xaa 4 / 2), Bob-omb blast 3 (the blast is the shell
     /// attack: while the Explode flag is up the collider update swaps the bomb's body box for a
     /// cc 6 box [obs v1.0.0 0x7100732640, world.rs `explosions`]; the v3.0.3 Mechakoopa missile's
     /// blast profile 0x7102a62d28 is attack type 6 too [obs]); a block hit only
@@ -524,6 +528,7 @@ impl Actor {
                 BossAttack::Stomp => return BossHit::Ignored,
                 BossAttack::Fire => 1,
                 BossAttack::Shell | BossAttack::Blast => 3,
+                BossAttack::BigShell => 5,
                 BossAttack::BlockHit => {
                     if self.phase != bw::CLOWN {
                         self.bowser_enter_hit_block();

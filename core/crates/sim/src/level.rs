@@ -203,6 +203,12 @@ impl Tree {
         let bottom = self.y + (self.h - 3) as f32 * TILE - 20.0;
         (bottom, bottom + 45.0)
     }
+
+    /// A player climbing trunk `climbing` (its x) with feet at `y` is at the top: the climb
+    /// zone's canopy band (106-tree.md), where the player enters TreeClimbTop.
+    pub fn at_top(&self, climbing: Option<f32>, y: f32) -> bool {
+        climbing == Some(self.x) && y + 16.0 >= self.canopy().1 - 1.0
+    }
 }
 
 /// An airship cannon (47): block origin, barrel angle (degrees), next shot timer kept by the

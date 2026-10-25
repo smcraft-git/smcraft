@@ -21,6 +21,68 @@ pub(crate) const SNAKE_OWNER: u32 = 0x8000_0000;
 const EXCL_OWNER: u32 = 0x9000_0000;
 /// Solid owner ids of tree canopies: base + tree.
 const TREE_OWNER: u32 = 0x9800_0000;
+
+/// Yoshi's tongue tip each frame (px ahead of him; in his Eat state, then Fail): `tongue_path`.
+/// NSMBU: the `tongue_tip` bone's model (x, z) in `YB_Reat` at its frames 0, 3, … 18 and
+/// `YB_Reat_fail` 0–15, as z·sin 63° + x·cos 63° (sin / cos 0x2CCCCCCC: 0.8910 / 0.4540);
+/// SMW: 5 + the `joint2` x of `stand_eat_head` 0–16 and `stand_eat_fail_head` 0–12.
+const TONGUE_WU: [(f32, bool); 23] = [
+    (8.29, true),   // z 9.33, x −0.06
+    (9.17, true),   // 10.29, 0.00
+    (10.44, true),  // 11.68, 0.08
+    (11.12, true),  // 12.41, 0.13
+    (15.18, true),  // 16.98, 0.11
+    (44.04, true),  // 49.61, −0.36
+    (72.71, true),  // 82.03, −0.84
+    (75.41, false), // 85.08, −0.88
+    (75.39, false), // 85.07, −0.89
+    (71.98, false), // 81.22, −0.86
+    (66.30, false), // 74.81, −0.78
+    (60.06, false), // 67.76, −0.69
+    (52.70, false), // 59.43, −0.56
+    (43.49, false), // 49.01, −0.39
+    (33.32, false), // 37.49, −0.19
+    (23.21, false), // 26.04, 0.01
+    (13.10, false), // 14.64, 0.13
+    (11.45, false), // 12.82, 0.07
+    (10.50, false), // 11.79, 0.00
+    (10.88, false), // 12.22, −0.02
+    (10.36, false), // 11.65, −0.04
+    (9.11, false),  // 10.25, −0.05
+    (8.36, false),  // 9.41, −0.06
+];
+const TONGUE_MW: [(f32, bool); 30] = [
+    (11.03, true),
+    (11.03, true),
+    (11.03, true),
+    (11.03, true),
+    (11.03, true),
+    (11.03, true),
+    (11.03, true),
+    (11.03, true),
+    (11.03, true),
+    (20.46, true),
+    (24.31, true),
+    (29.76, true),
+    (36.0, true),
+    (42.24, true),
+    (47.69, true),
+    (51.54, true),
+    (53.0, true),
+    (52.83, false),
+    (52.17, false),
+    (50.33, false),
+    (47.54, false),
+    (44.05, false),
+    (40.1, false),
+    (35.9, false),
+    (31.71, false),
+    (27.75, false),
+    (24.26, false),
+    (21.48, false),
+    (19.64, false),
+    (18.97, false),
+];
 /// Solid ids of Piranha Creeper stalk boxes (actor index × 128 + box).
 const CREEPER_OWNER: u32 = 0x9C00_0000;
 /// The Twister's column box: half width 16 (descriptor, 76-twister.md), half height
@@ -379,9 +441,11 @@ pub struct World {
     pub others: Vec<Player>,
     /// Which character each extra player is (index into Mario, Luigi, Toad, Toadette).
     pub other_chars: Vec<usize>,
-    /// Yoshi's mouth: what he holds to spit (an enemy kind; fire), tongue frames left, the Red
-    /// Yoshi fire cooldown, and Run last frame (tongue presses).
+    /// Yoshi's mouth: what he holds to spit (an enemy kind; fire; a power-up, with its SMM1
+    /// subtype), tongue frames left, the Red Yoshi fire cooldown, and Run last frame (tongue
+    /// presses).
     pub yoshi_mouth: Option<Kind>,
+    pub yoshi_mouth_sub: u8,
     pub tongue: i32,
     yoshi_fire_cd: i32,
     yoshi_prev_run: bool,
@@ -783,6 +847,7 @@ impl World {
             sound_parts: Default::default(),
             main_char: 0,
             yoshi_mouth: None,
+            yoshi_mouth_sub: 0,
             tongue: 0,
             yoshi_fire_cd: 0,
             yoshi_prev_run: false,
@@ -1726,6 +1791,19 @@ impl World {
                     a.phase = hit as u8;
                 }
             }
+            // a held power-up is put down where he is (actors/eat_out.rs)
+            if let Some(k) = self.yoshi_mouth.filter(|k| Self::yoshi_holds_item(*k)) {
+                let mut a = Actor::spat_out(
+                    &self.level,
+                    k,
+                    (px, py),
+                    facing,
+                    0.0,
+                    crate::actors::eat_out::Release::PutDown,
+                );
+                a.smm1_item = self.yoshi_mouth_sub;
+                self.add_actor(a);
+            }
             self.yoshi_mouth = None;
             self.tongue = 0;
             return;
@@ -1752,37 +1830,69 @@ impl World {
             } else if let Some(k) = self.yoshi_mouth.take() {
                 self.spit(k, px, py, facing, pvx);
             } else if self.tongue == 0 {
-                self.tongue = 10;
+                self.tongue = Self::tongue_path(self.style).len() as i32;
                 self.events.push(Event::Kick);
             }
         }
         if self.tongue > 0 {
             self.tongue -= 1;
-            // the tip goes out and back over 10 frames, up to 32 px [inf: the tongue contact
-            // (0x7100a2e780 → 0x7100a2e9b0) tests from the tongue-tip point the model gives
-            // (vtable +0x138: a bone of the `eat` animation); the reach lives in the Yoshi
-            // model's animation data, not in code]
-            let t = 10 - self.tongue;
-            let reach = 32.0 * (1.0 - ((t as f32 - 5.0).abs() / 5.0));
-            let x0 = px + facing as f32 * 8.0;
-            let x1 = x0 + facing as f32 * reach.max(4.0);
-            let tip = (x0.min(x1), py + 6.0, x0.max(x1), py + 18.0);
-            let hit = self.actors.iter().position(|a| {
-                a.id != id && a.alive() && a.solid_contact() && !a.held && overlap(tip, a.bbox())
-            });
-            if let Some(j) = hit {
-                self.tongue = 0;
-                self.eat(j);
+            // the tongue tip each frame (tongue_path), tested in Eat only (Fail just brings it
+            // back); the box from the mouth to the tip [inf: its height, the mouth's place and
+            // the contact's shape (0x7100a2e780 → 0x7100a2e9b0)]
+            let path = Self::tongue_path(self.style);
+            let i = path.len() - 1 - self.tongue as usize;
+            let (reach, eat) = path[i];
+            if eat {
+                let x0 = px + facing as f32 * 8.0;
+                let x1 = px + facing as f32 * reach.max(12.0);
+                let tip = (x0.min(x1), py + 6.0, x0.max(x1), py + 18.0);
+                let hit = self.actors.iter().position(|a| {
+                    a.id != id
+                        && a.alive()
+                        && a.solid_contact()
+                        && !a.held
+                        && overlap(tip, a.bbox())
+                });
+                if let Some(j) = hit {
+                    self.tongue = 0;
+                    self.eat(j);
+                }
             }
         }
     }
 
+    /// The tongue tip's distance ahead of Yoshi (px) each frame of his Eat state (true) and the
+    /// Fail after it, from the rider-standing eat animations and the Yoshi anim table's rates
+    /// (`Mush/<style>_YoshiAnmTable.byml`: `eat` / `eat_fail`) [obs v3.0.3 data; the code has no
+    /// reach of its own (yoshi.md §5.2): the tip is a bone of the model].
+    /// - NSMBU (`WU_Player_Yoshi`, the bone `tongue_tip`): `YB_Reat` (19 frames) at rate 3.0
+    ///   (its frames 0, 3, … 18; Eat ends at the animation's end), then `YB_Reat_fail` (15
+    ///   frames, rate 1.0). The model faces +z, turned toward the side by the eat's yaw target
+    ///   ±0x2CCCCCCC (63°; yoshi.md §5.1), so the tip is z·sin 63° + x·cos 63° ahead; a model
+    ///   unit is a pixel (the WU models are made to the 16-unit tile: small Mario's body and
+    ///   head 16 units tall) [inf: no scale was found applied in play]. 9.3 at rest, 85.1
+    ///   model units out (75.8 px).
+    /// - SMW (`MW_Player_Yoshi`, sprite planes, a unit a pixel: the 32-unit body plane is the
+    ///   32-px art): the head model's tongue joint (`joint2`, of `joint1` at (6, 16)) in
+    ///   `stand_eat_head` (16 frames, rate 1.0), its head bone 5 px ahead of Yoshi's place
+    ///   (`stand_eat_body`); out over frames 8–16 to 48 + 5, then `stand_eat_fail_head` (12
+    ///   frames) [inf: `joint2` as the tip bone the contact reads].
+    ///
+    /// The sitting (crouched rider) versions (`YB_RSeat`: 87.8 units out, 11 high; SMW
+    /// `sit_eat_head` 52 + 8, 9 high) are not modelled.
+    fn tongue_path(style: crate::player::Style) -> &'static [(f32, bool)] {
+        if style == crate::player::Style::MW {
+            &TONGUE_MW
+        } else {
+            &TONGUE_WU
+        }
+    }
+
     /// Yoshi's tongue caught actor `j` (yoshi.md §5.3 eat reactions, simplified): eaten
-    /// (GulpDown; a coin counts), held to spit (SpitOut enemies, fire, bones), or a power-up
-    /// for the rider [inf: EnemyDB marks power-ups SpitOut, but the mouth acts on the caught
-    /// actor's own eat handler (actor +0x338: type +0x24, swallow +0x30, replace +0x08;
-    /// catch 0x7100a24920), and the item handlers weren't found, so whether an item is held
-    /// and spat or swallowed into the rider is open]; Invalid things are left alone.
+    /// (GulpDown; a coin counts), held to spit (SpitOut enemies, fire, bones, and the power-ups:
+    /// held, never swallowed — their eat handler's type is SpitOut's, and the catch 0x71015fdc10
+    /// swallows only GulpDown's; actors/eat_out.rs) [obs v3.0.3]; Invalid things are left
+    /// alone.
     fn eat(&mut self, j: usize) {
         let a = &self.actors[j];
         if a.big {
@@ -1831,24 +1941,45 @@ impl World {
                 self.actors[j].mode = Mode::Dead;
                 self.yoshi_mouth = Some(Kind::Hammer);
             }
-            Kind::Mushroom
-            | Kind::FireFlower
-            | Kind::Star
-            | Kind::OneUp
-            | Kind::StyleItem
-            | Kind::SuperHammer => {
+            k if Self::yoshi_holds_item(k) => {
                 self.actors[j].mode = Mode::Dead;
-                let sub = self.actors[j].smm1_item;
-                self.collect_item(kind, ax, ay, sub);
+                self.actors[j].tallied = true;
+                self.yoshi_mouth = Some(kind);
+                self.yoshi_mouth_sub = self.actors[j].smm1_item;
             }
             _ => {}
         }
+    }
+
+    /// The power-ups Yoshi's tongue takes (to hold, then spit).
+    fn yoshi_holds_item(k: Kind) -> bool {
+        matches!(
+            k,
+            Kind::Mushroom
+                | Kind::FireFlower
+                | Kind::Star
+                | Kind::OneUp
+                | Kind::StyleItem
+                | Kind::SuperHammer
+        )
     }
 
     /// Spit what Yoshi holds: a shell kicked forward, or 3 fireballs / bones (yoshi.md §5.5:
     /// speed |v|·0.35 + 3.25 (bones + 2.0) at 0 and ±15°).
     fn spit(&mut self, k: Kind, px: f32, py: f32, facing: i32, pvx: f32) {
         match k {
+            k if Self::yoshi_holds_item(k) => {
+                let mut a = Actor::spat_out(
+                    &self.level,
+                    k,
+                    (px + facing as f32 * 16.0, py + 2.0),
+                    facing,
+                    pvx,
+                    crate::actors::eat_out::Release::Spit,
+                );
+                a.smm1_item = self.yoshi_mouth_sub;
+                self.add_actor(a);
+            }
             Kind::EnemyFire => self.spit_fire(px, py, facing, pvx, 3),
             Kind::Hammer => {
                 for dy in [-0.54f32, 0.0, 0.54] {
@@ -2783,11 +2914,8 @@ impl World {
         let mut out = Vec::new();
         let mut shaken = 0;
         for (ti, t) in self.level.trees.iter().enumerate() {
-            let (bottom, top) = t.canopy();
-            if climbing == Some(t.x)
-                && py + 16.0 >= top - 1.0
-                && self.trees_shaken.insert((self.area, ti))
-            {
+            let (bottom, _) = t.canopy();
+            if t.at_top(climbing, py) && self.trees_shaken.insert((self.area, ti)) {
                 shaken += 1;
                 if let Some(c) = t.contents {
                     out.push((t.x, (bottom + 8.0).max(t.y + 40.0), c));
@@ -3430,6 +3558,7 @@ impl World {
     }
 
     fn actor_interactions(&mut self) {
+        bosses::end_boss_contacts(&mut self.actors);
         let level_ref = &self.level;
         let n = self.actors.len();
         let mut scores = Vec::new();
@@ -3658,7 +3787,7 @@ impl World {
                 };
                 let ab = (ab.0 + dx, ab.1 + dy, ab.2 + dx, ab.3 + dy);
                 let ib = item_touch_box(self.style, a.kind, ab);
-                if a.taken == 0 && overlap(contact, ib) {
+                if a.taken == 0 && a.eat_lock == 0 && overlap(contact, ib) {
                     self.actors[i].taken = 1;
                 } else if a.taken == 2 {
                     let kind = a.kind;
@@ -11289,7 +11418,8 @@ mod tests {
         let gx = w.player.x + 24.0;
         w.add_actor(Actor::new(Kind::Goomba, gx, w.player.y));
         run(&mut w, 0, 1);
-        run(&mut w, input::RUN, 8);
+        run(&mut w, input::RUN, 1);
+        run(&mut w, 0, 17);
         assert!(
             w.actors
                 .iter()
@@ -11310,6 +11440,97 @@ mod tests {
         assert_eq!(w.actors[yi].phase, 1);
         run(&mut w, 0, 30);
         assert!(w.actors[yi].vx.abs() > 1.5, "running away");
+    }
+
+    #[test]
+    fn yoshi_s_tongue_reaches_as_far_as_his_model_s_in_each_style() {
+        // NSMBU: out to 75.4 px in its 7 Eat frames; SMW: 53 px, from its 10th frame
+        for (style, near, far, frames) in [
+            (crate::player::Style::WU, 60.0, 90.0, 7),
+            (crate::player::Style::MW, 44.0, 64.0, 17),
+        ] {
+            for (gap, eaten) in [(near, true), (far, false)] {
+                let mut w = World::with_level(Level::flat(80));
+                w.style = style;
+                let (px, py) = (w.player.x, w.player.y);
+                let mut y = Actor::new(Kind::Yoshi { red: false }, px, py);
+                y.held = true;
+                w.add_actor(y);
+                w.player.yoshi = Some(w.actors.last().unwrap().id);
+                let g = Actor::new(Kind::Goomba, px + gap, py);
+                w.add_actor(g);
+                w.actors.last_mut().unwrap().vx = 0.0;
+                w.yoshi_prev_run = false;
+                w.run_held = true;
+                w.step_yoshi_rider();
+                w.run_held = false;
+                for _ in 1..frames {
+                    w.step_yoshi_rider();
+                }
+                let alive = w.actors.iter().any(|a| a.kind == Kind::Goomba && a.alive());
+                assert_eq!(!alive, eaten, "{style:?} at {gap}");
+            }
+        }
+    }
+
+    #[test]
+    fn yoshi_holds_a_power_up_and_spits_it_out_bouncing() {
+        let mut lvl = Level::flat(60);
+        lvl.spawns
+            .push(spawn(Kind::YoshiEgg { red: false }, 100.0, 32.0));
+        let mut w = World::with_level(lvl);
+        w.style = crate::player::Style::MW;
+        w.player.x = 40.0;
+        run(&mut w, 0, 40);
+        let yi = w
+            .actors
+            .iter()
+            .position(|a| matches!(a.kind, Kind::Yoshi { .. }))
+            .unwrap();
+        let (yx, yy) = (w.actors[yi].x, w.actors[yi].y);
+        (w.player.x, w.player.y, w.player.vy) = (yx, yy + 14.0, -1.0);
+        w.player.on_ground = false;
+        w.player_interactions(false);
+        assert!(w.player.yoshi.is_some());
+        run(&mut w, 0, 10);
+        let form = w.player.form;
+        let mut m = Actor::new(Kind::Mushroom, w.player.x + 24.0, w.player.y);
+        m.dir = -1;
+        w.add_actor(m);
+        run(&mut w, 0, 1);
+        run(&mut w, input::RUN, 8);
+        // held, not given to the rider
+        assert_eq!(w.yoshi_mouth, Some(Kind::Mushroom));
+        assert!(
+            w.actors
+                .iter()
+                .all(|a| a.kind != Kind::Mushroom || !a.alive())
+        );
+        run(&mut w, 0, 30);
+        assert_eq!(w.player.form, form);
+        // spat out: 2.5 px/f ahead, bouncing up at 1.5 on its first two landings
+        run(&mut w, input::RUN, 1);
+        assert_eq!(w.yoshi_mouth, None);
+        let i = w
+            .actors
+            .iter()
+            .position(|a| a.kind == Kind::Mushroom && a.alive())
+            .expect("spat out");
+        assert_eq!(w.actors[i].eat_out, 3);
+        assert!(w.actors[i].vx >= 2.5 && w.actors[i].vy > 0.0);
+        let mut ups = 0;
+        for _ in 0..200 {
+            let was = w.actors[i].eat_out;
+            run(&mut w, 0, 1);
+            if w.actors[i].eat_out < was && w.actors[i].eat_out > 0 {
+                assert_eq!(w.actors[i].vy, 1.5);
+                ups += 1;
+            }
+            if w.actors[i].eat_out == 0 {
+                break;
+            }
+        }
+        assert_eq!((ups, w.actors[i].eat_out), (2, 0));
     }
 
     #[test]

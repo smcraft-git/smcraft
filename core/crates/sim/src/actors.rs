@@ -24,6 +24,7 @@ pub use claw::{ClawRope, NUDGE as CLAW_NUDGE, REACH as CLAW_REACH};
 mod clown;
 pub use clown::{ClownFire, charge_burst_tiles};
 mod dokan;
+pub mod eat_out;
 pub use dokan::Dokan;
 mod fly;
 pub use fly::Fly;
@@ -874,6 +875,12 @@ pub struct Actor {
     pub plank: Option<seesaw::Plank>,
     pub riders_tau: f32,
     pub seesaw: Option<u32>,
+    /// A sliding shell: the boss it hit and still touches (it hits a boss once a contact).
+    pub boss_contact: Option<u32>,
+    /// A power-up Yoshi spat out (actors/eat_out.rs): landings left in EatOut, and the frames
+    /// it can't be touched.
+    pub eat_out: u8,
+    pub eat_lock: u8,
     /// A plank walker's ground angle: this frame's and last frame's.
     pub plank_angle: (u32, u32),
     /// Bowser's middle jump is a gap jump (its speed set to land past the gap; MiddleJump's
@@ -985,6 +992,9 @@ impl Actor {
             plank: None,
             riders_tau: 0.0,
             seesaw: None,
+            boss_contact: None,
+            eat_out: 0,
+            eat_lock: 0,
             plank_angle: (0, 0),
             gap_jump: false,
             wing_rate: 1.0,
@@ -2311,6 +2321,10 @@ impl Actor {
     }
 
     fn step_normal(&mut self, level: &Level, player_x: f32) -> Option<Actor> {
+        if self.eat_out > 0 {
+            self.step_eat_out(level);
+            return None;
+        }
         if self.wings {
             match self.kind {
                 Kind::Goomba

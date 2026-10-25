@@ -280,6 +280,14 @@ sway, importer and pack 12, the dev cache already at v12).
   traces exact (40 new physics9 recordings since pass 7, 37 of them diverging on main too, not
   counted); coverage 510/550 + 211/273 (sound-effect blockers, as main); simulate 0 crashes
   (23 / 21 cleared).
+- ✅ **Inferred-behaviour pass 9** (2026-10-25, branch `infres9`, research specs/inf-inventory.md "Pass 9"): the
+  last three sound-effect parts (Seesaw, Tree, Dry Bones Shell; coverage 550/550 + 273/273); #15 a sliding shell
+  slides on through a boss (its own callback leaves an enemy-class shell alone; a big shell costs Bowser 5; [inf]
+  once a contact); #36 power-ups are held in Yoshi's mouth and spat into the item's EatOut (eat type table
+  0x71023cb894, catch 0x71015fdc10, spit 0x710134f870); #22 the tongue tip per style from the eat animations at the
+  anim table's rates (NSMBU 75.4 px in 7 frames, SMW 53 px from frame 9 of 17). Left: Bowser's rain re-anchor
+  (condition located, values unidentified), the aimed flame's mouth joint, Bowser Jr's wall bit 16, #3. 652 / 654
+  traces; simulate 0 crashes.
 - 🔄 **Placed sound effects** (2026-10-25, branch `separts`, research specs/sound-effect-parts.md):
   ✅ the record (spots: id, tile x, tile y, 0, 300 an area; a part's `sound_effect_id`; Mario's
   in header byte 0xF0, now `player_sound_effect`: the course writer 0x7100fde2c0) and its round
@@ -325,6 +333,12 @@ sway, importer and pack 12, the dev cache already at v12).
   Seesaw, Tree, Dry Bones shell); simulate 0 crashes. Left: those three, the default sound palette
   (tables 0x71023d8508…, not applied), the icon sizes, the put-down sound's moment, player states
   144 / 145, the console delay's network.
+  ✅ **2026-10-25, branch `infres9`**: the last three — the Seesaw (its physics 0x71013d7d90 plays
+  through the shared stood-on call when a player lands on its empty plank with its 25-frame
+  count out; the count refills on every such landing — this was read as the P Switch's, whose
+  only call is its pick-up 0x71013e99a0), the Tree (0x710137eae0: each time a player reaches the
+  top of the trunk, at 40 px above its origin, kind 5) and the Dry Bones Shell (an enemy of the
+  enemy base). Coverage 550 / 550 and 273 / 273; simulate 0 crashes.
 - **Agent queue** (when a helper slot frees; running 2026-10-25: the maker's Water Level and
   Custom Scroll modes, physics): ✅ a Koopaling in a Clown Car (2026-10-25, branch
   `kclown`, research 120-koopalings.md "In a Koopa Clown Car": KoKoopaDefault's Clown vtable
