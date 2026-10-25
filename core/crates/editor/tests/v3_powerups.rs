@@ -331,9 +331,12 @@ fn link_bow_draws_24_frames_and_shoots_a_5_px_arrow() {
 fn link_down_thrust_hangs_then_drops_at_6() {
     let mut w = link_world(&[]);
     press(&mut w, input::JUMP, 12);
-    w.step(Input {
-        buttons: input::DOWN,
-    });
+    // the ground-pound command: Down held 5 frames
+    for _ in 0..5 {
+        w.step(Input {
+            buttons: input::DOWN,
+        });
+    }
     assert!(matches!(w.player.pu.link, Link::Thrust { .. }));
     let y = w.player.y;
     run(
@@ -438,12 +441,13 @@ fn frog_hops_20_frames_waits_10_and_jumps_3_928() {
         });
         hops.push(w.player.pu.hop);
     }
-    // the first hop starts once the 10-frame wait is over, and lasts 20 frames
+    // the first hop starts once the 10-frame wait is over, and lasts 20 frames after its plain
+    // first frame; the next waits 9 more
     let start = hops.iter().position(|&h| h).unwrap();
     let len = hops[start..].iter().take_while(|&&h| h).count();
-    assert_eq!(len, player::FROG_HOP as usize);
+    assert_eq!(len, player::FROG_HOP as usize + 1);
     let wait = hops[start + len..].iter().take_while(|&&h| !h).count();
-    assert_eq!(wait, player::FROG_WAIT as usize);
+    assert_eq!(wait, player::FROG_WAIT as usize - 1);
     run(&mut w, 30);
     w.step(Input {
         buttons: input::JUMP,

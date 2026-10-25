@@ -104,6 +104,10 @@ pub fn run_all(course: &[u8], script: &[Input], start: &Start) -> Result<(String
     }
     if let Some(f) = start.form {
         w.player.form = f;
+        if f == Form::Frog {
+            // (the recorded runs start after a long rest: FrogWalk's wait has run out)
+            w.player.frog_settled();
+        }
     }
     if let Some(v) = start.vx {
         w.player.vx = v;

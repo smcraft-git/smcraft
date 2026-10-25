@@ -1625,7 +1625,8 @@ impl Player {
             // (a costume can crouch though small, SMM1 action table)
             // (the Cat's scratch from a crouch leaves it, ClimbAttack 30, and the crouch comes
             // back after it [obs: Ryujinx trace 3W_form cat_roll: 0.05 a frame in the scratch])
-            let scratch = self.cat_scratch > 0;
+            let scratch = self.cat_scratch > 0
+                || matches!(self.pu.link, crate::player::powerups::Link::Dash { .. });
             let want = (self.big() || self.form == Form::Costume)
                 && inp.held(input::DOWN)
                 && !self.sliding
@@ -1640,6 +1641,7 @@ impl Player {
                 && !self.sliding
                 && self.cat_slide == 0
                 && self.cat_scratch == 0
+                && !matches!(self.pu.link, crate::player::powerups::Link::Dash { .. })
                 && self.held.is_none()
                 && (self.crouch || !self.big());
             // CrouchEnd runs its crouch-friction move until its animation ends, plus the

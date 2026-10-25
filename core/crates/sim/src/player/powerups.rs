@@ -29,9 +29,11 @@ pub const BOW_DRAW: i32 = 24;
 pub const BOW_SPEED: f32 = 1.2;
 /// HipAttack for Link: hangs for "attack_under_start" (12 frames), a 5-frame pause, then drops
 /// from −6.0 (−4.2 in water) with gravity −0.34, steering ±0.3; landing waits 1 + 10 frames
-/// [obs 0x71015c6540 / 0x71015c6790 / 0x71015c6ca0].
+/// [obs 0x71015c6540 / 0x71015c6790 / 0x71015c6ca0]; it starts on the ground-pound command (Down
+/// held 5 frames) and the drop's first move comes after 17 still frames (the pause's count
+/// includes the frame it ends on) [obs: Ryujinx trace M1_sword link_thrust].
 pub const THRUST_HANG: i32 = 12;
-pub const THRUST_PAUSE: i32 = 5;
+pub const THRUST_PAUSE: i32 = 6;
 pub const THRUST_VY: f32 = -6.0;
 
 /// Link's moves (states 137–140, 19/20).
@@ -285,6 +287,8 @@ pub struct PowerUps {
     prop_first: bool,
     spin_once: bool,
     spin_lock: i32,
+    /// Frog Suit: a hop started this frame.
+    hop_new: bool,
     /// Super Acorn: the twirl of a Spin press in the glide once the boost is used.
     twirl: bool,
     pub killer_time: i32,
@@ -351,6 +355,7 @@ impl Default for PowerUps {
             spin_once: false,
             spin_lock: 0,
             twirl: false,
+            hop_new: false,
             killer_time: KILLER_TIME,
             killer: false,
             killer_lock: 0,
@@ -716,7 +721,7 @@ impl Player {
         pressed: bool,
         spin_pressed: bool,
         run_pressed: bool,
-        edge: u32,
+        _edge: u32,
         level: &Level,
     ) -> Option<Input> {
         let dir = inp.dir_x();
@@ -734,6 +739,11 @@ impl Player {
             } else if run_pressed && free {
                 if self.on_ground && down && !pressed {
                     self.pu.link = Link::Dash { phase: 0, t: 0 };
+                    // (out of the crouch: the dash's start brakes like it this frame and the
+                    // next, then walks [obs: Ryujinx trace M1_sword link_thrust])
+                    self.crouch = false;
+                    self.duck = false;
+                    self.duck_end = 2;
                 } else {
                     self.pu.link = Link::Slash(0);
                 }
@@ -748,7 +758,12 @@ impl Player {
                 self.pu.link = Link::Shield;
             } else if self.pu.link == Link::None
                 && !self.on_ground
-                && edge & input::DOWN != 0
+                // (the ground-pound command: Down held 5 frames with no direction, the frame
+                // the input object turns it into the command [obs: Ryujinx trace M1_sword
+                // link_thrust: Down pressed at 25, the hang from 29])
+                && down
+                && dir == 0
+                && self.pound_hold == 4
                 && free
                 && self.yoshi.is_none()
             {
@@ -1021,14 +1036,18 @@ impl Player {
             } else if self.pu.hop {
                 self.pu.hop_t -= 1;
                 if self.pu.hop_t <= 0 {
+                    // (the wait's count already runs on this frame: 9 braking frames, the next
+                    // hop on the 10th [obs: Ryujinx trace M3_form2 frog_walk])
                     self.pu.hop = false;
-                    self.pu.hop_t = FROG_WAIT;
+                    self.pu.hop_t = FROG_WAIT - 1;
                 }
             } else {
                 self.pu.hop_t = (self.pu.hop_t - 1).max(0);
                 if self.pu.hop_t == 0 && dir != 0 {
                     self.pu.hop = true;
-                    self.pu.hop_t = FROG_HOP;
+                    // (its plain first frame comes on top of the hop's own)
+                    self.pu.hop_t = FROG_HOP + 1;
+                    self.pu.hop_new = true;
                     self.walk_phase = 0.0;
                 }
             }
@@ -1037,6 +1056,15 @@ impl Player {
             self.pu.hop = false;
         }
         Some(inp)
+    }
+
+    /// Standing settled in FrogWalk (its wait long run out), as a trace that starts after a
+    /// rest has it.
+    pub fn frog_settled(&mut self) {
+        self.pu.form = self.form;
+        self.pu.frog_walk = true;
+        self.pu.hop = false;
+        self.pu.hop_t = 0;
     }
 
     /// FrogWalk's speeds (after the normal ground routine): the hop pushes toward the normal
@@ -1056,6 +1084,12 @@ impl Player {
         self.skid = SkidPhase::None;
         let dir = inp.dir_x();
         let run = inp.held(input::RUN);
+        // (a hop's first frame still moves by the plain ground routine [obs: Ryujinx trace
+        // M3_form2 frog_walk: +0.1, then +0.3 a frame])
+        if std::mem::take(&mut self.pu.hop_new) {
+            self.pose = Pose::Walk;
+            return;
+        }
         if self.pu.hop {
             let t = self.thresholds();
             let star = self.star > 0;
