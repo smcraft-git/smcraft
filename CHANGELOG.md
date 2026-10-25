@@ -29,7 +29,8 @@ SMCraft is back in development (it was archived in October 2026).
   Super Hammer's swing.
 - Placed Super Leaves, Cape Feathers and Propeller Mushrooms sway down through the floor as in
   the game and are gone once they leave the screen.
-- Goombas and other walkers ride Seesaws and tip them.
+- Goombas and other walkers ride Seesaws and tip them, hold on past a tilted plank's end as
+  far as the game's feet reach and keep the plank's swing as they drop off.
 - The screen's edges hold Mario as in the game: a Super Leaf flight levels off at the top of the
   screen, and a wall that fills a low 3D World course's screen stops the scrolling.
 - **Twisty Turny and Woozy bend the whole sound** as in the game: Twisty Turny sweeps a resonant

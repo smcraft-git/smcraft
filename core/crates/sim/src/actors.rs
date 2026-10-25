@@ -876,6 +876,12 @@ pub struct Actor {
     pub seesaw: Option<u32>,
     /// A plank walker's ground angle: this frame's and last frame's.
     pub plank_angle: (u32, u32),
+    /// The plank's carry of a walker this frame (x), and the speed a walker keeps in the air
+    /// after leaving the plank: that frame's carry, added to its x every frame until it lands
+    /// [obs: Ryujinx trace X_seesaw3, the Goomba's +0x674 / +0x320: 0.548 a frame from the
+    /// frame it leaves through its landing frame].
+    pub plank_carry: f32,
+    pub plat_vx: f32,
     /// Bowser's middle jump is a gap jump (its speed set to land past the gap; MiddleJump's
     /// enter 0x71006b0370 flag +0x90).
     pub gap_jump: bool,
@@ -986,6 +992,8 @@ impl Actor {
             riders_tau: 0.0,
             seesaw: None,
             plank_angle: (0, 0),
+            plank_carry: 0.0,
+            plat_vx: 0.0,
             gap_jump: false,
             wing_rate: 1.0,
             bro_wing: BroWing::default(),

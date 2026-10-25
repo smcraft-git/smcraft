@@ -219,6 +219,14 @@ sway, importer and pack 12, the dev cache already at v12).
   Seesaws (weight 2, the riders' torques summed, carried, x · cos). Open: the Cat's rolling attack (0x71015f6f70, its
   trigger not found), where a walker leaves a Seesaw's end [?], a Cat's 15.9 head on the ground
   [?]. Coverage 550 / 550 + 273 / 273; simulate 0 crashes.
+- 🔄 **Physics pass 10** (2026-10-25, branch `physics10`, research fidelity-log.md "physics10",
+  91-seesaw.md "Leaving the plank"): **654 / 654 traces exact** (was 652). ✅ a walker leaving a
+  Seesaw's end (v3.0.3 floor test 0x7100e2b3c0 / 0x7100e2ccf0 / 0x7100e32dd0): the plank is one
+  floor segment whose open ends stretch by the foot sensor's half width (4) × cos 2u, so a foot
+  holds 1.5 px past an end at 31.7° and 0.16 px at 43.5°; the leaving frame still steps along the
+  plank, and the carry of that frame stays as an x speed until the landing (+0x320); past an end
+  the carry is that end's movement plus the turn about it. Coverage 548 / 550 + 272 / 273 (as
+  main); simulate 0 crashes.
 - 🔄 **Inferred-behaviour pass 6** (2026-10-25, branch `infres6`, research specs/inf-inventory.md
   "Pass 6"): ✅ the Propeller Mushroom's own Move (#38, ItemPropeller 0x710134ca70 / 0x710134c3c0 /
   limits 0x710134c880; the Block context's enter 0x710134d550 skips the slow rise): out of a

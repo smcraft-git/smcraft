@@ -5914,19 +5914,20 @@ impl World {
             let Some(id) = self.actors[i].seesaw else {
                 continue;
             };
-            let Some((sx, plank)) = self
+            let Some((sx, sy, plank)) = self
                 .actors
                 .iter()
                 .find(|s| s.id == id)
-                .and_then(|s| s.plank.map(|p| (s.x, p)))
+                .and_then(|s| s.plank.map(|p| (s.x, s.y, p)))
             else {
                 self.actors[i].seesaw = None;
                 continue;
             };
             let a = &mut self.actors[i];
-            let (dx, dy) = plank.carry(a.x - sx);
-            a.x += dx;
-            a.y += dy;
+            // (the ends' line is 16 px over the Seesaw's y: actors.rs solid_box)
+            let (x, y) = plank.carry_walker(sx, sy + 16.0, a.x, a.y);
+            a.plank_carry = x - a.x;
+            (a.x, a.y) = (x, y);
             a.plank_angle = (plank.prev_angle(), a.plank_angle.0);
         }
     }
@@ -5951,18 +5952,31 @@ impl World {
     /// After the actors' moves: a walker over a Seesaw's plank stands on its top line (on it
     /// already, or falling onto it) [obs: Ryujinx trace X_seesaw2, a Goomba walking left along
     /// a tilting plank exactly on the line through its ends] [inf: the walkers this applies to;
-    /// a rider's step along the plank is its plain vx].
+    /// a rider's step along the plank is its plain vx]. Its foot sensor (±4 px [inf: the
+    /// sensor rows' floor span, e.g. 0x71023cb940 +0x30]) finds the plank while its centre is
+    /// over the top segment stretched at each end by the sensor (Plank::end_reach); off it,
+    /// the frame's step is still the plank's (vx along last frame's angle, with the fall's
+    /// first gravity) and the carry of that frame stays with it as a speed until it lands [obs:
+    /// X_seesaw2 / X_seesaw3, the Goombas' +0x658 contact, +0x560 step, +0x320 speed].
     fn seesaw_walkers(&mut self) {
-        let planks: Vec<(u32, crate::level::Solid)> = self
+        // a walker that left a plank keeps its last carry until it lands
+        for a in &mut self.actors {
+            if a.plat_vx != 0.0 && a.seesaw.is_none() {
+                a.x += a.plat_vx;
+                if a.on_ground || !Self::seesaw_walker(a) {
+                    a.plat_vx = 0.0;
+                }
+            }
+        }
+        let planks: Vec<(u32, crate::level::Solid, (f32, f32))> = self
             .level
             .solids
             .iter()
-            .filter(|s| {
-                self.actors
-                    .iter()
-                    .any(|a| a.id == s.owner && matches!(a.kind, Kind::Seesaw { .. }))
+            .filter_map(|s| {
+                let a = self.actors.iter().find(|a| a.id == s.owner)?;
+                let p = a.plank.filter(|_| matches!(a.kind, Kind::Seesaw { .. }))?;
+                Some((s.owner, *s, p.end_reach(4.0)))
             })
-            .map(|s| (s.owner, *s))
             .collect();
         if planks.is_empty() {
             return;
@@ -5972,9 +5986,16 @@ impl World {
                 a.seesaw = None;
                 continue;
             }
+            // a walker on a plank steps along it: vx · cos of the angle it had two frames
+            // before, as the player's [obs: X_seesaw2]; its foot looks for the plank there
+            let (sin, cos) = crate::fmath::table_sin_cos(a.plank_angle.0);
+            let step = a.x - a.pre.0;
+            if a.seesaw.is_some() {
+                a.x = a.pre.0 + step * cos;
+            }
             let mut on = None;
-            for (id, s) in &planks {
-                if a.x < s.x0 || a.x > s.x1 {
+            for (id, s, (rx, _)) in &planks {
+                if a.x < s.x0 + rx || a.x > s.x1 - rx {
                     continue;
                 }
                 let top = s.top_at(a.x);
@@ -5986,10 +6007,6 @@ impl World {
             }
             match on {
                 Some((id, _)) if a.seesaw == Some(id) => {
-                    // its step along the plank: vx · cos of the angle it had two frames before,
-                    // as the player's [obs: X_seesaw2]
-                    let (_, cos) = crate::fmath::table_sin_cos(a.plank_angle.0);
-                    a.x = a.pre.0 + (a.x - a.pre.0) * cos;
                     let s = planks.iter().find(|p| p.0 == id).map(|p| p.1);
                     if let Some(s) = s {
                         a.y = s.top_at(a.x);
@@ -6003,7 +6020,14 @@ impl World {
                     a.on_ground = true;
                     a.seesaw = Some(id);
                 }
-                None => a.seesaw = None,
+                None => {
+                    if a.seesaw.take().is_some() {
+                        // the leaving frame's step is the plank's, the fall's gravity added
+                        a.y += step * sin;
+                        a.plat_vx = a.plank_carry;
+                        a.on_ground = false;
+                    }
+                }
             }
         }
     }
