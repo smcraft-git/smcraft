@@ -361,6 +361,18 @@ pub fn pane_to_json(p: &Pane) -> Value {
                     "shadow_italic": t.shadow_italic,
                 }),
             );
+            if let Some(pc) = &t.per_char
+                && let Some(Value::Object(text)) = m.get_mut("text")
+            {
+                text.insert(
+                    "per_char".into(),
+                    json!({
+                        "eval_offset": pc.eval_offset, "eval_width": pc.eval_width,
+                        "loop_type": pc.loop_type, "origin_v": pc.origin_v,
+                        "curves": pc.curves.as_ref().map(tag_to_json),
+                    }),
+                );
+            }
         }
         PaneKind::Window(w) => {
             m.insert(
@@ -425,6 +437,19 @@ pub fn pane_from_json(v: &Value) -> Result<Pane> {
                 shadow_top: grgba(t, "shadow_top")?,
                 shadow_bottom: grgba(t, "shadow_bottom")?,
                 shadow_italic: gf(t, "shadow_italic")?,
+                per_char: match t.get("per_char") {
+                    Some(pc) if !pc.is_null() => Some(PerCharTransform {
+                        eval_offset: gf(pc, "eval_offset")?,
+                        eval_width: gf(pc, "eval_width")?,
+                        loop_type: gu8(pc, "loop_type")?,
+                        origin_v: gu8(pc, "origin_v")?,
+                        curves: match pc.get("curves") {
+                            Some(c) if !c.is_null() => Some(tag_from_json(c)?),
+                            _ => None,
+                        },
+                    }),
+                    _ => None,
+                },
             })
         }
         "wnd1" => {
@@ -535,6 +560,47 @@ fn group_from_json(v: &Value) -> Result<Group> {
 
 // --- animation -----------------------------------------------------------------------------
 
+/// One tag (`FLPA`, … or a text pane's `FLCC`) as JSON.
+pub fn tag_to_json(t: &AnimTag) -> Value {
+    json!({
+        "tag": t.magic,
+        "entries": t.entries.iter().map(|e| json!({
+            "index": e.index,
+            "target": e.target,
+            "curve": e.curve.code(),
+            // [frame, value, slope] triples
+            "keys": e.keys.iter().map(|k| json!([k.frame, k.value, k.slope])).collect::<Vec<_>>(),
+        })).collect::<Vec<_>>(),
+    })
+}
+
+pub fn tag_from_json(t: &Value) -> Result<AnimTag> {
+    Ok(AnimTag {
+        magic: gs(t, "tag")?,
+        entries: arr(get(t, "entries")?)?
+            .iter()
+            .map(|e| {
+                Ok(AnimEntry {
+                    index: gu8(e, "index")?,
+                    target: gu8(e, "target")?,
+                    curve: CurveType::from_code(gu8(e, "curve")?),
+                    keys: arr(get(e, "keys")?)?
+                        .iter()
+                        .map(|k| {
+                            let [frame, value, slope] = fixed_f::<3>(k)?;
+                            Ok(AnimKey {
+                                frame,
+                                value,
+                                slope,
+                            })
+                        })
+                        .collect::<Result<_>>()?,
+                })
+            })
+            .collect::<Result<_>>()?,
+    })
+}
+
 pub fn animation_to_json(a: &Animation) -> Value {
     json!({
         "name": a.name,
@@ -548,16 +614,7 @@ pub fn animation_to_json(a: &Animation) -> Value {
         "contents": a.contents.iter().map(|c| json!({
             "name": c.name,
             "kind": c.kind,
-            "tags": c.tags.iter().map(|t| json!({
-                "tag": t.magic,
-                "entries": t.entries.iter().map(|e| json!({
-                    "index": e.index,
-                    "target": e.target,
-                    "curve": e.curve.code(),
-                    // [frame, value, slope] triples
-                    "keys": e.keys.iter().map(|k| json!([k.frame, k.value, k.slope])).collect::<Vec<_>>(),
-                })).collect::<Vec<_>>(),
-            })).collect::<Vec<_>>(),
+            "tags": c.tags.iter().map(tag_to_json).collect::<Vec<_>>(),
         })).collect::<Vec<_>>(),
     })
 }
@@ -580,32 +637,7 @@ pub fn animation_from_json(v: &Value) -> Result<Animation> {
                     kind: gu8(c, "kind")?,
                     tags: arr(get(c, "tags")?)?
                         .iter()
-                        .map(|t| {
-                            Ok(AnimTag {
-                                magic: gs(t, "tag")?,
-                                entries: arr(get(t, "entries")?)?
-                                    .iter()
-                                    .map(|e| {
-                                        Ok(AnimEntry {
-                                            index: gu8(e, "index")?,
-                                            target: gu8(e, "target")?,
-                                            curve: CurveType::from_code(gu8(e, "curve")?),
-                                            keys: arr(get(e, "keys")?)?
-                                                .iter()
-                                                .map(|k| {
-                                                    let [frame, value, slope] = fixed_f::<3>(k)?;
-                                                    Ok(AnimKey {
-                                                        frame,
-                                                        value,
-                                                        slope,
-                                                    })
-                                                })
-                                                .collect::<Result<_>>()?,
-                                        })
-                                    })
-                                    .collect::<Result<_>>()?,
-                            })
-                        })
+                        .map(tag_from_json)
                         .collect::<Result<_>>()?,
                 })
             })
@@ -632,6 +664,46 @@ mod tests {
         let text = serde_json::to_string(&animation_to_json(&a)).unwrap();
         let back = animation_from_json(&serde_json::from_str(&text).unwrap()).unwrap();
         assert_eq!(back, a);
+    }
+
+    #[test]
+    fn per_character_transforms_round_trip() {
+        fn texts(p: &mut Pane, f: &mut dyn FnMut(&mut Text)) {
+            if let PaneKind::Text(t) = &mut p.kind {
+                f(t);
+            }
+            for c in &mut p.children {
+                texts(c, f);
+            }
+        }
+        let mut l = Layout::parse(&sample_bflyt()).unwrap();
+        let mut done = false;
+        texts(&mut l.root, &mut |t| {
+            t.per_char = Some(PerCharTransform {
+                eval_offset: -180.0,
+                eval_width: 30.0,
+                loop_type: 0,
+                origin_v: 1,
+                curves: Some(AnimTag {
+                    magic: "FLCC".into(),
+                    entries: vec![AnimEntry {
+                        index: 0,
+                        target: 1,
+                        curve: CurveType::Hermite,
+                        keys: vec![AnimKey {
+                            frame: -120.0,
+                            value: 0.0,
+                            slope: 0.0,
+                        }],
+                    }],
+                }),
+            });
+            done = true;
+        });
+        assert!(done, "the sample has a text pane");
+        let text = serde_json::to_string(&layout_to_json(&l)).unwrap();
+        let back = layout_from_json(&serde_json::from_str(&text).unwrap()).unwrap();
+        assert_eq!(back, l);
     }
 
     #[test]

@@ -194,46 +194,54 @@ fn parse_content(r: &Reader, c: usize) -> Result<AnimContent> {
     };
     for t in 0..tag_count {
         let to = c + r.u32(c + 32 + t * 4)? as usize;
-        let magic = String::from_utf8_lossy(r.bytes(to, 4)?).into_owned();
-        let n = r.u8(to + 4)? as usize;
-        let mut tag = AnimTag {
-            magic,
-            entries: Vec::with_capacity(n),
-        };
-        for e in 0..n {
-            let eo = to + r.u32(to + 8 + e * 4)? as usize;
-            let curve = CurveType::from_code(r.u8(eo + 2)?);
-            let count = r.u16(eo + 4)? as usize;
-            let ko = eo + r.u32(eo + 8)? as usize;
-            let keys = (0..count)
-                .map(|k| {
-                    if curve == CurveType::Hermite {
-                        let p = ko + k * 12;
-                        Ok(AnimKey {
-                            frame: r.f32(p)?,
-                            value: r.f32(p + 4)?,
-                            slope: r.f32(p + 8)?,
-                        })
-                    } else {
-                        let p = ko + k * 8;
-                        Ok(AnimKey {
-                            frame: r.f32(p)?,
-                            value: r.u16(p + 4)? as f32,
-                            slope: 0.0,
-                        })
-                    }
-                })
-                .collect::<Result<_>>()?;
-            tag.entries.push(AnimEntry {
-                index: r.u8(eo)?,
-                target: r.u8(eo + 1)?,
-                curve,
-                keys,
-            });
-        }
+        let tag = parse_tag(r, to)?;
         content.tags.push(tag);
     }
     Ok(content)
+}
+
+/// One animation tag at `to` (`FLPA`, `FLVC`, …; also a text pane's per-character curves,
+/// `FLCC`): magic, entry count, then offsets (from the tag) to the entries; an entry holds
+/// sub-index, target, curve type, key count and the offset (from the entry) of its keys.
+pub(crate) fn parse_tag(r: &Reader, to: usize) -> Result<AnimTag> {
+    let magic = String::from_utf8_lossy(r.bytes(to, 4)?).into_owned();
+    let n = r.u8(to + 4)? as usize;
+    let mut tag = AnimTag {
+        magic,
+        entries: Vec::with_capacity(n),
+    };
+    for e in 0..n {
+        let eo = to + r.u32(to + 8 + e * 4)? as usize;
+        let curve = CurveType::from_code(r.u8(eo + 2)?);
+        let count = r.u16(eo + 4)? as usize;
+        let ko = eo + r.u32(eo + 8)? as usize;
+        let keys = (0..count)
+            .map(|k| {
+                if curve == CurveType::Hermite {
+                    let p = ko + k * 12;
+                    Ok(AnimKey {
+                        frame: r.f32(p)?,
+                        value: r.f32(p + 4)?,
+                        slope: r.f32(p + 8)?,
+                    })
+                } else {
+                    let p = ko + k * 8;
+                    Ok(AnimKey {
+                        frame: r.f32(p)?,
+                        value: r.u16(p + 4)? as f32,
+                        slope: 0.0,
+                    })
+                }
+            })
+            .collect::<Result<_>>()?;
+        tag.entries.push(AnimEntry {
+            index: r.u8(eo)?,
+            target: r.u8(eo + 1)?,
+            curve,
+            keys,
+        });
+    }
+    Ok(tag)
 }
 
 #[cfg(test)]

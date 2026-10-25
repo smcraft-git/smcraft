@@ -183,6 +183,9 @@ SMCraft is back in development (it was archived in October 2026).
   the rescue scene's by style (Peach's or Toad's) and the staff roll's, looping where SMM1's
   streams loop and fading with the screen (imported with SMM1, importer 5; the Swift app and the
   desktop / web players play it).
+- **GAME OVER drops in letter by letter** as in SMM1: the layout player now does text panes'
+  per-character transforms (each letter on its own time along the pane's curves; ten SMM1
+  layouts use them). Needs the SMM1 import again (importer 5).
 - **Koopalings in Koopa Clown Cars**: the car chases you while the Koopaling fires volleys of
   his magic (Lemmy his balls, Wendy her rings) from it; a stomp stops the car while he ducks in,
   then he spins in his shell for a while (stomps bounce off) before he comes out; the third stomp

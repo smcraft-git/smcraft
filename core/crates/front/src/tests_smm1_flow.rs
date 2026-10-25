@@ -194,3 +194,47 @@ fn owner_a_death_fades_to_the_card_and_a_clear_to_the_map() {
         ]
     );
 }
+
+/// The owner's import from importer 5 on: GAME OVER's letters drop in one by one (the text
+/// pane's per-character transform, animated by `OneTime`'s `FLCT`).
+#[test]
+fn owner_game_over_letters_drop_in() {
+    let Some(smm1) = smm1() else { return };
+    let Some(mut s) = crate::smm1::GameOverScene::new(&smm1) else {
+        return;
+    };
+    let above = |s: &mut crate::smm1::GameOverScene| {
+        let mut out = Vec::new();
+        s.draw(&mut out);
+        out.iter()
+            .map(|d| match d {
+                crate::DrawItem::Layout { quads, .. } => quads
+                    .iter()
+                    .filter(|q| q.pos.iter().all(|p| p[1] > 360.0))
+                    .count(),
+                _ => 0,
+            })
+            .sum::<usize>()
+    };
+    for _ in 0..50 {
+        s.step(&UiInput::default());
+    }
+    let before = above(&mut s);
+    if before == 0 {
+        eprintln!("SMM1 import without per-character transforms (importer < 5); skipping");
+        return;
+    }
+    // the eight letters and their shadows wait above the screen (Mario too, from 360)…
+    assert!(before >= 16, "{before}");
+    for _ in 50..74 {
+        s.step(&UiInput::default());
+    }
+    // …drop one after another…
+    let mid = above(&mut s);
+    assert!(mid > 0 && mid < before, "{mid}");
+    for _ in 74..200 {
+        s.step(&UiInput::default());
+    }
+    // …and have all landed
+    assert_eq!(above(&mut s), 0);
+}
