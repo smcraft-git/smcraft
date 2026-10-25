@@ -22,8 +22,9 @@
 //!                                       World's course rows)
 //! ui/textures/EditModel/<name>.mtex     the Course Maker's model textures (glove cursor, grid,
 //!                                       part frame, selection rectangle, no-build zones, the
-//!                                       Water Level and Custom Scroll modes' art) and the theme
-//!                                       pictures (`Model/Edit_*`, `Lyt_Edit_Icon`)
+//!                                       Water Level and Custom Scroll modes' art), the theme
+//!                                       pictures (`Model/Edit_*`, `Lyt_Edit_Icon`) and the sound
+//!                                       effects' (`Lyt_Edit_PaletteSound`, `Otoasobi_panel`)
 //! ui/sound/sounds.json, <sound>.wav     the layouts' button and animation sounds
 //!                                       (`super::smm2_ui_sound`)
 //! courses/title_course_data_<n>.bcd     the title screen's demo courses (as in the RomFS)
@@ -49,7 +50,10 @@ use serde_json::{Value, json};
 use crate::smm1::{font_to_json, to_mtex};
 use crate::{ImportError, Progress, Result, read, write};
 
-pub const SMM2_UI_IMPORTER_VERSION: u32 = 9;
+/// 10: the placed sound effects' pictures (`Lyt_Edit_PaletteSound`: the palette icons
+/// `Lyt_E_P_SE_<label>`; `Otoasobi_panel`: the course icons' sheet `Otoasobi_CategoryPanel`) in
+/// `EditModel`.
+pub const SMM2_UI_IMPORTER_VERSION: u32 = 10;
 
 #[derive(Clone, Debug)]
 pub struct Smm2UiConfig {
@@ -279,8 +283,10 @@ const EDIT_MODEL_2P_FILE: &str = "Edit_mainCursor2P";
 /// the start pill `WaterLevelBtn.00`), `Edit_dragBtn` (the drag arrows), `Edit_EditPanel` (one
 /// 13 × 6 sheet of 128-px icons: the speed squares, the round buttons, the path marks),
 /// `Edit_autoscroll` (the scroll path's marks `Edit_autoscroll_00…11`) and `Edit_camera` (the
-/// birds `Edit_camera.00…20`: S, 1–10, G and the other languages' letters).
-const EDIT_MODEL_FILES: [&str; 11] = [
+/// birds `Edit_camera.00…20`: S, 1–10, G and the other languages' letters); then the placed
+/// sound effects' palette pictures (`Lyt_E_P_SE_<label>`, 128 px) and their course icons
+/// (`Otoasobi_CategoryPanel`: 128-px cells, the five categories' rows big, then framed small).
+const EDIT_MODEL_FILES: [&str; 13] = [
     "Edit_mainCursor",
     "Edit_grid",
     "Edit_SelectCursor",
@@ -292,6 +298,8 @@ const EDIT_MODEL_FILES: [&str; 11] = [
     "Edit_EditPanel",
     "Edit_autoscroll",
     "Edit_camera",
+    "Lyt_Edit_PaletteSound",
+    "Otoasobi_panel",
 ];
 
 /// The icon models `<style><suffix>` of the five styles.

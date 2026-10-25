@@ -236,6 +236,32 @@ sway, importer and pack 12, the dev cache already at v12).
   its +0x534 bits 19 / 20); the general branch not followed. 🔄 decoded, not ported: the Spike
   Top's RotationCliff (#24), Bowser Jr's shell-slide wall analysis (#37), the SMW / NSMBU Bowser
   decision tails. 598 / 598 traces exact; coverage 550/550 + 273/273; simulate 0 crashes.
+- 🔄 **Placed sound effects** (2026-10-25, branch `separts`, research specs/sound-effect-parts.md):
+  ✅ the record (spots: id, tile x, tile y, 0, 300 an area; a part's `sound_effect_id`; Mario's
+  in header byte 0xF0, now `player_sound_effect`: the course writer 0x7100fde2c0) and its round
+  trip; the 47 offered course ids, labels, the window's five pages (the rows of the course icons'
+  sheet) (icon → id 0x71023ca370, labels _INIT_1888; `mmk_formats::smm2::sound_effects`). ✅ in
+  play (`mmk_sim::otoasobi`, an observer the hosts step after each tick, no world hooks): spots
+  by a player's box against the spot's centre, once an entry (0x7100e443c0); parts by what they
+  do — enemies defeated, coins / items taken, blocks hit, Springs bounced, pipes / doors entered
+  (the play calls' trigger kinds 1 / 5 / 6); Mario's effect at the start and on its action
+  (running jump ≥ 3.0, damage, a fall out of the view, power-up, getting in, a skid:
+  0x71015d4900–0x71015d4fa0); the voices (16 shared, one long, own with hold: the table
+  0x710294f468) and the music effects' start range (an object's 160) and ends (a spot's 160,
+  an object's 180: 0x7101537ab0, 0x7100e443c0). ✅ the host: the effects' `cue` sounds, music effects
+  in the theme track's place (`cue_bgm` / `_hurry`, the `_Link` / `_USA` users), the music-like
+  ones (Heartbeat, Silence, Peaceful, Horror) over a stopped track [inf], the pictures (the
+  effect users of the effects import). ✅ the maker: the palette's sound button, the effect window
+  (`L_Category_01`), putting effects on tiles / parts (EditDB `isCanContainOtoasobi?`) / Mario,
+  erasing, the course icons (`Otoasobi_CategoryPanel`; sizes [inf]), `EditOtoasobi<id>` sounds.
+  Importer / game pack 17 (the Otoasobi sound users), UI importer / pack 10 (the pictures) —
+  **re-import both**. `mmk coverage` counts what isn't played: the two audio filters (Twisty
+  Turny, Woozy: DSP on the whole mix) and effects on parts whose action isn't modelled (P Switch,
+  POW, sideways Spring, Muncher, warp box, lifts, Key, Bill Blaster, claw, Mushroom Trampoline
+  …): 510 / 550 and 211 / 273 (228 / 550 and 126 / 273 courses use effects). Left: those parts
+  (the kind-4 callers 0x71013924e0…), the filters, the spot's ground drop, the icon sizes, the
+  hold rule's voice lengths. Captures: `maker-sound`, `maker-sound-ring`, `maker-sound-icons`;
+  in play, the courses in the spec's list.
 - **Agent queue** (when a helper slot frees; running 2026-10-25: the maker's Water Level and
   Custom Scroll modes, physics): ✅ a Koopaling in a Clown Car (2026-10-25, branch
   `kclown`, research 120-koopalings.md "In a Koopa Clown Car": KoKoopaDefault's Clown vtable

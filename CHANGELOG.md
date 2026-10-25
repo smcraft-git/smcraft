@@ -8,6 +8,22 @@ SMCraft never needs them again.
 
 SMCraft is back in development (it was archived in October 2026).
 
+- **Sound effects as in SMM2**: the shouts, crowds, stingers, animations and music changes
+  makers put in their courses now play — on touching their spot, when the part they are on is
+  defeated, taken, hit, bounced on or entered, and on Mario at the start and when he does the
+  effect's own action (a running jump, damage, a fall, a power-up, getting into a Shoe or a car,
+  a skid). The music effects (Boss, Bonus, Final Boss, the Super Mario Galaxy / 64 / Sunshine /
+  Kart tracks, Heartbeat, Silence, Peaceful, Horror) take the music's place until Mario walks
+  away from them, with their own hurry-up versions; the pictures (fireworks, sparks, flashes …)
+  show where they go off.
+- The Course Maker's sound button: the palette turns into the sound effects, the effect window
+  has the game's five categories, and effects go on empty tiles, on parts that can hold one and
+  on Mario; the course shows their icons, the eraser takes them off, and they save with the
+  course.
+- Twisty Turny and Woozy play their sound but don't yet bend the rest of the sound; courses using
+  them, or effects on parts whose action isn't done yet (P Switch, POW, Key, lifts …), count as
+  not fully playable. Re-import your game and the UI once (asset pack 17, UI pack 10).
+
 - **3D World looks like the game's**: its final pass (the game's tone map and colour correction,
   NSMBU's correction too) and its environment palette (the lights and fogs the game really uses
   per theme) — the snow background is no longer deep blue, the ground and sky backgrounds no

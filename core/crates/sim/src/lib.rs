@@ -19,6 +19,7 @@ pub mod input;
 pub mod level;
 pub mod liquid;
 pub mod options;
+pub mod otoasobi;
 pub mod player;
 pub mod render;
 pub mod snake;
