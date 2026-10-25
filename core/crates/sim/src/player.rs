@@ -406,6 +406,10 @@ pub struct Player {
     pub drawn_facing: i32,
     pub on_ground: bool,
     pub pose: Pose,
+    /// In the game's Walk state (1) after the last step, and steps taken (the first is the
+    /// start state's): the state's course-generator draws (`walk_draws`).
+    walk_state: bool,
+    steps: u32,
     /// Distance walked (px), drives the walk animation.
     pub walk_phase: f32,
     /// Slope under the feet while grounded: (steepness index, +1 if the surface rises to the
@@ -668,6 +672,8 @@ impl Player {
             drawn_facing: 1,
             on_ground: true,
             pose: Pose::Wait,
+            walk_state: false,
+            steps: 0,
             walk_phase: 0.0,
             slope: None,
             form: Form::Small,
@@ -1461,6 +1467,33 @@ impl Player {
     }
 
     pub fn step(&mut self, inp: Input, level: &Level) {
+        self.step_body(inp, level);
+        self.walk_draws();
+    }
+
+    /// The game's Walk state (1: standing, walking, the SMB1 skid on the ground) draws one word
+    /// from the course generator on entering (its wait-animation count, 2 + r(4)) and one every
+    /// frame it moves (speed ≠ 0 after the frame's update) [obs v3.0.3 enter 0x71015f2340, exe
+    /// 0x71015f26e0; Ryujinx trace P_moves_M1: one draw per moving frame, none standing]. The
+    /// player's first update is its start state's (16), not Walk's.
+    fn walk_draws(&mut self) {
+        let walking = self.steps > 0
+            && self.control == Control::Normal
+            && self.on_ground
+            && !self.crouch
+            && match self.pose {
+                Pose::Wait | Pose::Walk => true,
+                Pose::Skid => self.style == Style::M1,
+                _ => false,
+            };
+        self.steps = self.steps.saturating_add(1);
+        if walking && (!self.walk_state || self.vx != 0.0) {
+            let _ = crate::random::try_word();
+        }
+        self.walk_state = walking;
+    }
+
+    fn step_body(&mut self, inp: Input, level: &Level) {
         let inp = if self.stun > 0 {
             self.stun -= 1;
             Input::default()

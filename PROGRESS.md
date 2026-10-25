@@ -256,6 +256,33 @@ sway, importer and pack 12, the dev cache already at v12).
   budget can't be reached in an editor-made course (100 enemies an area).
   Coverage 548 / 550
   + 272 / 273 (as main); simulate 0 crashes.
+- 🔄 **Physics pass 11** (2026-10-25, branch `physics11`, research specs/random.md, fidelity-log.md
+  "physics11"): the game's random numbers. ✅ the generator (sead::Random, xorshift128, v3.0.3
+  0x710029a150) is the play scene's, seeded init(0) at every course start (0x7100e489c0): no clock
+  in it; ported as `sim/src/random.rs`, lent to the whole tick, part of `World` (snapshots,
+  checksum; SIM_VERSION 3). ✅ every draw site of the Bowser / Bowser Jr / winged Bro traces
+  logged in the game (a getU32 hook, `rcap2.py`) and matched one by one (`mmk trace --draws`):
+  creation draws (the shared map-object init's three words for SMB1 … NSMBU actors, Bowser's
+  150 + r(60), the SMW / NSMBU Bowser's decision objects), the player's Walk entry and moving
+  frames, Bowser's fire helper ahead of his step, low-bit draws (the Bros' facing / jump).
+  **682 / 683 traces exact** (was 675): X_bowser_M1 / _M3 / _MW / _WU, X_bowserjr_M1 / _WU,
+  X_wbros_M1 exact (Bowser and all his flames over 601 frames in X_bowser_M1; Bowser exact in
+  re-recordings with his object for SMB3, SMW and NSMBU, 601 frames; both Bowser Jrs exact).
+  ✅ found under the draws: SMW / NSMBU Bowsers take their counts from the decision objects and
+  never arm the breath helper; NSMBU's Fire state runs two frames longer, its flame (0.9 px/f,
+  level on its birth frame) leaves from the mouth joint and aims from there; Bowser Jr's
+  GoStraight fireballs (and the SMW / NSMBU straight flames) meet the player within 5 + 4 px and
+  hurt a frame later, like an enemy's touch (a boss's body too); the big jump's take-off and
+  SMW's jump out of LandOn; NSMBU Bowser Jr's fireball (hand joint, a frame later, 62-frame
+  cycle, table aim) and his wind-up a frame past the clip; no re-seed on a restart; creation
+  draws by kind (none for the Angry Sun, two for a Chain Chomp). ⬜ Left: X_bowser_3W (3D
+  World's Bowser draws from the game's clock-seeded global generator and isn't modelled from the
+  game; the engine runs NSMBU's rules on its own stream). ⬜ The audit (fidelity-log "physics11"):
+  the game's draw sites for the walking Hammer Bro, Lakitu, Magikoopa, Rocky Wrench, Fire Piranha,
+  Chain Chomp, Boom Boom, the Fire Clown Car are logged (new SMB1 `trace-courses` kinds), not yet
+  ported; Wiggler / Angry Sun / Monty Mole agree; Koopalings, Pom Pom, the 3D World enemies,
+  tower sway, block debris not traced. Coverage 550 / 550 + 273 / 273 (as main); simulate 0
+  crashes on both.
 - 🔄 **Inferred-behaviour pass 6** (2026-10-25, branch `infres6`, research specs/inf-inventory.md
   "Pass 6"): ✅ the Propeller Mushroom's own Move (#38, ItemPropeller 0x710134ca70 / 0x710134c3c0 /
   limits 0x710134c880; the Block context's enter 0x710134d550 skips the slow rise): out of a

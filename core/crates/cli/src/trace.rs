@@ -87,14 +87,28 @@ pub struct Start {
 /// Run the script; one CSV row per frame (the state after that frame's step).
 #[cfg(test)]
 pub fn run(course: &[u8], script: &[Input], start: &Start) -> Result<String, String> {
-    run_all(course, script, start).map(|(csv, _)| csv)
+    run_all(course, script, start).map(|(csv, _, _)| csv)
 }
 
 /// `run`, plus every actor's state after each frame (a second CSV: frame, id, kind / mode, x,
-/// y, vx, vy, dir), for traces that follow more objects than the first actor.
-pub fn run_all(course: &[u8], script: &[Input], start: &Start) -> Result<(String, String), String> {
+/// y, vx, vy, dir), for traces that follow more objects than the first actor, and a third: the
+/// course generator's draws (frame, the count after the draw, the engine's caller; frame −1 is
+/// the course start).
+pub fn run_all(
+    course: &[u8],
+    script: &[Input],
+    start: &Start,
+) -> Result<(String, String, String), String> {
     let c = mmk_formats::smm2::Course::parse(course).map_err(|e| e.to_string())?;
+    mmk_sim::random::log_draws(true);
     let mut w = mmk_sim::World::from_course(&c);
+    let mut draws = String::from("frame,draws,at\n");
+    let log = |frame: i64, draws: &mut String| {
+        for (n, at) in mmk_sim::random::take_log() {
+            draws.push_str(&format!("{frame},{n},{}:{}\n", at.file(), at.line()));
+        }
+    };
+    log(-1, &mut draws);
     if let Some((x, y)) = start.pos {
         w.player.x = x;
         w.player.y = y;
@@ -120,11 +134,12 @@ pub fn run_all(course: &[u8], script: &[Input], start: &Start) -> Result<(String
     w.reset_camera();
     let mut csv = String::from(
         "frame,x,y,vx,vy,facing,ground,pose,form,input,ax,ay,avx,avy,adir,akind,camx,camy,meter,\
-         flight\n",
+         flight,draws\n",
     );
     let mut all = String::from("frame,id,kind,x,y,vx,vy,dir\n");
     for (i, inp) in script.iter().enumerate() {
         w.step(*inp);
+        log(i as i64, &mut draws);
         for a in &w.actors {
             all.push_str(&format!(
                 "{i},{},{},{},{},{},{},{}\n",
@@ -156,18 +171,23 @@ pub fn run_all(course: &[u8], script: &[Input], start: &Start) -> Result<(String
             None => csv.push_str(",,,,,,"),
         }
         csv.push_str(&format!(
-            ",{},{},{},{}\n",
-            w.camera_x, w.camera_y, w.player.p_meter, w.player.flight
+            ",{},{},{},{},{}\n",
+            w.camera_x,
+            w.camera_y,
+            w.player.p_meter,
+            w.player.flight,
+            w.random.draws()
         ));
     }
-    Ok((csv, all))
+    mmk_sim::random::log_draws(false);
+    Ok((csv, all, draws))
 }
 
 // ---------------------------------------------------------------------------------------------
 // Physics test courses
 
 pub const STYLES: [&str; 5] = ["M1", "M3", "MW", "WU", "3W"];
-pub const KINDS: [&str; 50] = [
+pub const KINDS: [&str; 62] = [
     "flat",
     "wall",
     "slope",
@@ -218,12 +238,43 @@ pub const KINDS: [&str; 50] = [
     "bowser",
     "bowserjr",
     "walkin",
+    "hbro",
+    "lakitu",
+    "magikoopa",
+    "rocky",
+    "firepir",
+    "chomp",
+    "sledge",
+    "boomboom",
+    "monty",
+    "firecar",
+    "wiggler",
+    "sun",
 ];
 
 /// Kinds not made in 3D World (no winged Buzzy Beetle, Spike Top or Bowser Jr there).
 const NOT_W3: [&str; 3] = ["pbeetle", "stop", "bowserjr"];
-/// Kinds made in SMB1 only (the terrain they test is the same in every style).
-const M1_ONLY: [&str; 5] = ["slopejoin", "mushstart", "slopejoins", "sword", "sball"];
+/// Kinds made in SMB1 only (the terrain they test is the same in every style; the random-number
+/// enemies, of which not every style has each).
+const M1_ONLY: [&str; 17] = [
+    "slopejoin",
+    "mushstart",
+    "slopejoins",
+    "sword",
+    "sball",
+    "hbro",
+    "lakitu",
+    "magikoopa",
+    "rocky",
+    "firepir",
+    "chomp",
+    "sledge",
+    "boomboom",
+    "monty",
+    "firecar",
+    "wiggler",
+    "sun",
+];
 /// Kinds made in NSMBU only (a ground pound in the air needs a style that has one in the
 /// engine).
 const WU_ONLY: [&str; 4] = ["seesaw", "seesawp", "seesaw2", "seesaw3"];
@@ -739,7 +790,9 @@ pub fn build_course(name: &str) -> Result<Vec<u8>, String> {
         }
         // whole-course enemy tests (recorded with the player standing at the start): one enemy
         // or two in the first screen
-        "wbros" | "boo" | "lavab" | "pbeetle" | "stop" | "bowser" | "bowserjr" | "walkin" => {
+        "wbros" | "boo" | "lavab" | "pbeetle" | "stop" | "bowser" | "bowserjr" | "walkin"
+        | "hbro" | "lakitu" | "magikoopa" | "rocky" | "firepir" | "chomp" | "sledge"
+        | "boomboom" | "monty" | "firecar" | "wiggler" | "sun" => {
             floor(&mut e, 0, len - 1)?;
             let wings = mmk_editor::DEFAULT_FLAGS | 0x2;
             let put = |e: &mut Editor, part: i16, x: i32, y: i32, flags: u32| {
@@ -768,6 +821,19 @@ pub fn build_course(name: &str) -> Result<Vec<u8>, String> {
                 "bowser" => put(&mut e, 62, 18, up(1), mmk_editor::DEFAULT_FLAGS)?,
                 // a Goomba walking left into the standing player (the touch distance)
                 "walkin" => put(&mut e, 0, 12, up(1), mmk_editor::DEFAULT_FLAGS)?,
+                // the random-number traces (research specs/random.md): one enemy each
+                "hbro" => put(&mut e, 3, 18, up(1), mmk_editor::DEFAULT_FLAGS)?,
+                "lakitu" => put(&mut e, 30, 18, up(8), mmk_editor::DEFAULT_FLAGS)?,
+                "magikoopa" => put(&mut e, 39, 18, up(1), mmk_editor::DEFAULT_FLAGS)?,
+                "rocky" => put(&mut e, 58, 18, up(1), mmk_editor::DEFAULT_FLAGS)?,
+                "firepir" => put(&mut e, 2, 18, up(1), mmk_editor::DEFAULT_FLAGS | 0x4)?,
+                "chomp" => put(&mut e, 61, 18, up(1), mmk_editor::DEFAULT_FLAGS)?,
+                "sledge" => put(&mut e, 3, 18, up(1), mmk_editor::DEFAULT_FLAGS | 0x4)?,
+                "boomboom" => put(&mut e, 77, 18, up(1), mmk_editor::DEFAULT_FLAGS)?,
+                "monty" => put(&mut e, 102, 18, up(1), mmk_editor::DEFAULT_FLAGS)?,
+                "firecar" => put(&mut e, 42, 18, up(5), mmk_editor::DEFAULT_FLAGS | 0x4)?,
+                "wiggler" => put(&mut e, 52, 18, up(1), mmk_editor::DEFAULT_FLAGS)?,
+                "sun" => put(&mut e, 104, 18, up(9), mmk_editor::DEFAULT_FLAGS)?,
                 _ => put(&mut e, 98, 18, up(1), mmk_editor::DEFAULT_FLAGS)?,
             }
         }

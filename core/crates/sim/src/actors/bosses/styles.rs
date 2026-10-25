@@ -114,6 +114,14 @@ pub struct BowserStyle {
     gravity: f32,
     rain: Rain,
     spawns: Vec<Actor>,
+    /// A middle branch has been decided (the decision's +0x1d flag is up until then).
+    decided: bool,
+    /// SMW: this jump was decided out of LandOn (its squat is one frame).
+    after_land: bool,
+    /// The course's style index, from his first update (`style_index`); 3D World (which runs
+    /// on NSMBU's rules here) apart.
+    pub(super) style: u8,
+    pub(crate) w3: bool,
 }
 
 /// SMW / NSMBU style index (`style_index`).
@@ -136,8 +144,14 @@ const WU_WALK: f32 = 108.0;
 const WU_WALK_BACK: f32 = 81.0;
 /// NSMBU's flame frame in Shoot (slot 0x110 0x710115e280).
 const WU_FIRE_AT: u16 = 48;
-/// The straight / aimed flame's own speed (BulletKoopaFire +0x19d4).
+/// The straight / aimed flame's own speed (BulletKoopaFire +0x19d4): SMW 1.5, NSMBU 0.9 [obs:
+/// Ryujinx whole trace X_bowser_WU: the Fire state's aimed flame at 0.900 along 4.25°].
 const STRAIGHT_SPEED: f32 = 1.5;
+const WU_FLAME_SPEED: f32 = 0.9;
+/// NSMBU's Fire state flame leaves from its mouth joint at the fire frame, (22.009, 23.61) from
+/// his feet, and aims from there [obs: X_bowser_WU, the flame at (281.991, 39.61) from Bowser at
+/// (304, 16), aimed 4.251° = from that point to the player's chest].
+const WU_FIRE_MOUTH: (f32, f32) = (22.009, 23.61);
 /// FireFalling's rain: 149 frames, a drop every 30 (0x710115c660).
 const RAIN_FRAMES: i32 = 149;
 const RAIN_STEP: i32 = 30;
@@ -174,6 +188,10 @@ impl Actor {
         self.koopa.spawns.push(a);
     }
 
+    pub(super) fn koopa_spawn_pub(&mut self, a: Actor) {
+        self.koopa_spawn(a);
+    }
+
     /// The walk speed (slot 0x380) in SMW / NSMBU.
     pub(super) fn koopa_walk_speed(&mut self, st: usize) {
         let mode = self.bowser_mode();
@@ -192,13 +210,22 @@ impl Actor {
     /// The middle branch (slot 0x368): SMW 0x7101157dd0, NSMBU 0x7101152ab0.
     pub(super) fn koopa_middle_branch(&mut self, st: usize) {
         let mode = self.bowser_mode();
+        // a word first in every mode; the chases and the off-screen wait draw their pick from
+        // a second [obs v3.0.3 0x7101157dd0 / 0x7101152ab0]
+        let first = self.rand_word();
         if st == MW {
             let mut u = match mode {
                 1 | 3 => 1 + self.rand(3),
                 2 if self.big => self.rand(3),
-                _ => self.rand(4),
+                2 => self.rand(4),
+                _ => first >> 30,
             };
-            if self.spring_over.is_some_and(|h| h <= self.spring_reach_mid) {
+            // the first decision (+0x1d up) draws a third word: its low bit, 1 a hop, else
+            // the fire [obs v3.0.3 0x7101157dd0; Ryujinx trace X_bowser_MW: the first update's
+            // branch draws twice, later ones once] [inf: what raises +0x1d]
+            if !std::mem::replace(&mut self.koopa.decided, true) {
+                u = if self.rand_word() & 1 != 0 { 1 } else { 3 };
+            } else if self.spring_over.is_some_and(|h| h <= self.spring_reach_mid) {
                 u = 3;
             }
             match u {
@@ -213,13 +240,15 @@ impl Actor {
             1 => 1 + self.rand(4),
             3 => 1 + self.rand(2),
             2 if self.big => 0,
-            _ => self.rand(3),
+            _ => ((first as u64 * 3) >> 32) as u32,
         };
         let low = self
             .spring_over
             .is_some_and(|h| h <= self.spring_reach_mid || h <= self.spring_reach_third);
+        // (the first decision, +0x1d up, fires without a third draw [obs v3.0.3 0x7101152ab0])
+        let first_time = !std::mem::replace(&mut self.koopa.decided, true) && !self.koopa.w3;
         let state = match u {
-            _ if low => bw::FIRE,
+            _ if low || first_time => bw::FIRE,
             0 => bw::BEFORE_JUMP,
             1 | 3 => bw::FIRE,
             _ => bw::JUMP_FIRE,
@@ -231,10 +260,12 @@ impl Actor {
     /// the slow chase; in the fast chase when he walks against his facing, else when he met a
     /// wall; random otherwise.
     pub(super) fn koopa_big_branch(&mut self, st: usize) {
+        // (a word is drawn in every mode, its sign bit the coin's [obs v3.0.3 0x7101152970])
+        let word = self.rand_word();
         let coin = match self.bowser_mode() {
             1 => true,
             2 => self.heading as i32 != self.dir || self.wall,
-            _ => self.rand(2) == 1,
+            _ => word >> 31 == 1,
         };
         let spring = self.spring_over.is_some_and(|h| h <= self.spring_reach_big);
         self.koopa.gap = false;
@@ -277,6 +308,7 @@ impl Actor {
     /// Enters a state with the SMW / NSMBU rules (`fire`: SMW's in-air fire flag).
     pub(super) fn koopa_enter(&mut self, state: u8, st: usize, fire: bool) {
         let from = self.phase;
+        self.koopa.after_land = from == bw::LAND_ON;
         self.phase = state;
         self.koopa.frame = 0;
         self.koopa.sub = 0;
@@ -381,7 +413,14 @@ impl Actor {
                     return true;
                 }
                 self.vx = 0.0;
-                if f < self.koopa_anim(MW_SQUAT_S, 1.0) {
+                // out of LandOn the squat is a frame [obs: Ryujinx whole trace X_bowser_MW,
+                // decided on frame 419, moving on 421] [inf: why]
+                let squat = if self.koopa.after_land {
+                    1
+                } else {
+                    self.koopa_anim(MW_SQUAT_S, 1.0)
+                };
+                if f < squat {
                     return true;
                 }
                 let little = self.phase == bw::LITTLE_JUMP;
@@ -604,16 +643,20 @@ impl Actor {
             }
             return;
         }
-        if self.koopa.sub == 0 && f >= WU_FIRE_AT {
+        // NSMBU's Fire runs two frames past its clip's own frames: the flame at 50, the end at
+        // 106 [obs: Ryujinx whole trace X_bowser_WU: the flame born on frame 49 and the next
+        // decision's draws on 105 from the entry on frame 0] [inf: why two]
+        let late = if self.koopa.w3 { 0 } else { 2 };
+        if self.koopa.sub == 0 && f >= WU_FIRE_AT + late {
             self.koopa.sub = 1;
             let fl = if self.bowser_mode() != 3 {
-                self.koopa_aimed_flame(st)
+                self.koopa_aimed_flame(st, true)
             } else {
                 self.bowser_flame(st)
             };
             self.koopa_spawn(fl);
         }
-        if f >= self.koopa_anim(WU_FIRE1, 1.0) {
+        if f >= self.koopa_anim(WU_FIRE1, 1.0) + late {
             self.bowser_decide(level, st);
         }
     }
@@ -644,7 +687,7 @@ impl Actor {
                 if f >= 70 {
                     self.koopa.sub = 3;
                     let fl = if self.bowser_mode() != 3 {
-                        self.koopa_aimed_flame(st)
+                        self.koopa_aimed_flame(st, false)
                     } else {
                         self.bowser_flame(st)
                     };
@@ -757,7 +800,7 @@ impl Actor {
         };
         let mut fl = Actor::new(Kind::BowserFire, self.x + 17.0 * s * d, self.y + 36.0 * s);
         fl.big = self.big;
-        self.koopa_aim_straight(&mut fl, a as u32);
+        self.koopa_aim_straight(&mut fl, a as u32, STRAIGHT_SPEED);
         // it leaves the screen at the top (BirthFireFall)
         fl.phase = 2;
         let slot = (n - 1).clamp(0, 4) as usize;
@@ -768,26 +811,48 @@ impl Actor {
             vy: fl.vy,
             state: 2,
         };
+        // level at its own speed on its birth frame, along its angle from the next [obs: Ryujinx
+        // whole trace X_bowser_MW frames 554 / 585: vx −1.5 vy 0 at birth]
+        fl.die_pending = Some((fl.vx, fl.vy));
+        (fl.vx, fl.vy) = (STRAIGHT_SPEED * d, 0.0);
         self.koopa_spawn(fl);
     }
 
     /// A straight flame (GoStraight, unaimed) along the binary angle `a`.
     fn koopa_straight_flame(&mut self, st: usize, a: u32) -> Actor {
+        self.koopa_flame_from(st, super::BOWSER_MOUTH[st], a)
+    }
+
+    fn koopa_flame_from(&mut self, st: usize, (mx, my): (f32, f32), a: u32) -> Actor {
         let s = self.scale();
         let d = self.dir as f32;
-        let (mx, my) = super::BOWSER_MOUTH[st];
         let mut fl = Actor::new(Kind::BowserFire, self.x + d * mx * s, self.y + my * s);
         fl.big = self.big;
-        self.koopa_aim_straight(&mut fl, a);
+        let wu = st == 3 && !self.koopa.w3;
+        // (GoStraight: Bowser Jr's fireball's box)
+        fl.alt = wu;
+        let base = if wu { WU_FLAME_SPEED } else { STRAIGHT_SPEED };
+        self.koopa_aim_straight(&mut fl, a, base);
+        if !self.koopa.w3 {
+            // level at its own speed on its birth frame, along the aim from the next [obs:
+            // X_bowser_WU, vx −0.9 vy 0 at birth; X_bowser_MW's rising flames the same]
+            fl.die_pending = Some((fl.vx, fl.vy));
+            (fl.vx, fl.vy) = (base * d, 0.0);
+        }
         fl
     }
 
     /// The aimed flame (0x710114b470 with its aim): toward the player within ±45° of level,
-    /// ±45° by the player's height when he is behind.
-    fn koopa_aimed_flame(&mut self, st: usize) -> Actor {
+    /// ±45° by the player's height when he is behind; from the mouth (NSMBU's Fire state: its
+    /// joint, `WU_FIRE_MOUTH`).
+    fn koopa_aimed_flame(&mut self, st: usize, fire_state: bool) -> Actor {
         let s = self.scale();
         let d = self.dir as f32;
-        let (mx, my) = super::BOWSER_MOUTH[st];
+        let (mx, my) = if st == 3 && fire_state && !self.koopa.w3 {
+            WU_FIRE_MOUTH
+        } else {
+            super::BOWSER_MOUTH[st]
+        };
         let (fx, fy) = (self.x + d * mx * s, self.y + my * s);
         let (dx, dy) = (self.target.0 - fx, self.target.1 - fy);
         let q = 0x2000_0000_i32;
@@ -807,17 +872,17 @@ impl Actor {
         } else {
             q
         };
-        self.koopa_straight_flame(st, a as u32)
+        self.koopa_flame_from(st, (mx, my), a as u32)
     }
 
     /// GoStraight's motion (0x7100de1be0): along the angle at 1.5 plus |the carried speed ×
     /// cos|; no lane.
-    fn koopa_aim_straight(&self, fl: &mut Actor, a: u32) {
+    fn koopa_aim_straight(&self, fl: &mut Actor, a: u32, base: f32) {
         let d = self.dir as f32;
         let mean = self.bowser_mean_speed();
         let carry = if mean * d >= 0.0 { mean } else { 0.0 };
         let (sn, cs) = crate::fmath::table_sin_cos(a);
-        let v = STRAIGHT_SPEED + (cs * (carry * cs)).abs();
+        let v = base + (cs * (carry * cs)).abs();
         fl.dir = if cs < 0.0 { -1 } else { 1 };
         fl.vx = cs * v;
         fl.vy = sn * v;
@@ -969,8 +1034,10 @@ mod tests {
         out
     }
 
+    /// The flame's aim (an NSMBU flame flies level on its birth frame, its aim pending).
     fn angle_deg(fl: &Actor) -> f32 {
-        fl.vy.datan2(fl.vx).to_degrees()
+        let (vx, vy) = fl.die_pending.unwrap_or((fl.vx, fl.vy));
+        vy.datan2(vx).to_degrees()
     }
 
     #[test]
@@ -991,19 +1058,24 @@ mod tests {
     #[test]
     fn nsmbu_fire_aims_one_flame_at_frame_48() {
         let (level, mut a) = koopa("WU");
+        // (past his first decision, which fires again)
+        a.koopa.decided = true;
         a.koopa_enter(bw::FIRE, 3, false);
-        let shots = run(&level, &mut a, 48);
+        let shots = run(&level, &mut a, 50);
         let (f, fl) = shots.last().expect("a flame");
-        assert_eq!(*f, 48);
+        assert_eq!(*f, 50);
         assert_eq!(fl.kind, Kind::BowserFire);
         assert!(fl.home_y.is_nan());
-        // toward the player on his left, a little down to his feet + 8
+        // toward the player on his left, a little down to his feet + 8, at 0.9 (level on its
+        // birth frame)
         assert!(fl.vx < 0.0);
-        let speed = fl.vx.dhypot(fl.vy);
-        assert!((speed - 1.5).abs() < 1e-3, "{speed}");
+        assert_eq!(fl.vy, 0.0);
+        let (vx, vy) = fl.die_pending.expect("its aim");
+        let speed = vx.dhypot(vy);
+        assert!((speed - 0.9).abs() < 1e-3, "{speed}");
         let a_deg = angle_deg(fl);
         assert!((-180.0..-135.0).contains(&a_deg) || (135.0..=180.0).contains(&a_deg));
-        // the rest of Shoot (104 frames), then the decision
+        // the rest of Shoot (104 frames, two more in the game), then the decision
         let _ = run(&level, &mut a, 55);
         assert_eq!(a.phase, bw::FIRE);
         let _ = run(&level, &mut a, 1);
@@ -1106,6 +1178,10 @@ mod tests {
                 } else if s.phase == 3 {
                     rain.push((f, s));
                 }
+            }
+            // (the next decision may pick the fall again: one round)
+            if rain.len() == 5 {
+                break;
             }
         }
         // five flames up and forward at 50° … 70°

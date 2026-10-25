@@ -1,7 +1,8 @@
 //! A hash of the world's state for determinism checks: online peers compare it at confirmed
 //! frames (`mmk-netplay`), and `mmk simulate --checksum` compares runs across processes. It
-//! covers the tick, score, coins, every player's and actor's position, speed, facing and timer —
-//! enough that a divergence shows within a frame or two of happening.
+//! covers the tick, score, coins, the course generator's state (random.rs), every player's and
+//! actor's position, speed, facing and timer — enough that a divergence shows within a frame or
+//! two of happening.
 
 use crate::world::World;
 
@@ -17,6 +18,9 @@ impl World {
         let mut h = 0xcbf2_9ce4_8422_2325;
         h = fnv(h, self.tick);
         h = fnv(h, (self.score as u64) << 32 | self.coins as u64);
+        for w in self.random.words() {
+            h = fnv(h, w as u64);
+        }
         for p in std::iter::once(&self.player).chain(&self.others) {
             for v in [p.x, p.y, p.vx, p.vy] {
                 h = fnv(h, v.to_bits() as u64);

@@ -785,7 +785,8 @@ pub struct Actor {
     pub phase: u8,
     /// Wiggler: recent head positions (newest last), for the trailing segments.
     pub trail: Vec<(f32, f32)>,
-    /// Per-actor random state (xorshift32), seeded at spawn.
+    /// Per-actor random state (xorshift32), seeded at spawn: draws outside a world tick only
+    /// (the world lends its course generator to the actors, random.rs).
     pub rng: u32,
     /// Nearest player's position, set by the world before each step.
     pub target: (f32, f32),
@@ -1652,13 +1653,94 @@ impl Actor {
         self.heading += d.clamp(-rate, rate);
     }
 
+    /// The course-generator draws of a placed actor's creation. SMB1 … NSMBU actors run the
+    /// shared map-object init (0x7101286ee0: a random angle, a 0.5 … 1.5 rate and its sign:
+    /// three words); Bowser draws a 150 + r(60) frame count before it (+0x438, 0x71012c0560),
+    /// and the SMW / NSMBU Bowsers' two decision objects draw their jump and big-jump counts
+    /// after it (0x7101147c10 …, 1 + r(3) and 5 + r(4) each); 3D World's actors draw nothing
+    /// [obs v3.0.3; Ryujinx traces X_mushstart (four placed mushrooms: twelve draws),
+    /// X_walkin_M1, X_bowser_*, X_wbros_3W].
+    pub fn creation_draws(&mut self, style: crate::player::Style) {
+        use crate::player::Style;
+        // the Angry Sun runs no map-object init; a Chain Chomp runs it twice (the Chomp and its
+        // stake) [obs: Ryujinx traces M1_sun, M1_chomp] [inf: every other placed actor once,
+        // as the ones traced]
+        let inits = match self.kind {
+            _ if style == Style::W3 => 0,
+            Kind::AngrySun { .. } => 0,
+            Kind::ChainChomp { .. } => 2,
+            _ => 1,
+        };
+        if inits == 0 {
+            return;
+        }
+        let bowser = matches!(self.kind, Kind::Bowser { .. });
+        if bowser {
+            let _ = self.rand(60);
+        }
+        for _ in 0..3 * inits {
+            let _ = crate::random::try_word();
+        }
+        if bowser && matches!(style, Style::MW | Style::WU) {
+            // the first object's counts are his (bytes 0 / 1, as `bowser_reset_jump` /
+            // `bowser_reset_big` set them) [inf: the second's (the chase's) left out]
+            let jump = 1 + self.rand(3);
+            let big = 5 + self.rand(4);
+            self.boss_set_counts(jump as u8, big as u8);
+            let _ = self.rand(3);
+            let _ = self.rand(4);
+        }
+    }
+
+    /// A draw 0 ≤ r < n: from the course generator while the world steps (random.rs), else from
+    /// the actor's own state (an actor stepped on its own, in tests).
+    #[track_caller]
     fn rand(&mut self, n: u32) -> u32 {
+        if !self.own_random()
+            && let Some(r) = crate::random::try_below(n)
+        {
+            return r;
+        }
+        self.own_word() % n
+    }
+
+    /// 3D World's Bowser draws nothing from the course generator (his are the global, clock-
+    /// seeded generator's) [obs: Ryujinx trace X_bowser_3W, the course stream's one draw in 600
+    /// frames the player's]: he keeps his own state, out of the course's stream.
+    fn own_random(&self) -> bool {
+        matches!(self.kind, Kind::Bowser { .. }) && self.koopa.w3
+    }
+
+    /// A raw word, for the game's callers that take its low bits (`word & 1`) rather than
+    /// scaling it.
+    #[track_caller]
+    fn rand_word(&mut self) -> u32 {
+        if !self.own_random()
+            && let Some(w) = crate::random::try_word()
+        {
+            return w;
+        }
+        self.own_word()
+    }
+
+    /// A draw in [0, 1) (the word's top 23 bits as a float's mantissa, random.rs).
+    #[track_caller]
+    fn rand_unit(&mut self) -> f32 {
+        if !self.own_random()
+            && let Some(u) = crate::random::try_unit()
+        {
+            return u;
+        }
+        (self.own_word() >> 8) as f32 / (1u32 << 24) as f32
+    }
+
+    fn own_word(&mut self) -> u32 {
         let mut x = self.rng.max(1);
         x ^= x << 13;
         x ^= x >> 17;
         x ^= x << 5;
         self.rng = x;
-        x % n
+        x
     }
 
     pub fn half_w(&self) -> f32 {
@@ -1666,6 +1748,10 @@ impl Actor {
             Kind::Fireball | Kind::EnemyFire | Kind::Superball => 4.0,
             Kind::Bowser { .. } | Kind::BoomBoom { .. } if self.big => 32.0,
             Kind::Bowser { .. } | Kind::BoomBoom { .. } => 16.0,
+            // a GoStraight fire (`alt`: Bowser Jr's fireball, the SMW / NSMBU straight and aimed
+            // flames) meets a small player (half width 4) within 8.7 / 8.95 px, not 9.7 / 9.84
+            // [obs: Ryujinx whole traces X_bowserjr_M1, X_bowser_WU] [inf: 5 in (4.95, 5.69]]
+            Kind::BowserFire if self.alt => 5.0,
             Kind::BowserFire => 12.0,
             Kind::Shuriken => 4.0,
             Kind::BigCoin { .. } => 15.0,
@@ -3760,7 +3846,10 @@ impl Actor {
     fn bro_jump_kind(&mut self, level: &Level) -> Option<bool> {
         use crate::world::VIEW_H;
         let forced = self.y >= self.camera.1 + VIEW_H - 8.0;
-        let down = forced || self.rand(2) == 1;
+        // the choice is the word's low bit (0x7101097110: 2 | (word & 1), 3 down) [obs v3.0.3;
+        // Ryujinx trace X_wbros_M1] [inf: drawn when forced too]
+        let pick = self.rand_word() & 1 == 1;
+        let down = forced || pick;
         if !down {
             return Some(false);
         }
