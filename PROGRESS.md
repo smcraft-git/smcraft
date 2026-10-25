@@ -331,7 +331,9 @@ sway, importer and pack 12, the dev cache already at v12).
   balloon (`Mode_Disp_*`) and the window not relaid as the parts ring. Importer 18 / **game pack
   18** (`sound.json` `tempo`, `otoasobi_bus`) — re-import. Coverage 548 / 550, 272 / 273 (left:
   Seesaw, Tree, Dry Bones shell); simulate 0 crashes. Left: those three, the default sound palette
-  (tables 0x71023d8508…, not applied), the icon sizes, the put-down sound's moment, player states
+  (✅ 2026-10-25, `maker3`: the tables 0x71023d8508… are the effect window's eight pages, now
+  applied; the palette's start still [inf]), the icon sizes, the put-down sound's moment (✅
+  `maker3`: 0x7100f0eaa0 is the effect icon's put-down virtual), player states
   144 / 145, the console delay's network.
   ✅ **2026-10-25, branch `infres9`**: the last three — the Seesaw (its physics 0x71013d7d90 plays
   through the shared stood-on call when a player lands on its empty plank with its 25-frame
@@ -609,7 +611,13 @@ sway, importer and pack 12, the dev cache already at v12).
     undo step per press; undo / redo; mouse, touch taps, keyboard and pad (README keys)
   - ✅ part window `Edit_RingMenu_00`: four categories × pages of ≤ 13 round the ring (the ring's
     own Type / Select / Category animations), names from `PartsIconName`; the choice goes to the
-    front of the palette [page contents ours: not in the game's data]
+    front of the palette · ✅ the game's pages and order per style (2026-10-25, branch `maker3`;
+    maker spec C17: the ring reads the 2P menu's tables 0x7101922b20 / 0x71019228e0, a page's
+    category by its first page), each page keeps its selection (+0x16b8); the effect window's
+    eight pages (0x71019227b0), a new selection sounds its effect (0x71018e0c40) · ✅ the Spike
+    Trap's, Hidden Block's and Clear Pipe's pictures (were blank) · ⬜ hidden blocks and spike
+    traps aren't drawn in the maker's course view (nor spike traps in play: the sim draws no art
+    for them)
   - ✅ left column windows: Game Style, Course Theme, Timer (selector, OK), Autoscroll (none /
     slow / normal / fast), Clear Condition (`Edit_MissionWindow_00`: tabs, condition and amount
     selectors with the HUD's icons and sentences, Remove)
@@ -666,9 +674,14 @@ sway, importer and pack 12, the dev cache already at v12).
     door / warp box pair changes together, SMB1-only and 3D-World-only alternates by style ·
     ✅ a door / warp box brings its partner a tile to the right (0x7100ec9c00); with that tile
     taken the pair is refused, nothing moves it (0x7100eca770; 0x7100e9b840 is the grid snap;
-    2026-10-25) · ⬜ the trash can (`Edit_TrashCan_00`: a one-time-anim part, `Act` = the 45-frame
-    eat with `se_ui_edit_trash` + `SE_DropErase`; its trigger not found statically — maker spec
-    C16, a capture to take) · ✅ co-op making (2026-10-25, branch `coopmake`; maker spec C16,
+    2026-10-25) · 🔄 the trash can (2026-10-25, branch `maker3`; maker spec C17): its controller
+    built (`maker::trash`: shown with In, the 45-frame `Act` with `Anm_Act_TrashCan`'s
+    `se_ui_edit_trash` + `SE_DropErase`, Out once Act ends — the game's `UIOneTimeAnimCtrl`
+    0x7101b4d640 / 0x7101b4d930 / 0x7101b4d830; capture `maker-trash`); ⬜ what starts it: no
+    caller of the page's +0x800 or the controller's Act in the editor / UI code, no code asks for
+    the parts' `dropErase` key; the layout is also the Super World maker's and Story Mode's
+    assist editor's (`Edit_SupportEdit_00`, `UIEditAssistPage`) — a capture to take ·
+    ✅ co-op making (2026-10-25, branch `coopmake`; maker spec C16,
     `maker::coop`): `L_MultiEditBtn_00` → `Edit_MultiEditWindow_00` → with two controllers (the
     system set-up asks for exactly two, 0x7100e363a0) both cursors at the view's middle ±16 px
     and the undo history emptied and off (0x710103e490; every history call skipped in edit mode
@@ -698,8 +711,8 @@ sway, importer and pack 12, the dev cache already at v12).
     the cursor, from either mouth (0x7100ec1e90), carried by its middle, erased whole, 100 an
     area, nothing in its tiles; records encoded byte for byte (all 208 sample pipes); drawn
     with `3W_Object_dokan_tomei` (unit / top / curve00, turned) in the maker and play; capture
-    `maker-clearpipe --style 3W` · ⬜ the Clear Pipe's palette icon (no 2D art: the icon
-    renderer has no meshes), multigrab of clear pipes (✅ the ride in play: Phase 9, 2026-10-25); Lakitu's Cloud isn't a part of its own (no name
+    `maker-clearpipe --style 3W` · ✅ the Clear Pipe's picture (2026-10-25, branch `maker3`:
+    its unit + top meshes drawn on the CPU, `mmk_host::icon`) · ⬜ multigrab of clear pipes (✅ the ride in play: Phase 9, 2026-10-25); Lakitu's Cloud isn't a part of its own (no name
     in the game's part list: it comes with Lakitu, parts go into it)
   - ✅ tracks (2026-10-24): the Track part in Gizmos; a press lays a horizontal piece, dragging
     draws on from its end, 2 tiles a piece, 8 ways [inf: the gesture]; a part that rides tracks

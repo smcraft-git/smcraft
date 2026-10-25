@@ -26,6 +26,11 @@ SMCraft is back in development (it was archived in October 2026).
   has the game's five categories, and effects go on empty tiles, on parts that can hold one and
   on Mario; the course shows their icons, the eraser takes them off, and they save with the
   course.
+- The Course Maker's part window lays the parts out on the game's own pages, in its order, for
+  each game style (3D World's included); each page remembers its selection. The sound effect
+  window has the game's eight pages too, and plays each effect as you move onto it.
+- The Spike Trap, the Hidden Block and the Clear Pipe have their pictures in the part window, the
+  palette and player 2's menu (they were blank).
 - **The power-ups move as in SMM2**, checked frame by frame against the game: the Super Leaf's
   flight (the P-meter, the flaps, the climb to the top of the view and the drift after), the Cape
   Feather's glide and dives, the Propeller Mushroom's fall spin and drill, the Super Bell's wall
