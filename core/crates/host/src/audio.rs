@@ -217,6 +217,15 @@ impl Director {
         }
     }
 
+    /// What the placed sound effects' picture director should know from this one (the
+    /// course's tempo, its voices' lengths): `EffectDirector::sync_sound_effects`.
+    pub fn sound_effects_sync(&self) -> Option<mmk_sim::otoasobi::Sync> {
+        match &self.imp {
+            Imp::Data(s) => s.oto_sync(),
+            Imp::Legacy(_) => None,
+        }
+    }
+
     /// The Course Maker's music for `style` and `theme` (data-driven director only; the fixed
     /// SMB1 set has none): from the top unless already playing.
     pub fn edit_music(&mut self, style: &str, theme: u8) -> bool {

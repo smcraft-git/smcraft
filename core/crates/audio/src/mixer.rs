@@ -11,6 +11,8 @@
 //!   voice for a new one of at least its priority, and lowers (ducks) the groups it names while
 //!   it plays.
 //! - Effect voices are also sent to the theme's echo and reverb.
+//! - The music and effects pass the `OtoAsobi` bus, whose effects Twisty Turny and Woozy put
+//!   on (`oto.rs`); the echo and reverb return beside it.
 //! - Voices that are stopped fade out over [`STOP_FADE`] frames (or their own stop fade).
 //! - The render path does not allocate.
 
@@ -20,6 +22,7 @@ use std::sync::{Arc, Mutex};
 
 use crate::bank::{Bank, Samples, Sound};
 use crate::fx::{self, Delay, DelayParams, Reverb, ReverbParams};
+use crate::oto::{OtoBus, OtoParams, OtoSettings};
 use crate::stream::Cursor;
 
 pub const OUTPUT_RATE: u32 = 48_000;
@@ -159,6 +162,11 @@ pub enum Command {
     },
     /// Take the course sound set now in the shared slot (see [`SharedSet`]).
     LoadSet,
+    /// The `OtoAsobi` bus's settings and this frame's effects (Twisty Turny, Woozy).
+    SetOtoasobi {
+        settings: OtoSettings,
+        params: OtoParams,
+    },
 }
 
 /// A group of the course's sound set: itself and its folders (innermost first), volume, voice
@@ -268,6 +276,7 @@ pub struct Mixer {
     duck_rate: [(f32, f32); MAX_GROUPS],
     delay: Delay,
     reverb: Reverb,
+    oto: OtoBus,
     send: Vec<f32>,
     clock: Option<MusicClock>,
     output_gain: f32,
@@ -303,6 +312,7 @@ impl Mixer {
             duck_rate: [(0.0, 0.0); MAX_GROUPS],
             delay: Delay::new(out_rate),
             reverb: Reverb::new(out_rate),
+            oto: OtoBus::new(out_rate),
             send: vec![0.0; BLOCK * 2],
             clock: None,
             output_gain: 1.0,
@@ -461,6 +471,7 @@ impl Mixer {
                 self.delay.set(delay, self.out_rate);
                 self.reverb.set(reverb);
             }
+            Command::SetOtoasobi { settings, params } => self.oto.set(settings, params),
             Command::LoadSet => {
                 // never block the audio thread: if the game thread holds the lock, keep the old
                 let next = match self.shared.as_ref().map(|s| s.try_lock()) {
@@ -755,6 +766,8 @@ impl Mixer {
                 *slot = None;
             }
         }
+        // the music and effects through the OtoAsobi bus, then the theme's echo and reverb
+        self.oto.process(out);
         if send_any {
             let send = &self.send[..frames * 2];
             self.delay.process(send, out);

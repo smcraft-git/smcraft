@@ -498,13 +498,39 @@ impl Sounds {
         e: Emitter,
         handle: u32,
     ) -> bool {
-        let Some(plays) = self.resolve(user, key, local) else {
-            return false;
-        };
+        self.sfx_at_len(world, user, key, local, e, handle)
+            .is_some()
+    }
+
+    /// [`Self::sfx_at`], and how long (60 fps frames) the longest of what it played lasts
+    /// (None: no such key).
+    fn sfx_at_len(
+        &mut self,
+        world: &World,
+        user: &str,
+        key: &str,
+        local: &PropList,
+        e: Emitter,
+        handle: u32,
+    ) -> Option<f32> {
+        let plays = self.resolve(user, key, local)?;
+        let mut len = 0.0f32;
         for a in plays {
             let Some(sound) = self.wave_id(&a.wave) else {
                 continue;
             };
+            let body = if a.duration > 0.0 {
+                a.duration
+            } else {
+                self.set
+                    .sounds
+                    .get(sound.wrapping_sub(SET_BASE) as usize)
+                    .map_or(0.0, |s| match s.loop_range {
+                        Some(_) => f32::INFINITY,
+                        None => s.frames as f32 / s.rate.max(1) as f32 * 60.0 / a.pitch.max(0.05),
+                    })
+            };
+            len = len.max(a.delay.max(0.0) + body);
             let Some((pan, gain)) = self.pan_gain(world, e, a.distance.as_deref()) else {
                 continue;
             };
@@ -528,7 +554,7 @@ impl Sounds {
                 then: None,
             }));
         }
-        true
+        Some(len)
     }
 
     fn player_emitter(world: &World) -> Emitter {
@@ -868,16 +894,10 @@ impl Sounds {
     }
 
     /// The theme track from the top, or where it was if it is the same track; a music effect
-    /// in its place (sound/otoasobi.rs).
+    /// in its place (sound/otoasobi.rs; a music-like one plays over the theme track).
     fn course_music(&mut self) {
-        if self.oto_ambient() {
-            self.send(Command::StopMusic { fade: 0 });
-            self.track = None;
-            self.over = Over::None;
-            return;
-        }
-        if let Some((user, key)) = self.oto_music_key()
-            && self.play_music_of(&user, key, 0, None)
+        if let Some((user, key, start)) = self.oto_music_key()
+            && self.play_music_of(&user, key, start, None)
         {
             self.track = None;
             self.over = Over::None;
@@ -960,6 +980,7 @@ impl Sounds {
             diffusion: p.get("Diffusion").copied().unwrap_or(100.0),
         });
         self.send(Command::SetEffects { delay, reverb });
+        self.oto_area(world);
         // theme ambience (NSMBU / 3D World), looping until stopped
         self.send(Command::StopHandle {
             handle: H_AMBIENT,
@@ -1547,10 +1568,7 @@ impl Sounds {
                     self.saved = None;
                     match self.over {
                         // a music effect goes on in its hurry version
-                        Over::None
-                            if !self.fanfare
-                                && (self.oto_music_key().is_some() || self.oto_ambient()) =>
-                        {
+                        Over::None if !self.fanfare && self.oto_music_key().is_some() => {
                             self.course_music();
                         }
                         Over::None if !self.fanfare => {

@@ -20,9 +20,22 @@ SMCraft is back in development (it was archived in October 2026).
   has the game's five categories, and effects go on empty tiles, on parts that can hold one and
   on Mario; the course shows their icons, the eraser takes them off, and they save with the
   course.
-- Twisty Turny and Woozy play their sound but don't yet bend the rest of the sound; courses using
-  them, or effects on parts whose action isn't done yet (P Switch, POW, Key, lifts …), count as
-  not fully playable. Re-import your game and the UI once (asset pack 17, UI pack 10).
+- **Twisty Turny and Woozy bend the whole sound** as in the game: Twisty Turny sweeps a resonant
+  filter up and down over the music with an echo, Woozy makes it warble (stronger as Mario comes
+  in), each for 16 beats of the course's own tempo, ending with their scratch.
+- Sound effects on more parts go off as in the game: a P Switch or a lift stood on, a sideways
+  Spring or Mushroom / ON-OFF Trampoline bounced, a Key collected, a Bill Blaster or Cannon
+  firing, the Swinging Claw catching, a warp box left, a snake block or Dash Block ridden, a ! Block
+  hit, a Koopa Clown Car, Koopa Troopa Car or Lakitu's Cloud got into, a Yoshi's Egg hatching,
+  moving (winged / track) blocks hit, Munchers and Charvaarghs defeated. Music effects on enemies,
+  items and ridden parts play while Mario is near them and follow them, as in SMM2; Heartbeat,
+  Silence, Peaceful and Horror play over the course music, and the course music picks up where it
+  was after a music effect. Of the sample, 548 of 550 and 272 of 273 courses are fully playable
+  (left: effects on a Seesaw, a Tree, a Dry Bones shell).
+- The Course Maker: the sound button's balloon reads "Sound Effects" / "Parts" (it showed the
+  layout's Japanese default), and the effect window no longer turns into the parts ring when the
+  part pictures finish loading.
+- Re-import your game once (asset pack 18: the course music's tempo and the sound bus's effects).
 
 - **3D World looks like the game's**: its final pass (the game's tone map and colour correction,
   NSMBU's correction too) and its environment palette (the lights and fogs the game really uses

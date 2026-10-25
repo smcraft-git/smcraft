@@ -184,8 +184,12 @@ pub struct EffectDirector {
     coins: u32,
     coins_known: bool,
     in_water: bool,
-    /// The course's placed sound effects (their pictures: the effect user's `cue`).
+    /// The course's placed sound effects (their pictures: the effect user's `cue`), what the
+    /// sound director last told about them, and the audio filters' pictures, held until the
+    /// filter ends.
     sound_parts: Option<mmk_sim::otoasobi::SoundParts>,
+    sound_sync: Option<mmk_sim::otoasobi::Sync>,
+    filter_pictures: Vec<(u8, Vec<FxHandle>)>,
 }
 
 impl EffectDirector {
@@ -417,6 +421,11 @@ impl EffectDirector {
             self.seen.clear();
             self.coins_known = false;
             self.sound_parts = None;
+            for (_, hs) in std::mem::take(&mut self.filter_pictures) {
+                for h in hs {
+                    self.player.stop(h);
+                }
+            }
         }
         let fresh = self.last_tick == 0 || self.sound_parts.is_none();
         self.last_tick = world.tick;
@@ -465,8 +474,16 @@ impl EffectDirector {
         self.player.step();
     }
 
+    /// What the sound director knows of the placed sound effects (the course's tempo, its
+    /// voices' lengths), for this director's copy before its next step
+    /// (`audio::Director::sound_effects_sync`).
+    pub fn sync_sound_effects(&mut self, sync: Option<mmk_sim::otoasobi::Sync>) {
+        self.sound_sync = sync;
+    }
+
     /// The placed sound effects set off this tick: their pictures, at the effect
-    /// (`mmk_sim::otoasobi`).
+    /// (`mmk_sim::otoasobi`); an audio filter's runs until the filter ends (the game stops it
+    /// then, 0x7100e443c0) and isn't started again while it runs.
     fn sound_effect_pictures(&mut self, world: &World, fresh: bool) {
         if fresh && world.sound_parts.any() {
             self.sound_parts = Some(world.sound_parts.clone());
@@ -474,15 +491,35 @@ impl EffectDirector {
         let Some(mut parts) = self.sound_parts.take() else {
             return;
         };
+        if let Some(s) = self.sound_sync.take() {
+            parts.sync(&s);
+        }
         parts.step(world);
         let variant = match world.player.form {
             mmk_sim::player::Form::Link => mmk_sim::otoasobi::Variant::Link,
             mmk_sim::player::Form::Smb2 => mmk_sim::otoasobi::Variant::Usa,
             _ => mmk_sim::otoasobi::Variant::Plain,
         };
+        let pictures = std::mem::take(&mut self.filter_pictures);
+        for (id, hs) in pictures {
+            if parts.filters.iter().any(|f| f.id == id) {
+                self.filter_pictures.push((id, hs));
+            } else {
+                for h in hs {
+                    self.player.stop(h);
+                }
+            }
+        }
         for c in &parts.cues {
+            let filter = mmk_sim::otoasobi::audio_filter(c.id);
+            if filter && self.filter_pictures.iter().any(|(id, _)| *id == c.id) {
+                continue;
+            }
             let user = mmk_sim::otoasobi::user(c.id, variant);
-            self.play_key(world, &user, "cue", c.x, c.y, false, false, None, false);
+            let hs = self.play_key(world, &user, "cue", c.x, c.y, false, false, None, false);
+            if filter {
+                self.filter_pictures.push((c.id, hs));
+            }
         }
         self.sound_parts = Some(parts);
     }

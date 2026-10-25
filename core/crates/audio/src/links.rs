@@ -348,6 +348,10 @@ pub struct SoundDb {
     pub waves: HashMap<String, String>,
     /// Ground material per style, terrain part and theme value (`@ground` values).
     pub ground: HashMap<String, HashMap<String, HashMap<String, String>>>,
+    /// The course music's tempo per style, by theme: normal and hurried bpm (0: not known).
+    pub tempo: HashMap<String, Vec<[f32; 2]>>,
+    /// The `OtoAsobi` bus's effects: effect → parameter → value.
+    pub otoasobi_bus: HashMap<String, HashMap<String, f32>>,
 }
 
 /// Sequence containers' next child, per (user, node).
@@ -433,6 +437,25 @@ impl SoundDb {
                 m.insert(part.clone(), t);
             }
             db.ground.insert(style.clone(), m);
+        }
+        for (style, row) in doc["tempo"].as_object().into_iter().flatten() {
+            let bpm = |v: &Value, i: usize| v[i].as_f64().unwrap_or(0.0) as f32;
+            let list = row
+                .as_array()
+                .into_iter()
+                .flatten()
+                .map(|t| [bpm(t, 0), bpm(t, 1)])
+                .collect();
+            db.tempo.insert(style.clone(), list);
+        }
+        for (name, params) in doc["otoasobi_bus"].as_object().into_iter().flatten() {
+            let p = params
+                .as_object()
+                .into_iter()
+                .flatten()
+                .filter_map(|(k, v)| Some((k.clone(), v.as_f64()? as f32)))
+                .collect();
+            db.otoasobi_bus.insert(name.clone(), p);
         }
         for (w, f) in doc["waves"].as_object().into_iter().flatten() {
             if let Some(f) = f.as_str() {

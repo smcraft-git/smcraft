@@ -342,6 +342,9 @@ impl Session {
             // (else: too far ahead of a peer, or waiting for the others to start; keep sending)
             link.send(&net.packet());
             self.world = net.game.clone();
+            if let (Some(d), Some(e)) = (&self.director, &mut self.effects) {
+                e.sync_sound_effects(d.sound_effects_sync());
+            }
             if let Some(d) = &mut self.director {
                 d.after_step(&self.world);
             }
@@ -371,6 +374,9 @@ impl Session {
                     .map(|(k, _)| self.extra_inputs.get(k).copied().unwrap_or_default()),
             );
             self.world.step_players(&all);
+        }
+        if let (Some(d), Some(e)) = (&self.director, &mut self.effects) {
+            e.sync_sound_effects(d.sound_effects_sync());
         }
         if let Some(d) = &mut self.director {
             d.after_step(&self.world);
