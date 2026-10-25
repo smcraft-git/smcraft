@@ -19,8 +19,8 @@ use crate::smm1_costume::CostumeWindow;
 use crate::smm1_window::{MessageWindow, WindowEvent, WindowKind};
 use crate::{DrawItem, push_layout};
 
-/// The view (world units) [inf: the projection size is a runtime global, 0x102569f8; the
-/// scissor 384·3 × 216·3 of 0x02703e14 fits it].
+/// The view (world units): the projection size 0x102569f8 / 0x102569fc, set to 384 × 216 by
+/// a static initializer (0x0273e5dc) [obs].
 pub const VIEW: [f32; 2] = [384.0, 216.0];
 /// The camera's bounds: x 0–1152 (384 × 3), y 0–432 (216 × 2) [obs 0x027038c8].
 pub const BOUNDS: [f32; 2] = [1152.0, 432.0];
@@ -710,7 +710,8 @@ impl RescueScene {
 
     pub fn draw(&mut self, out: &mut Vec<DrawItem>) {
         let mut quads = Vec::new();
-        // the clear colour behind the stage [inf: black; SMB1's stage has its own sky]
+        // the clear colour behind the stage: black — the scene clears with sead's (0, 0, 0, 1)
+        // every frame (0x02703e14 → 0x0294bb8c with 0x10335594) [obs; SMB1's stage has a sky]
         let h = [640.0, 360.0];
         quads.push(Quad {
             pos: [[-h[0], h[1]], [h[0], h[1]], [-h[0], -h[1]], [h[0], -h[1]]],

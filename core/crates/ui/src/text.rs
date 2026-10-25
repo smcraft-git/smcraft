@@ -7,10 +7,11 @@
 //! aligned inside the block by the line alignment (or the position's horizontal part).
 //!
 //! A per-character transform (`PerCharTransform`) moves each character by its curves evaluated
-//! at the character's own time: the pane's time offset (animated by `FLCT`) plus `i · width / n`
-//! for character `i` of `n` (spaces count) [inf: the share]; one-time curves hold their ends,
-//! looping ones wrap over their keys. Translation x / y (targets 0, 1) and the rotation about z
-//! (5, about the glyph's centre, or its bottom with vertical origin 1) are applied.
+//! at the character's own time: the pane's time offset (animated by `FLCT`) plus
+//! `i · width / (n − 1)` for character `i` of `n` (spaces count; one character: the offset alone)
+//! [obs: SMM1's text box, 0x02892384]; one-time curves hold their ends, looping ones wrap over
+//! their keys. Translation x / y (targets 0, 1) and the rotation about z (5, about the glyph's
+//! centre, or its bottom with vertical origin 1 [obs 0x02885dc8]) are applied.
 
 use mmk_formats::lyt::{PerCharTransform, Text};
 
@@ -80,7 +81,12 @@ pub(crate) fn emit(
         let Some(curves) = &pc.curves else {
             return (0.0, 0.0, 0.0);
         };
-        let mut t = offset + i as f32 * width / n_chars as f32;
+        let step = if n_chars > 1 {
+            width / (n_chars - 1) as f32
+        } else {
+            0.0
+        };
+        let mut t = offset + i as f32 * step;
         if pc.loop_type == 1 {
             let (a, b) = curves
                 .entries

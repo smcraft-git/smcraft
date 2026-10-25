@@ -485,7 +485,9 @@ impl ChallengeFlow {
             let entry = self.run.entry;
             self.run.entry = Entry::Direct;
             if entry == Entry::Direct {
-                // after a skip the next course comes without the map [inf]
+                // after a skip the next course comes without the map: the result handler only
+                // books it (0x0277117c, result 5) and the play scene's result state asks for
+                // CourseInScene, through the plain scene fade (0x02379580 → 0x02766e1c) [obs]
                 self.handoff = None;
                 self.run.card = CardStart::Next;
                 self.play(cx);
